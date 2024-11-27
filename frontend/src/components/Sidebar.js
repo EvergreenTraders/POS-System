@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   Drawer,
   List,
@@ -29,11 +29,13 @@ const StyledDrawer = styled(Drawer)({
   },
 });
 
-const StyledListItem = styled(ListItem)({
+const StyledListItem = styled(ListItem)(({ active }) => ({
   '&:hover': {
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
-});
+  backgroundColor: active ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
+  borderLeft: active ? '4px solid #66bb6a' : 'none',
+}));
 
 const StyledLink = styled(Link)({
   textDecoration: 'none',
@@ -43,21 +45,27 @@ const StyledLink = styled(Link)({
 
 function Sidebar() {
   const [inventoryOpen, setInventoryOpen] = useState(false);
+  const location = useLocation();
+
+  const isActive = (path) => location.pathname === path;
+  const isInventoryActive = () => ['/inventory/jewellery', '/inventory/coins-bullions'].includes(location.pathname);
 
   return (
     <StyledDrawer variant="permanent">
       <List sx={{ mt: 8 }}>
         <StyledLink to="/">
-          <StyledListItem>
-            <ListItemIcon sx={{ color: 'white' }}>
+          <StyledListItem active={isActive('/')}>
+            <ListItemIcon sx={{ color: 'inherit' }}>
               <DashboardIcon />
             </ListItemIcon>
             <ListItemText primary="Dashboard" />
           </StyledListItem>
         </StyledLink>
 
-        <StyledListItem button onClick={() => setInventoryOpen(!inventoryOpen)}>
-          <ListItemIcon sx={{ color: 'white' }}>
+        <StyledListItem 
+          onClick={() => setInventoryOpen(!inventoryOpen)}
+        >
+          <ListItemIcon sx={{ color: 'inherit' }}>
             <InventoryIcon />
           </ListItemIcon>
           <ListItemText primary="Inventory" />
@@ -67,12 +75,12 @@ function Sidebar() {
         <Collapse in={inventoryOpen} timeout="auto" unmountOnExit>
           <List component="div" disablePadding>
             <StyledLink to="/inventory/jewellery">
-              <StyledListItem sx={{ pl: 4 }}>
+              <StyledListItem active={isActive('/inventory/jewellery')} sx={{ pl: 4 }}>
                 <ListItemText primary="Jewellery" />
               </StyledListItem>
             </StyledLink>
             <StyledLink to="/inventory/coins-bullions">
-              <StyledListItem sx={{ pl: 4 }}>
+              <StyledListItem active={isActive('/inventory/coins-bullions')} sx={{ pl: 4 }}>
                 <ListItemText primary="Coins & Bullions" />
               </StyledListItem>
             </StyledLink>
@@ -80,8 +88,8 @@ function Sidebar() {
         </Collapse>
 
         <StyledLink to="/products">
-          <StyledListItem>
-            <ListItemIcon sx={{ color: 'white' }}>
+          <StyledListItem active={isActive('/products')}>
+            <ListItemIcon sx={{ color: 'inherit' }}>
               <ShoppingCart />
             </ListItemIcon>
             <ListItemText primary="Products" />
@@ -89,8 +97,8 @@ function Sidebar() {
         </StyledLink>
 
         <StyledLink to="/orders">
-          <StyledListItem>
-            <ListItemIcon sx={{ color: 'white' }}>
+          <StyledListItem active={isActive('/orders')}>
+            <ListItemIcon sx={{ color: 'inherit' }}>
               <Receipt />
             </ListItemIcon>
             <ListItemText primary="Orders" />

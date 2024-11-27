@@ -49,9 +49,9 @@ function Orders() {
 
   return (
     <div>
-      <Typography variant="h4" gutterBottom>
+      {/* <Typography variant="h4" gutterBottom>
         Orders
-      </Typography>
+      </Typography> */}
       <TableContainer component={Paper}>
         <Table>
           <TableHead>

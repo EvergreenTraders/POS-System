@@ -121,7 +121,17 @@ function Inventory() {
 
   return (
     <Container maxWidth="md">
-      <Typography variant="h4" component="h1" gutterBottom sx={{ mt: 4, mb: 2, fontWeight: 'bold', color: '#1976d2' }}>
+      <Typography 
+        variant="h4" 
+        component="h1" 
+        gutterBottom 
+        sx={{ 
+          mt: 4, 
+          mb: 2, 
+          fontWeight: 'bold',
+          color: '#1a472a'
+        }}
+      >
         Inventory Management - Jewellery
       </Typography>
       
@@ -210,47 +220,12 @@ function Inventory() {
                           checked={formData.published}
                           onChange={handleChange}
                           name="published"
+                          color="primary"
                         />
                       }
                       label="Published"
                     />
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={formData.is_featured}
-                          onChange={handleChange}
-                          name="is_featured"
-                        />
-                      }
-                      label="Featured"
-                    />
                   </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <FormControl fullWidth margin="normal">
-                      <InputLabel>Visibility in Catalog</InputLabel>
-                      <Select
-                        name="visibility_in_catalog"
-                        value={formData.visibility_in_catalog}
-                        onChange={handleChange}
-                        label="Visibility in Catalog"
-                      >
-                        <MenuItem value="visible">Visible</MenuItem>
-                        <MenuItem value="catalog">Catalog</MenuItem>
-                        <MenuItem value="search">Search</MenuItem>
-                        <MenuItem value="hidden">Hidden</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                </Grid>
-              </FormSection>
-            </Grid>
-
-            <Grid item xs={12}>
-              <FormSection>
-                <Typography variant="h6" gutterBottom>
-                  Inventory
-                </Typography>
-                <Grid container spacing={2}>
                   <Grid item xs={12} sm={6}>
                     <FormControlLabel
                       control={
@@ -258,67 +233,13 @@ function Inventory() {
                           checked={formData.in_stock}
                           onChange={handleChange}
                           name="in_stock"
+                          color="primary"
                         />
                       }
                       label="In Stock"
                     />
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={formData.backorders_allowed}
-                          onChange={handleChange}
-                          name="backorders_allowed"
-                        />
-                      }
-                      label="Allow Backorders"
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={formData.sold_individually}
-                          onChange={handleChange}
-                          name="sold_individually"
-                        />
-                      }
-                      label="Sold Individually"
-                    />
                   </Grid>
                 </Grid>
-              </FormSection>
-            </Grid>
-
-            <Grid item xs={12}>
-              <FormSection>
-                <Typography variant="h6" gutterBottom>
-                  Additional Information
-                </Typography>
-                <TextField
-                  fullWidth
-                  label="Categories"
-                  name="categories"
-                  value={formData.categories}
-                  onChange={handleChange}
-                  margin="normal"
-                  helperText="Separate categories with commas"
-                />
-                <TextField
-                  fullWidth
-                  label="Image URLs"
-                  name="images"
-                  value={formData.images}
-                  onChange={handleChange}
-                  margin="normal"
-                  helperText="Enter image URLs separated by commas"
-                />
-                {formData.images && (
-                  <ImagePreview
-                    src={formData.images.split(',')[0]}
-                    alt="Product preview"
-                    onError={(e) => e.target.style.display = 'none'}
-                  />
-                )}
               </FormSection>
             </Grid>
 
@@ -328,14 +249,7 @@ function Inventory() {
                 variant="contained"
                 color="primary"
                 size="large"
-                sx={{
-                  mt: 2,
-                  px: 4,
-                  py: 1.5,
-                  borderRadius: 2,
-                  textTransform: 'none',
-                  fontSize: '1.1rem',
-                }}
+                sx={{ mt: 2 }}
               >
                 Add Jewellery Item
               </Button>

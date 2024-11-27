@@ -10,7 +10,7 @@ import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import Orders from './pages/Orders';
 import Jewellery from './pages/Jewellery';
-import CoinsBullions from './components/CoinsBullions';
+import CoinsBullions from './pages/CoinsBullions';
 
 const theme = createTheme({
   palette: {
@@ -53,7 +53,7 @@ function App() {
                 flexGrow: 1,
                 p: 3,
                 mt: 8,
-                ml: '240px', // Same as drawer width
+                ml: '50px', // Same as drawer width
               }}
             >
               <Routes>
@@ -62,6 +62,8 @@ function App() {
                 <Route path="/orders" element={<Orders />} />
                 <Route path="/inventory/jewellery" element={<Jewellery />} />
                 <Route path="/inventory/coins-bullions" element={<CoinsBullions />} />
+                <Route path="/inventory" element={<Jewellery />} />
+                <Route path="/reports" element={<Orders />} />
               </Routes>
             </Box>
           </Box>

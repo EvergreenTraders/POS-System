@@ -138,7 +138,7 @@ function CoinsBullions() {
 
   return (
     <Container maxWidth="md">
-      <Typography 
+      {/* <Typography 
         variant="h4" 
         component="h1" 
         gutterBottom 
@@ -151,8 +151,8 @@ function CoinsBullions() {
           textShadow: '2px 2px 4px rgba(0,0,0,0.1)'
         }}
       >
-        Coins & Bullions Inventory
-      </Typography>
+        Coins & Bullions
+      </Typography> */}
       
       <StyledPaper elevation={3}>
         <form onSubmit={handleSubmit}>
@@ -236,7 +236,7 @@ function CoinsBullions() {
             <Grid item xs={12} sm={6}>
               <FormSection>
                 <Typography variant="h6" gutterBottom color="primary">
-                  Grading & Certification
+                  Condition & Certification
                 </Typography>
                 <FormControl fullWidth margin="normal">
                   <InputLabel>Condition</InputLabel>
@@ -282,7 +282,7 @@ function CoinsBullions() {
             <Grid item xs={12}>
               <FormSection>
                 <Typography variant="h6" gutterBottom color="primary">
-                  Inventory Details
+                  Pricing & Stock
                 </Typography>
                 <Grid container spacing={2}>
                   <Grid item xs={12} sm={6}>
@@ -303,7 +303,7 @@ function CoinsBullions() {
                   <Grid item xs={12} sm={6}>
                     <TextField
                       fullWidth
-                      label="Quantity in Stock"
+                      label="Quantity"
                       name="quantity"
                       type="number"
                       value={formData.quantity}
@@ -333,20 +333,13 @@ function CoinsBullions() {
                 />
                 <TextField
                   fullWidth
-                  label="Image URLs"
+                  label="Images (URLs)"
                   name="images"
                   value={formData.images}
                   onChange={handleChange}
                   margin="normal"
                   helperText="Enter image URLs separated by commas"
                 />
-                {formData.images && (
-                  <ImagePreview
-                    src={formData.images.split(',')[0]}
-                    alt="Product preview"
-                    onError={(e) => e.target.style.display = 'none'}
-                  />
-                )}
               </FormSection>
             </Grid>
 
@@ -356,20 +349,9 @@ function CoinsBullions() {
                 variant="contained"
                 color="primary"
                 size="large"
-                sx={{
-                  mt: 2,
-                  px: 4,
-                  py: 1.5,
-                  borderRadius: 2,
-                  textTransform: 'none',
-                  fontSize: '1.1rem',
-                  backgroundColor: '#1a472a',
-                  '&:hover': {
-                    backgroundColor: '#0d3319',
-                  },
-                }}
+                sx={{ mt: 2 }}
               >
-                Add to Inventory
+                Add Item
               </Button>
             </Grid>
           </Grid>

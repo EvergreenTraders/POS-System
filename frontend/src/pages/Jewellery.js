@@ -121,7 +121,7 @@ function Jewellery() {
 
   return (
     <Container maxWidth="md">
-      <Typography 
+      {/* <Typography 
         variant="h4" 
         component="h1" 
         gutterBottom 
@@ -133,7 +133,7 @@ function Jewellery() {
         }}
       >
         Jewellery
-      </Typography>
+      </Typography> */}
       
       <StyledPaper elevation={3}>
         <form onSubmit={handleSubmit}>
