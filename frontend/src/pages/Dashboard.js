@@ -13,9 +13,9 @@ import {
 function Dashboard() {
   return (
     <div>
-      <Typography variant="h4" gutterBottom>
+      {/* <Typography variant="h4" gutterBottom>
         Dashboard
-      </Typography>
+      </Typography> */}
       <Grid container spacing={3}>
         <Grid item xs={12} sm={4}>
           <Paper sx={{ p: 2, textAlign: 'center' }}>

@@ -1,28 +1,21 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
   AppBar,
   Toolbar,
   Typography,
-  Button,
-  styled,
   IconButton,
   Badge,
+  styled,
 } from '@mui/material';
 import {
-  Dashboard as DashboardIcon,
-  ShoppingCart,
-  Receipt,
   ShoppingCart as CartIcon,
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import Cart from './Cart';
 
-const StyledLink = styled(Link)(({ theme }) => ({
-  color: 'white',
-  textDecoration: 'none',
-  marginLeft: theme.spacing(2),
-}));
+const StyledAppBar = styled(AppBar)({
+  zIndex: 1201, // Higher than drawer's z-index
+});
 
 function Navbar() {
   const [cartOpen, setCartOpen] = useState(false);
@@ -32,26 +25,11 @@ function Navbar() {
 
   return (
     <>
-      <AppBar position="static">
+      <StyledAppBar position="fixed">
         <Toolbar>
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
             POS System
           </Typography>
-          <StyledLink to="/">
-            <Button color="inherit" startIcon={<DashboardIcon />}>
-              Dashboard
-            </Button>
-          </StyledLink>
-          <StyledLink to="/products">
-            <Button color="inherit" startIcon={<ShoppingCart />}>
-              Products
-            </Button>
-          </StyledLink>
-          <StyledLink to="/orders">
-            <Button color="inherit" startIcon={<Receipt />}>
-              Orders
-            </Button>
-          </StyledLink>
           <IconButton
             color="inherit"
             onClick={() => setCartOpen(true)}
@@ -62,7 +40,7 @@ function Navbar() {
             </Badge>
           </IconButton>
         </Toolbar>
-      </AppBar>
+      </StyledAppBar>
       <Cart open={cartOpen} onClose={() => setCartOpen(false)} />
     </>
   );

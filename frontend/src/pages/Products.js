@@ -25,7 +25,7 @@ function Products() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-        <Typography variant="h4">Products</Typography>
+        {/* <Typography variant="h4">Products</Typography> */}
         <Button
           variant="contained"
           color="primary"

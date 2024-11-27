@@ -1,20 +1,39 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { Box } from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
 import { CartProvider } from './context/CartContext';
 import Navbar from './components/Navbar';
+import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import Orders from './pages/Orders';
+import Jewellery from './pages/Jewellery';
+import CoinsBullions from './pages/CoinsBullions';
 
 const theme = createTheme({
   palette: {
     primary: {
-      main: '#1976d2',
+      main: '#1a472a', // Dark green
+      light: '#2e7d32', // Lighter green
+      dark: '#0d3319', // Darker green
     },
     secondary: {
-      main: '#dc004e',
+      main: '#66bb6a', // Complementary green
+    },
+    background: {
+      default: '#e8f5e9', // Light green background
+      paper: '#ffffff',
+    },
+  },
+  components: {
+    MuiAppBar: {
+      styleOverrides: {
+        root: {
+          backgroundColor: '#1a472a',
+        },
+      },
     },
   },
 });
@@ -25,16 +44,29 @@ function App() {
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <Router>
-          <div className="App">
+          <Box sx={{ display: 'flex', minHeight: '100vh' }}>
             <Navbar />
-            <main style={{ padding: '20px' }}>
+            <Sidebar />
+            <Box
+              component="main"
+              sx={{
+                flexGrow: 1,
+                p: 3,
+                mt: 8,
+                ml: '50px', // Same as drawer width
+              }}
+            >
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/products" element={<Products />} />
                 <Route path="/orders" element={<Orders />} />
+                <Route path="/inventory/jewellery" element={<Jewellery />} />
+                <Route path="/inventory/coins-bullions" element={<CoinsBullions />} />
+                <Route path="/inventory" element={<Jewellery />} />
+                <Route path="/reports" element={<Orders />} />
               </Routes>
-            </main>
-          </div>
+            </Box>
+          </Box>
         </Router>
       </ThemeProvider>
     </CartProvider>
