@@ -13,6 +13,8 @@ import Products from './pages/Products';
 import Orders from './pages/Orders';
 import Jewellery from './pages/Jewellery';
 import CoinsBullions from './pages/CoinsBullions';
+import SystemConfig from './pages/SystemConfig';
+import Employees from './pages/Employees';
 
 const theme = createTheme({
   palette: {
@@ -143,6 +145,26 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <Orders />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/system-config/settings"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <SystemConfig />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/system-config/employees"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <Employees />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
