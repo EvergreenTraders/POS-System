@@ -54,6 +54,7 @@ function Employees() {
     password: '',
     phone: '',
     role: '',
+    salary: '40000',
     status: 'Active'
   });
 
@@ -86,6 +87,7 @@ function Employees() {
         email: employee.email,
         phone: employee.phone || '',
         role: employee.role,
+        salary: employee.salary,
         status: employee.status,
         password: ''
       });
@@ -98,7 +100,9 @@ function Employees() {
         password: '',
         phone: '',
         role: '',
-        status: 'Active'
+        salary: '40000',
+        status: 'Active',
+        autocomplete: 'off'
       });
     }
     setOpenDialog(true);
@@ -120,10 +124,22 @@ function Employees() {
   const handleSubmit = async () => {
     try {
       if (dialogMode === 'add') {
-        await axios.post('http://localhost:5000/api/employees', formData);
+        const response = await axios.post('http://localhost:5000/api/employees', {
+          username: formData.username,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          email: formData.email,
+          password: formData.password,
+          phone: formData.phone,
+          role: formData.role,
+          salary: 40000,
+          status: formData.status
+        });
+
+        setEmployees([...employees, response.data]);
         setSnackbar({
           open: true,
-          message: 'Employee added successfully',
+          message: 'Employee added successfully!',
           severity: 'success'
         });
       } else {
@@ -137,9 +153,10 @@ function Employees() {
       handleCloseDialog();
       fetchEmployees();
     } catch (err) {
+      console.error('Error submitting employee:', err);
       setSnackbar({
         open: true,
-        message: `Error: ${err.response?.data?.error || err.message}`,
+        message: err.response?.data?.error || 'Failed to submit employee data',
         severity: 'error'
       });
     }
@@ -244,7 +261,6 @@ function Employees() {
                 <TableCell>
                   <Chip
                     label={employee.role}
-                    color={getRoleColor(employee.role)}
                     size="small"
                   />
                 </TableCell>
@@ -335,15 +351,24 @@ function Employees() {
               value={formData.phone}
               onChange={handleInputChange}
               fullWidth
+              required
             />
-            <FormControl fullWidth>
+            <TextField
+              label="Salary"
+              name="salary"
+              type="number"
+              value={formData.salary}
+              onChange={handleInputChange}
+              fullWidth
+              required
+            />
+            <FormControl fullWidth required>
               <InputLabel>Role</InputLabel>
               <Select
                 name="role"
                 value={formData.role}
                 onChange={handleInputChange}
                 label="Role"
-                required
               >
                 <MenuItem value="Store Owner">Store Owner</MenuItem>
                 <MenuItem value="Store Manager">Store Manager</MenuItem>
@@ -354,7 +379,7 @@ function Employees() {
               </Select>
             </FormControl>
             {dialogMode === 'edit' && (
-              <FormControl fullWidth>
+              <FormControl fullWidth required>
                 <InputLabel>Status</InputLabel>
                 <Select
                   name="status"
