@@ -16,6 +16,7 @@ import {
   Inventory as InventoryIcon,
   KeyboardArrowDown,
   KeyboardArrowUp,
+  Settings as SettingsIcon,
 } from '@mui/icons-material';
 
 const StyledDrawer = styled(Drawer)({
@@ -45,10 +46,18 @@ const StyledLink = styled(Link)({
 
 function Sidebar() {
   const [inventoryOpen, setInventoryOpen] = useState(false);
+  const [systemConfigOpen, setSystemConfigOpen] = useState(false);
   const location = useLocation();
 
+  const handleInventoryClick = () => {
+    setInventoryOpen(!inventoryOpen);
+  };
+
+  const handleSystemConfigClick = () => {
+    setSystemConfigOpen(!systemConfigOpen);
+  };
+
   const isActive = (path) => location.pathname === path;
-  const isInventoryActive = () => ['/inventory/jewellery', '/inventory/coins-bullions'].includes(location.pathname);
 
   return (
     <StyledDrawer variant="permanent">
@@ -61,31 +70,6 @@ function Sidebar() {
             <ListItemText primary="Dashboard" />
           </StyledListItem>
         </StyledLink>
-
-        <StyledListItem 
-          onClick={() => setInventoryOpen(!inventoryOpen)}
-        >
-          <ListItemIcon sx={{ color: 'inherit' }}>
-            <InventoryIcon />
-          </ListItemIcon>
-          <ListItemText primary="Inventory" />
-          {inventoryOpen ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
-        </StyledListItem>
-
-        <Collapse in={inventoryOpen} timeout="auto" unmountOnExit>
-          <List component="div" disablePadding>
-            <StyledLink to="/inventory/jewellery">
-              <StyledListItem active={isActive('/inventory/jewellery')} sx={{ pl: 4 }}>
-                <ListItemText primary="Jewellery" />
-              </StyledListItem>
-            </StyledLink>
-            <StyledLink to="/inventory/coins-bullions">
-              <StyledListItem active={isActive('/inventory/coins-bullions')} sx={{ pl: 4 }}>
-                <ListItemText primary="Coins & Bullions" />
-              </StyledListItem>
-            </StyledLink>
-          </List>
-        </Collapse>
 
         <StyledLink to="/products">
           <StyledListItem active={isActive('/products')}>
@@ -104,6 +88,52 @@ function Sidebar() {
             <ListItemText primary="Orders" />
           </StyledListItem>
         </StyledLink>
+
+        <ListItem button onClick={handleInventoryClick}>
+          <ListItemIcon sx={{ color: 'white' }}>
+            <InventoryIcon />
+          </ListItemIcon>
+          <ListItemText primary="Inventory" />
+          {inventoryOpen ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
+        </ListItem>
+
+        <Collapse in={inventoryOpen} timeout="auto" unmountOnExit>
+          <List component="div" disablePadding>
+            <StyledLink to="/inventory/jewellery">
+              <StyledListItem active={isActive('/inventory/jewellery')} sx={{ pl: 4 }}>
+                <ListItemText primary="Jewellery" />
+              </StyledListItem>
+            </StyledLink>
+            <StyledLink to="/inventory/coins-bullions">
+              <StyledListItem active={isActive('/inventory/coins-bullions')} sx={{ pl: 4 }}>
+                <ListItemText primary="Coins & Bullions" />
+              </StyledListItem>
+            </StyledLink>
+          </List>
+        </Collapse>
+
+        <ListItem button onClick={handleSystemConfigClick}>
+          <ListItemIcon sx={{ color: 'white' }}>
+            <SettingsIcon />
+          </ListItemIcon>
+          <ListItemText primary="System Config" />
+          {systemConfigOpen ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
+        </ListItem>
+
+        <Collapse in={systemConfigOpen} timeout="auto" unmountOnExit>
+          <List component="div" disablePadding>
+            <StyledLink to="/system-config/employees">
+              <StyledListItem active={isActive('/system-config/employees')} sx={{ pl: 4 }}>
+                <ListItemText primary="Employees" />
+              </StyledListItem>
+            </StyledLink>
+            <StyledLink to="/system-config/settings">
+              <StyledListItem active={isActive('/system-config/settings')} sx={{ pl: 4 }}>
+                <ListItemText primary="Settings" />
+              </StyledListItem>
+            </StyledLink>
+          </List>
+        </Collapse>
       </List>
     </StyledDrawer>
   );
