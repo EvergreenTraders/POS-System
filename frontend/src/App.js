@@ -4,7 +4,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { Box } from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
 import { CartProvider } from './context/CartContext';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import Login from './components/Login';
@@ -15,6 +15,7 @@ import Jewellery from './pages/Jewellery';
 import CoinsBullions from './pages/CoinsBullions';
 import SystemConfig from './pages/SystemConfig';
 import Employees from './pages/Employees';
+import Estimator from './pages/Estimator';
 
 const theme = createTheme({
   palette: {
@@ -44,8 +45,10 @@ const theme = createTheme({
 
 // Protected Route wrapper component
 const ProtectedRoute = ({ children }) => {
+  const { user } = useAuth();
   const token = localStorage.getItem('token');
-  if (!token) {
+
+  if (!token || !user) {
     return <Navigate to="/login" replace />;
   }
   return children;
@@ -120,7 +123,17 @@ function App() {
                 }
               />
               <Route
-                path="/inventory/coins-bullions"
+                path="/estimator"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <Estimator />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="inventory/coins-bullions"
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>

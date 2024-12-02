@@ -17,6 +17,7 @@ import {
   Alert,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
+import { useNavigate } from 'react-router-dom';
 
 const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(4),
@@ -38,6 +39,7 @@ const ImagePreview = styled('img')({
 });
 
 function Jewellery() {
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
     type: 'simple',
     sku: '',
@@ -66,6 +68,7 @@ function Jewellery() {
   const handleChange = (e) => {
     const { name, value, checked } = e.target;
     setFormData(prev => ({
+
       ...prev,
       [name]: e.target.type === 'checkbox' ? checked : value
     }));
@@ -121,20 +124,18 @@ function Jewellery() {
 
   return (
     <Container maxWidth="md">
-      {/* <Typography 
-        variant="h4" 
-        component="h1" 
-        gutterBottom 
-        sx={{ 
-          mt: 4, 
-          mb: 2, 
-          fontWeight: 'bold', 
-          color: '#1a472a'
-        }}
-      >
-        Jewellery
-      </Typography> */}
-      
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h4" component="h1" gutterBottom>
+          Jewellery Management
+        </Typography>
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={() => navigate('/estimator')}
+        >
+          Estimator
+        </Button>
+      </Box>
       <StyledPaper elevation={3}>
         <form onSubmit={handleSubmit}>
           <Grid container spacing={3}>
