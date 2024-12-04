@@ -25,7 +25,7 @@ const LoginContainer = styled(Box)(({ theme }) => ({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: `linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), url('https://images.unsplash.com/photo-1556740738-b6a63e27c4df?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2070&q=80')`,
+    background: `linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), url('/images/background.png') no-repeat center center fixed`,
     backgroundSize: 'cover',
     backgroundPosition: 'center',
 }));
