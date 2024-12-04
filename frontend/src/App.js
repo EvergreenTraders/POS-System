@@ -65,7 +65,10 @@ const AuthenticatedLayout = ({ children }) => (
         flexGrow: 1,
         p: 3,
         mt: 8,
-        ml: '50px', // Same as drawer width
+        transition: theme => theme.transitions.create('margin', {
+          easing: theme.transitions.easing.sharp,
+          duration: theme.transitions.duration.enteringScreen,
+        }),
       }}
     >
       {children}
