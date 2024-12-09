@@ -83,7 +83,7 @@ function Estimator() {
     shape: '',
     clarity: '',
     color: '',
-    length: '',
+    depth: '',
     width: '',
     quantity: 1,
     weight: '',
@@ -115,9 +115,9 @@ function Estimator() {
     const newItem = {
       type: 'Diamond',
       description: `${diamondForm.shape} ${diamondForm.clarity} ${diamondForm.color} ${diamondForm.cut}`,
-      dimension: `${diamondForm.length}x${diamondForm.width}`,
+      dimension: `${diamondForm.depth}x${diamondForm.width}`,
       weight: diamondForm.weight,
-      carats: calculateCarats(diamondForm.length, diamondForm.width),
+      carats: calculateCarats(diamondForm.depth, diamondForm.width),
       quantity: diamondForm.quantity,
     };
     setEstimatedItems([...estimatedItems, newItem]);
@@ -135,9 +135,9 @@ function Estimator() {
     setEstimatedItems([...estimatedItems, newItem]);
   };
 
-  const calculateCarats = (length, width) => {
+  const calculateCarats = (depth, width) => {
     // This is a simplified calculation - you should implement proper carat calculation
-    return ((parseFloat(length) * parseFloat(width)) / 100).toFixed(2);
+    return ((parseFloat(depth) * parseFloat(width)) / 100).toFixed(2);
   };
 
   return (
@@ -303,10 +303,10 @@ function Estimator() {
               <Grid item xs={12} sm={4}>
                 <TextField
                   fullWidth
-                  label="Length (mm)"
-                  name="length"
+                  label="Depth (mm)"
+                  name="depth"
                   type="number"
-                  value={diamondForm.length}
+                  value={diamondForm.depth}
                   onChange={handleDiamondChange}
                   inputProps={{ step: "0.1" }}
                 />
@@ -446,7 +446,7 @@ function Estimator() {
             <Typography variant="body2">Clarity: {diamondForm.clarity}</Typography>
             <Typography variant="body2">Color: {diamondForm.color}</Typography>
             <Typography variant="body2">Cut: {diamondForm.cut}</Typography>
-            <Typography variant="body2">Length: {diamondForm.length}mm</Typography>
+            <Typography variant="body2">Depth: {diamondForm.depth}mm</Typography>
             <Typography variant="body2">Width: {diamondForm.width}mm</Typography>
             <Typography variant="body2">Quantity: {diamondForm.quantity}</Typography>
             <Typography variant="body2">Weight: {diamondForm.weight}ct</Typography>
