@@ -20,6 +20,7 @@ import {
   IconButton,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
+import axios from 'axios';
 
 // Diamond shape images
 const diamondShapes = [
@@ -72,7 +73,7 @@ function Estimator() {
     type: '',
     jewelryColor: '',
     purity: '',
-    category: '',
+    metalCategory: '',
     weight: '',
     size: '',
     spotPrice: '',
@@ -99,6 +100,66 @@ function Estimator() {
     consign: 0,
     trade: 0
   });
+
+  const [metalTypes, setMetalTypes] = useState([]);
+  const [metalStyles, setMetalStyles] = useState([]);
+  const [metalColors, setMetalColors] = useState([]);
+  const [metalCategories, setMetalCategories] = useState([]);
+  const [subcategories, setSubcategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedSubcategory, setSelectedSubcategory] = useState('');
+
+  useEffect(() => {
+    const fetchMetalData = async () => {
+      try {
+        const typesResponse = await axios.get('http://localhost:5000/api/metal_type');
+        const stylesResponse = await axios.get('http://localhost:5000/api/metal_style');
+        const colorsResponse = await axios.get('http://localhost:5000/api/metal_color');
+        const categoriesResponse = await axios.get('http://localhost:5000/api/metal_style_category');
+
+        // Check if the responses are successful
+        if (typesResponse.status === 200) {
+          setMetalTypes(typesResponse.data);
+        } else {
+          console.error('Failed to fetch metal types:', typesResponse.status);
+        }
+
+        if (stylesResponse.status === 200) {
+          setMetalStyles(stylesResponse.data);
+        } else {
+          console.error('Failed to fetch metal styles:', stylesResponse.status);
+        }
+
+        if (colorsResponse.status === 200) {
+          setMetalColors(colorsResponse.data);
+        } else {
+          console.error('Failed to fetch metal colors:', colorsResponse.status);
+        }
+        if (categoriesResponse.status === 200) {
+          setMetalCategories(categoriesResponse.data);
+        } else {
+          console.error('Failed to fetch categories:', categoriesResponse.status);
+        }
+      } catch (error) {
+        console.error('Error fetching metal data:', error);
+      }
+    };
+
+    fetchMetalData();
+  }, []);
+
+  const handleCategoryChange = async (event) => {
+    const categoryId = event.target.value;
+    setSelectedCategory(categoryId);
+    console.log("Selected Category:", categoryId);
+    try {
+      const response = await axios.get(`http://localhost:5000/api/metal_style_subcategory?category_id=${categoryId}`);
+      setSubcategories(response.data);
+      console.log("Fetched Subcategories:", response.data);
+    } catch (error) {
+      console.error('Error fetching subcategories:', error);
+    }
+  };
 
   useEffect(() => {
     // Calculate estimates whenever total values change
@@ -146,7 +207,7 @@ function Estimator() {
     // Add metal to estimated items
     const newItem = {
       type: 'Metal',
-      description: `${metalForm.metalType} ${metalForm.metalStyle} ${metalForm.category} ${metalForm.jewelryColor} ${metalForm.purity}`,
+      description: `${metalForm.metalType} ${metalForm.metalStyle} ${metalForm.metalCategory} ${selectedSubcategory} ${metalForm.jewelryColor} ${metalForm.purity}`,
       dimension: `${metalForm.size}`,
       weight: metalForm.weight,
       quantity: 1,
@@ -173,9 +234,9 @@ function Estimator() {
                 value={metalForm.metalType}
                 onChange={handleMetalChange}
               >
-                <MenuItem value="gold">Gold</MenuItem>
-                <MenuItem value="silver">Silver</MenuItem>
-                <MenuItem value="platinum">Platinum</MenuItem>
+                {metalTypes.map(type => (
+                  <MenuItem key={type.id} value={type.id}>{type.type}</MenuItem>
+                ))}
               </Select>
             </FormControl>
 
@@ -186,24 +247,37 @@ function Estimator() {
                 value={metalForm.metalStyle}
                 onChange={handleMetalChange}
               >
-                <MenuItem value="ring">Ring</MenuItem>
-                <MenuItem value="necklace">Necklace</MenuItem>
-                <MenuItem value="bracelet">Bracelet</MenuItem>
+                {metalStyles.map(style => (
+                  <MenuItem key={style.id} value={style.id}>{style.style}</MenuItem>
+                ))}
               </Select>
             </FormControl>
 
             <FormControl fullWidth sx={{ mb: 2 }}>
               <InputLabel>Select Category</InputLabel>
               <Select
-                name="category"
-                value={metalForm.category}
+                name="metalCategory"
+                value={metalForm.metalCategory}
                 onChange={handleMetalChange}
               >
-                <MenuItem value="engagement">Engagement</MenuItem>
-                <MenuItem value="wedding">Wedding</MenuItem>
-                <MenuItem value="fashion">Fashion</MenuItem>
-                <MenuItem value="religious">Religious</MenuItem>
-                <MenuItem value="custom">Custom</MenuItem>
+                {console.log("Rendering Categories:", metalCategories)} // Log categories before rendering
+                {metalCategories.map(category => (
+                  <MenuItem key={category.id} value={category.id}>{category.category_name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel>Select Subcategory</InputLabel>
+              <Select
+                name="subcategory"
+                value={selectedSubcategory}
+                onChange={(e) => setSelectedSubcategory(e.target.value)}
+                disabled={!selectedCategory} // Disable if no category is selected
+              >
+                {subcategories.map(subcategory => (
+                  <MenuItem key={subcategory.id} value={subcategory.id}>{subcategory.sub_category}</MenuItem>
+                ))}
               </Select>
             </FormControl>
 
@@ -214,10 +288,9 @@ function Estimator() {
                 value={metalForm.jewelryColor}
                 onChange={handleMetalChange}
               >
-                <MenuItem value="yellow">Yellow</MenuItem>
-                <MenuItem value="white">White</MenuItem>
-                <MenuItem value="rose">Rose</MenuItem>
-                <MenuItem value="platinum">Platinum</MenuItem>
+                {metalColors.map(color => (
+                  <MenuItem key={color.id} value={color.id}>{color.color}</MenuItem>
+                ))}
               </Select>
             </FormControl>
 
@@ -457,7 +530,8 @@ function Estimator() {
             <Typography variant="subtitle1">Metal Selection</Typography>
             <Typography variant="body2">Type: {metalForm.metalType}</Typography>
             <Typography variant="body2">Style: {metalForm.metalStyle}</Typography>
-            <Typography variant="body2">Category: {metalForm.category}</Typography>
+            <Typography variant="body2">Category: {metalForm.metalCategory}</Typography>
+            <Typography variant="body2">Subcategory: {selectedSubcategory}</Typography>
             <Typography variant="body2">Color: {metalForm.jewelryColor}</Typography>
             <Typography variant="body2">Purity: {metalForm.purity}</Typography>
             <Typography variant="body2">Weight: {metalForm.weight}g</Typography>
@@ -529,7 +603,6 @@ function Estimator() {
         </Grid>
       </Grid>
 
-   
     </Container>
   );
 }

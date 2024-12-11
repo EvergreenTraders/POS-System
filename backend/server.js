@@ -247,6 +247,62 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
+// Metal tables routes
+app.get('/api/metal_type', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM metal_type';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching metal types:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/metal_style', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM metal_style';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching metal styles:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/metal_color', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM metal_color';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching metal colors:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/metal_style_category', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM metal_style_category';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching metal style categories:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/metal_style_subcategory', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM metal_style_subcategory';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching metal style subcategories:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
