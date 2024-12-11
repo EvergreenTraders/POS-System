@@ -103,7 +103,7 @@ function Dashboard() {
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Active Pawns"
+            title="Protection Plans sold"
             value="124"
             icon={Inventory}
             change="8.2%"
