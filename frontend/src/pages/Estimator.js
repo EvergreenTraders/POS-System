@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Container,
   Paper,
@@ -83,7 +83,7 @@ function Estimator() {
     shape: '',
     clarity: '',
     color: '',
-    length: '',
+    depth: '',
     width: '',
     quantity: 1,
     weight: '',
@@ -93,10 +93,28 @@ function Estimator() {
   const [estimatedItems, setEstimatedItems] = useState([]);
   const [totalDiamondValue, setTotalDiamondValue] = useState(0);
   const [totalMetalValue, setTotalMetalValue] = useState(0);
+  const [estimates, setEstimates] = useState({
+    pawn: 0,
+    buy: 0,
+    consign: 0,
+    trade: 0
+  });
+
+  useEffect(() => {
+    // Calculate estimates whenever total values change
+    const totalValue = totalMetalValue + totalDiamondValue;
+    setEstimates({
+      pawn: totalValue * 0.5,    // 50% of total value
+      buy: totalValue * 0.7,     // 70% of total value
+      consign: totalValue * 0.8,  // 80% of total value
+      trade: totalValue * 0.6     // 60% of total value
+    });
+  }, [totalMetalValue, totalDiamondValue]);
 
   const handleMetalChange = (event) => {
     const { name, value } = event.target;
     setMetalForm(prev => ({
+
       ...prev,
       [name]: value
     }));
@@ -105,6 +123,7 @@ function Estimator() {
   const handleDiamondChange = (event) => {
     const { name, value } = event.target;
     setDiamondForm(prev => ({
+
       ...prev,
       [name]: value
     }));
@@ -115,9 +134,9 @@ function Estimator() {
     const newItem = {
       type: 'Diamond',
       description: `${diamondForm.shape} ${diamondForm.clarity} ${diamondForm.color} ${diamondForm.cut}`,
-      dimension: `${diamondForm.length}x${diamondForm.width}`,
+      dimension: `${diamondForm.depth}x${diamondForm.width}`,
       weight: diamondForm.weight,
-      carats: calculateCarats(diamondForm.length, diamondForm.width),
+      carats: calculateCarats(diamondForm.depth, diamondForm.width),
       quantity: diamondForm.quantity,
     };
     setEstimatedItems([...estimatedItems, newItem]);
@@ -135,9 +154,9 @@ function Estimator() {
     setEstimatedItems([...estimatedItems, newItem]);
   };
 
-  const calculateCarats = (length, width) => {
+  const calculateCarats = (depth, width) => {
     // This is a simplified calculation - you should implement proper carat calculation
-    return ((parseFloat(length) * parseFloat(width)) / 100).toFixed(2);
+    return ((parseFloat(depth) * parseFloat(width)) / 100).toFixed(2);
   };
 
   return (
@@ -303,10 +322,10 @@ function Estimator() {
               <Grid item xs={12} sm={4}>
                 <TextField
                   fullWidth
-                  label="Length (mm)"
-                  name="length"
+                  label="Depth (mm)"
+                  name="depth"
                   type="number"
-                  value={diamondForm.length}
+                  value={diamondForm.depth}
                   onChange={handleDiamondChange}
                   inputProps={{ step: "0.1" }}
                 />
@@ -415,6 +434,9 @@ function Estimator() {
                 />
               </Grid>
               <Grid item xs={6}>
+                <Typography variant="h6" sx={{ mb: 2 }}>Estimated Diamond Value: ${totalDiamondValue.toFixed(2)}</Typography>
+              </Grid>
+              <Grid item xs={6}>
                 <Button
                   variant="contained"
                   onClick={addDiamond}
@@ -446,10 +468,16 @@ function Estimator() {
             <Typography variant="body2">Clarity: {diamondForm.clarity}</Typography>
             <Typography variant="body2">Color: {diamondForm.color}</Typography>
             <Typography variant="body2">Cut: {diamondForm.cut}</Typography>
-            <Typography variant="body2">Length: {diamondForm.length}mm</Typography>
+            <Typography variant="body2">Depth: {diamondForm.depth}mm</Typography>
             <Typography variant="body2">Width: {diamondForm.width}mm</Typography>
             <Typography variant="body2">Quantity: {diamondForm.quantity}</Typography>
             <Typography variant="body2">Weight: {diamondForm.weight}ct</Typography>
+
+            <Typography variant="subtitle1" sx={{ mt: 2 }}>Price Estimates</Typography>
+            <Typography variant="body2">Pawn: ${estimates.pawn.toFixed(2)}</Typography>
+            <Typography variant="body2">Buy: ${estimates.buy.toFixed(2)}</Typography>
+            <Typography variant="body2">Consign: ${estimates.consign.toFixed(2)}</Typography>
+            <Typography variant="body2">Trade: ${estimates.trade.toFixed(2)}</Typography>
           </Paper>
         </Grid>
       </Grid>
@@ -500,6 +528,8 @@ function Estimator() {
           </Paper>
         </Grid>
       </Grid>
+
+   
     </Container>
   );
 }

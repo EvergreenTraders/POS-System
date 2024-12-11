@@ -19,7 +19,9 @@ import {
   KeyboardArrowUp,
   Settings as SettingsIcon,
   Menu as MenuIcon,
+  Savings as PiggyBankIcon,
   ChevronLeft as ChevronLeftIcon,
+  LocalAtm as PawnsIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
@@ -146,6 +148,19 @@ function Sidebar() {
             </StyledLink>
           </List>
         </Collapse>
+
+        <ListItem
+          button
+          component={Link}
+          to="/pawns"
+          selected={location.pathname === '/pawns'}
+          sx={{ minHeight: 48, px: 2.5 }}
+        >
+          <ListItemIcon>
+            <PiggyBankIcon sx={{ color: 'white' }} />
+          </ListItemIcon>
+          {isOpen && <ListItemText primary="Pawns" />}
+        </ListItem>
 
         <ListItem button onClick={handleSystemConfigClick}>
           <ListItemIcon sx={{ color: 'white', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>

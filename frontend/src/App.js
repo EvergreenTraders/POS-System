@@ -16,6 +16,7 @@ import CoinsBullions from './pages/CoinsBullions';
 import SystemConfig from './pages/SystemConfig';
 import Employees from './pages/Employees';
 import Estimator from './pages/Estimator';
+import Pawns from './pages/Pawns';
 
 const theme = createTheme({
   palette: {
@@ -181,6 +182,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <Employees />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/pawns"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <Pawns />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
