@@ -259,6 +259,17 @@ app.get('/api/metal_type', async (req, res) => {
   }
 });
 
+app.get('/api/metal_purity', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM metal_purity';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching metal purities:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.get('/api/metal_style', async (req, res) => {
   try {
     const query = 'SELECT * FROM metal_style';

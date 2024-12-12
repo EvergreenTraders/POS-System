@@ -18,6 +18,8 @@ import {
   TableHead,
   TableRow,
   IconButton,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
@@ -89,6 +91,7 @@ function Estimator() {
     quantity: 1,
     weight: '',
     cut: '',
+    labGrown: false,
   });
 
   const [estimatedItems, setEstimatedItems] = useState([]);
@@ -104,6 +107,7 @@ function Estimator() {
   const [metalTypes, setMetalTypes] = useState([]);
   const [metalStyles, setMetalStyles] = useState([]);
   const [metalColors, setMetalColors] = useState([]);
+  const [metalPurities, setMetalPurities] = useState([]);
   const [metalCategories, setMetalCategories] = useState([]);
   const [subcategories, setSubcategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('');
@@ -115,6 +119,7 @@ function Estimator() {
         const typesResponse = await axios.get('http://localhost:5000/api/metal_type');
         const stylesResponse = await axios.get('http://localhost:5000/api/metal_style');
         const colorsResponse = await axios.get('http://localhost:5000/api/metal_color');
+        const puritiesResponse = await axios.get('http://localhost:5000/api/metal_purity');
         const categoriesResponse = await axios.get('http://localhost:5000/api/metal_style_category');
 
         // Check if the responses are successful
@@ -135,6 +140,13 @@ function Estimator() {
         } else {
           console.error('Failed to fetch metal colors:', colorsResponse.status);
         }
+
+        if (puritiesResponse.status === 200) {
+          setMetalPurities(puritiesResponse.data);
+        } else {
+          console.error('Failed to fetch metal purities:', puritiesResponse.status);
+        }
+        
         if (categoriesResponse.status === 200) {
           setMetalCategories(categoriesResponse.data);
         } else {
@@ -179,6 +191,7 @@ function Estimator() {
       ...prev,
       [name]: value
     }));
+    calculateMetalValue();
   };
 
   const handleDiamondChange = (event) => {
@@ -199,6 +212,7 @@ function Estimator() {
       weight: diamondForm.weight,
       carats: calculateCarats(diamondForm.depth, diamondForm.width),
       quantity: diamondForm.quantity,
+      labGrown: diamondForm.labGrown,
     };
     setEstimatedItems([...estimatedItems, newItem]);
   };
@@ -220,6 +234,15 @@ function Estimator() {
     return ((parseFloat(depth) * parseFloat(width)) / 100).toFixed(2);
   };
 
+  const calculateMetalValue = () => {
+    if (!metalForm.spotPrice || !metalForm.purity || !metalForm.weight) return 0;
+
+    // Percentage factor (can adjust this based on your business logic)
+    const percentageFactor = 0.7; 
+
+    setTotalMetalValue(metalForm.spotPrice * metalForm.purity * metalForm.weight * percentageFactor);
+  };
+
   return (
     <Container maxWidth="lg">
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -228,14 +251,45 @@ function Estimator() {
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
             <Typography variant="h6" sx={{ mb: 2 }}>ESTIMATE METAL</Typography>
             <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Select Metal Type</InputLabel>
+              <InputLabel>Select Metal Type *</InputLabel>
               <Select
                 name="metalType"
                 value={metalForm.metalType}
                 onChange={handleMetalChange}
+                required
               >
                 {metalTypes.map(type => (
                   <MenuItem key={type.id} value={type.id}>{type.type}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel>Select Jewelry Color *</InputLabel>
+              <Select
+                name="jewelryColor"
+                value={metalForm.jewelryColor}
+                onChange={handleMetalChange}
+                required
+              >
+                {metalColors.map(color => (
+                  <MenuItem key={color.id} value={color.id}>{color.color}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel>Select Metal Purity *</InputLabel>
+              <Select
+                name="purity"
+                value={metalForm.purity}
+                onChange={handleMetalChange}
+                required
+              >
+                {metalPurities.map(purity => (
+                  <MenuItem key={purity.id} value={purity.id}>
+                    {purity.purity}{purity.value !== null ? ` - ${purity.value}` : ''}
+                  </MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -281,33 +335,6 @@ function Estimator() {
               </Select>
             </FormControl>
 
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Select Jewelry Color</InputLabel>
-              <Select
-                name="jewelryColor"
-                value={metalForm.jewelryColor}
-                onChange={handleMetalChange}
-              >
-                {metalColors.map(color => (
-                  <MenuItem key={color.id} value={color.id}>{color.color}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Select Metal Purity</InputLabel>
-              <Select
-                name="purity"
-                value={metalForm.purity}
-                onChange={handleMetalChange}
-              >
-                <MenuItem value="24k">24K</MenuItem>
-                <MenuItem value="22k">22K</MenuItem>
-                <MenuItem value="18k">18K</MenuItem>
-                <MenuItem value="14k">14K</MenuItem>
-              </Select>
-            </FormControl>
-
             <TextField
               fullWidth
               label="Weight (g)"
@@ -331,6 +358,7 @@ function Estimator() {
               onClick={() => addMetal()}
               fullWidth
               sx={{ mt: 2 }}
+              disabled={!metalForm.metalType || !metalForm.jewelryColor || !metalForm.purity}
             >
               Add Metal
             </Button>
@@ -345,9 +373,39 @@ function Estimator() {
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
             <Typography variant="h6" sx={{ mb: 2 }}>ESTIMATE DIAMONDS</Typography>
-
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={6} sm={5}>
+                <TextField
+                  fullWidth
+                  label="Quantity"
+                  name="quantity"
+                  type="number"
+                  value={diamondForm.quantity}
+                  onChange={handleDiamondChange}
+                  inputProps={{ min: "1" }}
+                />
+              </Grid>
+              <Grid item xs={6} sm={7}>
+                <Box sx={{ ml: 3 }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={diamondForm.labGrown || false}
+                        onChange={(e) => setDiamondForm(prev => ({
+                          ...prev, 
+                          labGrown: e.target.checked
+                        }))}
+                        name="labGrown"
+                      />
+                    }
+                    label="Lab Grown"
+                  />
+                </Box>
+              </Grid>
+            </Grid>
+            <Box sx={{ mb: 3 }}></Box>
             {/* Shape Selection */}
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Shape</Typography>
+            <Typography variant="subtitle1" sx={{ mb: 1 }}>Shape *</Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
               {diamondShapes.map((shape) => (
                 <Paper
@@ -384,7 +442,7 @@ function Estimator() {
               <Grid item xs={12} sm={4}>
                 <TextField
                   fullWidth
-                  label="Weight (carats)"
+                  label="Weight (carats) *"
                   name="weight"
                   type="number"
                   value={diamondForm.weight}
@@ -417,7 +475,7 @@ function Estimator() {
             </Grid>
 
             {/* Color Selection */}
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Color</Typography>
+            <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
               {diamondColors.map((color) => (
                 <Paper
@@ -444,7 +502,7 @@ function Estimator() {
             </Box>
 
             {/* Clarity Selection */}
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Clarity</Typography>
+            <Typography variant="subtitle1" sx={{ mb: 1 }}>Clarity *</Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
               {diamondClarity.map((clarity) => (
                 <Paper
@@ -476,19 +534,16 @@ function Estimator() {
             </Box>
 
             {/* Cut Grade */}
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Cut Grade</Typography>
+            <Typography variant="subtitle1" sx={{ mb: 1 }}>Cut *</Typography>
             <FormControl fullWidth sx={{ mb: 3 }}>
               <Select
                 name="cut"
                 value={diamondForm.cut}
                 onChange={handleDiamondChange}
-                displayEmpty
+                required
               >
-                <MenuItem value="" disabled>Select Cut Grade</MenuItem>
                 {diamondCuts.map((cut) => (
-                  <MenuItem key={cut.value} value={cut.value}>
-                    {cut.name}
-                  </MenuItem>
+                  <MenuItem key={cut.name} value={cut.value}>{cut.name}</MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -496,28 +551,18 @@ function Estimator() {
             {/* Quantity and Add Button */}
             <Grid container spacing={2} alignItems="center">
               <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                  label="Quantity"
-                  name="quantity"
-                  type="number"
-                  value={diamondForm.quantity}
-                  onChange={handleDiamondChange}
-                  inputProps={{ min: "1" }}
-                />
-              </Grid>
-              <Grid item xs={6}>
-                <Typography variant="h6" sx={{ mb: 2 }}>Estimated Diamond Value: ${totalDiamondValue.toFixed(2)}</Typography>
-              </Grid>
-              <Grid item xs={6}>
                 <Button
                   variant="contained"
                   onClick={addDiamond}
                   fullWidth
-                  disabled={!diamondForm.shape || !diamondForm.clarity || !diamondForm.color}
+                  sx={{ mt: 2 }}
+                  disabled={!diamondForm.shape || !diamondForm.clarity || !diamondForm.color || !diamondForm.cut || !diamondForm.weight}
                 >
                   Add Diamond
                 </Button>
+              </Grid>
+              <Grid item xs={6}>
+              <Typography variant="h6" sx={{ mb: 2 }}>Est. Diamond Value: ${totalDiamondValue.toFixed(2)}</Typography>
               </Grid>
             </Grid>
           </Paper>
@@ -535,17 +580,15 @@ function Estimator() {
             <Typography variant="body2">Color: {metalForm.jewelryColor}</Typography>
             <Typography variant="body2">Purity: {metalForm.purity}</Typography>
             <Typography variant="body2">Weight: {metalForm.weight}g</Typography>
-            <Typography variant="body2">Spot Price: ${metalForm.spotPrice}</Typography>
 
             <Typography variant="subtitle1" sx={{ mt: 2 }}>Diamond Selection</Typography>
             <Typography variant="body2">Shape: {diamondForm.shape}</Typography>
             <Typography variant="body2">Clarity: {diamondForm.clarity}</Typography>
             <Typography variant="body2">Color: {diamondForm.color}</Typography>
             <Typography variant="body2">Cut: {diamondForm.cut}</Typography>
-            <Typography variant="body2">Depth: {diamondForm.depth}mm</Typography>
-            <Typography variant="body2">Width: {diamondForm.width}mm</Typography>
             <Typography variant="body2">Quantity: {diamondForm.quantity}</Typography>
             <Typography variant="body2">Weight: {diamondForm.weight}ct</Typography>
+            <Typography variant="body2">Lab Grown: {diamondForm.labGrown ? 'Yes' : 'No'}</Typography>
 
             <Typography variant="subtitle1" sx={{ mt: 2 }}>Price Estimates</Typography>
             <Typography variant="body2">Pawn: ${estimates.pawn.toFixed(2)}</Typography>
@@ -571,6 +614,7 @@ function Estimator() {
                     <TableCell>Weight</TableCell>
                     <TableCell>Carats</TableCell>
                     <TableCell>Quantity</TableCell>
+                    <TableCell>Lab Grown</TableCell>
                     <TableCell>Actions</TableCell>
                   </TableRow>
                 </TableHead>
@@ -583,6 +627,7 @@ function Estimator() {
                       <TableCell>{item.weight}</TableCell>
                       <TableCell>{item.carats}</TableCell>
                       <TableCell>{item.quantity}</TableCell>
+                      <TableCell>{item.labGrown ? 'Yes' : 'No'}</TableCell>
                       <TableCell>
                         <IconButton
                           onClick={() => {
