@@ -20,6 +20,7 @@ import {
   IconButton,
   FormControlLabel,
   Checkbox,
+  Slider
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
@@ -52,11 +53,31 @@ const diamondClarity = [
 
 // Diamond color samples
 const diamondColors = [
-  { name: 'Colorless', color: '#ffffff' },
-  { name: 'Near Colorless', color: '#f7f7e8' },
-  { name: 'Faint Color', color: '#f7f3d9' },
-  { name: 'Very Light Color', color: '#f7efc5' },
-  { name: 'Light Color', color: '#f7ebb2' },
+  { 
+    name: 'Colorless', 
+    color: '#ffffff',
+    range: 'D-F'
+  },
+  { 
+    name: 'Near Colorless', 
+    color: '#f7f7e8',
+    range: 'G-J'
+  },
+  { 
+    name: 'Faint Color', 
+    color: '#f7f3d9',
+    range: 'K-M'
+  },
+  { 
+    name: 'Very Light Color', 
+    color: '#f7efc5',
+    range: 'N-R'
+  },
+  { 
+    name: 'Light Color', 
+    color: '#f7ebb2',
+    range: 'S-Z'
+  },
 ];
 
 // Diamond cut grades
@@ -85,13 +106,14 @@ function Estimator() {
   const [diamondForm, setDiamondForm] = useState({
     shape: '',
     clarity: '',
-    color: '',
+    color: 'Colorless', // Set default color
     depth: '',
     width: '',
     quantity: 1,
     weight: '',
     cut: '',
     labGrown: false,
+    exactColor: 'D' // Set default exact color
   });
 
   const [estimatedItems, setEstimatedItems] = useState([]);
@@ -112,6 +134,39 @@ function Estimator() {
   const [subcategories, setSubcategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedSubcategory, setSelectedSubcategory] = useState('');
+
+  const [diamondValuationType, setDiamondValuationType] = useState('each');
+
+  const [exactColor, setExactColor] = useState('D');
+
+  const colorScale = Array.from({length: 23}, (_, i) => 
+    String.fromCharCode(68 + i) // Starting from 'D'
+  );
+
+  // Function to determine color category based on exact color
+  const getColorCategory = (exactColor) => {
+    const colorCategories = [
+      { name: 'Colorless', range: 'D-F', start: 'D', end: 'F' },
+      { name: 'Near Colorless', range: 'G-J', start: 'G', end: 'J' },
+      { name: 'Faint Color', range: 'K-M', start: 'K', end: 'M' },
+      { name: 'Very Light Color', range: 'N-R', start: 'N', end: 'R' },
+      { name: 'Light Color', range: 'S-Z', start: 'S', end: 'Z' }
+    ];
+
+    return colorCategories.find(
+      category => exactColor >= category.start && exactColor <= category.end
+    )?.name || 'Colorless';
+  };
+
+  const handleExactColorChange = (event, newValue) => {
+    setExactColor(colorScale[newValue]);
+    
+    // Update the diamond form with the exact color
+    setDiamondForm(prev => ({
+      ...prev,
+      exactColor: colorScale[newValue]
+    }));
+  };
 
   useEffect(() => {
     const fetchMetalData = async () => {
@@ -186,62 +241,100 @@ function Estimator() {
 
   const handleMetalChange = (event) => {
     const { name, value } = event.target;
-    setMetalForm(prev => ({
-
-      ...prev,
-      [name]: value
-    }));
-    calculateMetalValue();
+    
+    if (name === 'purity') {
+      // Find the full purity object when purity is selected
+      const selectedPurity = metalPurities.find(p => p.id === value);
+      setMetalForm(prev => ({
+        ...prev,
+        purity: selectedPurity // Store the entire purity object
+      }));
+    } else {
+      // For other fields, continue to update as before
+      setMetalForm(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
   };
 
   const handleDiamondChange = (event) => {
     const { name, value } = event.target;
     setDiamondForm(prev => ({
-
       ...prev,
       [name]: value
     }));
   };
 
+  const handleDiamondValuationTypeChange = (event) => {
+    setDiamondValuationType(event.target.value);
+  };
+
   const addDiamond = () => {
-    // Add diamond to estimated items
+    
     const newItem = {
       type: 'Diamond',
-      description: `${diamondForm.shape} ${diamondForm.clarity} ${diamondForm.color} ${diamondForm.cut}`,
-      dimension: `${diamondForm.depth}x${diamondForm.width}`,
+      description: `${diamondForm.shape} ${diamondForm.clarity} ${diamondForm.color} ${diamondForm.exactColor} ${diamondForm.cut}`,
       weight: diamondForm.weight,
-      carats: calculateCarats(diamondForm.depth, diamondForm.width),
       quantity: diamondForm.quantity,
-      labGrown: diamondForm.labGrown,
+      valuationType: diamondForm.quantity > 1 ? diamondValuationType : 'each',
     };
-    setEstimatedItems([...estimatedItems, newItem]);
+
+    setEstimatedItems(prev => [...prev, newItem]);
+    
+    // Reset diamond form after adding
+    setDiamondForm({
+      shape: '',
+      clarity: '',
+      color: 'Colorless',
+      depth: '',
+      width: '',
+      quantity: 1,
+      weight: '',
+      cut: '',
+      labGrown: false,
+      exactColor: 'D'
+    });
+    
+    // Reset exact color to default
+    setExactColor('D');
+    
+    // Reset valuation type to default
+    setDiamondValuationType('each');
   };
 
   const addMetal = () => {
     // Add metal to estimated items
     const newItem = {
       type: 'Metal',
-      description: `${metalForm.metalType} ${metalForm.metalStyle} ${metalForm.metalCategory} ${selectedSubcategory} ${metalForm.jewelryColor} ${metalForm.purity}`,
+      description: `${metalForm.metalType} ${metalForm.metalStyle} ${metalForm.metalCategory} ${selectedSubcategory} ${metalForm.jewelryColor} ${metalForm.purity?.purity || ''}`,
       dimension: `${metalForm.size}`,
       weight: metalForm.weight,
       quantity: 1,
+      value: totalMetalValue
     };
-    setEstimatedItems([...estimatedItems, newItem]);
+
+    setEstimatedItems(prev => [...prev, newItem]);
   };
 
-  const calculateCarats = (depth, width) => {
-    // This is a simplified calculation - you should implement proper carat calculation
-    return ((parseFloat(depth) * parseFloat(width)) / 100).toFixed(2);
-  };
 
   const calculateMetalValue = () => {
-    if (!metalForm.spotPrice || !metalForm.purity || !metalForm.weight) return 0;
-
-    // Percentage factor (can adjust this based on your business logic)
-    const percentageFactor = 0.7; 
-
-    setTotalMetalValue(metalForm.spotPrice * metalForm.purity * metalForm.weight * percentageFactor);
+    // Only calculate if all necessary fields are filled
+    if (metalForm.weight && metalForm.spotPrice && metalForm.purity) {
+      const percentageFactor = 0.7; 
+      setTotalMetalValue(metalForm.spotPrice * metalForm.purity.value * metalForm.weight * percentageFactor);
+    }
+      
+      else {
+      // Reset metal value if fields are incomplete
+      setTotalMetalValue(0);
+    }
   };
+
+  useEffect(() => {
+    calculateMetalValue();
+  }, [metalForm.weight, metalForm.spotPrice, metalForm.purity]);
+
 
   return (
     <Container maxWidth="lg">
@@ -282,7 +375,7 @@ function Estimator() {
               <InputLabel>Select Metal Purity *</InputLabel>
               <Select
                 name="purity"
-                value={metalForm.purity}
+                value={metalForm.purity?.id || ''} // Use id for value
                 onChange={handleMetalChange}
                 required
               >
@@ -314,7 +407,6 @@ function Estimator() {
                 value={metalForm.metalCategory}
                 onChange={handleMetalChange}
               >
-                {console.log("Rendering Categories:", metalCategories)} // Log categories before rendering
                 {metalCategories.map(category => (
                   <MenuItem key={category.id} value={category.id}>{category.category_name}</MenuItem>
                 ))}
@@ -386,21 +478,21 @@ function Estimator() {
                 />
               </Grid>
               <Grid item xs={6} sm={7}>
-                <Box sx={{ ml: 3 }}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={diamondForm.labGrown || false}
-                        onChange={(e) => setDiamondForm(prev => ({
-                          ...prev, 
-                          labGrown: e.target.checked
-                        }))}
-                        name="labGrown"
-                      />
-                    }
-                    label="Lab Grown"
-                  />
-                </Box>
+              <Box sx={{ ml: 3 }}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={diamondForm.labGrown || false}
+                      onChange={(e) => setDiamondForm(prev => ({
+                        ...prev, 
+                        labGrown: e.target.checked
+                      }))}
+                      name="labGrown"
+                    />
+                  }
+                  label="Lab Grown"
+                />
+              </Box>
               </Grid>
             </Grid>
             <Box sx={{ mb: 3 }}></Box>
@@ -437,7 +529,26 @@ function Estimator() {
             </Box>
 
             {/* Size Section */}
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Size</Typography>
+            <Grid container spacing={2} sx={{ mb: 3, alignItems: 'center' }}>
+              <Grid item>
+                <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
+              </Grid>
+              {diamondForm.quantity > 1 && (
+                <Grid item>
+                  <FormControl sx={{ minWidth: 120 }}>
+                    <Select
+                      value={diamondValuationType}
+                      onChange={handleDiamondValuationTypeChange}
+                      displayEmpty
+                      size="small"
+                    >
+                      <MenuItem value="each">Each</MenuItem>
+                      <MenuItem value="total">Total</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              )}
+            </Grid>
             <Grid container spacing={2} sx={{ mb: 3 }}>
               <Grid item xs={12} sm={4}>
                 <TextField
@@ -480,7 +591,10 @@ function Estimator() {
               {diamondColors.map((color) => (
                 <Paper
                   key={color.name}
-                  elevation={diamondForm.color === color.name ? 8 : 1}
+                  elevation={
+                    // Highlight if the current exact color falls in this category
+                    getColorCategory(exactColor) === color.name ? 8 : 1
+                  }
                   sx={{
                     p: 1,
                     cursor: 'pointer',
@@ -491,14 +605,45 @@ function Estimator() {
                     alignItems: 'center',
                     justifyContent: 'center',
                     backgroundColor: color.color,
+                    transition: 'all 0.3s ease',
                   }}
-                  onClick={() => setDiamondForm(prev => ({ ...prev, color: color.name }))}
+                  onClick={() => {
+                    // When clicking, set the exact color to the start of the range
+                    const startColor = color.range.split('-')[0];
+                    setDiamondForm(prev => ({ 
+                      ...prev, 
+                      color: color.name,
+                      exactColor: startColor
+                    }));
+                    // Update exact color state
+                    setExactColor(startColor);
+                  }}
                 >
                   <Typography variant="caption" align="center" sx={{ mt: 1 }}>
                     {color.name}
                   </Typography>
+                  <Typography variant="caption" align="center">
+                    {color.range}
+                  </Typography>
                 </Paper>
               ))}
+            </Box>
+
+            {/* Color Scale Slider */}
+            <Box sx={{ width: '100%', px: 2, mt: 2 }}>
+              <Typography gutterBottom>
+                Exact Color: {exactColor}
+              </Typography>
+              <Slider
+                value={colorScale.indexOf(exactColor)}
+                onChange={handleExactColorChange}
+                valueLabelDisplay="auto"
+                valueLabelFormat={(value) => colorScale[value]}
+                step={1}
+                marks
+                min={0}
+                max={colorScale.length - 1}
+              />
             </Box>
 
             {/* Clarity Selection */}
@@ -578,7 +723,7 @@ function Estimator() {
             <Typography variant="body2">Category: {metalForm.metalCategory}</Typography>
             <Typography variant="body2">Subcategory: {selectedSubcategory}</Typography>
             <Typography variant="body2">Color: {metalForm.jewelryColor}</Typography>
-            <Typography variant="body2">Purity: {metalForm.purity}</Typography>
+            <Typography variant="body2">Purity: {metalForm.purity.purity}</Typography>
             <Typography variant="body2">Weight: {metalForm.weight}g</Typography>
 
             <Typography variant="subtitle1" sx={{ mt: 2 }}>Diamond Selection</Typography>
@@ -589,6 +734,7 @@ function Estimator() {
             <Typography variant="body2">Quantity: {diamondForm.quantity}</Typography>
             <Typography variant="body2">Weight: {diamondForm.weight}ct</Typography>
             <Typography variant="body2">Lab Grown: {diamondForm.labGrown ? 'Yes' : 'No'}</Typography>
+            <Typography variant="body2">Exact Color: {diamondForm.exactColor}</Typography>
 
             <Typography variant="subtitle1" sx={{ mt: 2 }}>Price Estimates</Typography>
             <Typography variant="body2">Pawn: ${estimates.pawn.toFixed(2)}</Typography>
