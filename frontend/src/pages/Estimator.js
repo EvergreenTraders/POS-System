@@ -20,7 +20,8 @@ import {
   IconButton,
   FormControlLabel,
   Checkbox,
-  Slider
+  Slider,
+  FormGroup
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
@@ -37,6 +38,8 @@ const diamondShapes = [
   { name: 'Trillion', image: '/images/diamonds/trillion.png' },
   { name: 'Marquise', image: '/images/diamonds/marquise.png' },
   { name: 'Pear', image: '/images/diamonds/pear.png' },
+  { name: 'Radiant', image: '/images/diamonds/radiant.png' },
+  { name: 'Asscher', image: '/images/diamonds/asscher.png' },
 ];
 
 // Diamond clarity images
@@ -89,6 +92,195 @@ const diamondCuts = [
   { name: 'Poor', value: 'P' },
 ];
 
+const diamondSizes = {
+  'default': [
+    '0.25 ct',
+    '0.5 ct',
+    '0.75 ct',
+    '1 ct',
+    '1.25 ct',
+    '1.5 ct',
+    '1.75 ct',
+    '2 ct',
+    '2.25 ct',
+    '2.5 ct',
+    '2.75 ct',
+    '3 ct',
+    '3.25 ct',
+    '3.5 ct',
+    '3.75 ct',
+    '4 ct',
+    '4.25 ct',
+    '4.5 ct',
+    '4.75 ct',
+    '5 ct',
+    ]
+};
+// Mapping of diamond sizes to their corresponding weights for specific cuts
+const diamondCutWeights = {
+  'Princess': {
+    '2.5 mm': '0.1',
+    '3.25 mm': '0.25',
+    '4.5 mm': '0.50',
+    '5 mm': '0.75',
+    '5.5 mm': '1.00',
+    '6 mm': '1.25',
+    '6.5 mm': '1.50',
+    '6.75 mm': '1.75',
+    '7 mm': '2.00',
+    '7.5 mm': '2.50',
+    '8 mm': '3.00',
+    '8.5 mm': '3.50',
+    '8.75 mm': '4.00',
+    '9.25 mm': '4.50',
+    '9.5 mm': '5.00'
+  },
+  'Round': {
+    '3 mm': '0.1',
+    '4 mm': '0.25',
+    '5 mm': '0.50',
+    '5.75 mm': '0.75',
+    '6.5 mm': '1.00',
+    '6.8 mm': '1.25',
+    '7.3 mm': '1.50',
+    '7.75 mm': '1.75',
+    '8 mm': '2.00',
+    '8.7 mm': '2.50',
+    '9.1 mm': '3.00'
+  },
+  'Oval': {
+      '4x3 mm' :	'0.15',
+      '5x3 mm':	'0.25',
+      '6x4 mm':	'0.50',
+      '7x5 mm':	'0.75',
+      '7.7x5.7 mm':	'1.00',
+      '8x6 mm':	'1.25',
+      '8.5x6.5 mm':	'1.50',
+      '9x6.5 mm':	'1.75',
+      '9x7 mm':	'2.00',
+      '10x8 mm':	'2.50',
+      '12x8 mm':	'3.00'
+  },
+  'Cushion': {
+    '3.25 mm':	'0.25',
+    '4.9 mm': '0.50',
+    '5.25 mm': '0.75',
+    '5.5 mm': '1.00',
+    '6 mm': '1.25',
+    '6.5 mm': '1.50',
+    '6.75 mm': '1.75',
+    '7 mm': '2.00',
+    '7.5 mm': '2.50',
+    '8 mm': '3.00',
+    '8.5 mm': '3.50',
+    '9 mm': '4.00'
+  },
+  'Emerald': {
+    '4.30x3 mm':	'0.25',
+    '6x4 mm':	'0.50',
+    '6.5x4.5 mm':	'0.75',
+    '7x5 mm':	'1.00',
+    '7.3x5.3 mm':	'1.25',
+    '7.5x5.5 mm':	'1.50',
+    '8x6 mm':	'1.75',
+    '8.5x6.5 mm':	'2.00',
+    '9x7 mm':	'2.50',
+    '9.3x7.5 mm':	'3.00',
+    '9.75x7.7 mm':	'3.50',
+    '10x8 mm':	'4.00',
+    '10.5x8.5 mm':	'4.50',
+    '11x9 mm':	'5.00'
+  },
+  'Heart': {
+    '4 mm':	'0.25',
+    '5 mm':	'0.50',
+    '6 mm':	'0.75',
+    '6.5 mm':	'1.00',
+    '7 mm':	'1.25',
+    '7.5 mm':	'1.50',
+    '7.7 mm':	'1.75',
+    '8 mm':	'2.00',
+    '8.5 mm':	'2.50',
+    '9 mm':	'3.00',
+    '10 mm':	'3.50',
+    '10.5 mm':	'4.00',
+    '11 mm':	'4.50',
+    '11.5 mm':	'5.00'
+    },
+    'Pear': {
+      '5x3 mm':	'0.25',
+      '6x4 mm':	'0.50',
+      '7x5 mm':	'0.75',
+      '7.7x5.7 mm':	'1.00',
+      '8x6 mm':	'1.25',
+      '8.5x6.5 mm':	'1.50',
+      '10x6 mm':	'1.75',
+      '9x7 mm':	'2.00',
+      '10x8 mm':	'2.50',
+      '12x8 mm':	'3.00',
+      '12x9 mm':	'3.50',
+      '14x8 mm':	'4.00',
+      '14.5x9 mm':	'4.50',
+      '15x9 mm':	'5.00'
+    },
+    'Marquise': {
+      '6x3 mm':	'0.25',
+      '8x4 mm':	'0.50',
+      '9x4.5 mm':	'0.75',
+      '10x5 mm':	'1.00',
+      '11x5.5 mm':	'1.25',
+      '12x6 mm':	'1.50',
+      '12.5x6.25 mm':	'1.75',
+      '13x6.5 mm':	'2.00',
+      '14x7 mm':	'2.50',
+      '15x7 mm':	'3.00',
+      '15x8 mm':	'3.50',
+      '16.5x8.25 mm':	'4.00',
+      '16.75x8.5 mm':	'4.50',
+      '17x8.5 mm':	'5.00'
+    },
+    'Radiant': {
+      '4.3x3 mm':	'0.25',
+      '6x4 mm':	'0.50',
+      '6.5x4.5 mm':	'0.75',
+      '7x5 mm':	'1.00',
+      '7.3x5.3 mm':	'1.25',
+      '7.5x5.8 mm':	'1.50',
+      '8x6 mm':	'1.75',
+      '8.2x6.2 mm':	'2.00',
+      '9x7 mm':	'2.50',
+      '9.5x7.5 mm':	'3.00',
+      '10x8 mm':	'3.50',
+      '10.2x8.2 mm':	'4.00',
+      '10.5x8.5 mm':	'4.50',
+      '11x9 mm':	'5.00'
+    },
+    'Asscher': {
+      '3.25 mm':	'0.25',
+      '4.5 mm':	'0.50',
+      '5 mm':	'0.75',
+      '5.5 mm':	'1.00',
+      '6 mm':	'1.25',
+      '6.5 mm':	'1.50',
+      '6.7 mm':	'1.75',
+      '7 mm':	'2.00',
+      '7.5 mm':	'2.50',
+      '8 mm':	'3.00',
+      '8.5 mm':	'3.50',
+      '9 mm':	'4.00',
+      '9.25 mm':	'4.50',
+      '9.5 mm':	'5.00'
+    }
+};
+
+// Diamond sizes based on the selected shape
+const getDiamondSizes = (shape) => {
+  if (diamondCutWeights[shape]) {
+    return Object.keys(diamondCutWeights[shape]);
+  }
+  return diamondSizes['default'];
+};
+
 function Estimator() {
   const [metalForm, setMetalForm] = useState({
     metalType: '',
@@ -106,14 +298,22 @@ function Estimator() {
   const [diamondForm, setDiamondForm] = useState({
     shape: '',
     clarity: '',
-    color: 'Colorless', // Set default color
-    depth: '',
-    width: '',
+    color: 'Colorless',
     quantity: 1,
-    weight: '',
+    weight: 0,
     cut: '',
     labGrown: false,
-    exactColor: 'D' // Set default exact color
+    exactColor: 'D'
+  });
+
+  const [stoneForm, setStoneForm] = useState({
+    quantity: 1,
+    name: '',
+    shape: '',
+    color: '',
+    weight: '',
+    width: '',
+    depth: ''
   });
 
   const [estimatedItems, setEstimatedItems] = useState([]);
@@ -266,42 +466,49 @@ function Estimator() {
     }));
   };
 
+  const handleStoneChange = (event) => {
+    const { name, value } = event.target;
+    setStoneForm(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
   const handleDiamondValuationTypeChange = (event) => {
     setDiamondValuationType(event.target.value);
   };
 
   const addDiamond = () => {
-    
-    const newItem = {
-      type: 'Diamond',
-      description: `${diamondForm.shape} ${diamondForm.clarity} ${diamondForm.color} ${diamondForm.exactColor} ${diamondForm.cut}`,
-      weight: diamondForm.weight,
-      quantity: diamondForm.quantity,
-      valuationType: diamondForm.quantity > 1 ? diamondValuationType : 'each',
-    };
-
-    setEstimatedItems(prev => [...prev, newItem]);
-    
-    // Reset diamond form after adding
-    setDiamondForm({
-      shape: '',
-      clarity: '',
-      color: 'Colorless',
-      depth: '',
-      width: '',
-      quantity: 1,
-      weight: '',
-      cut: '',
-      labGrown: false,
-      exactColor: 'D'
-    });
-    
-    // Reset exact color to default
-    setExactColor('D');
-    
-    // Reset valuation type to default
-    setDiamondValuationType('each');
+  
+  const newItem = {
+    type: 'Diamond',
+    description: `${diamondForm.shape} ${diamondForm.clarity} ${diamondForm.color} ${diamondForm.exactColor} ${diamondForm.cut}`,
+    weight: diamondForm.weight,
+    quantity: diamondForm.quantity,
+    labGrown: diamondForm.labGrown,
+    valuationType: diamondForm.quantity > 1 ? diamondValuationType : 'each',
   };
+
+  setEstimatedItems(prev => [...prev, newItem]);
+  
+  // Reset diamond form after adding
+  setDiamondForm({
+    shape: '',
+    clarity: '',
+    color: 'Colorless',
+    quantity: 1,
+    size: '',
+    cut: '',
+    labGrown: false,
+    exactColor: 'D'
+  });
+  
+  // Reset exact color to default
+  setExactColor('D');
+  
+  // Reset valuation type to default
+  setDiamondValuationType('each');
+};
 
   const addMetal = () => {
     // Add metal to estimated items
@@ -317,6 +524,29 @@ function Estimator() {
     setEstimatedItems(prev => [...prev, newItem]);
   };
 
+  const addStone = () => {
+    if (stoneForm.name && stoneForm.shape && stoneForm.color && 
+        stoneForm.weight && stoneForm.width && stoneForm.depth) {
+      const newStone = {
+        ...stoneForm,
+        id: Date.now(),
+        estimatedValue: calculateStoneValue() // You'll need to implement this
+      };
+      
+      setEstimatedItems(prev => [...prev, newStone]);
+      
+      // Reset form
+      setStoneForm({
+        quantity: 1,
+        name: '',
+        shape: '',
+        color: '',
+        weight: '',
+        width: '',
+        depth: ''
+      });
+    }
+  };
 
   const calculateMetalValue = () => {
     // Only calculate if all necessary fields are filled
@@ -335,6 +565,342 @@ function Estimator() {
     calculateMetalValue();
   }, [metalForm.weight, metalForm.spotPrice, metalForm.purity]);
 
+  const [currentStone, setCurrentStone] = useState({
+    type: '',
+    color: '',
+    weight: '',
+    isNatural: true,
+    isCertified: false
+  });
+
+  const [estimatedStones, setEstimatedStones] = useState([]);
+
+  const renderStoneEstimationTab = () => (
+    <Grid container spacing={2} sx={{ p: 2 }}>
+      {/* Quantity */}
+      <Grid item xs={12} md={6}>
+        <TextField
+          fullWidth
+          label="Quantity"
+          type="number"
+          value={stoneForm.quantity}
+          onChange={(e) => setStoneForm(prev => ({
+            ...prev, 
+            quantity: parseInt(e.target.value) || 1
+          }))}
+          InputProps={{
+            inputProps: { min: 1, max: 100 }
+          }}
+        />
+      </Grid>
+
+      {/* Stone Name/Type */}
+      <Grid item xs={12} md={6}>
+        <FormControl fullWidth>
+          <InputLabel>Stone Name</InputLabel>
+          <Select
+            value={stoneForm.name}
+            label="Stone Name"
+            onChange={(e) => setStoneForm(prev => ({
+              ...prev, 
+              name: e.target.value,
+              color: '' // Reset color when type changes
+            }))}
+          >
+            {[
+              'Ruby', 'Sapphire', 'Emerald', 
+              'Amethyst', 'Topaz', 'Opal', 
+              'Tanzanite', 'Aquamarine', 'Tourmaline'
+            ].map(type => (
+              <MenuItem key={type} value={type}>{type}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Grid>
+
+      {/* Stone Shape */}
+      <Grid item xs={12} md={6}>
+        <FormControl fullWidth>
+          <InputLabel>Stone Shape</InputLabel>
+          <Select
+            value={stoneForm.shape}
+            label="Stone Shape"
+            onChange={(e) => setStoneForm(prev => ({
+              ...prev, 
+              shape: e.target.value
+            }))}
+          >
+            {[
+              'Round', 'Oval', 'Emerald', 'Pear', 
+              'Marquise', 'Princess', 'Cushion', 
+              'Radiant', 'Asscher', 'Heart'
+            ].map(shape => (
+              <MenuItem key={shape} value={shape}>{shape}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Grid>
+
+      {/* Stone Color (Dynamic based on stone type) */}
+      <Grid item xs={12} md={6}>
+        <FormControl 
+          fullWidth 
+          disabled={!stoneForm.name}
+        >
+          <InputLabel>Stone Color</InputLabel>
+          <Select
+            value={stoneForm.color}
+            label="Stone Color"
+            onChange={(e) => setStoneForm(prev => ({
+              ...prev, 
+              color: e.target.value
+            }))}
+          >
+            {stoneForm.name && {
+              'Ruby': ['Pigeon Blood Red', 'Pinkish Red', 'Purplish Red'],
+              'Sapphire': ['Blue', 'Yellow', 'Pink', 'White', 'Green'],
+              'Emerald': ['Deep Green', 'Bluish Green', 'Yellowish Green'],
+              'Amethyst': ['Light Purple', 'Deep Purple', 'Lavender'],
+              'Topaz': ['Blue', 'Yellow', 'White', 'Pink'],
+              'Opal': ['White', 'Black', 'Fire', 'Crystal'],
+              'Tanzanite': ['Blue', 'Violet'],
+              'Aquamarine': ['Blue', 'Greenish Blue'],
+              'Tourmaline': ['Green', 'Pink', 'Watermelon', 'Blue']
+            }[stoneForm.name].map(color => (
+              <MenuItem key={color} value={color}>{color}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Grid>
+
+      {/* Weight */}
+      <Grid item xs={12} md={4}>
+        <TextField
+          fullWidth
+          label="Weight (Carats)"
+          type="number"
+          value={stoneForm.weight}
+          onChange={(e) => setStoneForm(prev => ({
+            ...prev, 
+            weight: e.target.value
+          }))}
+          InputProps={{
+            inputProps: { min: 0, step: 0.01 }
+          }}
+        />
+      </Grid>
+
+      {/* Width */}
+      <Grid item xs={12} md={4}>
+        <TextField
+          fullWidth
+          label="Width (mm)"
+          type="number"
+          value={stoneForm.width}
+          onChange={(e) => setStoneForm(prev => ({
+            ...prev, 
+            width: e.target.value
+          }))}
+          InputProps={{
+            inputProps: { min: 0, step: 0.1 }
+          }}
+        />
+      </Grid>
+
+      {/* Depth */}
+      <Grid item xs={12} md={4}>
+        <TextField
+          fullWidth
+          label="Depth (mm)"
+          type="number"
+          value={stoneForm.depth}
+          onChange={(e) => setStoneForm(prev => ({
+            ...prev, 
+            depth: e.target.value
+          }))}
+          InputProps={{
+            inputProps: { min: 0, step: 0.1 }
+          }}
+        />
+      </Grid>
+
+      {/* Add Stone Button */}
+      <Grid item xs={12}>
+        <Button 
+          variant="contained" 
+          color="primary" 
+          fullWidth 
+          onClick={addStone}
+          disabled={
+            !stoneForm.name || 
+            !stoneForm.shape || 
+            !stoneForm.color || 
+            !stoneForm.weight || 
+            !stoneForm.width || 
+            !stoneForm.depth
+          }
+        >
+          Add Stone
+        </Button>
+      </Grid>
+
+      {/* Estimated Stones Table */}
+      {estimatedItems.filter(item => item.type === 'Stone').length > 0 && (
+        <Grid item xs={12}>
+          <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Estimated Stones</Typography>
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Qty</TableCell>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Shape</TableCell>
+                  <TableCell>Color</TableCell>
+                  <TableCell>Weight (ct)</TableCell>
+                  <TableCell>Width (mm)</TableCell>
+                  <TableCell>Depth (mm)</TableCell>
+                  <TableCell>Est. Value</TableCell>
+                  <TableCell>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {estimatedItems.filter(item => item.type === 'Stone').map((stone) => (
+                  <TableRow key={stone.id}>
+                    <TableCell>{stone.quantity}</TableCell>
+                    <TableCell>{stone.name}</TableCell>
+                    <TableCell>{stone.shape}</TableCell>
+                    <TableCell>{stone.color}</TableCell>
+                    <TableCell>{stone.weight}</TableCell>
+                    <TableCell>{stone.width}</TableCell>
+                    <TableCell>{stone.depth}</TableCell>
+                    <TableCell>${stone.estimatedValue.toLocaleString()}</TableCell>
+                    <TableCell>
+                      <IconButton 
+                        onClick={() => setEstimatedItems(prev => 
+                          prev.filter(s => s.id !== stone.id)
+                        )}
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Grid>
+      )}
+
+      {/* Total Estimated Stone Value */}
+      <Grid item xs={12} sx={{ mt: 2 }}>
+        <Typography variant="h6">
+          Est. Stone Value: $
+          {estimatedItems.filter(item => item.type === 'Stone')
+            .reduce((total, stone) => total + stone.estimatedValue, 0)
+            .toLocaleString()}
+        </Typography>
+      </Grid>
+    </Grid>
+  );
+
+  const renderDiamondEstimationTab = () => (
+    <Grid container spacing={2} sx={{ p: 2 }}>
+      <Grid container spacing={2} alignItems="center">
+        <Grid item xs={6}>
+          <FormControl fullWidth variant="outlined">
+            <InputLabel>Cut *</InputLabel>
+            <Select
+              value={diamondForm.cut}
+              label="Cut"
+              onChange={(e) => setDiamondForm(prev => ({
+                ...prev, 
+                cut: e.target.value
+              }))}
+            >
+              {diamondCuts.map((cut) => (
+                <MenuItem key={cut.name} value={cut.name}>
+                  {cut.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={6}>
+          <Button 
+            variant="contained" 
+            color="primary" 
+            fullWidth 
+            onClick={addDiamond}
+            disabled={!diamondForm.shape || !diamondForm.clarity || !diamondForm.cut}
+          >
+            Add Diamond
+          </Button>
+        </Grid>
+      </Grid>
+
+      <Grid item xs={12} sx={{ mt: 2 }}>
+        <Typography variant="h6">Est. Diamond Value: ${totalDiamondValue.toFixed(2)}</Typography>
+      </Grid>
+    </Grid>
+  );
+
+  const calculateStoneValue = () => {
+    // This is a simplified placeholder. You'll want to replace with actual valuation logic
+    const baseValues = {
+      'Ruby': 1000,
+      'Sapphire': 800,
+      'Emerald': 1200,
+      'Amethyst': 100,
+      'Topaz': 150,
+      'Opal': 200,
+      'Tanzanite': 650,
+      'Aquamarine': 300,
+      'Tourmaline': 400
+    };
+
+    const colorMultipliers = {
+      'Pigeon Blood Red': 2.5,
+      'Blue': 1.8,
+      'Deep Green': 2.0,
+      // Add more color multipliers
+    };
+
+    const baseValue = baseValues[stoneForm.name] || 500;
+    const colorMultiplier = colorMultipliers[stoneForm.color] || 1;
+    const weightMultiplier = Math.pow(parseFloat(stoneForm.weight), 1.5);
+
+    return Math.round(baseValue * colorMultiplier * weightMultiplier);
+  };
+
+  const [activeTab, setActiveTab] = useState('diamond');
+
+  const renderTabButtons = () => (
+    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+      <Button
+        variant={activeTab === 'diamond' ? 'contained' : 'outlined'}
+        onClick={() => setActiveTab('diamond')}
+        sx={{ mr: 2 }}
+      >
+        Diamond
+      </Button>
+      <Button
+        variant={activeTab === 'stone' ? 'contained' : 'outlined'}
+        onClick={() => setActiveTab('stone')}
+      >
+        Stone
+      </Button>
+    </Box>
+  );
+
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+  };
+
+  const handleNextTab = () => {
+    if (activeTab < 2) {
+      setActiveTab(prevTab => prevTab + 1);
+    }
+  };
 
   return (
     <Container maxWidth="lg">
@@ -464,252 +1030,266 @@ function Estimator() {
         {/* Diamond Estimation Section */}
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
-            <Typography variant="h6" sx={{ mb: 2 }}>ESTIMATE DIAMONDS</Typography>
-            <Grid container spacing={2} alignItems="center">
-              <Grid item xs={6} sm={5}>
-                <TextField
-                  fullWidth
-                  label="Quantity"
-                  name="quantity"
-                  type="number"
-                  value={diamondForm.quantity}
-                  onChange={handleDiamondChange}
-                  inputProps={{ min: "1" }}
-                />
-              </Grid>
-              <Grid item xs={6} sm={7}>
-              <Box sx={{ ml: 3 }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={diamondForm.labGrown || false}
-                      onChange={(e) => setDiamondForm(prev => ({
-                        ...prev, 
-                        labGrown: e.target.checked
-                      }))}
-                      name="labGrown"
-                    />
-                  }
-                  label="Lab Grown"
-                />
-              </Box>
-              </Grid>
-            </Grid>
-            <Box sx={{ mb: 3 }}></Box>
-            {/* Shape Selection */}
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Shape *</Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-              {diamondShapes.map((shape) => (
-                <Paper
-                  key={shape.name}
-                  elevation={diamondForm.shape === shape.name ? 8 : 1}
-                  sx={{
-                    p: 1,
-                    cursor: 'pointer',
-                    width: 80,
-                    height: 80,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                  onClick={() => setDiamondForm(prev => ({ ...prev, shape: shape.name }))}
-                >
-                  <Box
-                    component="img"
-                    src={shape.image}
-                    alt={shape.name}
-                    sx={{ width: 40, height: 40 }}
-                  />
-                  <Typography variant="caption" align="center">
-                    {shape.name}
-                  </Typography>
-                </Paper>
-              ))}
-            </Box>
-
-            {/* Size Section */}
-            <Grid container spacing={2} sx={{ mb: 3, alignItems: 'center' }}>
-              <Grid item>
-                <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
-              </Grid>
-              {diamondForm.quantity > 1 && (
-                <Grid item>
-                  <FormControl sx={{ minWidth: 120 }}>
-                    <Select
-                      value={diamondValuationType}
-                      onChange={handleDiamondValuationTypeChange}
-                      displayEmpty
-                      size="small"
-                    >
-                      <MenuItem value="each">Each</MenuItem>
-                      <MenuItem value="total">Total</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Grid>
-              )}
-            </Grid>
-            <Grid container spacing={2} sx={{ mb: 3 }}>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  fullWidth
-                  label="Weight (carats) *"
-                  name="weight"
-                  type="number"
-                  value={diamondForm.weight}
-                  onChange={handleDiamondChange}
-                  inputProps={{ step: "0.01", min: "0" }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  fullWidth
-                  label="Depth (mm)"
-                  name="depth"
-                  type="number"
-                  value={diamondForm.depth}
-                  onChange={handleDiamondChange}
-                  inputProps={{ step: "0.1" }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  fullWidth
-                  label="Width (mm)"
-                  name="width"
-                  type="number"
-                  value={diamondForm.width}
-                  onChange={handleDiamondChange}
-                  inputProps={{ step: "0.1" }}
-                />
-              </Grid>
-            </Grid>
-
-            {/* Color Selection */}
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-              {diamondColors.map((color) => (
-                <Paper
-                  key={color.name}
-                  elevation={
-                    // Highlight if the current exact color falls in this category
-                    getColorCategory(exactColor) === color.name ? 8 : 1
-                  }
-                  sx={{
-                    p: 1,
-                    cursor: 'pointer',
-                    width: 80,
-                    height: 80,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: color.color,
-                    transition: 'all 0.3s ease',
-                  }}
-                  onClick={() => {
-                    // When clicking, set the exact color to the start of the range
-                    const startColor = color.range.split('-')[0];
-                    setDiamondForm(prev => ({ 
-                      ...prev, 
-                      color: color.name,
-                      exactColor: startColor
-                    }));
-                    // Update exact color state
-                    setExactColor(startColor);
-                  }}
-                >
-                  <Typography variant="caption" align="center" sx={{ mt: 1 }}>
-                    {color.name}
-                  </Typography>
-                  <Typography variant="caption" align="center">
-                    {color.range}
-                  </Typography>
-                </Paper>
-              ))}
-            </Box>
-
-            {/* Color Scale Slider */}
-            <Box sx={{ width: '100%', px: 2, mt: 2 }}>
-              <Typography gutterBottom>
-                Exact Color: {exactColor}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+              <Typography variant="h6" sx={{ mb: 0, mr: 2 }}>
+                {activeTab === 'diamond' ? 'ESTIMATE DIAMOND' : 'ESTIMATE STONE'}
               </Typography>
-              <Slider
-                value={colorScale.indexOf(exactColor)}
-                onChange={handleExactColorChange}
-                valueLabelDisplay="auto"
-                valueLabelFormat={(value) => colorScale[value]}
-                step={1}
-                marks
-                min={0}
-                max={colorScale.length - 1}
-              />
-            </Box>
-
-            {/* Clarity Selection */}
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Clarity *</Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-              {diamondClarity.map((clarity) => (
-                <Paper
-                  key={clarity.name}
-                  elevation={diamondForm.clarity === clarity.name ? 8 : 1}
-                  sx={{
-                    p: 1,
-                    cursor: 'pointer',
-                    width: 80,
-                    height: 80,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                  onClick={() => setDiamondForm(prev => ({ ...prev, clarity: clarity.name }))}
-                >
-                  <Box
-                    component="img"
-                    src={clarity.image}
-                    alt={clarity.name}
-                    sx={{ width: 40, height: 40 }}
-                  />
-                  <Typography variant="caption" align="center">
-                    {clarity.name}
-                  </Typography>
-                </Paper>
-              ))}
-            </Box>
-
-            {/* Cut Grade */}
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Cut *</Typography>
-            <FormControl fullWidth sx={{ mb: 3 }}>
-              <Select
-                name="cut"
-                value={diamondForm.cut}
-                onChange={handleDiamondChange}
-                required
-              >
-                {diamondCuts.map((cut) => (
-                  <MenuItem key={cut.name} value={cut.value}>{cut.name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            {/* Quantity and Add Button */}
-            <Grid container spacing={2} alignItems="center">
-              <Grid item xs={6}>
+              
+              <Box>
                 <Button
-                  variant="contained"
-                  onClick={addDiamond}
-                  fullWidth
-                  sx={{ mt: 2 }}
-                  disabled={!diamondForm.shape || !diamondForm.clarity || !diamondForm.color || !diamondForm.cut || !diamondForm.weight}
+                  variant={activeTab === 'diamond' ? 'contained' : 'outlined'}
+                  onClick={() => setActiveTab('diamond')}
+                  sx={{ mr: 2 }}
                 >
-                  Add Diamond
+                  Diamond
                 </Button>
-              </Grid>
-              <Grid item xs={6}>
-              <Typography variant="h6" sx={{ mb: 2 }}>Est. Diamond Value: ${totalDiamondValue.toFixed(2)}</Typography>
-              </Grid>
-            </Grid>
+                <Button
+                  variant={activeTab === 'stone' ? 'contained' : 'outlined'}
+                  onClick={() => setActiveTab('stone')}
+                >
+                  Stone
+                </Button>
+              </Box>
+            </Box>
+            
+            {activeTab === 'diamond' && (
+              <Box>
+                <Grid container spacing={2} alignItems="center">
+                  <Grid item xs={6} sm={5}>
+                    <TextField
+                      fullWidth
+                      label="Quantity"
+                      name="quantity"
+                      type="number"
+                      value={diamondForm.quantity}
+                      onChange={handleDiamondChange}
+                      inputProps={{ min: "1" }}
+                    />
+                  </Grid>
+                  <Grid item xs={6} sm={7}>
+                  <Box sx={{ ml: 3 }}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={diamondForm.labGrown || false}
+                          onChange={(e) => setDiamondForm(prev => ({
+                            ...prev, 
+                            labGrown: e.target.checked
+                          }))}
+                          name="labGrown"
+                        />
+                      }
+                      label="Lab Grown"
+                    />
+                  </Box>
+                  </Grid>
+                </Grid>
+                <Box sx={{ mb: 3 }}></Box>
+                {/* Shape Selection */}
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>Shape *</Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+                  {diamondShapes.map((shape) => (
+                    <Paper
+                      key={shape.name}
+                      elevation={diamondForm.shape === shape.name ? 8 : 1}
+                      sx={{
+                        p: 1,
+                        cursor: 'pointer',
+                        width: 80,
+                        height: 80,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      onClick={() => setDiamondForm(prev => ({ ...prev, shape: shape.name }))}
+                    >
+                      <Box
+                        component="img"
+                        src={shape.image}
+                        alt={shape.name}
+                        sx={{ width: 40, height: 40 }}
+                      />
+                      <Typography variant="caption" align="center">
+                        {shape.name}
+                      </Typography>
+                    </Paper>
+                  ))}
+                </Box>
+
+                {/* Size Section */}
+                <Grid container spacing={1} sx={{ mb: 2, alignItems: 'center' }}>
+                  <Grid item>
+                    <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
+                  </Grid>
+                  {diamondForm.quantity > 1 && (
+                    <Grid item>
+                      <FormControl sx={{ minWidth: 120 }}>
+                        <Select
+                          value={diamondValuationType}
+                          onChange={handleDiamondValuationTypeChange}
+                          displayEmpty
+                          size="small"
+                        >
+                          <MenuItem value="each">Each</MenuItem>
+                          <MenuItem value="total">Total</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                  )}
+                </Grid>
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={12} sm={4}>
+                    <TextField
+                      fullWidth
+                      label="Weight (carats) *"
+                      name="weight"
+                      type="number"
+                      value={diamondForm.weight}
+                      onChange={handleDiamondChange}
+                      inputProps={{ step: "0.01", min: "0" }}
+                    />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                        {/* Size Dropdown */}
+                    <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
+                      <InputLabel>Diamond Size</InputLabel>
+                      <Select
+                        value={diamondForm.size}
+                        label="Diamond Size"
+                        onChange={(e) => {
+                          const selectedSize = e.target.value;
+                          
+                          // Special handling for diamond cut shapes
+                          if (diamondCutWeights[diamondForm.shape]) {
+                            setDiamondForm(prev => ({
+                              ...prev, 
+                              size: selectedSize,
+                              // Get corresponding weight from mapping
+                              weight: diamondCutWeights[diamondForm.shape][selectedSize]
+                            }));
+                          } else {
+                            // Default handling for other shapes
+                            setDiamondForm(prev => ({
+                              ...prev, 
+                              size: selectedSize,
+                              weight: 0
+                            }));
+                          }
+                        }}
+                      >
+                        {getDiamondSizes(diamondForm.shape).map((size) => (
+                          <MenuItem key={size} value={size}>
+                            {size}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                </Grid>
+                  </Grid>
+
+                {/* Color Selection */}
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+                  {diamondColors.map((color) => (
+                    <Paper
+                      key={color.name}
+                      elevation={
+                        // Highlight if the current exact color falls in this category
+                        getColorCategory(exactColor) === color.name ? 8 : 1
+                      }
+                      sx={{
+                        p: 1,
+                        cursor: 'pointer',
+                        width: 80,
+                        height: 80,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: color.color,
+                        transition: 'all 0.3s ease',
+                      }}
+                      onClick={() => {
+                        // When clicking, set the exact color to the start of the range
+                        const startColor = color.range.split('-')[0];
+                        setDiamondForm(prev => ({ 
+                          ...prev, 
+                          color: color.name,
+                          exactColor: startColor
+                        }));
+                        // Update exact color state
+                        setExactColor(startColor);
+                      }}
+                    >
+                      <Typography variant="caption" align="center" sx={{ mt: 1 }}>
+                        {color.name}
+                      </Typography>
+                      <Typography variant="caption" align="center">
+                        {color.range}
+                      </Typography>
+                    </Paper>
+                  ))}
+                </Box>
+
+                {/* Color Scale Slider */}
+                <Box sx={{ width: '100%', px: 2, mt: 2 }}>
+                  <Typography gutterBottom>
+                    Exact Color: {exactColor}
+                  </Typography>
+                  <Slider
+                    value={colorScale.indexOf(exactColor)}
+                    onChange={handleExactColorChange}
+                    valueLabelDisplay="auto"
+                    valueLabelFormat={(value) => colorScale[value]}
+                    step={1}
+                    marks
+                    min={0}
+                    max={colorScale.length - 1}
+                  />
+                </Box>
+
+                {/* Clarity Selection */}
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>Clarity *</Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+                  {diamondClarity.map((clarity) => (
+                    <Paper
+                      key={clarity.name}
+                      elevation={diamondForm.clarity === clarity.name ? 8 : 1}
+                      sx={{
+                        p: 1,
+                        cursor: 'pointer',
+                        width: 80,
+                        height: 80,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      onClick={() => setDiamondForm(prev => ({ ...prev, clarity: clarity.name }))}
+                    >
+                      <Box
+                        component="img"
+                        src={clarity.image}
+                        alt={clarity.name}
+                        sx={{ width: 40, height: 40 }}
+                      />
+                      <Typography variant="caption" align="center">
+                        {clarity.name}
+                      </Typography>
+                    </Paper>
+                  ))}
+                </Box>
+
+                {renderDiamondEstimationTab()}
+              </Box>
+            )}
+
+            {activeTab === 'stone' && (
+              <Box>
+                {renderStoneEstimationTab()}
+              </Box>
+            )}
           </Paper>
         </Grid>
 
@@ -731,9 +1311,9 @@ function Estimator() {
             <Typography variant="body2">Clarity: {diamondForm.clarity}</Typography>
             <Typography variant="body2">Color: {diamondForm.color}</Typography>
             <Typography variant="body2">Cut: {diamondForm.cut}</Typography>
+            <Typography variant="body2">Weight: {diamondForm.weight} ct</Typography>
             <Typography variant="body2">Quantity: {diamondForm.quantity}</Typography>
-            <Typography variant="body2">Weight: {diamondForm.weight}ct</Typography>
-            <Typography variant="body2">Lab Grown: {diamondForm.labGrown ? 'Yes' : 'No'}</Typography>
+            <Typography variant="body2">Lab Grown: {diamondForm.labGrown? 'Yes' : 'No'}</Typography>
             <Typography variant="body2">Exact Color: {diamondForm.exactColor}</Typography>
 
             <Typography variant="subtitle1" sx={{ mt: 2 }}>Price Estimates</Typography>
