@@ -21,7 +21,8 @@ import {
   FormControlLabel,
   Checkbox,
   Slider,
-  FormGroup
+  FormGroup,
+  Divider
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
@@ -313,7 +314,8 @@ function Estimator() {
     color: '',
     weight: '',
     width: '',
-    depth: ''
+    depth: '',
+    valuationType: 'each'
   });
 
   const [estimatedItems, setEstimatedItems] = useState([]);
@@ -530,7 +532,7 @@ function Estimator() {
       const newStone = {
         ...stoneForm,
         id: Date.now(),
-        estimatedValue: calculateStoneValue() // You'll need to implement this
+        estimatedValue: calculateStoneValue()
       };
       
       setEstimatedItems(prev => [...prev, newStone]);
@@ -543,7 +545,8 @@ function Estimator() {
         color: '',
         weight: '',
         width: '',
-        depth: ''
+        depth: '',
+        valuationType: 'each'
       });
     }
   };
@@ -672,56 +675,95 @@ function Estimator() {
           </Select>
         </FormControl>
       </Grid>
-
-      {/* Weight */}
-      <Grid item xs={12} md={4}>
-        <TextField
-          fullWidth
-          label="Weight (Carats)"
-          type="number"
-          value={stoneForm.weight}
-          onChange={(e) => setStoneForm(prev => ({
-            ...prev, 
-            weight: e.target.value
-          }))}
-          InputProps={{
-            inputProps: { min: 0, step: 0.01 }
-          }}
-        />
+      
+      {/* Size Section */}
+      <Grid container spacing={1} sx={{ mt: 0, mb: 0, alignItems: 'center' }}>
+        <Grid item>
+          <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
+        </Grid>
+        {stoneForm.quantity > 1 && (
+          <Grid item>
+            <FormControl sx={{ minWidth: 120 }}>
+              <Select
+                value={stoneForm.valuationType}
+                onChange={(e) => setStoneForm(prev => ({
+                  ...prev, 
+                  valuationType: e.target.value
+                }))}
+                displayEmpty
+                size="small"
+                sx={{
+                  '& .MuiOutlinedInput-notchedOutline': {
+                    border: 'none'
+                  },
+                  '&:hover .MuiOutlinedInput-notchedOutline': {
+                    border: 'none'
+                  },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                    border: 'none'
+                  }
+                }}
+              >
+                <MenuItem value="each">Each</MenuItem>
+                <MenuItem value="total">Total</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+        )}
       </Grid>
 
-      {/* Width */}
-      <Grid item xs={12} md={4}>
-        <TextField
-          fullWidth
-          label="Width (mm)"
-          type="number"
-          value={stoneForm.width}
-          onChange={(e) => setStoneForm(prev => ({
-            ...prev, 
-            width: e.target.value
-          }))}
-          InputProps={{
-            inputProps: { min: 0, step: 0.1 }
-          }}
-        />
-      </Grid>
+      {/* Measurements Container */}
+      <Grid container spacing={2} sx={{ mt: -1 }}>
+        {/* Weight */}
+        <Grid item xs={12} md={4}>
+          <TextField
+            fullWidth
+            label="Weight (Carats)"
+            type="number"
+            value={stoneForm.weight}
+            onChange={(e) => setStoneForm(prev => ({
+              ...prev, 
+              weight: e.target.value
+            }))}
+            InputProps={{
+              inputProps: { min: 0, step: 0.01 }
+            }}
+          />
+        </Grid>
 
-      {/* Depth */}
-      <Grid item xs={12} md={4}>
-        <TextField
-          fullWidth
-          label="Depth (mm)"
-          type="number"
-          value={stoneForm.depth}
-          onChange={(e) => setStoneForm(prev => ({
-            ...prev, 
-            depth: e.target.value
-          }))}
-          InputProps={{
-            inputProps: { min: 0, step: 0.1 }
-          }}
-        />
+        {/* Width */}
+        <Grid item xs={12} md={4}>
+          <TextField
+            fullWidth
+            label="Width (mm)"
+            type="number"
+            value={stoneForm.width}
+            onChange={(e) => setStoneForm(prev => ({
+              ...prev, 
+              width: e.target.value
+            }))}
+            InputProps={{
+              inputProps: { min: 0, step: 0.1 }
+            }}
+          />
+        </Grid>
+
+        {/* Depth */}
+        <Grid item xs={12} md={4}>
+          <TextField
+            fullWidth
+            label="Depth (mm)"
+            type="number"
+            value={stoneForm.depth}
+            onChange={(e) => setStoneForm(prev => ({
+              ...prev, 
+              depth: e.target.value
+            }))}
+            InputProps={{
+              inputProps: { min: 0, step: 0.1 }
+            }}
+          />
+        </Grid>
       </Grid>
 
       {/* Add Stone Button */}
@@ -845,7 +887,7 @@ function Estimator() {
   );
 
   const calculateStoneValue = () => {
-    // This is a simplified placeholder. You'll want to replace with actual valuation logic
+    // This is a simplified placeholder. Have to replace with actual valuation logic
     const baseValues = {
       'Ruby': 1000,
       'Sapphire': 800,
@@ -1118,7 +1160,7 @@ function Estimator() {
                 </Box>
 
                 {/* Size Section */}
-                <Grid container spacing={1} sx={{ mb: 2, alignItems: 'center' }}>
+                <Grid container spacing={1} sx={{ mb: 0.5, alignItems: 'center' }}>
                   <Grid item>
                     <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
                   </Grid>
@@ -1130,6 +1172,17 @@ function Estimator() {
                           onChange={handleDiamondValuationTypeChange}
                           displayEmpty
                           size="small"
+                          sx={{
+                            '& .MuiOutlinedInput-notchedOutline': {
+                              border: 'none'
+                            },
+                            '&:hover .MuiOutlinedInput-notchedOutline': {
+                              border: 'none'
+                            },
+                            '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                              border: 'none'
+                            }
+                          }}
                         >
                           <MenuItem value="each">Each</MenuItem>
                           <MenuItem value="total">Total</MenuItem>
@@ -1315,6 +1368,14 @@ function Estimator() {
             <Typography variant="body2">Quantity: {diamondForm.quantity}</Typography>
             <Typography variant="body2">Lab Grown: {diamondForm.labGrown? 'Yes' : 'No'}</Typography>
             <Typography variant="body2">Exact Color: {diamondForm.exactColor}</Typography>
+
+            <Typography variant="subtitle1" sx={{ mt: 2 }}>Stone Selection</Typography>
+                <Typography variant="body2">Name: {stoneForm.stoneName}</Typography>
+                <Typography variant="body2">Shape: {stoneForm.shape}</Typography>
+                <Typography variant="body2">Color: {stoneForm.color}</Typography>
+                <Typography variant="body2">Weight: {stoneForm.weight} ct</Typography>
+                <Typography variant="body2">Quantity: {stoneForm.quantity}</Typography>
+
 
             <Typography variant="subtitle1" sx={{ mt: 2 }}>Price Estimates</Typography>
             <Typography variant="body2">Pawn: ${estimates.pawn.toFixed(2)}</Typography>
