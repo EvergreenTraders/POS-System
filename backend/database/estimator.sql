@@ -15,12 +15,12 @@ END $$;
 
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_style') THEN
-        CREATE TABLE metal_style (
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_category') THEN
+        CREATE TABLE metal_category (
             id SERIAL PRIMARY KEY,
-            style VARCHAR(25) NOT NULL
+            category VARCHAR(25) NOT NULL
         );
-        INSERT INTO metal_style (style) VALUES
+        INSERT INTO metal_category (category) VALUES
         ('Rings'),
         ('Necklaces'),
         ('Bracelets'),
@@ -41,16 +41,16 @@ BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_color') THEN
         CREATE TABLE metal_color (
             id SERIAL PRIMARY KEY,
-            color VARCHAR(25) NOT NULL
+            metal_type_id INT NOT NULL,
+            color VARCHAR(25) NOT NULL,
+            FOREIGN KEY (metal_type_id) REFERENCES metal_type(id)
         );
-        INSERT INTO metal_color (color) VALUES
-        ('Yellow'),
-        ('White'),
-        ('2 Tone'),
-        ('Tri-color'),
-        ('Rose-Red'),
-        ('Antique'),
-        ('Black');
+        INSERT INTO metal_color (metal_type_id, color) VALUES
+        (1, 'Yellow'),
+        (1, 'White'),
+        (1, '2 Tone'),
+        (1, 'Tri-color'),
+        (1, 'Rose-Red');
     END IF;
 END $$;
 
@@ -59,22 +59,41 @@ BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_purity') THEN
         CREATE TABLE metal_purity (
             id SERIAL PRIMARY KEY,
-            purity VARCHAR(25) NOT NULL,
-            value DECIMAL(5, 3)
+            metal_type_id INT NOT NULL,
+            purity VARCHAR(25),
+            value DECIMAL(5,3),
+            FOREIGN KEY (metal_type_id) REFERENCES metal_type(id)
         );
-        INSERT INTO metal_purity (purity, value) VALUES
-        ('24K', .999),
-        ('22K', .917),
-        ('21K', .875),
-        ('20K', .833),
-        ('18K', .750),
-        ('14K', .585),
-        ('10K', .417),
-        ('9K', .375),
-        ('8K', .333),
-        ('Gold Filled', NULL),
-        ('Gold Plated', NULL),
-        ('Other', NULL);
+        INSERT INTO metal_purity (metal_type_id, purity, value) VALUES
+        (1, '24K', 0.999),
+        (1, '22K', 0.917),
+        (1, '21K', 0.875),
+        (1, '20K', 0.833),
+        (1, '18K', 0.750),
+        (1, '14K', 0.585),
+        (1, '10K', 0.417),
+        (1, '9K', 0.375),
+        (1, '8K', 0.333),
+        (1, 'Gold Filled', NULL),
+        (1, 'Gold Plated', NULL),
+        (1, 'Other', NULL),
+        (2, NULL, 0.999),
+        (2, NULL, 0.950),
+        (2, NULL, 0.585),
+        (2, 'Other', NULL),
+        (3, 'Pure', 0.999),
+        (3, 'Sterling', 0.925),
+        (3, 'Coin', 0.900),
+        (3, 'Vermeil', NULL),
+        (3, 'Silver Plate', NULL),
+        (3, 'Other', NULL),
+        (4, 'Palladium', 0.999),
+        (4, 'Palladium', 0.950),
+        (4, 'Palladium', 0.500),
+        (4, 'Titanium', NULL),
+        (4, 'Tungsten', NULL),
+        (4, 'Stainless', NULL),
+        (4, 'Copper', NULL);
     END IF;
 END $$;
 
@@ -84,12 +103,12 @@ BEGIN
         CREATE TABLE metal_style_category (
             id SERIAL PRIMARY KEY,
             metal_type_id INT NOT NULL,
-            metal_style_id INT NOT NULL,
+            metal_category_id INT NOT NULL,
             category VARCHAR(255) NOT NULL,
             FOREIGN KEY (metal_type_id) REFERENCES metal_type(id),
-            FOREIGN KEY (metal_style_id) REFERENCES metal_style(id)
+            FOREIGN KEY (metal_category_id) REFERENCES metal_category(id)
         );
-        INSERT INTO metal_style_category (metal_type_id, metal_style_id, category) VALUES
+        INSERT INTO metal_style_category (metal_type_id, metal_category_id, category) VALUES
         (1, 1, 'Gold-Diamond Rings'),
         (1, 1, 'Gold-Diamond & Stone Rings'),
         (1, 1, 'Silver-Diamond Rings'),
@@ -231,7 +250,7 @@ BEGIN
         CREATE TABLE metal (
             id SERIAL PRIMARY KEY,
             metal_type_id INT NOT NULL,
-            metal_style_id INT NOT NULL,
+            metal_category_id INT NOT NULL,
             metal_style_subcategory_id INT NOT NULL,
             metal_color_id INT NOT NULL,
             metal_purity_id INT NOT NULL,
@@ -240,7 +259,7 @@ BEGIN
             metal_spot_price_timestamp TIMESTAMP NOT NULL,
             metal_spot_price_website VARCHAR(255) NOT NULL,
             FOREIGN KEY (metal_type_id) REFERENCES metal_type(id),
-            FOREIGN KEY (metal_style_id) REFERENCES metal_style(id),
+            FOREIGN KEY (metal_category_id) REFERENCES metal_category(id),
             FOREIGN KEY (metal_style_subcategory_id) REFERENCES metal_style_subcategory(id),
             FOREIGN KEY (metal_color_id) REFERENCES metal_color(id),
             FOREIGN KEY (metal_purity_id) REFERENCES metal_purity(id)

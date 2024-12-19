@@ -259,10 +259,18 @@ app.get('/api/metal_type', async (req, res) => {
   }
 });
 
-app.get('/api/metal_purity', async (req, res) => {
+
+app.get('/api/metal_purity/:metal_type_id', async (req, res) => {
   try {
-    const query = 'SELECT * FROM metal_purity';
-    const result = await pool.query(query);
+    const { metal_type_id } = req.params;
+    
+    const query = 'SELECT * FROM metal_purity WHERE metal_type_id = $1';
+    const result = await pool.query(query, [metal_type_id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No purities found for this metal type' });
+    }
+    
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching metal purities:', err.message);
@@ -270,13 +278,13 @@ app.get('/api/metal_purity', async (req, res) => {
   }
 });
 
-app.get('/api/metal_style', async (req, res) => {
+app.get('/api/metal_category', async (req, res) => {
   try {
-    const query = 'SELECT * FROM metal_style';
+    const query = 'SELECT * FROM metal_category';
     const result = await pool.query(query);
     res.json(result.rows);
   } catch (err) {
-    console.error('Error fetching metal styles:', err.message);
+    console.error('Error fetching metal categories:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -284,16 +284,12 @@ const getDiamondSizes = (shape) => {
 
 function Estimator() {
   const [metalForm, setMetalForm] = useState({
-    metalType: '',
-    metalStyle: '',
     type: '',
-    jewelryColor: '',
-    purity: '',
     metalCategory: '',
+    jewelryColor: '',
     weight: '',
-    size: '',
-    spotPrice: '',
-    scrap: false,
+    price: '',
+    purity: { purity: '', value: 0 }
   });
 
   const [diamondForm, setDiamondForm] = useState({
@@ -329,14 +325,8 @@ function Estimator() {
   });
 
   const [metalTypes, setMetalTypes] = useState([]);
-  const [metalStyles, setMetalStyles] = useState([]);
-  const [metalColors, setMetalColors] = useState([]);
-  const [metalPurities, setMetalPurities] = useState([]);
   const [metalCategories, setMetalCategories] = useState([]);
-  const [subcategories, setSubcategories] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState('');
-  const [selectedSubcategory, setSelectedSubcategory] = useState('');
-
+  const [metalPurities, setMetalPurities] = useState([]);
   const [diamondValuationType, setDiamondValuationType] = useState('each');
 
   const [exactColor, setExactColor] = useState('D');
@@ -344,6 +334,8 @@ function Estimator() {
   const colorScale = Array.from({length: 23}, (_, i) => 
     String.fromCharCode(68 + i) // Starting from 'D'
   );
+
+  const [metalColors, setMetalColors] = useState([]);
 
   // Function to determine color category based on exact color
   const getColorCategory = (exactColor) => {
@@ -374,10 +366,8 @@ function Estimator() {
     const fetchMetalData = async () => {
       try {
         const typesResponse = await axios.get('http://localhost:5000/api/metal_type');
-        const stylesResponse = await axios.get('http://localhost:5000/api/metal_style');
+        const categoriesResponse = await axios.get('http://localhost:5000/api/metal_category');
         const colorsResponse = await axios.get('http://localhost:5000/api/metal_color');
-        const puritiesResponse = await axios.get('http://localhost:5000/api/metal_purity');
-        const categoriesResponse = await axios.get('http://localhost:5000/api/metal_style_category');
 
         // Check if the responses are successful
         if (typesResponse.status === 200) {
@@ -386,10 +376,10 @@ function Estimator() {
           console.error('Failed to fetch metal types:', typesResponse.status);
         }
 
-        if (stylesResponse.status === 200) {
-          setMetalStyles(stylesResponse.data);
+        if (categoriesResponse.status === 200) {
+          setMetalCategories(categoriesResponse.data);
         } else {
-          console.error('Failed to fetch metal styles:', stylesResponse.status);
+          console.error('Failed to fetch metal categories:', categoriesResponse.status);
         }
 
         if (colorsResponse.status === 200) {
@@ -397,18 +387,7 @@ function Estimator() {
         } else {
           console.error('Failed to fetch metal colors:', colorsResponse.status);
         }
-
-        if (puritiesResponse.status === 200) {
-          setMetalPurities(puritiesResponse.data);
-        } else {
-          console.error('Failed to fetch metal purities:', puritiesResponse.status);
-        }
         
-        if (categoriesResponse.status === 200) {
-          setMetalCategories(categoriesResponse.data);
-        } else {
-          console.error('Failed to fetch categories:', categoriesResponse.status);
-        }
       } catch (error) {
         console.error('Error fetching metal data:', error);
       }
@@ -417,16 +396,13 @@ function Estimator() {
     fetchMetalData();
   }, []);
 
-  const handleCategoryChange = async (event) => {
-    const categoryId = event.target.value;
-    setSelectedCategory(categoryId);
-    console.log("Selected Category:", categoryId);
+  const fetchPurities = async (metalTypeId) => {
     try {
-      const response = await axios.get(`http://localhost:5000/api/metal_style_subcategory?category_id=${categoryId}`);
-      setSubcategories(response.data);
-      console.log("Fetched Subcategories:", response.data);
+      const response = await axios.get(`http://localhost:5000/api/metal_purity/${metalTypeId}`);
+      setMetalPurities(response.data);
     } catch (error) {
-      console.error('Error fetching subcategories:', error);
+      console.error('Error fetching metal purities:', error);
+      setMetalPurities([]); // Reset purities if fetch fails
     }
   };
 
@@ -435,7 +411,7 @@ function Estimator() {
     const totalValue = totalMetalValue + totalDiamondValue;
     setEstimates({
       pawn: totalValue * 0.5,    // 50% of total value
-      buy: totalValue * 0.7,     // 70% of total value
+      buy: totalValue * 0.7,    // 70% of total value
       consign: totalValue * 0.8,  // 80% of total value
       trade: totalValue * 0.6     // 60% of total value
     });
@@ -444,15 +420,29 @@ function Estimator() {
   const handleMetalChange = (event) => {
     const { name, value } = event.target;
     
+    // When metal type changes, fetch corresponding purities
+    if (name === 'type') {
+      const selectedMetalType = metalTypes.find(type => type.id === value);
+      if (selectedMetalType) {
+        fetchPurities(selectedMetalType.id);
+      }
+      
+      setMetalForm(prev => ({
+        ...prev,
+        type: value,
+        purity: { purity: '', value: 0 }
+      }));
+      return;
+    }
+    
+    // For purity, find the full purity object
     if (name === 'purity') {
-      // Find the full purity object when purity is selected
       const selectedPurity = metalPurities.find(p => p.id === value);
       setMetalForm(prev => ({
         ...prev,
-        purity: selectedPurity // Store the entire purity object
+        purity: selectedPurity || { purity: '', value: 0 }
       }));
     } else {
-      // For other fields, continue to update as before
       setMetalForm(prev => ({
         ...prev,
         [name]: value
@@ -499,7 +489,7 @@ function Estimator() {
     clarity: '',
     color: 'Colorless',
     quantity: 1,
-    size: '',
+    weight: 0,
     cut: '',
     labGrown: false,
     exactColor: 'D'
@@ -516,11 +506,11 @@ function Estimator() {
     // Add metal to estimated items
     const newItem = {
       type: 'Metal',
-      description: `${metalForm.metalType} ${metalForm.metalStyle} ${metalForm.metalCategory} ${selectedSubcategory} ${metalForm.jewelryColor} ${metalForm.purity?.purity || ''}`,
+      description: `${metalForm.type} ${metalForm.metalCategory} ${metalForm.purity?.purity || ''} ${metalForm.jewelryColor}`,
       dimension: `${metalForm.size}`,
       weight: metalForm.weight,
       quantity: 1,
-      value: totalMetalValue
+      estimatedValue: totalMetalValue
     };
 
     setEstimatedItems(prev => [...prev, newItem]);
@@ -553,9 +543,9 @@ function Estimator() {
 
   const calculateMetalValue = () => {
     // Only calculate if all necessary fields are filled
-    if (metalForm.weight && metalForm.spotPrice && metalForm.purity) {
+    if (metalForm.weight && metalForm.price && metalForm.purity) {
       const percentageFactor = 0.7; 
-      setTotalMetalValue(metalForm.spotPrice * metalForm.purity.value * metalForm.weight * percentageFactor);
+      setTotalMetalValue(metalForm.price * metalForm.purity.value * metalForm.weight * percentageFactor);
     }
       
       else {
@@ -566,7 +556,7 @@ function Estimator() {
 
   useEffect(() => {
     calculateMetalValue();
-  }, [metalForm.weight, metalForm.spotPrice, metalForm.purity]);
+  }, [metalForm.weight, metalForm.price, metalForm.purity]);
 
   const [currentStone, setCurrentStone] = useState({
     type: '',
@@ -954,8 +944,8 @@ function Estimator() {
             <FormControl fullWidth sx={{ mb: 2 }}>
               <InputLabel>Select Metal Type *</InputLabel>
               <Select
-                name="metalType"
-                value={metalForm.metalType}
+                name="type"
+                value={metalForm.type}
                 onChange={handleMetalChange}
                 required
               >
@@ -965,19 +955,21 @@ function Estimator() {
               </Select>
             </FormControl>
 
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Select Jewelry Color *</InputLabel>
-              <Select
-                name="jewelryColor"
-                value={metalForm.jewelryColor}
-                onChange={handleMetalChange}
-                required
-              >
-                {metalColors.map(color => (
-                  <MenuItem key={color.id} value={color.id}>{color.color}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            {metalTypes.find(type => type.type === 'Gold')?.id === metalForm.type && (
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel>Select Jewelry Color *</InputLabel>
+                <Select
+                  name="jewelryColor"
+                  value={metalForm.jewelryColor}
+                  onChange={handleMetalChange}
+                  required
+                >
+                  {metalColors.map(color => (
+                    <MenuItem key={color.id} value={color.id}>{color.color}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
 
             <FormControl fullWidth sx={{ mb: 2 }}>
               <InputLabel>Select Metal Purity *</InputLabel>
@@ -989,48 +981,26 @@ function Estimator() {
               >
                 {metalPurities.map(purity => (
                   <MenuItem key={purity.id} value={purity.id}>
-                    {purity.purity}{purity.value !== null ? ` - ${purity.value}` : ''}
+                    {purity.purity === null 
+                      ? `${purity.value}` 
+                      : (purity.value === null 
+                        ? purity.purity 
+                        : `${purity.purity} - ${purity.value}`)}
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
 
             <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Select Metal Style</InputLabel>
-              <Select
-                name="metalStyle"
-                value={metalForm.metalStyle}
-                onChange={handleMetalChange}
-              >
-                {metalStyles.map(style => (
-                  <MenuItem key={style.id} value={style.id}>{style.style}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Select Category</InputLabel>
+              <InputLabel>Select Metal Category *</InputLabel>
               <Select
                 name="metalCategory"
                 value={metalForm.metalCategory}
                 onChange={handleMetalChange}
+                required
               >
                 {metalCategories.map(category => (
-                  <MenuItem key={category.id} value={category.id}>{category.category_name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Select Subcategory</InputLabel>
-              <Select
-                name="subcategory"
-                value={selectedSubcategory}
-                onChange={(e) => setSelectedSubcategory(e.target.value)}
-                disabled={!selectedCategory} // Disable if no category is selected
-              >
-                {subcategories.map(subcategory => (
-                  <MenuItem key={subcategory.id} value={subcategory.id}>{subcategory.sub_category}</MenuItem>
+                  <MenuItem key={category.id} value={category.id}>{category.category}</MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -1047,8 +1017,8 @@ function Estimator() {
             <TextField
               fullWidth
               label="Spot Price/oz"
-              name="spotPrice"
-              value={metalForm.spotPrice}
+              name="price"
+              value={metalForm.price}
               onChange={handleMetalChange}
               sx={{ mb: 2 }}
             />
@@ -1058,7 +1028,7 @@ function Estimator() {
               onClick={() => addMetal()}
               fullWidth
               sx={{ mt: 2 }}
-              disabled={!metalForm.metalType || !metalForm.jewelryColor || !metalForm.purity}
+              disabled={!metalForm.type || !metalForm.purity || !metalForm.metalCategory || (metalTypes.find(type => type.type === 'Gold')?.id === metalForm.type && !metalForm.jewelryColor)}
             >
               Add Metal
             </Button>
@@ -1351,12 +1321,10 @@ function Estimator() {
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
             <Typography variant="h6" sx={{ mb: 2 }}>SUMMARY</Typography>
             <Typography variant="subtitle1">Metal Selection</Typography>
-            <Typography variant="body2">Type: {metalForm.metalType}</Typography>
-            <Typography variant="body2">Style: {metalForm.metalStyle}</Typography>
-            <Typography variant="body2">Category: {metalForm.metalCategory}</Typography>
-            <Typography variant="body2">Subcategory: {selectedSubcategory}</Typography>
-            <Typography variant="body2">Color: {metalForm.jewelryColor}</Typography>
+            <Typography variant="body2">Type: {metalForm.type}</Typography>
             <Typography variant="body2">Purity: {metalForm.purity.purity}</Typography>
+            <Typography variant="body2">Category: {metalForm.metalCategory}</Typography>
+            <Typography variant="body2">Color: {metalForm.jewelryColor}</Typography>
             <Typography variant="body2">Weight: {metalForm.weight}g</Typography>
 
             <Typography variant="subtitle1" sx={{ mt: 2 }}>Diamond Selection</Typography>
@@ -1370,7 +1338,7 @@ function Estimator() {
             <Typography variant="body2">Exact Color: {diamondForm.exactColor}</Typography>
 
             <Typography variant="subtitle1" sx={{ mt: 2 }}>Stone Selection</Typography>
-                <Typography variant="body2">Name: {stoneForm.stoneName}</Typography>
+                <Typography variant="body2">Name: {stoneForm.name}</Typography>
                 <Typography variant="body2">Shape: {stoneForm.shape}</Typography>
                 <Typography variant="body2">Color: {stoneForm.color}</Typography>
                 <Typography variant="body2">Weight: {stoneForm.weight} ct</Typography>
