@@ -292,7 +292,8 @@ function Estimator() {
     purity: { purity: '', value: 0 }
   });
 
-  const [diamondForm, setDiamondForm] = useState({
+  // Primary gem form
+  const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
     shape: '',
     clarity: '',
     color: 'Colorless',
@@ -300,7 +301,43 @@ function Estimator() {
     weight: 0,
     cut: '',
     labGrown: false,
-    exactColor: 'D'
+    exactColor: 'D',
+    size: ''
+  });
+
+  // Secondary gem form
+  const [secondaryDiamondForm, setSecondaryDiamondForm] = useState({
+    shape: '',
+    clarity: '',
+    color: 'Colorless',
+    quantity: 1,
+    weight: 0,
+    cut: '',
+    labGrown: false,
+    exactColor: 'D',
+    size: ''
+  });
+
+  const [primaryStoneForm, setPrimaryStoneForm] = useState({
+    quantity: 1,
+    name: '',
+    shape: '',
+    color: '',
+    weight: '',
+    width: '',
+    depth: '',
+    valuationType: 'each'
+  });
+
+  const [secondaryStoneForm, setSecondaryStoneForm] = useState({
+    quantity: 1,
+    name: '',
+    shape: '',
+    color: '',
+    weight: '',
+    width: '',
+    depth: '',
+    valuationType: 'each'
   });
 
   const [stoneForm, setStoneForm] = useState({
@@ -352,14 +389,70 @@ function Estimator() {
     )?.name || 'Colorless';
   };
 
+  const [activeTab, setActiveTab] = useState('primary_gem_diamond');
+
+  const getCurrentForm = () => {
+    return activeTab.startsWith('primary') ? primaryDiamondForm : secondaryDiamondForm;
+  };
+
+  const setCurrentForm = (updater) => {
+    if (activeTab.startsWith('primary')) {
+      setPrimaryDiamondForm(updater);
+    } else {
+      setSecondaryDiamondForm(updater);
+    }
+  };
+
   const handleExactColorChange = (event, newValue) => {
     setExactColor(colorScale[newValue]);
     
-    // Update the diamond form with the exact color
-    setDiamondForm(prev => ({
+    // Update the current form with the exact color
+    setCurrentForm(prev => ({
       ...prev,
       exactColor: colorScale[newValue]
     }));
+  };
+
+  const handleDiamondChange = (event) => {
+    const { name, value } = event.target;
+    setCurrentForm(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const addDiamond = () => {
+    const currentForm = getCurrentForm();
+    const newItem = {
+      type: activeTab.startsWith('primary') ? 'Primary Diamond' : 'Secondary Diamond',
+      description: `${currentForm.shape} ${currentForm.clarity} ${currentForm.color} ${currentForm.exactColor} ${currentForm.cut}`,
+      weight: currentForm.weight,
+      quantity: currentForm.quantity,
+      labGrown: currentForm.labGrown,
+      valuationType: currentForm.quantity > 1 ? diamondValuationType : 'each',
+    };
+
+    setEstimatedItems(prev => [...prev, newItem]);
+    
+    // Reset the current form after adding
+    const resetForm = {
+      shape: '',
+      clarity: '',
+      color: 'Colorless',
+      quantity: 1,
+      weight: 0,
+      cut: '',
+      labGrown: false,
+      exactColor: 'D',
+      size: ''
+    };
+    setCurrentForm(resetForm);
+    
+    // Reset exact color to default
+    setExactColor('D');
+    
+    // Reset valuation type to default
+    setDiamondValuationType('each');
   };
 
   useEffect(() => {
@@ -450,14 +543,6 @@ function Estimator() {
     }
   };
 
-  const handleDiamondChange = (event) => {
-    const { name, value } = event.target;
-    setDiamondForm(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-
   const handleStoneChange = (event) => {
     const { name, value } = event.target;
     setStoneForm(prev => ({
@@ -469,38 +554,6 @@ function Estimator() {
   const handleDiamondValuationTypeChange = (event) => {
     setDiamondValuationType(event.target.value);
   };
-
-  const addDiamond = () => {
-  
-  const newItem = {
-    type: 'Diamond',
-    description: `${diamondForm.shape} ${diamondForm.clarity} ${diamondForm.color} ${diamondForm.exactColor} ${diamondForm.cut}`,
-    weight: diamondForm.weight,
-    quantity: diamondForm.quantity,
-    labGrown: diamondForm.labGrown,
-    valuationType: diamondForm.quantity > 1 ? diamondValuationType : 'each',
-  };
-
-  setEstimatedItems(prev => [...prev, newItem]);
-  
-  // Reset diamond form after adding
-  setDiamondForm({
-    shape: '',
-    clarity: '',
-    color: 'Colorless',
-    quantity: 1,
-    weight: 0,
-    cut: '',
-    labGrown: false,
-    exactColor: 'D'
-  });
-  
-  // Reset exact color to default
-  setExactColor('D');
-  
-  // Reset valuation type to default
-  setDiamondValuationType('each');
-};
 
   const addMetal = () => {
     // Add metal to estimated items
@@ -842,9 +895,9 @@ function Estimator() {
           <FormControl fullWidth variant="outlined">
             <InputLabel>Cut *</InputLabel>
             <Select
-              value={diamondForm.cut}
+              value={getCurrentForm().cut}
               label="Cut"
-              onChange={(e) => setDiamondForm(prev => ({
+              onChange={(e) => setCurrentForm(prev => ({
                 ...prev, 
                 cut: e.target.value
               }))}
@@ -858,20 +911,38 @@ function Estimator() {
           </FormControl>
         </Grid>
         <Grid item xs={6}>
-          <Button 
-            variant="contained" 
-            color="primary" 
-            fullWidth 
-            onClick={addDiamond}
-            disabled={!diamondForm.shape || !diamondForm.clarity || !diamondForm.cut}
-          >
-            Add Diamond
-          </Button>
+          <Grid container spacing={2} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Grid item xs={12}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                fullWidth 
+                onClick={addDiamond}
+                disabled={!getCurrentForm().shape || !getCurrentForm().clarity || !getCurrentForm().cut}
+              >
+                Finish
+              </Button>
+            </Grid>
+          </Grid>
         </Grid>
       </Grid>
-
-      <Grid item xs={12} sx={{ mt: 2 }}>
-        <Typography variant="h6">Est. Diamond Value: ${totalDiamondValue.toFixed(2)}</Typography>
+      <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
+        <Typography variant="h6" sx={{ flexGrow: 1, mr: 2 }}>
+          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} Gem Value: ${totalDiamondValue.toFixed(2)}
+        </Typography>
+        <Button 
+          variant="contained" 
+          color="primary" 
+          onClick={() => {
+            if (activeTab.startsWith('primary')) {
+              setActiveTab('secondary_gem_diamond');
+            } else {
+              setActiveTab('primary_gem_diamond');
+            }
+          }}
+        >
+          {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
+        </Button>
       </Grid>
     </Grid>
   );
@@ -904,25 +975,45 @@ function Estimator() {
     return Math.round(baseValue * colorMultiplier * weightMultiplier);
   };
 
-  const [activeTab, setActiveTab] = useState('diamond');
-
-  const renderTabButtons = () => (
-    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-      <Button
-        variant={activeTab === 'diamond' ? 'contained' : 'outlined'}
-        onClick={() => setActiveTab('diamond')}
-        sx={{ mr: 2 }}
-      >
-        Diamond
-      </Button>
-      <Button
-        variant={activeTab === 'stone' ? 'contained' : 'outlined'}
-        onClick={() => setActiveTab('stone')}
-      >
-        Stone
-      </Button>
-    </Box>
-  );
+  const renderTabButtons = () => {
+    if (activeTab.startsWith('primary')) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+          <Button
+            variant={activeTab === 'primary_gem_diamond' ? 'contained' : 'outlined'}
+            onClick={() => setActiveTab('primary_gem_diamond')}
+            sx={{ mr: 2 }}
+          >
+            Diamond
+          </Button>
+          <Button
+            variant={activeTab === 'primary_gem_stone' ? 'contained' : 'outlined'}
+            onClick={() => setActiveTab('primary_gem_stone')}
+          >
+            Stone
+          </Button>
+        </Box>
+      );
+    } else {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+          <Button
+            variant={activeTab === 'secondary_gem_diamond' ? 'contained' : 'outlined'}
+            onClick={() => setActiveTab('secondary_gem_diamond')}
+            sx={{ mr: 2 }}
+          >
+            Diamond
+          </Button>
+          <Button
+            variant={activeTab === 'secondary_gem_stone' ? 'contained' : 'outlined'}
+            onClick={() => setActiveTab('secondary_gem_stone')}
+          >
+            Stone
+          </Button>
+        </Box>
+      );
+    }
+  };
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
@@ -1044,27 +1135,13 @@ function Estimator() {
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
               <Typography variant="h6" sx={{ mb: 0, mr: 2 }}>
-                {activeTab === 'diamond' ? 'ESTIMATE DIAMOND' : 'ESTIMATE STONE'}
+                {activeTab.startsWith('primary') ? 'ESTIMATE PRIMARY GEM' : 'ESTIMATE SECONDARY GEM'}
               </Typography>
               
-              <Box>
-                <Button
-                  variant={activeTab === 'diamond' ? 'contained' : 'outlined'}
-                  onClick={() => setActiveTab('diamond')}
-                  sx={{ mr: 2 }}
-                >
-                  Diamond
-                </Button>
-                <Button
-                  variant={activeTab === 'stone' ? 'contained' : 'outlined'}
-                  onClick={() => setActiveTab('stone')}
-                >
-                  Stone
-                </Button>
-              </Box>
+              {renderTabButtons()}
             </Box>
             
-            {activeTab === 'diamond' && (
+            {(activeTab === 'primary_gem_diamond' || activeTab === 'secondary_gem_diamond') && (
               <Box>
                 <Grid container spacing={2} alignItems="center">
                   <Grid item xs={6} sm={5}>
@@ -1073,7 +1150,7 @@ function Estimator() {
                       label="Quantity"
                       name="quantity"
                       type="number"
-                      value={diamondForm.quantity}
+                      value={getCurrentForm().quantity}
                       onChange={handleDiamondChange}
                       inputProps={{ min: "1" }}
                     />
@@ -1083,8 +1160,8 @@ function Estimator() {
                     <FormControlLabel
                       control={
                         <Checkbox
-                          checked={diamondForm.labGrown || false}
-                          onChange={(e) => setDiamondForm(prev => ({
+                          checked={getCurrentForm().labGrown}
+                          onChange={(e) => setCurrentForm(prev => ({
                             ...prev, 
                             labGrown: e.target.checked
                           }))}
@@ -1103,7 +1180,7 @@ function Estimator() {
                   {diamondShapes.map((shape) => (
                     <Paper
                       key={shape.name}
-                      elevation={diamondForm.shape === shape.name ? 8 : 1}
+                      elevation={getCurrentForm().shape === shape.name ? 8 : 1}
                       sx={{
                         p: 1,
                         cursor: 'pointer',
@@ -1114,7 +1191,7 @@ function Estimator() {
                         alignItems: 'center',
                         justifyContent: 'center',
                       }}
-                      onClick={() => setDiamondForm(prev => ({ ...prev, shape: shape.name }))}
+                      onClick={() => setCurrentForm(prev => ({ ...prev, shape: shape.name }))}
                     >
                       <Box
                         component="img"
@@ -1134,7 +1211,7 @@ function Estimator() {
                   <Grid item>
                     <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
                   </Grid>
-                  {diamondForm.quantity > 1 && (
+                  {getCurrentForm().quantity > 1 && (
                     <Grid item>
                       <FormControl sx={{ minWidth: 120 }}>
                         <Select
@@ -1168,7 +1245,7 @@ function Estimator() {
                       label="Weight (carats) *"
                       name="weight"
                       type="number"
-                      value={diamondForm.weight}
+                      value={getCurrentForm().weight}
                       onChange={handleDiamondChange}
                       inputProps={{ step: "0.01", min: "0" }}
                     />
@@ -1178,22 +1255,22 @@ function Estimator() {
                     <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
                       <InputLabel>Diamond Size</InputLabel>
                       <Select
-                        value={diamondForm.size}
+                        value={getCurrentForm().size}
                         label="Diamond Size"
                         onChange={(e) => {
                           const selectedSize = e.target.value;
                           
                           // Special handling for diamond cut shapes
-                          if (diamondCutWeights[diamondForm.shape]) {
-                            setDiamondForm(prev => ({
+                          if (diamondCutWeights[getCurrentForm().shape]) {
+                            setCurrentForm(prev => ({
                               ...prev, 
                               size: selectedSize,
                               // Get corresponding weight from mapping
-                              weight: diamondCutWeights[diamondForm.shape][selectedSize]
+                              weight: diamondCutWeights[getCurrentForm().shape][selectedSize]
                             }));
                           } else {
                             // Default handling for other shapes
-                            setDiamondForm(prev => ({
+                            setCurrentForm(prev => ({
                               ...prev, 
                               size: selectedSize,
                               weight: 0
@@ -1201,7 +1278,7 @@ function Estimator() {
                           }
                         }}
                       >
-                        {getDiamondSizes(diamondForm.shape).map((size) => (
+                        {getDiamondSizes(getCurrentForm().shape).map((size) => (
                           <MenuItem key={size} value={size}>
                             {size}
                           </MenuItem>
@@ -1236,7 +1313,7 @@ function Estimator() {
                       onClick={() => {
                         // When clicking, set the exact color to the start of the range
                         const startColor = color.range.split('-')[0];
-                        setDiamondForm(prev => ({ 
+                        setCurrentForm(prev => ({ 
                           ...prev, 
                           color: color.name,
                           exactColor: startColor
@@ -1278,7 +1355,7 @@ function Estimator() {
                   {diamondClarity.map((clarity) => (
                     <Paper
                       key={clarity.name}
-                      elevation={diamondForm.clarity === clarity.name ? 8 : 1}
+                      elevation={getCurrentForm().clarity === clarity.name ? 8 : 1}
                       sx={{
                         p: 1,
                         cursor: 'pointer',
@@ -1289,7 +1366,7 @@ function Estimator() {
                         alignItems: 'center',
                         justifyContent: 'center',
                       }}
-                      onClick={() => setDiamondForm(prev => ({ ...prev, clarity: clarity.name }))}
+                      onClick={() => setCurrentForm(prev => ({ ...prev, clarity: clarity.name }))}
                     >
                       <Box
                         component="img"
@@ -1308,7 +1385,7 @@ function Estimator() {
               </Box>
             )}
 
-            {activeTab === 'stone' && (
+            {(activeTab === 'primary_gem_stone' || activeTab === 'secondary_gem_stone') && (
               <Box>
                 {renderStoneEstimationTab()}
               </Box>
@@ -1327,23 +1404,39 @@ function Estimator() {
             <Typography variant="body2">Color: {metalForm.jewelryColor}</Typography>
             <Typography variant="body2">Weight: {metalForm.weight}g</Typography>
 
-            <Typography variant="subtitle1" sx={{ mt: 2 }}>Diamond Selection</Typography>
-            <Typography variant="body2">Shape: {diamondForm.shape}</Typography>
-            <Typography variant="body2">Clarity: {diamondForm.clarity}</Typography>
-            <Typography variant="body2">Color: {diamondForm.color}</Typography>
-            <Typography variant="body2">Cut: {diamondForm.cut}</Typography>
-            <Typography variant="body2">Weight: {diamondForm.weight} ct</Typography>
-            <Typography variant="body2">Quantity: {diamondForm.quantity}</Typography>
-            <Typography variant="body2">Lab Grown: {diamondForm.labGrown? 'Yes' : 'No'}</Typography>
-            <Typography variant="body2">Exact Color: {diamondForm.exactColor}</Typography>
+            <Typography variant="subtitle1" sx={{ mt: 2 }}>Primary Gem Diamond Selection</Typography>
+            <Typography variant="body2">Shape: {primaryDiamondForm.shape}</Typography>
+            <Typography variant="body2">Clarity: {primaryDiamondForm.clarity}</Typography>
+            <Typography variant="body2">Color: {primaryDiamondForm.color}</Typography>
+            <Typography variant="body2">Cut: {primaryDiamondForm.cut}</Typography>
+            <Typography variant="body2">Weight: {primaryDiamondForm.weight} ct</Typography>
+            <Typography variant="body2">Quantity: {primaryDiamondForm.quantity}</Typography>
+            <Typography variant="body2">Lab Grown: {primaryDiamondForm.labGrown? 'Yes' : 'No'}</Typography>
+            <Typography variant="body2">Exact Color: {primaryDiamondForm.exactColor}</Typography>
 
-            <Typography variant="subtitle1" sx={{ mt: 2 }}>Stone Selection</Typography>
-                <Typography variant="body2">Name: {stoneForm.name}</Typography>
-                <Typography variant="body2">Shape: {stoneForm.shape}</Typography>
-                <Typography variant="body2">Color: {stoneForm.color}</Typography>
-                <Typography variant="body2">Weight: {stoneForm.weight} ct</Typography>
-                <Typography variant="body2">Quantity: {stoneForm.quantity}</Typography>
+            <Typography variant="subtitle1" sx={{ mt: 2 }}>Primary Gem Stone Selection</Typography>
+            <Typography variant="body2">Name: {primaryStoneForm.name}</Typography>
+            <Typography variant="body2">Shape: {primaryStoneForm.shape}</Typography>
+            <Typography variant="body2">Color: {primaryStoneForm.color}</Typography>
+            <Typography variant="body2">Weight: {primaryStoneForm.weight} ct</Typography>
+            <Typography variant="body2">Quantity: {primaryStoneForm.quantity}</Typography>
 
+            <Typography variant="subtitle1" sx={{ mt: 2 }}>Secondary Gem Diamond Selection</Typography>
+            <Typography variant="body2">Shape: {secondaryDiamondForm.shape}</Typography>
+            <Typography variant="body2">Clarity: {secondaryDiamondForm.clarity}</Typography>
+            <Typography variant="body2">Color: {secondaryDiamondForm.color}</Typography>
+            <Typography variant="body2">Cut: {secondaryDiamondForm.cut}</Typography>
+            <Typography variant="body2">Weight: {secondaryDiamondForm.weight} ct</Typography>
+            <Typography variant="body2">Quantity: {secondaryDiamondForm.quantity}</Typography>
+            <Typography variant="body2">Lab Grown: {secondaryDiamondForm.labGrown ? 'Yes' : 'No'}</Typography>
+            <Typography variant="body2">Exact Color: {secondaryDiamondForm.exactColor}</Typography>
+
+            <Typography variant="subtitle1" sx={{ mt: 2 }}>Secondary Gem Stone Selection</Typography>
+            <Typography variant="body2">Name: {secondaryStoneForm.name}</Typography>
+            <Typography variant="body2">Shape: {secondaryStoneForm.shape}</Typography>
+            <Typography variant="body2">Color: {secondaryStoneForm.color}</Typography>
+            <Typography variant="body2">Weight: {secondaryStoneForm.weight} ct</Typography>
+            <Typography variant="body2">Quantity: {secondaryStoneForm.quantity}</Typography>
 
             <Typography variant="subtitle1" sx={{ mt: 2 }}>Price Estimates</Typography>
             <Typography variant="body2">Pawn: ${estimates.pawn.toFixed(2)}</Typography>
