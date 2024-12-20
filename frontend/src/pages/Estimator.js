@@ -27,34 +27,6 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 
-// Diamond shape images
-const diamondShapes = [
-  { name: 'Round', image: '/images/diamonds/round.png' },
-  { name: 'Oval', image: '/images/diamonds/oval.png' },
-  { name: 'Heart', image: '/images/diamonds/heart.png' },
-  { name: 'Cushion', image: '/images/diamonds/cushion.png' },
-  { name: 'Princess', image: '/images/diamonds/princess.png' },
-  { name: 'Baguette', image: '/images/diamonds/baguette.png' },
-  { name: 'Emerald', image: '/images/diamonds/emerald.png' },
-  { name: 'Trillion', image: '/images/diamonds/trillion.png' },
-  { name: 'Marquise', image: '/images/diamonds/marquise.png' },
-  { name: 'Pear', image: '/images/diamonds/pear.png' },
-  { name: 'Radiant', image: '/images/diamonds/radiant.png' },
-  { name: 'Asscher', image: '/images/diamonds/asscher.png' },
-];
-
-// Diamond clarity images
-const diamondClarity = [
-  { name: 'Flawless', image: '/images/clarity/fl.png' },
-  { name: 'IF', image: '/images/clarity/if.png' },
-  { name: 'VVS1/VVS2', image: '/images/clarity/vvs.png' },
-  { name: 'VS1/VS2', image: '/images/clarity/vs.png' },
-  { name: 'SI1', image: '/images/clarity/si1.png' },
-  { name: 'SI2', image: '/images/clarity/si2.png' },
-  { name: 'I1', image: '/images/clarity/i1.png' },
-  { name: 'I2/I3', image: '/images/clarity/i2.png' },
-];
-
 // Diamond color samples
 const diamondColors = [
   { 
@@ -373,6 +345,46 @@ function Estimator() {
   );
 
   const [metalColors, setMetalColors] = useState([]);
+
+  const [diamondShapes, setDiamondShapes] = useState([]);
+
+  const [diamondClarity, setDiamondClarity] = useState([]);
+
+  useEffect(() => {
+    const fetchDiamondShapes = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/diamond_shape');
+        // Transform the response to match the previous format
+        const shapesWithImages = response.data.map(shape => ({
+          name: shape.shape,
+          image: shape.image_path.replace('.jpg', '.png') // Convert jpg to png to match existing image naming
+        }));
+        setDiamondShapes(shapesWithImages);
+      } catch (error) {
+        console.error('Error fetching diamond shapes:', error);
+      }
+    };
+
+    fetchDiamondShapes();
+  }, []);
+
+  useEffect(() => {
+    const fetchDiamondClarity = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/diamond_clarity');
+        // Transform the response to match the previous format
+        const clarityWithImages = response.data.map(clarity => ({
+          name: clarity.name,
+          image: clarity.image_path
+        }));
+        setDiamondClarity(clarityWithImages);
+      } catch (error) {
+        console.error('Error fetching diamond clarity:', error);
+      }
+    };
+
+    fetchDiamondClarity();
+  }, []);
 
   // Function to determine color category based on exact color
   const getColorCategory = (exactColor) => {

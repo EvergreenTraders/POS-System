@@ -322,6 +322,28 @@ app.get('/api/metal_style_subcategory', async (req, res) => {
   }
 });
 
+// Diamond Shapes API Endpoint
+app.get('/api/diamond_shape', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT shape, description, image_path FROM diamond_shape');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching diamond shapes:', error);
+    res.status(500).json({ error: 'Failed to fetch diamond shapes' });
+  }
+});
+
+// Diamond Clarity API Endpoint
+app.get('/api/diamond_clarity', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT name, image_path FROM diamond_clarity');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching diamond clarity:', error);
+    res.status(500).json({ error: 'Failed to fetch diamond clarity' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
