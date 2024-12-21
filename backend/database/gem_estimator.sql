@@ -1,5 +1,6 @@
 DO $$
 BEGIN
+    -- Diamond Shape Table
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'diamond_shape') THEN
         CREATE TABLE diamond_shape (
             id SERIAL PRIMARY KEY,
@@ -22,10 +23,8 @@ BEGIN
         ('Trillion', 'Triangular-shaped diamond', '/images/diamonds/trillion.jpg'),
         ('Baguette', 'Long, rectangular step cut', '/images/diamonds/baguette.jpg');
     END IF;
-END $$;
 
-DO $$
-BEGIN
+    -- Diamond Clarity Table
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'diamond_clarity') THEN
         CREATE TABLE diamond_clarity (
             id SERIAL PRIMARY KEY,
@@ -43,10 +42,24 @@ BEGIN
         ('I1', '/images/clarity/i1.png'),
         ('I2/I3', '/images/clarity/i2.png');
     END IF;
-END $$;
 
-DO $$
-BEGIN
+    -- Diamond Cut Table
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'diamond_cut') THEN
+        CREATE TABLE diamond_cut (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(50) NOT NULL UNIQUE,
+            value CHAR(2) NOT NULL
+        );
+        
+        INSERT INTO diamond_cut (name, value) VALUES
+        ('Excellent', 'Ex'),
+        ('Very Good', 'VG'),
+        ('Good', 'G'),
+        ('Fair', 'F'),
+        ('Poor', 'P');
+    END IF;
+
+    -- Diamond Size Weight Table
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'diamond_size_weight') THEN
         CREATE TABLE diamond_size_weight (
             id SERIAL PRIMARY KEY,
@@ -210,5 +223,22 @@ BEGIN
         (9, '9 mm', 4.00),
         (9, '9.25 mm', 4.50),
         (9, '9.5 mm', 5.00);
+    END IF;
+
+    -- Diamond Color Table
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'diamond_color') THEN
+        CREATE TABLE diamond_color (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(50) NOT NULL UNIQUE,
+            color VARCHAR(7) NOT NULL,
+            range VARCHAR(10) NOT NULL
+        );
+        
+        INSERT INTO diamond_color (name, color, range) VALUES
+        ('Colorless', '#ffffff', 'D-F'),
+        ('Near Colorless', '#f7f7e8', 'G-J'),
+        ('Faint Color', '#f7f3d9', 'K-M'),
+        ('Very Light Color', '#f7efc5', 'N-R'),
+        ('Light Color', '#f7ebb2', 'S-Z');
     END IF;
 END $$;

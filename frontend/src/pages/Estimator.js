@@ -27,44 +27,6 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 
-// Diamond color samples
-const diamondColors = [
-  { 
-    name: 'Colorless', 
-    color: '#ffffff',
-    range: 'D-F'
-  },
-  { 
-    name: 'Near Colorless', 
-    color: '#f7f7e8',
-    range: 'G-J'
-  },
-  { 
-    name: 'Faint Color', 
-    color: '#f7f3d9',
-    range: 'K-M'
-  },
-  { 
-    name: 'Very Light Color', 
-    color: '#f7efc5',
-    range: 'N-R'
-  },
-  { 
-    name: 'Light Color', 
-    color: '#f7ebb2',
-    range: 'S-Z'
-  },
-];
-
-// Diamond cut grades
-const diamondCuts = [
-  { name: 'Excellent', value: 'EX' },
-  { name: 'Very Good', value: 'VG' },
-  { name: 'Good', value: 'G' },
-  { name: 'Fair', value: 'F' },
-  { name: 'Poor', value: 'P' },
-];
-
 function Estimator() {
   const [metalForm, setMetalForm] = useState({
     type: '',
@@ -163,6 +125,10 @@ function Estimator() {
 
   const [diamondSizes, setDiamondSizes] = useState([]);
 
+  const [diamondCuts, setDiamondCuts] = useState([]);
+
+  const [diamondColors, setDiamondColors] = useState([]);
+
   useEffect(() => {
     const fetchAllData = async () => {
       try {
@@ -194,6 +160,14 @@ function Estimator() {
         const colorsResponse = await axios.get('http://localhost:5000/api/metal_color');
         setMetalColors(colorsResponse.data);
 
+        // Fetch Diamond Cuts
+        const cutsResponse = await axios.get('http://localhost:5000/api/diamond_cut');
+        setDiamondCuts(cutsResponse.data);
+
+        // Fetch Diamond Colors
+        const diamondColorResponse = await axios.get('http://localhost:5000/api/diamond_color');
+        setDiamondColors(diamondColorResponse.data);
+        
       } catch (error) {
         console.error('Error fetching initial data:', error);
       }

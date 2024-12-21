@@ -367,6 +367,40 @@ app.get('/api/diamond_size_weight/:diamond_shape_id', async (req, res) => {
   }
 });
 
+// Fetch Diamond Cut Grades
+app.get('/api/diamond_cut', async (req, res) => {
+  try {
+    const query = 'SELECT id, name, value FROM diamond_cut';
+    const result = await pool.query(query);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No diamond cut grades found' });
+    }
+    
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching diamond cut grades:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Fetch Diamond Color Grades
+app.get('/api/diamond_color', async (req, res) => {
+  try {
+    const query = 'SELECT id, name, color, range FROM diamond_color';
+    const result = await pool.query(query);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No diamond color grades found' });
+    }
+    
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching diamond color grades:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
