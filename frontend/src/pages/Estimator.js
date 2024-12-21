@@ -65,195 +65,6 @@ const diamondCuts = [
   { name: 'Poor', value: 'P' },
 ];
 
-const diamondSizes = {
-  'default': [
-    '0.25 ct',
-    '0.5 ct',
-    '0.75 ct',
-    '1 ct',
-    '1.25 ct',
-    '1.5 ct',
-    '1.75 ct',
-    '2 ct',
-    '2.25 ct',
-    '2.5 ct',
-    '2.75 ct',
-    '3 ct',
-    '3.25 ct',
-    '3.5 ct',
-    '3.75 ct',
-    '4 ct',
-    '4.25 ct',
-    '4.5 ct',
-    '4.75 ct',
-    '5 ct',
-    ]
-};
-// Mapping of diamond sizes to their corresponding weights for specific cuts
-const diamondCutWeights = {
-  'Princess': {
-    '2.5 mm': '0.1',
-    '3.25 mm': '0.25',
-    '4.5 mm': '0.50',
-    '5 mm': '0.75',
-    '5.5 mm': '1.00',
-    '6 mm': '1.25',
-    '6.5 mm': '1.50',
-    '6.75 mm': '1.75',
-    '7 mm': '2.00',
-    '7.5 mm': '2.50',
-    '8 mm': '3.00',
-    '8.5 mm': '3.50',
-    '8.75 mm': '4.00',
-    '9.25 mm': '4.50',
-    '9.5 mm': '5.00'
-  },
-  'Round': {
-    '3 mm': '0.1',
-    '4 mm': '0.25',
-    '5 mm': '0.50',
-    '5.75 mm': '0.75',
-    '6.5 mm': '1.00',
-    '6.8 mm': '1.25',
-    '7.3 mm': '1.50',
-    '7.75 mm': '1.75',
-    '8 mm': '2.00',
-    '8.7 mm': '2.50',
-    '9.1 mm': '3.00'
-  },
-  'Oval': {
-      '4x3 mm' :	'0.15',
-      '5x3 mm':	'0.25',
-      '6x4 mm':	'0.50',
-      '7x5 mm':	'0.75',
-      '7.7x5.7 mm':	'1.00',
-      '8x6 mm':	'1.25',
-      '8.5x6.5 mm':	'1.50',
-      '9x6.5 mm':	'1.75',
-      '9x7 mm':	'2.00',
-      '10x8 mm':	'2.50',
-      '12x8 mm':	'3.00'
-  },
-  'Cushion': {
-    '3.25 mm':	'0.25',
-    '4.9 mm': '0.50',
-    '5.25 mm': '0.75',
-    '5.5 mm': '1.00',
-    '6 mm': '1.25',
-    '6.5 mm': '1.50',
-    '6.75 mm': '1.75',
-    '7 mm': '2.00',
-    '7.5 mm': '2.50',
-    '8 mm': '3.00',
-    '8.5 mm': '3.50',
-    '9 mm': '4.00'
-  },
-  'Emerald': {
-    '4.30x3 mm':	'0.25',
-    '6x4 mm':	'0.50',
-    '6.5x4.5 mm':	'0.75',
-    '7x5 mm':	'1.00',
-    '7.3x5.3 mm':	'1.25',
-    '7.5x5.5 mm':	'1.50',
-    '8x6 mm':	'1.75',
-    '8.5x6.5 mm':	'2.00',
-    '9x7 mm':	'2.50',
-    '9.3x7.5 mm':	'3.00',
-    '9.75x7.7 mm':	'3.50',
-    '10x8 mm':	'4.00',
-    '10.5x8.5 mm':	'4.50',
-    '11x9 mm':	'5.00'
-  },
-  'Heart': {
-    '4 mm':	'0.25',
-    '5 mm':	'0.50',
-    '6 mm':	'0.75',
-    '6.5 mm':	'1.00',
-    '7 mm':	'1.25',
-    '7.5 mm':	'1.50',
-    '7.7 mm':	'1.75',
-    '8 mm':	'2.00',
-    '8.5 mm':	'2.50',
-    '9 mm':	'3.00',
-    '10 mm':	'3.50',
-    '10.5 mm':	'4.00',
-    '11 mm':	'4.50',
-    '11.5 mm':	'5.00'
-    },
-    'Pear': {
-      '5x3 mm':	'0.25',
-      '6x4 mm':	'0.50',
-      '7x5 mm':	'0.75',
-      '7.7x5.7 mm':	'1.00',
-      '8x6 mm':	'1.25',
-      '8.5x6.5 mm':	'1.50',
-      '10x6 mm':	'1.75',
-      '9x7 mm':	'2.00',
-      '10x8 mm':	'2.50',
-      '12x8 mm':	'3.00',
-      '12x9 mm':	'3.50',
-      '14x8 mm':	'4.00',
-      '14.5x9 mm':	'4.50',
-      '15x9 mm':	'5.00'
-    },
-    'Marquise': {
-      '6x3 mm':	'0.25',
-      '8x4 mm':	'0.50',
-      '9x4.5 mm':	'0.75',
-      '10x5 mm':	'1.00',
-      '11x5.5 mm':	'1.25',
-      '12x6 mm':	'1.50',
-      '12.5x6.25 mm':	'1.75',
-      '13x6.5 mm':	'2.00',
-      '14x7 mm':	'2.50',
-      '15x7 mm':	'3.00',
-      '15x8 mm':	'3.50',
-      '16.5x8.25 mm':	'4.00',
-      '16.75x8.5 mm':	'4.50',
-      '17x8.5 mm':	'5.00'
-    },
-    'Radiant': {
-      '4.3x3 mm':	'0.25',
-      '6x4 mm':	'0.50',
-      '6.5x4.5 mm':	'0.75',
-      '7x5 mm':	'1.00',
-      '7.3x5.3 mm':	'1.25',
-      '7.5x5.8 mm':	'1.50',
-      '8x6 mm':	'1.75',
-      '8.2x6.2 mm':	'2.00',
-      '9x7 mm':	'2.50',
-      '9.5x7.5 mm':	'3.00',
-      '10x8 mm':	'3.50',
-      '10.2x8.2 mm':	'4.00',
-      '10.5x8.5 mm':	'4.50',
-      '11x9 mm':	'5.00'
-    },
-    'Asscher': {
-      '3.25 mm':	'0.25',
-      '4.5 mm':	'0.50',
-      '5 mm':	'0.75',
-      '5.5 mm':	'1.00',
-      '6 mm':	'1.25',
-      '6.5 mm':	'1.50',
-      '6.7 mm':	'1.75',
-      '7 mm':	'2.00',
-      '7.5 mm':	'2.50',
-      '8 mm':	'3.00',
-      '8.5 mm':	'3.50',
-      '9 mm':	'4.00',
-      '9.25 mm':	'4.50',
-      '9.5 mm':	'5.00'
-    }
-};
-
-// Diamond sizes based on the selected shape
-const getDiamondSizes = (shape) => {
-  if (diamondCutWeights[shape]) {
-    return Object.keys(diamondCutWeights[shape]);
-  }
-  return diamondSizes['default'];
-};
-
 function Estimator() {
   const [metalForm, setMetalForm] = useState({
     type: '',
@@ -350,56 +161,78 @@ function Estimator() {
 
   const [diamondClarity, setDiamondClarity] = useState([]);
 
+  const [diamondSizes, setDiamondSizes] = useState([]);
+
   useEffect(() => {
-    const fetchDiamondShapes = async () => {
+    const fetchAllData = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/diamond_shape');
-        // Transform the response to match the previous format
-        const shapesWithImages = response.data.map(shape => ({
+        // Fetch Diamond Shapes
+        const shapesResponse = await axios.get('http://localhost:5000/api/diamond_shape');
+        const shapesWithImages = shapesResponse.data.map(shape => ({
           name: shape.shape,
-          image: shape.image_path.replace('.jpg', '.png') // Convert jpg to png to match existing image naming
+          image: shape.image_path.replace('.jpg', '.png')
         }));
         setDiamondShapes(shapesWithImages);
-      } catch (error) {
-        console.error('Error fetching diamond shapes:', error);
-      }
-    };
 
-    fetchDiamondShapes();
-  }, []);
-
-  useEffect(() => {
-    const fetchDiamondClarity = async () => {
-      try {
-        const response = await axios.get('http://localhost:5000/api/diamond_clarity');
-        // Transform the response to match the previous format
-        const clarityWithImages = response.data.map(clarity => ({
+        // Fetch Diamond Clarity
+        const clarityResponse = await axios.get('http://localhost:5000/api/diamond_clarity');
+        const clarityWithImages = clarityResponse.data.map(clarity => ({
           name: clarity.name,
           image: clarity.image_path
         }));
         setDiamondClarity(clarityWithImages);
+
+        // Fetch Metal Types
+        const typesResponse = await axios.get('http://localhost:5000/api/metal_type');
+        setMetalTypes(typesResponse.data);
+
+        // Fetch Metal Categories
+        const categoriesResponse = await axios.get('http://localhost:5000/api/metal_category');
+        setMetalCategories(categoriesResponse.data);
+
+        // Fetch Metal Colors
+        const colorsResponse = await axios.get('http://localhost:5000/api/metal_color');
+        setMetalColors(colorsResponse.data);
+
       } catch (error) {
-        console.error('Error fetching diamond clarity:', error);
+        console.error('Error fetching initial data:', error);
       }
     };
 
-    fetchDiamondClarity();
+    fetchAllData();
   }, []);
 
-  // Function to determine color category based on exact color
-  const getColorCategory = (exactColor) => {
-    const colorCategories = [
-      { name: 'Colorless', range: 'D-F', start: 'D', end: 'F' },
-      { name: 'Near Colorless', range: 'G-J', start: 'G', end: 'J' },
-      { name: 'Faint Color', range: 'K-M', start: 'K', end: 'M' },
-      { name: 'Very Light Color', range: 'N-R', start: 'N', end: 'R' },
-      { name: 'Light Color', range: 'S-Z', start: 'S', end: 'Z' }
-    ];
-
-    return colorCategories.find(
-      category => exactColor >= category.start && exactColor <= category.end
-    )?.name || 'Colorless';
+  const fetchPurities = async (metalTypeId) => {
+    try {
+      const response = await axios.get(`http://localhost:5000/api/metal_purity/${metalTypeId}`);
+      setMetalPurities(response.data);
+      console.log("metalPurities", response.data);
+    } catch (error) {
+      console.error('Error fetching metal purities:', error);
+      setMetalPurities([]); // Reset purities if fetch fails
+    }
   };
+
+  const fetchDiamondSizes = async (diamondShapeId) => {
+    try {
+      const response = await axios.get(`http://localhost:5000/api/diamond_size_weight/${diamondShapeId}`);
+      setDiamondSizes(response.data);
+    } catch (error) {
+      console.error('Error fetching diamond sizes:', error);
+      setDiamondSizes([]);
+    }
+  };
+  
+  useEffect(() => {
+    // Calculate estimates whenever total values change
+    const totalValue = totalMetalValue + totalDiamondValue;
+    setEstimates({
+      pawn: totalValue * 0.5,    // 50% of total value
+      buy: totalValue * 0.7,    // 70% of total value
+      consign: totalValue * 0.8,  // 80% of total value
+      trade: totalValue * 0.6     // 60% of total value
+    });
+  }, [totalMetalValue, totalDiamondValue]);
 
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
 
@@ -427,9 +260,29 @@ function Estimator() {
 
   const handleDiamondChange = (event) => {
     const { name, value } = event.target;
+    
+    // If shape is changed, fetch corresponding sizes
+    if (name === 'shape') {      
+      // Find the shape object
+      const selectedShape = diamondShapes.find((shape, index) => {
+        if (shape.name === value) {
+          shape.id = index + 1; // Store the ID based on index
+          return true;
+        }
+        return false;
+      });
+      if (selectedShape) {
+        fetchDiamondSizes(selectedShape.id);
+      } else {
+        console.error("No shape found for:", value);
+      }
+    }
+
     setCurrentForm(prev => ({
       ...prev,
-      [name]: value
+      [name]: value,
+      // Reset size when shape changes
+      ...(name === 'shape' && { size: '' })
     }));
   };
 
@@ -466,61 +319,6 @@ function Estimator() {
     // Reset valuation type to default
     setDiamondValuationType('each');
   };
-
-  useEffect(() => {
-    const fetchMetalData = async () => {
-      try {
-        const typesResponse = await axios.get('http://localhost:5000/api/metal_type');
-        const categoriesResponse = await axios.get('http://localhost:5000/api/metal_category');
-        const colorsResponse = await axios.get('http://localhost:5000/api/metal_color');
-
-        // Check if the responses are successful
-        if (typesResponse.status === 200) {
-          setMetalTypes(typesResponse.data);
-        } else {
-          console.error('Failed to fetch metal types:', typesResponse.status);
-        }
-
-        if (categoriesResponse.status === 200) {
-          setMetalCategories(categoriesResponse.data);
-        } else {
-          console.error('Failed to fetch metal categories:', categoriesResponse.status);
-        }
-
-        if (colorsResponse.status === 200) {
-          setMetalColors(colorsResponse.data);
-        } else {
-          console.error('Failed to fetch metal colors:', colorsResponse.status);
-        }
-        
-      } catch (error) {
-        console.error('Error fetching metal data:', error);
-      }
-    };
-
-    fetchMetalData();
-  }, []);
-
-  const fetchPurities = async (metalTypeId) => {
-    try {
-      const response = await axios.get(`http://localhost:5000/api/metal_purity/${metalTypeId}`);
-      setMetalPurities(response.data);
-    } catch (error) {
-      console.error('Error fetching metal purities:', error);
-      setMetalPurities([]); // Reset purities if fetch fails
-    }
-  };
-
-  useEffect(() => {
-    // Calculate estimates whenever total values change
-    const totalValue = totalMetalValue + totalDiamondValue;
-    setEstimates({
-      pawn: totalValue * 0.5,    // 50% of total value
-      buy: totalValue * 0.7,    // 70% of total value
-      consign: totalValue * 0.8,  // 80% of total value
-      trade: totalValue * 0.6     // 60% of total value
-    });
-  }, [totalMetalValue, totalDiamondValue]);
 
   const handleMetalChange = (event) => {
     const { name, value } = event.target;
@@ -566,6 +364,7 @@ function Estimator() {
   const handleDiamondValuationTypeChange = (event) => {
     setDiamondValuationType(event.target.value);
   };
+
 
   const addMetal = () => {
     // Add metal to estimated items
@@ -1037,6 +836,21 @@ function Estimator() {
     }
   };
 
+  // Function to determine color category based on exact color
+  const getColorCategory = (exactColor) => {
+    const colorCategories = [
+      { name: 'Colorless', range: 'D-F', start: 'D', end: 'F' },
+      { name: 'Near Colorless', range: 'G-J', start: 'G', end: 'J' },
+      { name: 'Faint Color', range: 'K-M', start: 'K', end: 'M' },
+      { name: 'Very Light Color', range: 'N-R', start: 'N', end: 'R' },
+      { name: 'Light Color', range: 'S-Z', start: 'S', end: 'Z' }
+    ];
+
+    return colorCategories.find(
+      category => exactColor >= category.start && exactColor <= category.end
+    )?.name || 'Colorless';
+  };
+
   return (
     <Container maxWidth="lg">
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -1203,7 +1017,19 @@ function Estimator() {
                         alignItems: 'center',
                         justifyContent: 'center',
                       }}
-                      onClick={() => setCurrentForm(prev => ({ ...prev, shape: shape.name }))}
+                      onClick={() => {
+                        // Simulate an event object similar to a form input
+                        const event = {
+                          target: {
+                            name: 'shape',
+                            value: shape.name
+                          }
+                        };
+                        
+                        // Update current form and call handleDiamondChange
+                        setCurrentForm(prev => ({ ...prev, shape: shape.name }));
+                        handleDiamondChange(event);
+                      }}
                     >
                       <Box
                         component="img"
@@ -1267,32 +1093,27 @@ function Estimator() {
                     <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
                       <InputLabel>Diamond Size</InputLabel>
                       <Select
-                        value={getCurrentForm().size}
-                        label="Diamond Size"
+                        fullWidth
+                        displayEmpty
+                        value={getCurrentForm().size || ''}
+                        name="size"
                         onChange={(e) => {
                           const selectedSize = e.target.value;
                           
-                          // Special handling for diamond cut shapes
-                          if (diamondCutWeights[getCurrentForm().shape]) {
-                            setCurrentForm(prev => ({
-                              ...prev, 
-                              size: selectedSize,
-                              // Get corresponding weight from mapping
-                              weight: diamondCutWeights[getCurrentForm().shape][selectedSize]
-                            }));
-                          } else {
-                            // Default handling for other shapes
-                            setCurrentForm(prev => ({
-                              ...prev, 
-                              size: selectedSize,
-                              weight: 0
-                            }));
-                          }
+                          // Find the selected size object
+                          const selectedSizeObj = diamondSizes.find(sizeObj => sizeObj.size === selectedSize);
+                          
+                          // Update the form with selected size and weight
+                          setCurrentForm(prev => ({
+                            ...prev, 
+                            size: selectedSize,
+                            weight: selectedSizeObj ? selectedSizeObj.weight : 0
+                          }));
                         }}
                       >
-                        {getDiamondSizes(getCurrentForm().shape).map((size) => (
-                          <MenuItem key={size} value={size}>
-                            {size}
+                        {diamondSizes.map((sizeObj) => (
+                          <MenuItem key={sizeObj.size} value={sizeObj.size}>
+                            {sizeObj.size}
                           </MenuItem>
                         ))}
                       </Select>

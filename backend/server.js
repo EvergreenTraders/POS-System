@@ -344,6 +344,29 @@ app.get('/api/diamond_clarity', async (req, res) => {
   }
 });
 
+// Diamond Size API Endpoint
+app.get('/api/diamond_size_weight/:diamond_shape_id', async (req, res) => {
+  try {
+    const { diamond_shape_id } = req.params;
+    
+    const query = `
+      SELECT size, weight 
+      FROM diamond_size_weight 
+      WHERE diamond_shape_id = $1 
+    `;
+    const result = await pool.query(query, [diamond_shape_id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No sizes found for this diamond shape' });
+    }
+    
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching diamond sizes:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
