@@ -22,10 +22,13 @@ import {
   Checkbox,
   Slider,
   FormGroup,
-  Divider
+  Divider,
+  Radio,
+  RadioGroup
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
+import { HexColorPicker } from 'react-colorful';
 
 function Estimator() {
   const [metalForm, setMetalForm] = useState({
@@ -63,38 +66,20 @@ function Estimator() {
     size: ''
   });
 
-  const [primaryStoneForm, setPrimaryStoneForm] = useState({
-    quantity: 1,
+  const initialStoneForm = {
     name: '',
     shape: '',
-    color: '',
+    color: '#000000',
     weight: '',
     width: '',
     depth: '',
+    quantity: 1,
+    authentic: false,
     valuationType: 'each'
-  });
+  };
 
-  const [secondaryStoneForm, setSecondaryStoneForm] = useState({
-    quantity: 1,
-    name: '',
-    shape: '',
-    color: '',
-    weight: '',
-    width: '',
-    depth: '',
-    valuationType: 'each'
-  });
-
-  const [stoneForm, setStoneForm] = useState({
-    quantity: 1,
-    name: '',
-    shape: '',
-    color: '',
-    weight: '',
-    width: '',
-    depth: '',
-    valuationType: 'each'
-  });
+  const [primaryStoneForm, setPrimaryStoneForm] = useState(initialStoneForm);
+  const [secondaryStoneForm, setSecondaryStoneForm] = useState(initialStoneForm);
 
   const [estimatedItems, setEstimatedItems] = useState([]);
   const [totalDiamondValue, setTotalDiamondValue] = useState(0);
@@ -120,6 +105,19 @@ function Estimator() {
   const [metalColors, setMetalColors] = useState([]);
 
   const [diamondShapes, setDiamondShapes] = useState([]);
+
+  const stoneShapes = [
+    { name: 'Round', image: '/images/stone_shapes/round.png' },
+    { name: 'Oval', image: '/images/stone_shapes/oval.png' },
+    { name: 'Emerald', image: '/images/stone_shapes/emerald.png' },
+    { name: 'Pear', image: '/images/stone_shapes/pear.png' },
+    { name: 'Marquise', image: '/images/stone_shapes/marquise.png' },
+    { name: 'Princess', image: '/images/stone_shapes/princess.png' },
+    { name: 'Cushion', image: '/images/stone_shapes/cushion.png' },
+    { name: 'Radiant', image: '/images/stone_shapes/radiant.png' },
+    { name: 'Asscher', image: '/images/stone_shapes/asscher.png' },
+    { name: 'Heart', image: '/images/stone_shapes/heart.png' }
+  ];
 
   const [diamondClarity, setDiamondClarity] = useState([]);
 
@@ -219,6 +217,18 @@ function Estimator() {
       setPrimaryDiamondForm(updater);
     } else {
       setSecondaryDiamondForm(updater);
+    }
+  };
+
+  const getCurrentStoneForm = () => {
+    return activeTab.startsWith('primary') ? primaryStoneForm : secondaryStoneForm;
+  };
+
+  const setCurrentStoneForm = (newForm) => {
+    if (activeTab.startsWith('primary')) {
+      setPrimaryStoneForm(newForm);
+    } else {
+      setSecondaryStoneForm(newForm);
     }
   };
 
@@ -329,9 +339,17 @@ function Estimator() {
 
   const handleStoneChange = (event) => {
     const { name, value } = event.target;
-    setStoneForm(prev => ({
+    setCurrentStoneForm(prev => ({
       ...prev,
       [name]: value
+    }));
+  };
+
+  const handleStoneTypeChange = (event) => {
+    const selectedStone = stoneTypes.find(stone => stone.name === event.target.value);
+    setCurrentStoneForm(prev => ({
+      ...prev,
+      name: selectedStone ? selectedStone.name : '',
     }));
   };
 
@@ -355,27 +373,26 @@ function Estimator() {
   };
 
   const addStone = () => {
-    if (stoneForm.name && stoneForm.shape && stoneForm.color && 
-        stoneForm.weight && stoneForm.width && stoneForm.depth) {
-      const newStone = {
-        ...stoneForm,
-        id: Date.now(),
-        estimatedValue: calculateStoneValue()
-      };
-      
-      setEstimatedItems(prev => [...prev, newStone]);
-      
-      // Reset form
-      setStoneForm({
-        quantity: 1,
-        name: '',
-        shape: '',
-        color: '',
-        weight: '',
-        width: '',
-        depth: '',
-        valuationType: 'each'
-      });
+    const currentForm = getCurrentStoneForm();
+    const newStone = {
+      type: 'Stone',
+      description: `${currentForm.name} - ${currentForm.color}`,
+      dimension: currentForm.shape,
+      weight: null,
+      carats: currentForm.weight,
+      quantity: currentForm.quantity,
+      labGrown: false,
+      estimatedValue: calculateStoneValue(),
+      isPrimary: activeTab.startsWith('primary')
+    };
+
+    setEstimatedItems(prev => [...prev, newStone]);
+
+    // Reset the form after adding
+    if (activeTab.startsWith('primary')) {
+      setPrimaryStoneForm(initialStoneForm);
+    } else {
+      setSecondaryStoneForm(initialStoneForm);
     }
   };
 
@@ -406,115 +423,170 @@ function Estimator() {
 
   const [estimatedStones, setEstimatedStones] = useState([]);
 
+  const stoneTypes = [
+    { name: 'Ruby', image: '/images/stones/ruby.png' },
+    { name: 'Sapphire', image: '/images/stones/sapphire.png' },
+    { name: 'Emerald', image: '/images/stones/emerald.png' },
+    { name: 'Amethyst', image: '/images/stones/amethyst.png' },
+    { name: 'Topaz', image: '/images/stones/topaz.png' },
+    { name: 'Garnet', image: '/images/stones/garnet.png' },
+    { name: 'Tanzanite', image: '/images/stones/tanzanite.png' },
+    { name: 'Aquamarine', image: '/images/stones/aquamarine.png' },
+    { name: 'Black Oynx', image: '/images/stones/black_onyx.png' }
+  ];
+
   const renderStoneEstimationTab = () => (
     <Grid container spacing={2} sx={{ p: 2 }}>
-      {/* Quantity */}
-      <Grid item xs={12} md={6}>
-        <TextField
-          fullWidth
-          label="Quantity"
-          type="number"
-          value={stoneForm.quantity}
-          onChange={(e) => setStoneForm(prev => ({
-            ...prev, 
-            quantity: parseInt(e.target.value) || 1
-          }))}
-          InputProps={{
-            inputProps: { min: 1, max: 100 }
-          }}
-        />
+      {/* Quantity and Authentic */}
+      <Grid container spacing={2} alignItems="center">
+        <Grid item xs={6} sm={5}>
+          <TextField
+            fullWidth
+            label="Quantity"
+            type="number"
+            value={getCurrentStoneForm().quantity}
+            onChange={(e) => setCurrentStoneForm(prev => ({
+              ...prev, 
+              quantity: parseInt(e.target.value) || 1
+            }))}
+            InputProps={{
+              inputProps: { min: 1, max: 100 }
+            }}
+          />
+        </Grid>
+        <Grid item xs={6} sm={7}>
+          <Box sx={{ ml: 3 }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={getCurrentStoneForm().authentic || false}
+                  onChange={(e) => setCurrentStoneForm(prev => ({
+                    ...prev,
+                    authentic: e.target.checked
+                  }))}
+                />
+              }
+              label="Authentic"
+            />
+          </Box>
+        </Grid>
       </Grid>
 
-      {/* Stone Name/Type */}
-      <Grid item xs={12} md={6}>
-        <FormControl fullWidth>
-          <InputLabel>Stone Name</InputLabel>
-          <Select
-            value={stoneForm.name}
-            label="Stone Name"
-            onChange={(e) => setStoneForm(prev => ({
-              ...prev, 
-              name: e.target.value,
-              color: '' // Reset color when type changes
-            }))}
-          >
-            {[
-              'Ruby', 'Sapphire', 'Emerald', 
-              'Amethyst', 'Topaz', 'Opal', 
-              'Tanzanite', 'Aquamarine', 'Tourmaline'
-            ].map(type => (
-              <MenuItem key={type} value={type}>{type}</MenuItem>
+      {/* Stone Type and Color */}
+      <Grid container spacing={3} sx={{ mt: 0 }}>
+        {/* Stone Type */}
+        <Grid item xs={12} md={8}>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>Type *</Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+            {stoneTypes.map((stone) => (
+              <Paper
+                key={stone.name}
+                elevation={getCurrentStoneForm().name === stone.name ? 8 : 1}
+                sx={{
+                  p: 1,
+                  cursor: 'pointer',
+                  width: 80,
+                  height: 80,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                onClick={() => handleStoneTypeChange({ target: { value: stone.name } })}
+              >
+                <Box
+                  component="img"
+                  src={stone.image}
+                  alt={stone.name}
+                  sx={{ width: 40, height: 40 }}
+                />
+                <Typography variant="caption" align="center">
+                  {stone.name}
+                </Typography>
+              </Paper>
             ))}
-          </Select>
-        </FormControl>
+          </Box>
+        </Grid>
+
+        {/* Stone Color Picker */}
+        <Grid item xs={12} md={4}>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
+          <Box sx={{ width: 160, mb: 2 }}>
+            <HexColorPicker
+              color={getCurrentStoneForm().color || '#000000'}
+              onChange={(color) => setCurrentStoneForm(prev => ({
+                ...prev,
+                color: color
+              }))}
+              style={{ width: '100%', height: '160px' }}
+            />
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box
+              sx={{
+                width: 48,
+                height: 48,
+                borderRadius: 1,
+                bgcolor: getCurrentStoneForm().color || '#000000',
+                border: '2px solid',
+                borderColor: 'divider'
+              }}
+            />
+            <Typography>
+              {getCurrentStoneForm().color || '#000000'}
+            </Typography>
+          </Box>
+        </Grid>
       </Grid>
 
       {/* Stone Shape */}
-      <Grid item xs={12} md={6}>
-        <FormControl fullWidth>
-          <InputLabel>Stone Shape</InputLabel>
-          <Select
-            value={stoneForm.shape}
-            label="Stone Shape"
-            onChange={(e) => setStoneForm(prev => ({
-              ...prev, 
-              shape: e.target.value
-            }))}
-          >
-            {[
-              'Round', 'Oval', 'Emerald', 'Pear', 
-              'Marquise', 'Princess', 'Cushion', 
-              'Radiant', 'Asscher', 'Heart'
-            ].map(shape => (
-              <MenuItem key={shape} value={shape}>{shape}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Grid>
+      <Box>
+        <Typography variant="subtitle1" sx={{ mb: 1 }}>Shape *</Typography>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+          {stoneShapes.map((shape) => (
+            <Paper
+              key={shape.name}
+              elevation={getCurrentStoneForm().shape === shape.name ? 8 : 1}
+              sx={{
+                p: 1,
+                cursor: 'pointer',
+                width: 80,
+                height: 80,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onClick={() => setCurrentStoneForm(prev => ({
+                ...prev,
+                shape: shape.name
+              }))}
+            >
+              <Box
+                component="img"
+                src={shape.image}
+                alt={shape.name}
+                sx={{ width: 40, height: 40 }}
+              />
+              <Typography variant="caption" align="center">
+                {shape.name}
+              </Typography>
+            </Paper>
+          ))}
+        </Box>
+      </Box>
 
-      {/* Stone Color (Dynamic based on stone type) */}
-      <Grid item xs={12} md={6}>
-        <FormControl 
-          fullWidth 
-          disabled={!stoneForm.name}
-        >
-          <InputLabel>Stone Color</InputLabel>
-          <Select
-            value={stoneForm.color}
-            label="Stone Color"
-            onChange={(e) => setStoneForm(prev => ({
-              ...prev, 
-              color: e.target.value
-            }))}
-          >
-            {stoneForm.name && {
-              'Ruby': ['Pigeon Blood Red', 'Pinkish Red', 'Purplish Red'],
-              'Sapphire': ['Blue', 'Yellow', 'Pink', 'White', 'Green'],
-              'Emerald': ['Deep Green', 'Bluish Green', 'Yellowish Green'],
-              'Amethyst': ['Light Purple', 'Deep Purple', 'Lavender'],
-              'Topaz': ['Blue', 'Yellow', 'White', 'Pink'],
-              'Opal': ['White', 'Black', 'Fire', 'Crystal'],
-              'Tanzanite': ['Blue', 'Violet'],
-              'Aquamarine': ['Blue', 'Greenish Blue'],
-              'Tourmaline': ['Green', 'Pink', 'Watermelon', 'Blue']
-            }[stoneForm.name].map(color => (
-              <MenuItem key={color} value={color}>{color}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Grid>
-      
       {/* Size Section */}
       <Grid container spacing={1} sx={{ mt: 0, mb: 0, alignItems: 'center' }}>
         <Grid item>
           <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
         </Grid>
-        {stoneForm.quantity > 1 && (
+        {getCurrentStoneForm().quantity > 1 && (
           <Grid item>
             <FormControl sx={{ minWidth: 120 }}>
               <Select
-                value={stoneForm.valuationType}
-                onChange={(e) => setStoneForm(prev => ({
+                value={getCurrentStoneForm().valuationType}
+                onChange={(e) => setCurrentStoneForm(prev => ({
                   ...prev, 
                   valuationType: e.target.value
                 }))}
@@ -546,10 +618,10 @@ function Estimator() {
         <Grid item xs={12} md={4}>
           <TextField
             fullWidth
-            label="Weight (Carats)"
+            label="Weight (Carats) *"
             type="number"
-            value={stoneForm.weight}
-            onChange={(e) => setStoneForm(prev => ({
+            value={getCurrentStoneForm().weight}
+            onChange={(e) => setCurrentStoneForm(prev => ({
               ...prev, 
               weight: e.target.value
             }))}
@@ -565,8 +637,8 @@ function Estimator() {
             fullWidth
             label="Width (mm)"
             type="number"
-            value={stoneForm.width}
-            onChange={(e) => setStoneForm(prev => ({
+            value={getCurrentStoneForm().width}
+            onChange={(e) => setCurrentStoneForm(prev => ({
               ...prev, 
               width: e.target.value
             }))}
@@ -582,8 +654,8 @@ function Estimator() {
             fullWidth
             label="Depth (mm)"
             type="number"
-            value={stoneForm.depth}
-            onChange={(e) => setStoneForm(prev => ({
+            value={getCurrentStoneForm().depth}
+            onChange={(e) => setCurrentStoneForm(prev => ({
               ...prev, 
               depth: e.target.value
             }))}
@@ -602,73 +674,34 @@ function Estimator() {
           fullWidth 
           onClick={addStone}
           disabled={
-            !stoneForm.name || 
-            !stoneForm.shape || 
-            !stoneForm.color || 
-            !stoneForm.weight || 
-            !stoneForm.width || 
-            !stoneForm.depth
+            !getCurrentStoneForm().name || 
+            !getCurrentStoneForm().shape || 
+            !getCurrentStoneForm().color || 
+            !getCurrentStoneForm().weight 
           }
         >
           Add Stone
         </Button>
       </Grid>
 
-      {/* Estimated Stones Table */}
-      {estimatedItems.filter(item => item.type === 'Stone').length > 0 && (
-        <Grid item xs={12}>
-          <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Estimated Stones</Typography>
-          <TableContainer component={Paper}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Qty</TableCell>
-                  <TableCell>Name</TableCell>
-                  <TableCell>Shape</TableCell>
-                  <TableCell>Color</TableCell>
-                  <TableCell>Weight (ct)</TableCell>
-                  <TableCell>Width (mm)</TableCell>
-                  <TableCell>Depth (mm)</TableCell>
-                  <TableCell>Est. Value</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {estimatedItems.filter(item => item.type === 'Stone').map((stone) => (
-                  <TableRow key={stone.id}>
-                    <TableCell>{stone.quantity}</TableCell>
-                    <TableCell>{stone.name}</TableCell>
-                    <TableCell>{stone.shape}</TableCell>
-                    <TableCell>{stone.color}</TableCell>
-                    <TableCell>{stone.weight}</TableCell>
-                    <TableCell>{stone.width}</TableCell>
-                    <TableCell>{stone.depth}</TableCell>
-                    <TableCell>${stone.estimatedValue.toLocaleString()}</TableCell>
-                    <TableCell>
-                      <IconButton 
-                        onClick={() => setEstimatedItems(prev => 
-                          prev.filter(s => s.id !== stone.id)
-                        )}
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Grid>
-      )}
-
-      {/* Total Estimated Stone Value */}
-      <Grid item xs={12} sx={{ mt: 2 }}>
-        <Typography variant="h6">
-          Est. Stone Value: $
-          {estimatedItems.filter(item => item.type === 'Stone')
-            .reduce((total, stone) => total + stone.estimatedValue, 0)
-            .toLocaleString()}
+      {/* Add button to switch between primary and secondary gems */}
+      <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Typography variant="h6" sx={{ flexGrow: 1, mr: 2 }}>
+          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: ${estimatedItems.filter(item => item.type === (activeTab.includes('diamond') ? 'Diamond' : 'Stone')).reduce((total, stone) => total + stone.estimatedValue, 0).toFixed(2)}
         </Typography>
+        <Button 
+          variant="contained" 
+          color="primary" 
+          onClick={() => {
+            if (activeTab.startsWith('primary')) {
+              setActiveTab('secondary_gem_stone');
+            } else {
+              setActiveTab('primary_gem_stone');
+            }
+          }}
+        >
+           {activeTab.startsWith('primary') ? 'Secondary' : 'Primary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'}
+        </Button>
       </Grid>
     </Grid>
   );
@@ -688,9 +721,7 @@ function Estimator() {
               }))}
             >
               {diamondCuts.map((cut) => (
-                <MenuItem key={cut.name} value={cut.name}>
-                  {cut.name}
-                </MenuItem>
+                <MenuItem key={cut.name} value={cut.name}>{cut.name}</MenuItem>
               ))}
             </Select>
           </FormControl>
@@ -705,7 +736,7 @@ function Estimator() {
                 onClick={addDiamond}
                 disabled={!getCurrentForm().shape || !getCurrentForm().clarity || !getCurrentForm().cut}
               >
-                Finish
+                ADD DIAMOND
               </Button>
             </Grid>
           </Grid>
@@ -713,7 +744,7 @@ function Estimator() {
       </Grid>
       <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
         <Typography variant="h6" sx={{ flexGrow: 1, mr: 2 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} Gem Value: ${totalDiamondValue.toFixed(2)}
+          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: ${estimatedItems.filter(item => item.type === (activeTab.includes('diamond') ? 'Diamond' : 'Stone')).reduce((total, stone) => total + stone.estimatedValue, 0).toFixed(2)}
         </Typography>
         <Button 
           variant="contained" 
@@ -726,7 +757,7 @@ function Estimator() {
             }
           }}
         >
-          {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
+          {activeTab.startsWith('primary') ? 'Secondary' : 'Primary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'}
         </Button>
       </Grid>
     </Grid>
@@ -753,9 +784,9 @@ function Estimator() {
       // Add more color multipliers
     };
 
-    const baseValue = baseValues[stoneForm.name] || 500;
-    const colorMultiplier = colorMultipliers[stoneForm.color] || 1;
-    const weightMultiplier = Math.pow(parseFloat(stoneForm.weight), 1.5);
+    const baseValue = baseValues[getCurrentStoneForm().name] || 500;
+    const colorMultiplier = colorMultipliers[getCurrentStoneForm().color] || 1;
+    const weightMultiplier = Math.pow(parseFloat(getCurrentStoneForm().weight), 1.5);
 
     return Math.round(baseValue * colorMultiplier * weightMultiplier);
   };
@@ -763,38 +794,58 @@ function Estimator() {
   const renderTabButtons = () => {
     if (activeTab.startsWith('primary')) {
       return (
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-          <Button
-            variant={activeTab === 'primary_gem_diamond' ? 'contained' : 'outlined'}
-            onClick={() => setActiveTab('primary_gem_diamond')}
-            sx={{ mr: 2 }}
-          >
-            Diamond
-          </Button>
-          <Button
-            variant={activeTab === 'primary_gem_stone' ? 'contained' : 'outlined'}
-            onClick={() => setActiveTab('primary_gem_stone')}
-          >
-            Stone
-          </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 0, mr: 2 }}>
+            ESTIMATE PRIMARY GEM
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <FormControl sx={{ mr: 2 }}>
+              <RadioGroup 
+                row 
+                value={activeTab} 
+                onChange={handleTabChange}
+              >
+                <FormControlLabel 
+                  value="primary_gem_diamond" 
+                  control={<Radio />} 
+                  label="Diamond" 
+                />
+                <FormControlLabel 
+                  value="primary_gem_stone" 
+                  control={<Radio />} 
+                  label="Stone" 
+                />
+              </RadioGroup>
+            </FormControl>
+          </Box>
         </Box>
       );
     } else {
       return (
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-          <Button
-            variant={activeTab === 'secondary_gem_diamond' ? 'contained' : 'outlined'}
-            onClick={() => setActiveTab('secondary_gem_diamond')}
-            sx={{ mr: 2 }}
-          >
-            Diamond
-          </Button>
-          <Button
-            variant={activeTab === 'secondary_gem_stone' ? 'contained' : 'outlined'}
-            onClick={() => setActiveTab('secondary_gem_stone')}
-          >
-            Stone
-          </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 0, mr: 2 }}>
+            EST. SECONDARY GEM
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <FormControl sx={{ mr: 2 }}>
+              <RadioGroup 
+                row 
+                value={activeTab} 
+                onChange={handleTabChange}
+              >
+                <FormControlLabel 
+                  value="secondary_gem_diamond" 
+                  control={<Radio />} 
+                  label="Diamond" 
+                />
+                <FormControlLabel 
+                  value="secondary_gem_stone" 
+                  control={<Radio />} 
+                  label="Stone" 
+                />
+              </RadioGroup>
+            </FormControl>
+          </Box>
         </Box>
       );
     }
@@ -935,10 +986,45 @@ function Estimator() {
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
               <Typography variant="h6" sx={{ mb: 0, mr: 2 }}>
-                {activeTab.startsWith('primary') ? 'ESTIMATE PRIMARY GEM' : 'ESTIMATE SECONDARY GEM'}
+                {activeTab.startsWith('primary') ? 'EST. PRIMARY GEM' : 'EST. SECONDARY GEM'}
               </Typography>
-              
-              {renderTabButtons()}
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <FormControl sx={{ mr: 2 }}>
+                  <RadioGroup 
+                    row 
+                    value={activeTab} 
+                    onChange={handleTabChange}
+                  >
+                    {activeTab.startsWith('primary') ? (
+                      <>
+                        <FormControlLabel 
+                          value="primary_gem_diamond" 
+                          control={<Radio />} 
+                          label="Diamond" 
+                        />
+                        <FormControlLabel 
+                          value="primary_gem_stone" 
+                          control={<Radio />} 
+                          label="Stone" 
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <FormControlLabel 
+                          value="secondary_gem_diamond" 
+                          control={<Radio />} 
+                          label="Diamond" 
+                        />
+                        <FormControlLabel 
+                          value="secondary_gem_stone" 
+                          control={<Radio />} 
+                          label="Stone" 
+                        />
+                      </>
+                    )}
+                  </RadioGroup>
+                </FormControl>
+              </Box>
             </Box>
             
             {(activeTab === 'primary_gem_diamond' || activeTab === 'secondary_gem_diamond') && (
@@ -1204,46 +1290,37 @@ function Estimator() {
         <Grid item xs={12} md={3}>
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
             <Typography variant="h6" sx={{ mb: 2 }}>SUMMARY</Typography>
-            <Typography variant="subtitle1">Metal Selection</Typography>
+            <Typography variant="subtitle1">Metal</Typography>
             <Typography variant="body2">Type: {metalForm.type}</Typography>
             <Typography variant="body2">Purity: {metalForm.purity.purity}</Typography>
             <Typography variant="body2">Category: {metalForm.metalCategory}</Typography>
             <Typography variant="body2">Color: {metalForm.jewelryColor}</Typography>
             <Typography variant="body2">Weight: {metalForm.weight}g</Typography>
 
-            <Typography variant="subtitle1" sx={{ mt: 2 }}>Primary Gem Diamond Selection</Typography>
-            <Typography variant="body2">Shape: {primaryDiamondForm.shape}</Typography>
-            <Typography variant="body2">Clarity: {primaryDiamondForm.clarity}</Typography>
-            <Typography variant="body2">Color: {primaryDiamondForm.color}</Typography>
-            <Typography variant="body2">Cut: {primaryDiamondForm.cut}</Typography>
-            <Typography variant="body2">Weight: {primaryDiamondForm.weight} ct</Typography>
-            <Typography variant="body2">Quantity: {primaryDiamondForm.quantity}</Typography>
-            <Typography variant="body2">Lab Grown: {primaryDiamondForm.labGrown? 'Yes' : 'No'}</Typography>
-            <Typography variant="body2">Exact Color: {primaryDiamondForm.exactColor}</Typography>
-
-            <Typography variant="subtitle1" sx={{ mt: 2 }}>Primary Gem Stone Selection</Typography>
-            <Typography variant="body2">Name: {primaryStoneForm.name}</Typography>
-            <Typography variant="body2">Shape: {primaryStoneForm.shape}</Typography>
-            <Typography variant="body2">Color: {primaryStoneForm.color}</Typography>
-            <Typography variant="body2">Weight: {primaryStoneForm.weight} ct</Typography>
-            <Typography variant="body2">Quantity: {primaryStoneForm.quantity}</Typography>
-
-            <Typography variant="subtitle1" sx={{ mt: 2 }}>Secondary Gem Diamond Selection</Typography>
-            <Typography variant="body2">Shape: {secondaryDiamondForm.shape}</Typography>
-            <Typography variant="body2">Clarity: {secondaryDiamondForm.clarity}</Typography>
-            <Typography variant="body2">Color: {secondaryDiamondForm.color}</Typography>
-            <Typography variant="body2">Cut: {secondaryDiamondForm.cut}</Typography>
-            <Typography variant="body2">Weight: {secondaryDiamondForm.weight} ct</Typography>
-            <Typography variant="body2">Quantity: {secondaryDiamondForm.quantity}</Typography>
-            <Typography variant="body2">Lab Grown: {secondaryDiamondForm.labGrown ? 'Yes' : 'No'}</Typography>
-            <Typography variant="body2">Exact Color: {secondaryDiamondForm.exactColor}</Typography>
-
-            <Typography variant="subtitle1" sx={{ mt: 2 }}>Secondary Gem Stone Selection</Typography>
-            <Typography variant="body2">Name: {secondaryStoneForm.name}</Typography>
-            <Typography variant="body2">Shape: {secondaryStoneForm.shape}</Typography>
-            <Typography variant="body2">Color: {secondaryStoneForm.color}</Typography>
-            <Typography variant="body2">Weight: {secondaryStoneForm.weight} ct</Typography>
-            <Typography variant="body2">Quantity: {secondaryStoneForm.quantity}</Typography>
+            <Typography variant="subtitle1" sx={{ mt: 2 }}>
+              {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'}
+            </Typography>
+            {activeTab.includes('diamond') ? (
+              <>
+                <Typography variant="body2">Shape: {activeTab.startsWith('primary') ? primaryDiamondForm.shape : secondaryDiamondForm.shape}</Typography>
+                <Typography variant="body2">Clarity: {activeTab.startsWith('primary') ? primaryDiamondForm.clarity : secondaryDiamondForm.clarity}</Typography>
+                <Typography variant="body2">Color: {activeTab.startsWith('primary') ? primaryDiamondForm.color : secondaryDiamondForm.color}</Typography>
+                <Typography variant="body2">Cut: {activeTab.startsWith('primary') ? primaryDiamondForm.cut : secondaryDiamondForm.cut}</Typography>
+                <Typography variant="body2">Weight: {activeTab.startsWith('primary') ? primaryDiamondForm.weight : secondaryDiamondForm.weight} ct</Typography>
+                <Typography variant="body2">Quantity: {activeTab.startsWith('primary') ? primaryDiamondForm.quantity : secondaryDiamondForm.quantity}</Typography>
+                <Typography variant="body2">Lab Grown: {activeTab.startsWith('primary') ? (primaryDiamondForm.labGrown? 'Yes' : 'No') : (secondaryDiamondForm.labGrown ? 'Yes' : 'No')}</Typography>
+                <Typography variant="body2">Exact Color: {activeTab.startsWith('primary') ? primaryDiamondForm.exactColor : secondaryDiamondForm.exactColor}</Typography>
+              </>
+            ) : (
+              <>
+                <Typography variant="body2">Type: {activeTab.startsWith('primary') ? primaryStoneForm.name : secondaryStoneForm.name}</Typography>
+                <Typography variant="body2">Shape: {activeTab.startsWith('primary') ? primaryStoneForm.shape : secondaryStoneForm.shape}</Typography>
+                <Typography variant="body2">Color: {activeTab.startsWith('primary') ? primaryStoneForm.color : secondaryStoneForm.color}</Typography>
+                <Typography variant="body2">Weight: {activeTab.startsWith('primary') ? primaryStoneForm.weight : secondaryStoneForm.weight} ct</Typography>
+                <Typography variant="body2">Quantity: {activeTab.startsWith('primary') ? primaryStoneForm.quantity : secondaryStoneForm.quantity}</Typography>
+                <Typography variant="body2">Authentic: {activeTab.startsWith('primary') ? primaryStoneForm.authentic? 'Yes' : 'No' : secondaryStoneForm.authentic? 'Yes' : 'No'}</Typography>
+              </>
+            )}
 
             <Typography variant="subtitle1" sx={{ mt: 2 }}>Price Estimates</Typography>
             <Typography variant="body2">Pawn: ${estimates.pawn.toFixed(2)}</Typography>
@@ -1267,9 +1344,7 @@ function Estimator() {
                     <TableCell>Description</TableCell>
                     <TableCell>Dimensions</TableCell>
                     <TableCell>Weight</TableCell>
-                    <TableCell>Carats</TableCell>
                     <TableCell>Quantity</TableCell>
-                    <TableCell>Lab Grown</TableCell>
                     <TableCell>Actions</TableCell>
                   </TableRow>
                 </TableHead>
@@ -1279,10 +1354,8 @@ function Estimator() {
                       <TableCell>{item.type}</TableCell>
                       <TableCell>{item.description}</TableCell>
                       <TableCell>{item.dimension}</TableCell>
-                      <TableCell>{item.weight}</TableCell>
                       <TableCell>{item.carats}</TableCell>
                       <TableCell>{item.quantity}</TableCell>
-                      <TableCell>{item.labGrown ? 'Yes' : 'No'}</TableCell>
                       <TableCell>
                         <IconButton
                           onClick={() => {
