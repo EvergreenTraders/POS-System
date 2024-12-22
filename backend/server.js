@@ -322,6 +322,85 @@ app.get('/api/metal_style_subcategory', async (req, res) => {
   }
 });
 
+// Diamond Shapes API Endpoint
+app.get('/api/diamond_shape', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT shape, description, image_path FROM diamond_shape');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching diamond shapes:', error);
+    res.status(500).json({ error: 'Failed to fetch diamond shapes' });
+  }
+});
+
+// Diamond Clarity API Endpoint
+app.get('/api/diamond_clarity', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT name, image_path FROM diamond_clarity');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching diamond clarity:', error);
+    res.status(500).json({ error: 'Failed to fetch diamond clarity' });
+  }
+});
+
+// Diamond Size API Endpoint
+app.get('/api/diamond_size_weight/:diamond_shape_id', async (req, res) => {
+  try {
+    const { diamond_shape_id } = req.params;
+    
+    const query = `
+      SELECT size, weight 
+      FROM diamond_size_weight 
+      WHERE diamond_shape_id = $1 
+    `;
+    const result = await pool.query(query, [diamond_shape_id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No sizes found for this diamond shape' });
+    }
+    
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching diamond sizes:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Fetch Diamond Cut Grades
+app.get('/api/diamond_cut', async (req, res) => {
+  try {
+    const query = 'SELECT id, name, value FROM diamond_cut';
+    const result = await pool.query(query);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No diamond cut grades found' });
+    }
+    
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching diamond cut grades:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Fetch Diamond Color Grades
+app.get('/api/diamond_color', async (req, res) => {
+  try {
+    const query = 'SELECT id, name, color, range FROM diamond_color';
+    const result = await pool.query(query);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No diamond color grades found' });
+    }
+    
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching diamond color grades:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
