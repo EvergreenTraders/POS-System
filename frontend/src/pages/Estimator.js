@@ -106,19 +106,6 @@ function Estimator() {
 
   const [diamondShapes, setDiamondShapes] = useState([]);
 
-  const stoneShapes = [
-    { name: 'Round', image: '/images/stone_shapes/round.png' },
-    { name: 'Oval', image: '/images/stone_shapes/oval.png' },
-    { name: 'Emerald', image: '/images/stone_shapes/emerald.png' },
-    { name: 'Pear', image: '/images/stone_shapes/pear.png' },
-    { name: 'Marquise', image: '/images/stone_shapes/marquise.png' },
-    { name: 'Princess', image: '/images/stone_shapes/princess.png' },
-    { name: 'Cushion', image: '/images/stone_shapes/cushion.png' },
-    { name: 'Radiant', image: '/images/stone_shapes/radiant.png' },
-    { name: 'Asscher', image: '/images/stone_shapes/asscher.png' },
-    { name: 'Heart', image: '/images/stone_shapes/heart.png' }
-  ];
-
   const [diamondClarity, setDiamondClarity] = useState([]);
 
   const [diamondSizes, setDiamondSizes] = useState([]);
@@ -127,9 +114,29 @@ function Estimator() {
 
   const [diamondColors, setDiamondColors] = useState([]);
 
+  const [stoneTypes, setStoneTypes] = useState([]);
+
+  const [stoneShapes, setStoneShapes] = useState([]);
+
   useEffect(() => {
     const fetchAllData = async () => {
       try {
+        // Fetch Stone Shapes
+        const stoneShapesResponse = await axios.get('http://localhost:5000/api/stone_shape');
+        const stoneShapesWithImages = stoneShapesResponse.data.map(shape => ({
+          name: shape.shape,
+          image: shape.image_path.replace('.jpg', '.png')
+        }));
+        setStoneShapes(stoneShapesWithImages);
+
+        // Fetch Stone Types
+        const stoneTypesResponse = await axios.get('http://localhost:5000/api/stone_type');
+        const typesWithImages = stoneTypesResponse.data.map(type => ({
+          name: type.type,
+          image: type.image_path.replace('.jpg', '.png')
+        }));
+        setStoneTypes(typesWithImages);
+
         // Fetch Diamond Shapes
         const shapesResponse = await axios.get('http://localhost:5000/api/diamond_shape');
         const shapesWithImages = shapesResponse.data.map(shape => ({
@@ -375,11 +382,10 @@ function Estimator() {
   const addStone = () => {
     const currentForm = getCurrentStoneForm();
     const newStone = {
-      type: 'Stone',
+      type:  activeTab.startsWith('primary') ? 'Primary Stone' : 'Secondary Stone',
       description: `${currentForm.name} - ${currentForm.color}`,
       dimension: currentForm.shape,
-      weight: null,
-      carats: currentForm.weight,
+      weight: currentForm.weight,
       quantity: currentForm.quantity,
       labGrown: false,
       estimatedValue: calculateStoneValue(),
@@ -422,18 +428,6 @@ function Estimator() {
   });
 
   const [estimatedStones, setEstimatedStones] = useState([]);
-
-  const stoneTypes = [
-    { name: 'Ruby', image: '/images/stones/ruby.png' },
-    { name: 'Sapphire', image: '/images/stones/sapphire.png' },
-    { name: 'Emerald', image: '/images/stones/emerald.png' },
-    { name: 'Amethyst', image: '/images/stones/amethyst.png' },
-    { name: 'Topaz', image: '/images/stones/topaz.png' },
-    { name: 'Garnet', image: '/images/stones/garnet.png' },
-    { name: 'Tanzanite', image: '/images/stones/tanzanite.png' },
-    { name: 'Aquamarine', image: '/images/stones/aquamarine.png' },
-    { name: 'Black Oynx', image: '/images/stones/black_onyx.png' }
-  ];
 
   const renderStoneEstimationTab = () => (
     <Grid container spacing={2} sx={{ p: 2 }}>
@@ -892,7 +886,7 @@ function Estimator() {
                 required
               >
                 {metalTypes.map(type => (
-                  <MenuItem key={type.id} value={type.id}>{type.type}</MenuItem>
+                  <MenuItem key={type.id} value={type.type}>{type.type}</MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -907,7 +901,7 @@ function Estimator() {
                   required
                 >
                   {metalColors.map(color => (
-                    <MenuItem key={color.id} value={color.id}>{color.color}</MenuItem>
+                    <MenuItem key={color.id} value={color.color}>{color.color}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
@@ -942,7 +936,7 @@ function Estimator() {
                 required
               >
                 {metalCategories.map(category => (
-                  <MenuItem key={category.id} value={category.id}>{category.category}</MenuItem>
+                  <MenuItem key={category.id} value={category.category}>{category.category}</MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -1292,7 +1286,7 @@ function Estimator() {
             <Typography variant="h6" sx={{ mb: 2 }}>SUMMARY</Typography>
             <Typography variant="subtitle1">Metal</Typography>
             <Typography variant="body2">Type: {metalForm.type}</Typography>
-            <Typography variant="body2">Purity: {metalForm.purity.purity}</Typography>
+            <Typography variant="body2">Purity: {metalForm.purity.purity || metalForm.purity.value}</Typography>
             <Typography variant="body2">Category: {metalForm.metalCategory}</Typography>
             <Typography variant="body2">Color: {metalForm.jewelryColor}</Typography>
             <Typography variant="body2">Weight: {metalForm.weight}g</Typography>
@@ -1354,7 +1348,7 @@ function Estimator() {
                       <TableCell>{item.type}</TableCell>
                       <TableCell>{item.description}</TableCell>
                       <TableCell>{item.dimension}</TableCell>
-                      <TableCell>{item.carats}</TableCell>
+                      <TableCell>{item.weight}</TableCell>
                       <TableCell>{item.quantity}</TableCell>
                       <TableCell>
                         <IconButton

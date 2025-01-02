@@ -259,7 +259,6 @@ app.get('/api/metal_type', async (req, res) => {
   }
 });
 
-
 app.get('/api/metal_purity/:metal_type_id', async (req, res) => {
   try {
     const { metal_type_id } = req.params;
@@ -398,6 +397,28 @@ app.get('/api/diamond_color', async (req, res) => {
   } catch (err) {
     console.error('Error fetching diamond color grades:', err.message);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Stone Type API Endpoint
+app.get('/api/stone_type', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT type, image_path FROM stone_type');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching stone types:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Stone Shape API Endpoint
+app.get('/api/stone_shape', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT shape, image_path FROM stone_shape');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching stone shapes:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
