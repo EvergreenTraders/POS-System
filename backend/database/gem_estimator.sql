@@ -1,6 +1,5 @@
 DO $$
 BEGIN
-    drop table if exists stone_type;
     -- Stone Shape Table
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_shape') THEN
         CREATE TABLE stone_shape (

@@ -185,7 +185,6 @@ function Estimator() {
     try {
       const response = await axios.get(`http://localhost:5000/api/metal_purity/${metalTypeId}`);
       setMetalPurities(response.data);
-      console.log("metalPurities", response.data);
     } catch (error) {
       console.error('Error fetching metal purities:', error);
       setMetalPurities([]); // Reset purities if fetch fails
@@ -313,10 +312,10 @@ function Estimator() {
 
   const handleMetalChange = (event) => {
     const { name, value } = event.target;
-    
     // When metal type changes, fetch corresponding purities
     if (name === 'type') {
-      const selectedMetalType = metalTypes.find(type => type.id === value);
+      const selectedMetalType = metalTypes.find(type => type.type === value);
+
       if (selectedMetalType) {
         fetchPurities(selectedMetalType.id);
       }
@@ -891,7 +890,7 @@ function Estimator() {
               </Select>
             </FormControl>
 
-            {metalTypes.find(type => type.type === 'Gold')?.id === metalForm.type && (
+             {metalForm.type === 'Gold' && (
               <FormControl fullWidth sx={{ mb: 2 }}>
                 <InputLabel>Select Jewelry Color *</InputLabel>
                 <Select
@@ -1336,7 +1335,6 @@ function Estimator() {
                   <TableRow>
                     <TableCell>Type</TableCell>
                     <TableCell>Description</TableCell>
-                    <TableCell>Dimensions</TableCell>
                     <TableCell>Weight</TableCell>
                     <TableCell>Quantity</TableCell>
                     <TableCell>Actions</TableCell>
@@ -1347,7 +1345,6 @@ function Estimator() {
                     <TableRow key={index}>
                       <TableCell>{item.type}</TableCell>
                       <TableCell>{item.description}</TableCell>
-                      <TableCell>{item.dimension}</TableCell>
                       <TableCell>{item.weight}</TableCell>
                       <TableCell>{item.quantity}</TableCell>
                       <TableCell>
