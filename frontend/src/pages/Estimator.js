@@ -281,7 +281,7 @@ function Estimator() {
     const newItem = {
       type: activeTab.startsWith('primary') ? 'Primary Diamond' : 'Secondary Diamond',
       description: `${currentForm.shape} ${currentForm.clarity} ${currentForm.color} ${currentForm.exactColor} ${currentForm.cut}`,
-      weight: currentForm.weight,
+      weight: currentForm.weight+' ct',
       quantity: currentForm.quantity,
       labGrown: currentForm.labGrown,
       valuationType: currentForm.quantity > 1 ? diamondValuationType : 'each',
@@ -370,7 +370,7 @@ function Estimator() {
       type: 'Metal',
       description: `${metalForm.type} ${metalForm.metalCategory} ${metalForm.purity?.purity || ''} ${metalForm.jewelryColor}`,
       dimension: `${metalForm.size}`,
-      weight: metalForm.weight,
+      weight: metalForm.weight+' g',
       quantity: 1,
       estimatedValue: totalMetalValue
     };
@@ -384,7 +384,7 @@ function Estimator() {
       type:  activeTab.startsWith('primary') ? 'Primary Stone' : 'Secondary Stone',
       description: `${currentForm.name} - ${currentForm.color}`,
       dimension: currentForm.shape,
-      weight: currentForm.weight,
+      weight: currentForm.weight+' ct',
       quantity: currentForm.quantity,
       labGrown: false,
       estimatedValue: calculateStoneValue(),
@@ -693,7 +693,7 @@ function Estimator() {
             }
           }}
         >
-           {activeTab.startsWith('primary') ? 'Secondary' : 'Primary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'}
+           {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
         </Button>
       </Grid>
     </Grid>

@@ -1,5 +1,25 @@
 DO $$
 BEGIN
+   -- insert into metal_type (type) values ('Palladium');
+    -- delete from metal_purity where metal_type_id = 4;
+    --delete from precious_metal_type where type = 'Other';
+    -- ALTER TABLE metal_type RENAME TO precious_metal_type;
+    
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'non_precious_metal_type') THEN
+        CREATE TABLE non_precious_metal_type (
+            id SERIAL PRIMARY KEY,
+            type VARCHAR(25) NOT NULL
+        );
+        INSERT INTO non_precious_metal_type (type) VALUES
+        ('Gold Plated'),
+        ('Gold Filled'),
+        ('Titanium'),
+        ('Tungsten'),
+        ('Stainless'),
+        ('Copper'),
+        ('Silver Plate');
+    END IF;
+
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_type') THEN
         CREATE TABLE metal_type (
             id SERIAL PRIMARY KEY,

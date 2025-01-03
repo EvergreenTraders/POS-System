@@ -1,5 +1,27 @@
 DO $$
 BEGIN
+    -- Stone Color Table
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_color') THEN
+        CREATE TABLE stone_color (
+            id SERIAL PRIMARY KEY,
+            color VARCHAR(50) NOT NULL UNIQUE
+        );
+        
+        INSERT INTO stone_color (color) VALUES
+        ('Yellow'),
+        ('Green'),
+        ('Blue'),
+        ('Orange'),
+        ('Red'),
+        ('Purple'),
+        ('Brown'),
+        ('Black'),
+        ('White'),
+        ('Teal'),
+        ('Gray'),
+        ('Pink');
+    END IF;
+
     -- Stone Shape Table
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_shape') THEN
         CREATE TABLE stone_shape (
