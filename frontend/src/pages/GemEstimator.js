@@ -21,24 +21,25 @@ import {
   FormControlLabel,
   Checkbox,
   Slider,
-  FormGroup,
-  Divider,
   Radio,
   RadioGroup
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 import { HexColorPicker } from 'react-colorful';
+import MetalEstimator from './MetalEstimator';
 
-function Estimator() {
-  const [metalForm, setMetalForm] = useState({
-    type: '',
-    metalCategory: '',
-    jewelryColor: '',
-    weight: '',
-    price: '',
-    purity: { purity: '', value: 0 }
-  });
+function GemEstimator() {
+  const [metalFormState, setMetalFormState] = useState({});
+  const [totalMetalValue, setTotalMetalValue] = useState(0);
+
+  const handleMetalFormChange = (formState) => {
+      setMetalFormState(formState);
+  };
+
+  const handleTotalMetalValueChange = (value) => {
+      setTotalMetalValue(value);
+  };
 
   // Primary gem form
   const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
@@ -83,17 +84,12 @@ function Estimator() {
 
   const [estimatedItems, setEstimatedItems] = useState([]);
   const [totalDiamondValue, setTotalDiamondValue] = useState(0);
-  const [totalMetalValue, setTotalMetalValue] = useState(0);
   const [estimates, setEstimates] = useState({
     pawn: 0,
     buy: 0,
-    consign: 0,
-    trade: 0
+    retail: 0
   });
 
-  const [metalTypes, setMetalTypes] = useState([]);
-  const [metalCategories, setMetalCategories] = useState([]);
-  const [metalPurities, setMetalPurities] = useState([]);
   const [diamondValuationType, setDiamondValuationType] = useState('each');
 
   const [exactColor, setExactColor] = useState('D');
@@ -101,8 +97,6 @@ function Estimator() {
   const colorScale = Array.from({length: 23}, (_, i) => 
     String.fromCharCode(68 + i) // Starting from 'D'
   );
-
-  const [metalColors, setMetalColors] = useState([]);
 
   const [diamondShapes, setDiamondShapes] = useState([]);
 
@@ -153,18 +147,6 @@ function Estimator() {
         }));
         setDiamondClarity(clarityWithImages);
 
-        // Fetch Metal Types
-        const typesResponse = await axios.get('http://localhost:5000/api/metal_type');
-        setMetalTypes(typesResponse.data);
-
-        // Fetch Metal Categories
-        const categoriesResponse = await axios.get('http://localhost:5000/api/metal_category');
-        setMetalCategories(categoriesResponse.data);
-
-        // Fetch Metal Colors
-        const colorsResponse = await axios.get('http://localhost:5000/api/metal_color');
-        setMetalColors(colorsResponse.data);
-
         // Fetch Diamond Cuts
         const cutsResponse = await axios.get('http://localhost:5000/api/diamond_cut');
         setDiamondCuts(cutsResponse.data);
@@ -180,16 +162,6 @@ function Estimator() {
 
     fetchAllData();
   }, []);
-
-  const fetchPurities = async (metalTypeId) => {
-    try {
-      const response = await axios.get(`http://localhost:5000/api/metal_purity/${metalTypeId}`);
-      setMetalPurities(response.data);
-    } catch (error) {
-      console.error('Error fetching metal purities:', error);
-      setMetalPurities([]); // Reset purities if fetch fails
-    }
-  };
 
   const fetchDiamondSizes = async (diamondShapeId) => {
     try {
@@ -207,8 +179,7 @@ function Estimator() {
     setEstimates({
       pawn: totalValue * 0.5,    // 50% of total value
       buy: totalValue * 0.7,    // 70% of total value
-      consign: totalValue * 0.8,  // 80% of total value
-      trade: totalValue * 0.6     // 60% of total value
+      retail: totalValue * 0.8,  // 80% of total value
     });
   }, [totalMetalValue, totalDiamondValue]);
 
@@ -310,39 +281,6 @@ function Estimator() {
     setDiamondValuationType('each');
   };
 
-  const handleMetalChange = (event) => {
-    const { name, value } = event.target;
-    // When metal type changes, fetch corresponding purities
-    if (name === 'type') {
-      const selectedMetalType = metalTypes.find(type => type.type === value);
-
-      if (selectedMetalType) {
-        fetchPurities(selectedMetalType.id);
-      }
-      
-      setMetalForm(prev => ({
-        ...prev,
-        type: value,
-        purity: { purity: '', value: 0 }
-      }));
-      return;
-    }
-    
-    // For purity, find the full purity object
-    if (name === 'purity') {
-      const selectedPurity = metalPurities.find(p => p.id === value);
-      setMetalForm(prev => ({
-        ...prev,
-        purity: selectedPurity || { purity: '', value: 0 }
-      }));
-    } else {
-      setMetalForm(prev => ({
-        ...prev,
-        [name]: value
-      }));
-    }
-  };
-
   const handleStoneChange = (event) => {
     const { name, value } = event.target;
     setCurrentStoneForm(prev => ({
@@ -361,21 +299,6 @@ function Estimator() {
 
   const handleDiamondValuationTypeChange = (event) => {
     setDiamondValuationType(event.target.value);
-  };
-
-
-  const addMetal = () => {
-    // Add metal to estimated items
-    const newItem = {
-      type: 'Metal',
-      description: `${metalForm.type} ${metalForm.metalCategory} ${metalForm.purity?.purity || ''} ${metalForm.jewelryColor}`,
-      dimension: `${metalForm.size}`,
-      weight: metalForm.weight+' g',
-      quantity: 1,
-      estimatedValue: totalMetalValue
-    };
-
-    setEstimatedItems(prev => [...prev, newItem]);
   };
 
   const addStone = () => {
@@ -400,23 +323,6 @@ function Estimator() {
       setSecondaryStoneForm(initialStoneForm);
     }
   };
-
-  const calculateMetalValue = () => {
-    // Only calculate if all necessary fields are filled
-    if (metalForm.weight && metalForm.price && metalForm.purity) {
-      const percentageFactor = 0.7; 
-      setTotalMetalValue(metalForm.price * metalForm.purity.value * metalForm.weight * percentageFactor);
-    }
-      
-      else {
-      // Reset metal value if fields are incomplete
-      setTotalMetalValue(0);
-    }
-  };
-
-  useEffect(() => {
-    calculateMetalValue();
-  }, [metalForm.weight, metalForm.price, metalForm.purity]);
 
   const [currentStone, setCurrentStone] = useState({
     type: '',
@@ -874,106 +780,10 @@ function Estimator() {
       <Grid container spacing={3} sx={{ mb: 3 }}>
         {/* Metal Estimation Section */}
         <Grid item xs={12} md={3}>
-          <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
-            <Typography variant="h6" sx={{ mb: 2 }}>ESTIMATE METAL</Typography>
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Select Metal Type *</InputLabel>
-              <Select
-                name="type"
-                value={metalForm.type}
-                onChange={handleMetalChange}
-                required
-              >
-                {metalTypes.map(type => (
-                  <MenuItem key={type.id} value={type.type}>{type.type}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-             {metalForm.type === 'Gold' && (
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel>Select Jewelry Color *</InputLabel>
-                <Select
-                  name="jewelryColor"
-                  value={metalForm.jewelryColor}
-                  onChange={handleMetalChange}
-                  required
-                >
-                  {metalColors.map(color => (
-                    <MenuItem key={color.id} value={color.color}>{color.color}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            )}
-
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Select Metal Purity *</InputLabel>
-              <Select
-                name="purity"
-                value={metalForm.purity?.id || ''} // Use id for value
-                onChange={handleMetalChange}
-                required
-              >
-                {metalPurities.map(purity => (
-                  <MenuItem key={purity.id} value={purity.id}>
-                    {purity.purity === null 
-                      ? `${purity.value}` 
-                      : (purity.value === null 
-                        ? purity.purity 
-                        : `${purity.purity} - ${purity.value}`)}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Select Metal Category *</InputLabel>
-              <Select
-                name="metalCategory"
-                value={metalForm.metalCategory}
-                onChange={handleMetalChange}
-                required
-              >
-                {metalCategories.map(category => (
-                  <MenuItem key={category.id} value={category.category}>{category.category}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <TextField
-              fullWidth
-              label="Weight (g)"
-              name="weight"
-              value={metalForm.weight}
-              onChange={handleMetalChange}
-              sx={{ mb: 2 }}
-            />
-
-            <TextField
-              fullWidth
-              label="Spot Price/oz"
-              name="price"
-              value={metalForm.price}
-              onChange={handleMetalChange}
-              sx={{ mb: 2 }}
-            />
-
-            <Button
-              variant="contained"
-              onClick={() => addMetal()}
-              fullWidth
-              sx={{ mt: 2 }}
-              disabled={!metalForm.type || !metalForm.purity || !metalForm.metalCategory || (metalTypes.find(type => type.type === 'Gold')?.id === metalForm.type && !metalForm.jewelryColor)}
-            >
-              Add Metal
-            </Button>
-
-            <Typography variant="h6" sx={{ mt: 2 }}>
-              Est. Metal Value: ${totalMetalValue.toFixed(2)}
-            </Typography>
-          </Paper>
+        <MetalEstimator 
+                onMetalValueChange={handleTotalMetalValueChange}
+                setMetalFormState={handleMetalFormChange} />
         </Grid>
-
         {/* Diamond Estimation Section */}
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
@@ -1282,13 +1092,18 @@ function Estimator() {
         {/* Summary Section */}
         <Grid item xs={12} md={3}>
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
-            <Typography variant="h6" sx={{ mb: 2 }}>SUMMARY</Typography>
+          <Typography variant="h6">Price Estimates</Typography>
+            <Typography variant="body2">Pawn: ${estimates.pawn.toFixed(2)}</Typography>
+            <Typography variant="body2">Buy: ${estimates.buy.toFixed(2)}</Typography>
+            <Typography variant="body2">Retail: ${estimates.retail.toFixed(2)}</Typography>
+
+            <Typography variant="h6">SUMMARY</Typography>
             <Typography variant="subtitle1">Metal</Typography>
-            <Typography variant="body2">Type: {metalForm.type}</Typography>
-            <Typography variant="body2">Purity: {metalForm.purity.purity || metalForm.purity.value}</Typography>
-            <Typography variant="body2">Category: {metalForm.metalCategory}</Typography>
-            <Typography variant="body2">Color: {metalForm.jewelryColor}</Typography>
-            <Typography variant="body2">Weight: {metalForm.weight}g</Typography>
+            <Typography variant="body2">Type: {metalFormState.type}</Typography>
+            <Typography variant="body2">Purity: {metalFormState.purity.purity || metalFormState.purity.value}</Typography>
+            <Typography variant="body2">Category: {metalFormState.metalCategory}</Typography>
+            <Typography variant="body2">Color: {metalFormState.jewelryColor}</Typography>
+            <Typography variant="body2">Weight: {metalFormState.weight}g</Typography>
 
             <Typography variant="subtitle1" sx={{ mt: 2 }}>
               {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'}
@@ -1314,12 +1129,6 @@ function Estimator() {
                 <Typography variant="body2">Authentic: {activeTab.startsWith('primary') ? primaryStoneForm.authentic? 'Yes' : 'No' : secondaryStoneForm.authentic? 'Yes' : 'No'}</Typography>
               </>
             )}
-
-            <Typography variant="subtitle1" sx={{ mt: 2 }}>Price Estimates</Typography>
-            <Typography variant="body2">Pawn: ${estimates.pawn.toFixed(2)}</Typography>
-            <Typography variant="body2">Buy: ${estimates.buy.toFixed(2)}</Typography>
-            <Typography variant="body2">Consign: ${estimates.consign.toFixed(2)}</Typography>
-            <Typography variant="body2">Trade: ${estimates.trade.toFixed(2)}</Typography>
           </Paper>
         </Grid>
       </Grid>
@@ -1371,4 +1180,4 @@ function Estimator() {
   );
 }
 
-export default Estimator;
+export default GemEstimator;
