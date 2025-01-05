@@ -28,12 +28,18 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  Divider
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 import MetalEstimator from './MetalEstimator';
 import EditIcon from '@mui/icons-material/Edit';
+import PhotoCamera from '@mui/icons-material/PhotoCamera';
+import CloudUpload from '@mui/icons-material/CloudUpload';
+import ImageList from '@mui/material/ImageList';
+import ImageListItem from '@mui/material/ImageListItem';
+import CloseIcon from '@mui/icons-material/Close';
 
 function GemEstimator() {
   const [metalFormState, setMetalFormState] = useState({});
@@ -949,6 +955,68 @@ function GemEstimator() {
     }));
   };
 
+  // Add state for images
+  const [images, setImages] = useState([]);
+  const [showCamera, setShowCamera] = useState(false);
+  const videoRef = React.useRef(null);
+  const [stream, setStream] = useState(null);
+
+  const handleFileUpload = (event) => {
+    const files = Array.from(event.target.files);
+    const newImages = files.map(file => ({
+      file,
+      url: URL.createObjectURL(file),
+      type: 'upload'
+    }));
+    setImages(prev => [...prev, ...newImages]);
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      setStream(stream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setShowCamera(true);
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      alert("Could not access camera. Please make sure you have given permission.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    setStream(null);
+    setShowCamera(false);
+  };
+
+  const captureImage = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(videoRef.current, 0, 0);
+      canvas.toBlob(blob => {
+        const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        const newImage = {
+          file,
+          url: URL.createObjectURL(file),
+          type: 'capture'
+        };
+        setImages(prev => [...prev, newImage]);
+        stopCamera();
+      }, 'image/jpeg');
+    }
+  };
+
+  const removeImage = (index) => {
+    setImages(prev => prev.filter((_, i) => i !== index));
+  };
+
   return (
     <Container maxWidth="lg">
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -1267,13 +1335,93 @@ function GemEstimator() {
 
         {/* Summary Section */}
         <Grid item xs={12} md={3}>
-          <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
-          <Typography variant="h6">Price Estimates</Typography>
+          <Paper sx={{ p: 2, height: '100%', overflow: 'auto' }}>
+            <Typography variant="h6">Images</Typography>
+            <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+              <Button
+                variant="outlined"
+                component="label"
+                startIcon={<CloudUpload />}
+                sx={{ flex: 1 }}
+              >
+                Upload
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  multiple
+                  onChange={handleFileUpload}
+                />
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={showCamera ? stopCamera : startCamera}
+                startIcon={<PhotoCamera />}
+                sx={{ flex: 1 }}
+              >
+                {showCamera ? 'Stop' : 'Camera'}
+              </Button>
+            </Box>
+
+            {/* Camera Preview */}
+            {showCamera && (
+              <Box sx={{ position: 'relative', mb: 2 }}>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  style={{ width: '100%', borderRadius: '8px' }}
+                />
+                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+                  <Button
+                    variant="contained"
+                    onClick={captureImage}
+                    startIcon={<PhotoCamera />}
+                    size="small"
+                  >
+                    Capture
+                  </Button>
+                </Box>
+              </Box>
+            )}
+
+            {/* Image Gallery */}
+            {images.length > 0 && (
+              <ImageList sx={{ width: '100%', height: 200, mb: 2 }} cols={2} rowHeight={100}>
+                {images.map((image, index) => (
+                  <ImageListItem key={index} sx={{ position: 'relative' }}>
+                    <img
+                      src={image.url}
+                      alt={`Uploaded ${index + 1}`}
+                      loading="lazy"
+                      style={{ height: '100%', objectFit: 'cover' }}
+                    />
+                    <IconButton
+                      sx={{
+                        position: 'absolute',
+                        top: 4,
+                        right: 4,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        '&:hover': { backgroundColor: 'rgba(0, 0, 0, 0.7)' },
+                      }}
+                      size="small"
+                      onClick={() => removeImage(index)}
+                    >
+                      <CloseIcon sx={{ color: 'white' }} fontSize="small" />
+                    </IconButton>
+                  </ImageListItem>
+                ))}
+              </ImageList>
+            )}
+
+            <Divider sx={{ my: 2 }} />
+            
+            <Typography variant="h6">Price Estimates</Typography>
             <Typography variant="body2">Pawn: ${priceEstimates.pawn.toFixed(2)}</Typography>
             <Typography variant="body2">Buy: ${priceEstimates.buy.toFixed(2)}</Typography>
             <Typography variant="body2">Retail: ${priceEstimates.retail.toFixed(2)}</Typography>
 
-            <Typography variant="h6">SUMMARY</Typography>
+            <Typography variant="h6" sx={{ mt: 2 }}>SUMMARY</Typography>
             <Grid container spacing={2} >
             {addMetal.map((metal, index) => (
                 <Grid item xs={12} key={index}>
@@ -1449,6 +1597,10 @@ function GemEstimator() {
             </TableContainer>
           </Paper>
         </Grid>
+      </Grid>
+
+      <Grid container spacing={1} sx={{ mt: 3 }}>
+        {/* Remove the standalone image section */}
       </Grid>
 
       {/* Details Dialog */}
