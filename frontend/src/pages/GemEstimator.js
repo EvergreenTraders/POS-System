@@ -121,6 +121,8 @@ function GemEstimator() {
 
   const [stoneShapes, setStoneShapes] = useState([]);
 
+  const [stoneColors, setStoneColors] = useState([]);
+
   useEffect(() => {
     const fetchAllData = async () => {
       try {
@@ -139,6 +141,10 @@ function GemEstimator() {
           image: type.image_path.replace('.jpg', '.png')
         }));
         setStoneTypes(typesWithImages);
+
+        // Fetch Stone Colors
+        const stoneColorsResponse = await axios.get('http://localhost:5000/api/stone_color');
+        setStoneColors(stoneColorsResponse.data);
 
         // Fetch Diamond Shapes
         const shapesResponse = await axios.get('http://localhost:5000/api/diamond_shape');
@@ -318,15 +324,13 @@ function GemEstimator() {
   const addStone = () => {
     const currentForm = getCurrentStoneForm();
     const newStone = {
-      type:  activeTab.startsWith('primary') ? 'Primary Stone' : 'Secondary Stone',
-     // description: `${currentForm.name} - ${currentForm.color}`,
+      type:  currentForm.name,
       shape: currentForm.shape,
       weight: currentForm.weight+' ct',
       color: currentForm.color,
       quantity: currentForm.quantity,
       authentic: currentForm.authentic,
-      estimatedValue: calculateStoneValue(),
-      //isPrimary: activeTab.startsWith('primary')
+      isPrimary: activeTab.startsWith('primary')
     };
 
     setEstimatedItems(prev => [...prev, newStone]);
@@ -425,32 +429,19 @@ function GemEstimator() {
 
         {/* Stone Color Picker */}
         <Grid item xs={12} md={4}>
-          <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
-          <Box sx={{ width: 160, mb: 2 }}>
-            <HexColorPicker
-              color={getCurrentStoneForm().color || '#000000'}
-              onChange={(color) => setCurrentStoneForm(prev => ({
-                ...prev,
-                color: color
-              }))}
-              style={{ width: '100%', height: '160px' }}
-            />
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box
-              sx={{
-                width: 48,
-                height: 48,
-                borderRadius: 1,
-                bgcolor: getCurrentStoneForm().color || '#000000',
-                border: '2px solid',
-                borderColor: 'divider'
-              }}
-            />
-            <Typography>
-              {getCurrentStoneForm().color || '#000000'}
-            </Typography>
-          </Box>
+        <FormControl fullWidth sx={{ mb: 2 }}>
+          <InputLabel>Select Stone Color *</InputLabel>
+          <Select
+            name="color"
+            value={getCurrentStoneForm().color}
+            onChange={handleStoneChange}
+            required
+          >
+            {stoneColors.map(color => (
+              <MenuItem key={color.id} value={color.color}>{color.color}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         </Grid>
       </Grid>
 
@@ -677,34 +668,6 @@ function GemEstimator() {
       </Grid>
     </Grid>
   );
-
-  const calculateStoneValue = () => {
-    // This is a simplified placeholder. Have to replace with actual valuation logic
-    const baseValues = {
-      'Ruby': 1000,
-      'Sapphire': 800,
-      'Emerald': 1200,
-      'Amethyst': 100,
-      'Topaz': 150,
-      'Opal': 200,
-      'Tanzanite': 650,
-      'Aquamarine': 300,
-      'Tourmaline': 400
-    };
-
-    const colorMultipliers = {
-      'Pigeon Blood Red': 2.5,
-      'Blue': 1.8,
-      'Deep Green': 2.0,
-      // Add more color multipliers
-    };
-
-    const baseValue = baseValues[getCurrentStoneForm().name] || 500;
-    const colorMultiplier = colorMultipliers[getCurrentStoneForm().color] || 1;
-    const weightMultiplier = Math.pow(parseFloat(getCurrentStoneForm().weight), 1.5);
-
-    return Math.round(baseValue * colorMultiplier * weightMultiplier);
-  };
 
   const renderTabButtons = () => {
     if (activeTab.startsWith('primary')) {
@@ -1118,7 +1081,7 @@ function GemEstimator() {
             <Typography variant="h6">SUMMARY</Typography>
             {addMetal.map((metal, index) => (
             <div key={index}>
-                <Typography variant="subtitle1">Metal</Typography>
+                <Typography variant="subtitle2">Metal</Typography>
                 <Typography variant="body2">Precious Metal Type: {metal.preciousMetalType}</Typography>
                 <Typography variant="body2">Non Precious Metal Type: {metal.nonPreciousMetalType}</Typography>
                 <Typography variant="body2">Purity: {metal.purity.purity || metal.purity.value}</Typography>
@@ -1143,32 +1106,19 @@ function GemEstimator() {
                   <Typography variant="body2">Lab Grown: {diamond.labGrown ? 'Yes' : 'No'}</Typography>
                   <Typography variant="body2">Exact Color: {diamond.exactColor}</Typography>
                 </div>))}
-                {/* <Typography variant="body2">Shape: {activeTab.startsWith('primary') ? primaryDiamondForm.shape : secondaryDiamondForm.shape}</Typography>
-                <Typography variant="body2">Clarity: {activeTab.startsWith('primary') ? primaryDiamondForm.clarity : secondaryDiamondForm.clarity}</Typography>
-                <Typography variant="body2">Color: {activeTab.startsWith('primary') ? primaryDiamondForm.color : secondaryDiamondForm.color}</Typography>
-                <Typography variant="body2">Cut: {activeTab.startsWith('primary') ? primaryDiamondForm.cut : secondaryDiamondForm.cut}</Typography>
-                <Typography variant="body2">Weight: {activeTab.startsWith('primary') ? primaryDiamondForm.weight : secondaryDiamondForm.weight} ct</Typography>
-                <Typography variant="body2">Quantity: {activeTab.startsWith('primary') ? primaryDiamondForm.quantity : secondaryDiamondForm.quantity}</Typography>
-                <Typography variant="body2">Lab Grown: {activeTab.startsWith('primary') ? (primaryDiamondForm.labGrown? 'Yes' : 'No') : (secondaryDiamondForm.labGrown ? 'Yes' : 'No')}</Typography>
-                <Typography variant="body2">Exact Color: {activeTab.startsWith('primary') ? primaryDiamondForm.exactColor : secondaryDiamondForm.exactColor}</Typography> */}
               </>
             ) : (
               <>
               {stoneSummary.map((stone, index) => (
                 <div key={index}>
-                  <Typography variant="subtitle2" sx={{ mt: 2 }}>{stone.type} </Typography>
+                  <Typography variant="subtitle2" sx={{ mt: 2 }}>{stone.isPrimary ? 'Primary' : 'Secondary'} Stone </Typography>
+                  <Typography variant="body2">Type: {stone.type}</Typography>
                   <Typography variant="body2">Shape: {stone.shape}</Typography>
                   <Typography variant="body2">Color: {stone.color}</Typography>
                   <Typography variant="body2">Weight: {stone.weight}</Typography>
                   <Typography variant="body2">Quantity: {stone.quantity}</Typography>
                   <Typography variant="body2">Authentic: {stone.authentic ? 'Yes' : 'No'}</Typography>
                 </div>))}
-                {/* <Typography variant="body2">Type: {activeTab.startsWith('primary') ? primaryStoneForm.name : secondaryStoneForm.name}</Typography>
-                <Typography variant="body2">Shape: {activeTab.startsWith('primary') ? primaryStoneForm.shape : secondaryStoneForm.shape}</Typography>
-                <Typography variant="body2">Color: {activeTab.startsWith('primary') ? primaryStoneForm.color : secondaryStoneForm.color}</Typography>
-                <Typography variant="body2">Weight: {activeTab.startsWith('primary') ? primaryStoneForm.weight : secondaryStoneForm.weight} ct</Typography>
-                <Typography variant="body2">Quantity: {activeTab.startsWith('primary') ? primaryStoneForm.quantity : secondaryStoneForm.quantity}</Typography>
-                <Typography variant="body2">Authentic: {activeTab.startsWith('primary') ? primaryStoneForm.authentic? 'Yes' : 'No' : secondaryStoneForm.authentic? 'Yes' : 'No'}</Typography> */}
               </>
             )}
           </Paper>

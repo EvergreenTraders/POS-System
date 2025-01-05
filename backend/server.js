@@ -446,6 +446,17 @@ app.get('/api/stone_shape', async (req, res) => {
   }
 });
 
+// Stone Color API Endpoint
+app.get('/api/stone_color', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT color FROM stone_color');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching stone colors:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
