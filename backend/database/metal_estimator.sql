@@ -1,9 +1,5 @@
 DO $$
 BEGIN
-   -- insert into metal_type (type) values ('Palladium');
-    -- delete from metal_purity where metal_type_id = 4;
-    --delete from precious_metal_type where type = 'Other';
-    -- ALTER TABLE metal_type RENAME TO precious_metal_type;
     
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'non_precious_metal_type') THEN
         CREATE TABLE non_precious_metal_type (
@@ -20,21 +16,18 @@ BEGIN
         ('Silver Plate');
     END IF;
 
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_type') THEN
-        CREATE TABLE metal_type (
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'precious_metal_type') THEN
+        CREATE TABLE precious_metal_type (
             id SERIAL PRIMARY KEY,
             type VARCHAR(25) NOT NULL
         );
-        INSERT INTO metal_type (type) VALUES
+        INSERT INTO precious_metal_type (type) VALUES
         ('Gold'),
         ('Platinum'),
         ('Silver'),
-        ('Other');
+        ('Palladium');
     END IF;
-END $$;
 
-DO $$
-BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_category') THEN
         CREATE TABLE metal_category (
             id SERIAL PRIMARY KEY,
@@ -54,37 +47,31 @@ BEGIN
         ('Scrap'),
         ('Loose Diamonds and Stones');
     END IF;
-END $$;
 
-DO $$
-BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_color') THEN
         CREATE TABLE metal_color (
             id SERIAL PRIMARY KEY,
-            metal_type_id INT NOT NULL,
+            precious_metal_type_id INT NOT NULL,
             color VARCHAR(25) NOT NULL,
-            FOREIGN KEY (metal_type_id) REFERENCES metal_type(id)
+            FOREIGN KEY (precious_metal_type_id) REFERENCES precious_metal_type(id)
         );
-        INSERT INTO metal_color (metal_type_id, color) VALUES
+        INSERT INTO metal_color (precious_metal_type_id, color) VALUES
         (1, 'Yellow'),
         (1, 'White'),
         (1, '2 Tone'),
         (1, 'Tri-color'),
         (1, 'Rose-Red');
     END IF;
-END $$;
 
-DO $$
-BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_purity') THEN
         CREATE TABLE metal_purity (
             id SERIAL PRIMARY KEY,
-            metal_type_id INT NOT NULL,
+            precious_metal_type_id INT NOT NULL,
             purity VARCHAR(25),
             value DECIMAL(5,3),
-            FOREIGN KEY (metal_type_id) REFERENCES metal_type(id)
+            FOREIGN KEY (precious_metal_type_id) REFERENCES precious_metal_type(id)
         );
-        INSERT INTO metal_purity (metal_type_id, purity, value) VALUES
+        INSERT INTO metal_purity (precious_metal_type_id, purity, value) VALUES
         (1, '24K', 0.999),
         (1, '22K', 0.917),
         (1, '21K', 0.875),
@@ -94,31 +81,17 @@ BEGIN
         (1, '10K', 0.417),
         (1, '9K', 0.375),
         (1, '8K', 0.333),
-        (1, 'Gold Filled', NULL),
-        (1, 'Gold Plated', NULL),
-        (1, 'Other', NULL),
         (2, NULL, 0.999),
         (2, NULL, 0.950),
         (2, NULL, 0.585),
-        (2, 'Other', NULL),
         (3, 'Pure', 0.999),
         (3, 'Sterling', 0.925),
         (3, 'Coin', 0.900),
-        (3, 'Vermeil', NULL),
-        (3, 'Silver Plate', NULL),
-        (3, 'Other', NULL),
-        (4, 'Palladium', 0.999),
-        (4, 'Palladium', 0.950),
-        (4, 'Palladium', 0.500),
-        (4, 'Titanium', NULL),
-        (4, 'Tungsten', NULL),
-        (4, 'Stainless', NULL),
-        (4, 'Copper', NULL);
+        (4, NULL, 0.999),
+        (4, NULL, 0.950),
+        (4, NULL, 0.500);
     END IF;
-END $$;
 
-DO $$
-BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_style_category') THEN
         CREATE TABLE metal_style_category (
             id SERIAL PRIMARY KEY,
@@ -188,10 +161,7 @@ BEGIN
         (1, 12, 'Diamond Melee'),
         (1, 12, 'Diamond & Colored Melee');
     END IF;
-END $$;
 
-DO $$
-BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_style_subcategory') THEN
         CREATE TABLE metal_style_subcategory (
             id SERIAL PRIMARY KEY,
@@ -262,10 +232,7 @@ BEGIN
         (49, 'Gent''s Diamond Wedding Bands'),
         (49, 'Unisex Diamond Wedding Bands');
     END IF;
-END $$;
 
-DO $$
-BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal') THEN
         CREATE TABLE metal (
             id SERIAL PRIMARY KEY,

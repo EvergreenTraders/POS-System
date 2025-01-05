@@ -13,7 +13,8 @@ import axios from 'axios';
 
 const MetalEstimator = ({ onMetalValueChange, setMetalFormState }) => {
   const [metalFormState, setMetalForm] = useState({
-    type: '',
+    preciousMetalType: '',
+    nonPreciousMetalType: '',
     metalCategory: '',
     jewelryColor: '',
     weight: '',
@@ -21,7 +22,8 @@ const MetalEstimator = ({ onMetalValueChange, setMetalFormState }) => {
     purity: { purity: '', value: 0 }
   });
 
-  const [metalTypes, setMetalTypes] = useState([]);
+  const [preciousMetalTypes, setPreciousMetalTypes] = useState([]);
+  const [nonPreciousMetalTypes, setNonPreciousMetalTypes] = useState([]);
   const [metalCategories, setMetalCategories] = useState([]);
   const [metalPurities, setMetalPurities] = useState([]);
   const [metalColors, setMetalColors] = useState([]);
@@ -35,9 +37,13 @@ const MetalEstimator = ({ onMetalValueChange, setMetalFormState }) => {
   useEffect(() => {
     const fetchAllData = async () => {
       try {
-        // Fetch Metal Types
-        const typesResponse = await axios.get('http://localhost:5000/api/metal_type');
-        setMetalTypes(typesResponse.data);
+        // Fetch Precious Metal Types
+        const preciousMetalTypesResponse = await axios.get('http://localhost:5000/api/precious_metal_type');
+        setPreciousMetalTypes(preciousMetalTypesResponse.data);
+
+        // Fetch Non-Precious Metal Types
+        const nonPreciousMetalTypesResponse = await axios.get('http://localhost:5000/api/non_precious_metal_type');
+        setNonPreciousMetalTypes(nonPreciousMetalTypesResponse.data);
 
         // Fetch Metal Categories
         const categoriesResponse = await axios.get('http://localhost:5000/api/metal_category');
@@ -55,9 +61,9 @@ const MetalEstimator = ({ onMetalValueChange, setMetalFormState }) => {
     fetchAllData();
   }, []);
 
-  const fetchPurities = async (metalTypeId) => {
+  const fetchPurities = async (preciousMetalTypeId) => {
     try {
-      const response = await axios.get(`http://localhost:5000/api/metal_purity/${metalTypeId}`);
+      const response = await axios.get(`http://localhost:5000/api/metal_purity/${preciousMetalTypeId}`);
       setMetalPurities(response.data);
     } catch (error) {
       console.error('Error fetching metal purities:', error);
@@ -67,20 +73,27 @@ const MetalEstimator = ({ onMetalValueChange, setMetalFormState }) => {
 
   const handleMetalChange = (event) => {
     const { name, value } = event.target;
-    if (name === 'type') {
-      const selectedMetalType = metalTypes.find(type => type.type === value);
-      if (selectedMetalType) {
-        fetchPurities(selectedMetalType.id);
+    if (name === 'preciousMetalType') {
+      const selectedPreciousMetalType = preciousMetalTypes.find(type => type.type === value);
+      if (selectedPreciousMetalType) {
+        fetchPurities(selectedPreciousMetalType.id);
       }
     
     setMetalForm(prev => ({
       ...prev,
-      type: value,
+      preciousMetalType: value,
       purity: { purity: '', value: 0 }
     }));
     return;
   }
-  
+    if (name === 'nonPreciousMetalType') {
+    setMetalForm(prev => ({
+      ...prev,
+      nonPreciousMetalType: value,
+      purity: { purity: '', value: 0 }
+    }));
+    return;
+  }
   // For purity, find the full purity object
   if (name === 'purity') {
     const selectedPurity = metalPurities.find(p => p.id === value);
@@ -111,7 +124,8 @@ const MetalEstimator = ({ onMetalValueChange, setMetalFormState }) => {
 
     // Reset form
     setMetalForm({
-      type: '',
+      preciousMetalType: '',
+      nonPreciousMetalType: '',
       metalCategory: '',
       jewelryColor: '',
       weight: '',
@@ -141,20 +155,34 @@ const MetalEstimator = ({ onMetalValueChange, setMetalFormState }) => {
     <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
       <Typography variant="h6" sx={{ mb: 2 }}>ESTIMATE METAL</Typography>
       <FormControl fullWidth sx={{ mb: 2 }}>
-        <InputLabel>Select Metal Type *</InputLabel>
+        <InputLabel>Select Precious Metal Type *</InputLabel>
         <Select
-          name="type"
-          value={metalFormState.type}
+          name="preciousMetalType"
+          value={metalFormState.preciousMetalType}
           onChange={handleMetalChange}
           required
         >
-          {metalTypes.map(type => (
+          {preciousMetalTypes.map(type => (
             <MenuItem key={type.id} value={type.type}>{type.type}</MenuItem>
           ))}
         </Select>
       </FormControl>
 
-      {metalFormState.type === 'Gold' && (
+      <FormControl fullWidth sx={{ mb: 2 }}>
+        <InputLabel>Select Non-Precious Metal Type</InputLabel>
+        <Select
+          name="nonPreciousMetalType"
+          value={metalFormState.nonPreciousMetalType}
+          onChange={handleMetalChange}
+          required
+        >
+          {nonPreciousMetalTypes.map(type => (
+            <MenuItem key={type.id} value={type.type}>{type.type}</MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+
+      {metalFormState.preciousMetalType === 'Gold' && (
         <FormControl fullWidth sx={{ mb: 2 }}>
           <InputLabel>Select Jewelry Color *</InputLabel>
           <Select
@@ -227,7 +255,7 @@ const MetalEstimator = ({ onMetalValueChange, setMetalFormState }) => {
         onClick={addMetal}
         fullWidth
         sx={{ mt: 2 }}
-        disabled={!metalFormState.type || !metalFormState.purity || !metalFormState.metalCategory || !metalFormState.weight || (metalFormState.type === 'Gold' && !metalFormState.jewelryColor)}
+        disabled={!metalFormState.preciousMetalType ||!metalFormState.purity || !metalFormState.metalCategory || !metalFormState.weight || (metalFormState.type === 'Gold' && !metalFormState.jewelryColor)}
       >
         Add Metal
       </Button>

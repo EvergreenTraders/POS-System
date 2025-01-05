@@ -1099,7 +1099,8 @@ function GemEstimator() {
 
             <Typography variant="h6">SUMMARY</Typography>
             <Typography variant="subtitle1">Metal</Typography>
-            <Typography variant="body2">Type: {metalFormState.type}</Typography>
+            <Typography variant="body2">Precious Metal Type: {metalFormState.preciousMetalType}</Typography>
+            <Typography variant="body2">Non Precious Metal Type: {metalFormState.nonPreciousMetalType}</Typography>
             <Typography variant="body2">Purity: {metalFormState.purity.purity || metalFormState.purity.value}</Typography>
             <Typography variant="body2">Category: {metalFormState.metalCategory}</Typography>
             <Typography variant="body2">Color: {metalFormState.jewelryColor}</Typography>
