@@ -1460,12 +1460,61 @@ function GemEstimator() {
               </ImageList>
             )}
 
-            <Divider sx={{ my: 2 }} />
-            
-            <Typography variant="h6">Price Estimates</Typography>
-            <Typography variant="body2">Pawn: ${priceEstimates.pawn.toFixed(2)}</Typography>
-            <Typography variant="body2">Buy: ${priceEstimates.buy.toFixed(2)}</Typography>
-            <Typography variant="body2">Retail: ${priceEstimates.retail.toFixed(2)}</Typography>
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h6" sx={{ mb: 2 }}>Price Estimates</Typography>
+              
+              <Box sx={{ 
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                overflow: 'hidden'
+              }}>
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  p: 1.5,
+                  borderBottom: '1px solid',
+                  borderColor: 'divider',
+                }}>
+                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
+                    Pawn Value
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
+                    ${priceEstimates.pawn.toFixed(2)}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  p: 1.5,
+                  borderBottom: '1px solid',
+                  borderColor: 'divider',
+                  '&:hover': { bgcolor: 'action.hover' }
+                }}>
+                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
+                    Buy Value
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
+                    ${priceEstimates.buy.toFixed(2)}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  p: 1.5,
+                  '&:hover': { bgcolor: 'action.hover' }
+                }}>
+                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
+                    Retail Value
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
+                    ${priceEstimates.retail.toFixed(2)}
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
 
             <Typography variant="h6" sx={{ mt: 2 }}>SUMMARY</Typography>
             <Grid container spacing={2} >
