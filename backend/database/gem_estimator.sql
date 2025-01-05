@@ -1,5 +1,68 @@
 DO $$
 BEGIN
+    -- Stone Color Table
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_color') THEN
+        CREATE TABLE stone_color (
+            id SERIAL PRIMARY KEY,
+            color VARCHAR(50) NOT NULL UNIQUE
+        );
+        
+        INSERT INTO stone_color (color) VALUES
+        ('Yellow'),
+        ('Green'),
+        ('Blue'),
+        ('Orange'),
+        ('Red'),
+        ('Purple'),
+        ('Brown'),
+        ('Black'),
+        ('White'),
+        ('Teal'),
+        ('Gray'),
+        ('Pink');
+    END IF;
+
+    -- Stone Shape Table
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_shape') THEN
+        CREATE TABLE stone_shape (
+            id SERIAL PRIMARY KEY,
+            shape VARCHAR(50) NOT NULL UNIQUE,
+            image_path VARCHAR(255)
+        );
+        
+        INSERT INTO stone_shape (shape, image_path) VALUES
+        ('Round', '/images/stone_shapes/round.png'),
+        ('Oval', '/images/stone_shapes/oval.png'),
+        ('Emerald', '/images/stone_shapes/emerald.png'),
+        ('Pear', '/images/stone_shapes/pear.png'),
+        ('Cushion', '/images/stone_shapes/cushion.png'),
+        ('Heart', '/images/stone_shapes/heart.png'),
+        ('Princess', '/images/stone_shapes/princess.png'),
+        ('Marquise', '/images/stone_shapes/marquise.png'),
+        ('Radiant', '/images/stone_shapes/radiant.png'),
+        ('Asscher', '/images/stone_shapes/asscher.png');
+    END IF;
+
+    -- Stone Type Table
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_type') THEN
+        CREATE TABLE stone_type (
+            id SERIAL PRIMARY KEY,
+            type VARCHAR(50) NOT NULL UNIQUE,
+            image_path VARCHAR(255)
+        );
+        
+        INSERT INTO stone_type (type, image_path) VALUES
+        ('Topaz', '/images/stones/topaz.png'),
+        ('Tanzanite', '/images/stones/tanzanite.png'),
+        ('Aquamarine', '/images/stones/aquamarine.png'),
+        ('Garnet', '/images/stones/garnet.png'),
+        ('Black Onyx', '/images/stones/black_onyx.png'),
+        ('Amethyst', '/images/stones/amethyst.png'),
+        ('Emerald', '/images/stones/emerald.png'),
+        ('Sapphire', '/images/stones/sapphire.png'),
+        ('Ruby', '/images/stones/ruby.png');
+    END IF;
+
     -- Diamond Shape Table
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'diamond_shape') THEN
         CREATE TABLE diamond_shape (

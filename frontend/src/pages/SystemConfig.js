@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Container,
   Typography,
@@ -50,7 +50,13 @@ function SystemConfig() {
     email: '',
     currency: 'USD',
     timezone: 'UTC',
+    priceEstimates: {
+      pawn: 50,    // 50% for pawn
+      buy: 70,     // 70% for buy
+      retail: 80,  // 80% for retail
+    }
   });
+
 
   const [securitySettings, setSecuritySettings] = useState({
     requirePasswordChange: true,
@@ -72,10 +78,29 @@ function SystemConfig() {
 
   const handleGeneralSettingsChange = (event) => {
     const { name, value } = event.target;
-    setGeneralSettings(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    
+    // Handle nested priceEstimates updates
+    if (name.startsWith('priceEstimates.')) {
+      const field = name.split('.')[1];
+      setGeneralSettings(prev => ({
+        ...prev,
+        priceEstimates: {
+          ...prev.priceEstimates,
+          [field]: Number(value)
+        }
+      }));
+      // Save to localStorage immediately
+      const updatedPriceEstimates = {
+        ...generalSettings.priceEstimates,
+        [field]: Number(value)
+      };
+      localStorage.setItem('priceEstimateSettings', JSON.stringify(updatedPriceEstimates));
+    } else {
+      setGeneralSettings(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
   };
 
   const handleSecuritySettingsChange = (event) => {
@@ -96,7 +121,9 @@ function SystemConfig() {
 
   const handleSaveSettings = async () => {
     try {
-      // TODO: Implement API call to save settings
+      // Save price estimate percentages to localStorage
+      localStorage.setItem('priceEstimateSettings', JSON.stringify(generalSettings.priceEstimates));
+      
       setSnackbar({
         open: true,
         message: 'Settings saved successfully',
@@ -110,6 +137,14 @@ function SystemConfig() {
       });
     }
   };
+
+  // Initialize price estimate settings
+  useEffect(() => {
+    // Save initial price estimates if not already in localStorage
+    if (!localStorage.getItem('priceEstimateSettings')) {
+      localStorage.setItem('priceEstimateSettings', JSON.stringify(generalSettings.priceEstimates));
+    }
+  }, []);
 
   return (
     <Container>
@@ -183,6 +218,47 @@ function SystemConfig() {
                   rows={2}
                   value={generalSettings.address}
                   onChange={handleGeneralSettingsChange}
+                />
+              </Grid>
+            </Grid>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Price Estimate Percentages
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  label="Pawn Percentage"
+                  name="priceEstimates.pawn"
+                  type="number"
+                  value={generalSettings.priceEstimates.pawn}
+                  onChange={handleGeneralSettingsChange}
+                  inputProps={{ min: 0, max: 100 }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  label="Buy Percentage"
+                  name="priceEstimates.buy"
+                  type="number"
+                  value={generalSettings.priceEstimates.buy}
+                  onChange={handleGeneralSettingsChange}
+                  inputProps={{ min: 0, max: 100 }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  label="Retail Percentage"
+                  name="priceEstimates.retail"
+                  type="number"
+                  value={generalSettings.priceEstimates.retail}
+                  onChange={handleGeneralSettingsChange}
+                  inputProps={{ min: 0, max: 100 }}
                 />
               </Grid>
             </Grid>

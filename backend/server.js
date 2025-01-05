@@ -247,6 +247,30 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
+// Precious Metal tables routes
+app.get('/api/precious_metal_type', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM precious_metal_type';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching precious metal types:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Non Precious Metal tables routes
+app.get('/api/non_precious_metal_type', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM non_precious_metal_type';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching non-precious metal types:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Metal tables routes
 app.get('/api/metal_type', async (req, res) => {
   try {
@@ -259,13 +283,12 @@ app.get('/api/metal_type', async (req, res) => {
   }
 });
 
-
-app.get('/api/metal_purity/:metal_type_id', async (req, res) => {
+app.get('/api/metal_purity/:precious_metal_type_id', async (req, res) => {
   try {
-    const { metal_type_id } = req.params;
+    const { precious_metal_type_id } = req.params;
     
-    const query = 'SELECT * FROM metal_purity WHERE metal_type_id = $1';
-    const result = await pool.query(query, [metal_type_id]);
+    const query = 'SELECT * FROM metal_purity WHERE precious_metal_type_id = $1';
+    const result = await pool.query(query, [precious_metal_type_id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'No purities found for this metal type' });
@@ -398,6 +421,39 @@ app.get('/api/diamond_color', async (req, res) => {
   } catch (err) {
     console.error('Error fetching diamond color grades:', err.message);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Stone Type API Endpoint
+app.get('/api/stone_type', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT type, image_path FROM stone_type');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching stone types:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Stone Shape API Endpoint
+app.get('/api/stone_shape', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT shape, image_path FROM stone_shape');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching stone shapes:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Stone Color API Endpoint
+app.get('/api/stone_color', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT color FROM stone_color');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching stone colors:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

@@ -15,7 +15,7 @@ import Jewellery from './pages/Jewellery';
 import CoinsBullions from './pages/CoinsBullions';
 import SystemConfig from './pages/SystemConfig';
 import Employees from './pages/Employees';
-import Estimator from './pages/Estimator';
+import GemEstimator from './pages/GemEstimator';
 import Pawns from './pages/Pawns';
 
 const theme = createTheme({
@@ -127,11 +127,11 @@ function App() {
                 }
               />
               <Route
-                path="/estimator"
+                path="/gem-estimator"
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <Estimator />
+                      <GemEstimator />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
