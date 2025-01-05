@@ -295,6 +295,114 @@ function GemEstimator() {
     }
   };
 
+  const [images, setImages] = useState([]);
+  const [showCamera, setShowCamera] = useState(false);
+  const videoRef = React.useRef(null);
+  const [stream, setStream] = useState(null);
+  const [isVideoReady, setIsVideoReady] = useState(false);
+
+  // Clean up camera resources when component unmounts
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [stream]);
+
+  // Handle video initialization when showCamera changes
+  useEffect(() => {
+    if (showCamera && videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.onloadedmetadata = () => {
+        videoRef.current.play().then(() => {
+          setIsVideoReady(true);
+        }).catch(err => {
+          console.error("Error playing video:", err);
+        });
+      };
+    }
+  }, [showCamera, stream]);
+
+  const handleFileUpload = (event) => {
+    const files = Array.from(event.target.files);
+    const newImages = files.map(file => ({
+      file,
+      url: URL.createObjectURL(file),
+      type: 'upload'
+    }));
+    setImages(prev => [...prev, ...newImages]);
+  };
+
+  const startCamera = async () => {
+    setIsVideoReady(false); // Reset video ready state
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } 
+      });
+      setStream(mediaStream);
+      setShowCamera(true);
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      alert("Could not access camera. Please make sure you have given permission.");
+    }
+  };
+
+  const stopCamera = () => {
+    setIsVideoReady(false);
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setStream(null);
+    setShowCamera(false);
+  };
+
+  const captureImage = () => {
+    if (!videoRef.current || !isVideoReady) {
+      console.log("Video ref:", videoRef.current, "Ready:", isVideoReady);
+      alert("Camera is not ready yet. Please wait a moment.");
+      return;
+    }
+
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth || 1280;
+      canvas.height = videoRef.current.videoHeight || 720;
+      
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      
+      canvas.toBlob(blob => {
+        if (!blob) {
+          alert("Failed to capture image. Please try again.");
+          return;
+        }
+        const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        const newImage = {
+          file,
+          url: URL.createObjectURL(file),
+          type: 'capture'
+        };
+        setImages(prev => [...prev, newImage]);
+        stopCamera();
+      }, 'image/jpeg', 0.8);
+    } catch (err) {
+      console.error("Error capturing image:", err);
+      alert("Failed to capture image. Please try again.");
+    }
+  };
+
+  const removeImage = (index) => {
+    setImages(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleExactColorChange = (event, newValue) => {
     setExactColor(colorScale[newValue]);
     
@@ -955,68 +1063,6 @@ function GemEstimator() {
     }));
   };
 
-  // Add state for images
-  const [images, setImages] = useState([]);
-  const [showCamera, setShowCamera] = useState(false);
-  const videoRef = React.useRef(null);
-  const [stream, setStream] = useState(null);
-
-  const handleFileUpload = (event) => {
-    const files = Array.from(event.target.files);
-    const newImages = files.map(file => ({
-      file,
-      url: URL.createObjectURL(file),
-      type: 'upload'
-    }));
-    setImages(prev => [...prev, ...newImages]);
-  };
-
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      setStream(stream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      setShowCamera(true);
-    } catch (err) {
-      console.error("Error accessing camera:", err);
-      alert("Could not access camera. Please make sure you have given permission.");
-    }
-  };
-
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-    }
-    setStream(null);
-    setShowCamera(false);
-  };
-
-  const captureImage = () => {
-    if (videoRef.current) {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(videoRef.current, 0, 0);
-      canvas.toBlob(blob => {
-        const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-        const newImage = {
-          file,
-          url: URL.createObjectURL(file),
-          type: 'capture'
-        };
-        setImages(prev => [...prev, newImage]);
-        stopCamera();
-      }, 'image/jpeg');
-    }
-  };
-
-  const removeImage = (index) => {
-    setImages(prev => prev.filter((_, i) => i !== index));
-  };
-
   return (
     <Container maxWidth="lg">
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -1529,72 +1575,161 @@ function GemEstimator() {
       <Grid container spacing={1} sx={{ mt: 3 }}>
         {/* Estimated Items Section */}
         <Grid item xs={12}>
-          <Paper sx={{ p: 2, mt: 3, mb: 3 }}>
-            <Typography variant="h6" sx={{ mb: 2 }}>Estimated Items</Typography>
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Description</TableCell>
-                    <TableCell>Transaction Type</TableCell>
-                    <TableCell>Price</TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {estimatedItems.map((item, index) => (
-                    <TableRow 
-                      key={index}
-                      onClick={() => handleOpenDialog(index)}
-                      sx={{ 
-                        cursor: 'pointer',
-                        transition: 'all 0.2s'
-                      }}
-                    >
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <Typography>{item.weight}g {item.purity} {item.type} {item.category}</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <Select
-                          value={itemTransactionTypes[index] || 'pawn'}
-                          onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
-                          size="small"
-                        >
-                          <MenuItem value="pawn">Pawn (${item.priceEstimates.pawn.toFixed(2)})</MenuItem>
-                          <MenuItem value="buy">Buy (${item.priceEstimates.buy.toFixed(2)})</MenuItem>
-                          <MenuItem value="retail">Retail (${item.priceEstimates.retail.toFixed(2)})</MenuItem>
-                        </Select>
-                      </TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <TextField 
-                          type="number"
-                          value={editedPrices[index] || item.priceEstimates[itemTransactionTypes[index] || 'pawn']}
-                          onChange={(e) => handlePriceChange(index, e.target.value)}
-                          InputProps={{
-                            startAdornment: <InputAdornment position="start">$</InputAdornment>
-                          }}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <IconButton
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const newItems = [...estimatedItems];
-                            newItems.splice(index, 1);
-                            setEstimatedItems(newItems);
-                          }}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </TableCell>
+          <Paper sx={{ p: 3, mt: 3, mb: 3, borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>Estimated Items</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {estimatedItems.length} {estimatedItems.length === 1 ? 'item' : 'items'}
+              </Typography>
+            </Box>
+            
+            {estimatedItems.length === 0 ? (
+              <Box sx={{ 
+                py: 6, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center',
+                bgcolor: 'grey.50',
+                borderRadius: 1
+              }}>
+                <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
+                  No items estimated yet
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Complete your estimation above to see items here
+                </Typography>
+              </Box>
+            ) : (
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Description</TableCell>
+                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Transaction Type</TableCell>
+                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Price</TableCell>
+                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Actions</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                  </TableHead>
+                  <TableBody>
+                    {estimatedItems.map((item, index) => (
+                      <TableRow 
+                        key={index}
+                        onClick={() => handleOpenDialog(index)}
+                        sx={{ 
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          '&:hover': {
+                            bgcolor: 'action.hover',
+                            '& .action-buttons': {
+                              opacity: 1
+                            }
+                          }
+                        }}
+                      >
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Box>
+                              <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
+                                {item.weight}g {item.purity} {item.type}
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                {item.category}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <Select
+                            value={itemTransactionTypes[index] || 'pawn'}
+                            onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
+                            size="small"
+                            sx={{ 
+                              minWidth: 150,
+                              '& .MuiSelect-select': {
+                                py: 1
+                              }
+                            }}
+                          >
+                            <MenuItem value="pawn">
+                              <Box>
+                                <Typography variant="body2">Pawn</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ${item.priceEstimates.pawn.toFixed(2)}
+                                </Typography>
+                              </Box>
+                            </MenuItem>
+                            <MenuItem value="buy">
+                              <Box>
+                                <Typography variant="body2">Buy</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ${item.priceEstimates.buy.toFixed(2)}
+                                </Typography>
+                              </Box>
+                            </MenuItem>
+                            <MenuItem value="retail">
+                              <Box>
+                                <Typography variant="body2">Retail</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ${item.priceEstimates.retail.toFixed(2)}
+                                </Typography>
+                              </Box>
+                            </MenuItem>
+                          </Select>
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <TextField 
+                            type="number"
+                            value={editedPrices[index] || item.priceEstimates[itemTransactionTypes[index] || 'pawn']}
+                            onChange={(e) => handlePriceChange(index, e.target.value)}
+                            InputProps={{
+                              startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                              sx: {
+                                '& input': {
+                                  py: 1
+                                }
+                              }
+                            }}
+                            size="small"
+                            sx={{ width: 150 }}
+                          />
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <Box className="action-buttons" sx={{ 
+                            opacity: 0.7,
+                            transition: 'opacity 0.2s',
+                            display: 'flex',
+                            gap: 1 
+                          }}>
+                            <IconButton
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenDialog(index);
+                              }}
+                              size="small"
+                              sx={{ color: 'primary.main' }}
+                            >
+                              <EditIcon />
+                            </IconButton>
+                            <IconButton
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const newItems = [...estimatedItems];
+                                newItems.splice(index, 1);
+                                setEstimatedItems(newItems);
+                              }}
+                              size="small"
+                              sx={{ color: 'error.main' }}
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
           </Paper>
         </Grid>
       </Grid>
