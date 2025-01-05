@@ -32,6 +32,7 @@ import MetalEstimator from './MetalEstimator';
 function GemEstimator() {
   const [metalFormState, setMetalFormState] = useState({});
   const [totalMetalValue, setTotalMetalValue] = useState(0);
+  const [addMetal, setAddMetal] = useState([]);
 
   const handleMetalFormChange = (formState) => {
       setMetalFormState(formState);
@@ -40,6 +41,14 @@ function GemEstimator() {
   const handleTotalMetalValueChange = (value) => {
       setTotalMetalValue(value);
   };
+
+  const handleAddMetal = (newItem) => {
+    setAddMetal(prev => [...prev, newItem]); 
+  };
+
+  const [diamondSummary, setDiamondSummary] = useState([]);
+
+  const [stoneSummary, setStoneSummary] = useState([]);
 
   // Primary gem form
   const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
@@ -250,15 +259,20 @@ function GemEstimator() {
   const addDiamond = () => {
     const currentForm = getCurrentForm();
     const newItem = {
-      type: activeTab.startsWith('primary') ? 'Primary Diamond' : 'Secondary Diamond',
-      description: `${currentForm.shape} ${currentForm.clarity} ${currentForm.color} ${currentForm.exactColor} ${currentForm.cut}`,
-      weight: currentForm.weight+' ct',
+      shape: currentForm.shape,
+      clarity: currentForm.clarity,
+      color: currentForm.color,
+      exactColor: currentForm.exactColor,
+      cut: currentForm.cut,
+      size: currentForm.size,
+      weight: currentForm.weight,
       quantity: currentForm.quantity,
       labGrown: currentForm.labGrown,
-      valuationType: currentForm.quantity > 1 ? diamondValuationType : 'each',
+      isPrimary: activeTab.startsWith('primary'),
     };
 
     setEstimatedItems(prev => [...prev, newItem]);
+    setDiamondSummary(prev => [...prev, newItem]);
     
     // Reset the current form after adding
     const resetForm = {
@@ -305,16 +319,18 @@ function GemEstimator() {
     const currentForm = getCurrentStoneForm();
     const newStone = {
       type:  activeTab.startsWith('primary') ? 'Primary Stone' : 'Secondary Stone',
-      description: `${currentForm.name} - ${currentForm.color}`,
-      dimension: currentForm.shape,
+     // description: `${currentForm.name} - ${currentForm.color}`,
+      shape: currentForm.shape,
       weight: currentForm.weight+' ct',
+      color: currentForm.color,
       quantity: currentForm.quantity,
-      labGrown: false,
+      authentic: currentForm.authentic,
       estimatedValue: calculateStoneValue(),
-      isPrimary: activeTab.startsWith('primary')
+      //isPrimary: activeTab.startsWith('primary')
     };
 
     setEstimatedItems(prev => [...prev, newStone]);
+    setStoneSummary(prev => [...prev, newStone]);
 
     // Reset the form after adding
     if (activeTab.startsWith('primary')) {
@@ -656,7 +672,7 @@ function GemEstimator() {
             }
           }}
         >
-          {activeTab.startsWith('primary') ? 'Secondary' : 'Primary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'}
+          {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
         </Button>
       </Grid>
     </Grid>
@@ -782,8 +798,10 @@ function GemEstimator() {
         <Grid item xs={12} md={3}>
         <MetalEstimator 
                 onMetalValueChange={handleTotalMetalValueChange}
+                onAddMetal={handleAddMetal}
                 setMetalFormState={handleMetalFormChange} />
         </Grid>
+
         {/* Diamond Estimation Section */}
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
@@ -1098,36 +1116,59 @@ function GemEstimator() {
             <Typography variant="body2">Retail: ${estimates.retail.toFixed(2)}</Typography>
 
             <Typography variant="h6">SUMMARY</Typography>
-            <Typography variant="subtitle1">Metal</Typography>
-            <Typography variant="body2">Precious Metal Type: {metalFormState.preciousMetalType}</Typography>
-            <Typography variant="body2">Non Precious Metal Type: {metalFormState.nonPreciousMetalType}</Typography>
-            <Typography variant="body2">Purity: {metalFormState.purity.purity || metalFormState.purity.value}</Typography>
-            <Typography variant="body2">Category: {metalFormState.metalCategory}</Typography>
-            <Typography variant="body2">Color: {metalFormState.jewelryColor}</Typography>
-            <Typography variant="body2">Weight: {metalFormState.weight}g</Typography>
+            {addMetal.map((metal, index) => (
+            <div key={index}>
+                <Typography variant="subtitle1">Metal</Typography>
+                <Typography variant="body2">Precious Metal Type: {metal.preciousMetalType}</Typography>
+                <Typography variant="body2">Non Precious Metal Type: {metal.nonPreciousMetalType}</Typography>
+                <Typography variant="body2">Purity: {metal.purity.purity || metal.purity.value}</Typography>
+                <Typography variant="body2">Category: {metal.metalCategory}</Typography>
+                <Typography variant="body2">Color: {metal.jewelryColor}</Typography>
+                <Typography variant="body2">Weight: {metal.weight}g</Typography>
+                <Typography variant="body2">Estimated Value: ${metal.estimatedValue.toFixed(2)}</Typography>
+            </div>
+        ))}
 
-            <Typography variant="subtitle1" sx={{ mt: 2 }}>
-              {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'}
-            </Typography>
             {activeTab.includes('diamond') ? (
               <>
-                <Typography variant="body2">Shape: {activeTab.startsWith('primary') ? primaryDiamondForm.shape : secondaryDiamondForm.shape}</Typography>
+              {diamondSummary.map((diamond, index) => (
+                <div key={index}>
+                  <Typography variant="subtitle2" sx={{ mt: 2 }}>{diamond.isPrimary ? 'Primary' : 'Secondary'} Diamond </Typography>
+                  <Typography variant="body2">Shape: {diamond.shape}</Typography>
+                  <Typography variant="body2">Clarity: {diamond.clarity}</Typography>
+                  <Typography variant="body2">Color: {diamond.color}</Typography>
+                  <Typography variant="body2">Cut: {diamond.cut}</Typography>
+                  <Typography variant="body2">Weight: {diamond.weight}</Typography>
+                  <Typography variant="body2">Quantity: {diamond.quantity}</Typography>
+                  <Typography variant="body2">Lab Grown: {diamond.labGrown ? 'Yes' : 'No'}</Typography>
+                  <Typography variant="body2">Exact Color: {diamond.exactColor}</Typography>
+                </div>))}
+                {/* <Typography variant="body2">Shape: {activeTab.startsWith('primary') ? primaryDiamondForm.shape : secondaryDiamondForm.shape}</Typography>
                 <Typography variant="body2">Clarity: {activeTab.startsWith('primary') ? primaryDiamondForm.clarity : secondaryDiamondForm.clarity}</Typography>
                 <Typography variant="body2">Color: {activeTab.startsWith('primary') ? primaryDiamondForm.color : secondaryDiamondForm.color}</Typography>
                 <Typography variant="body2">Cut: {activeTab.startsWith('primary') ? primaryDiamondForm.cut : secondaryDiamondForm.cut}</Typography>
                 <Typography variant="body2">Weight: {activeTab.startsWith('primary') ? primaryDiamondForm.weight : secondaryDiamondForm.weight} ct</Typography>
                 <Typography variant="body2">Quantity: {activeTab.startsWith('primary') ? primaryDiamondForm.quantity : secondaryDiamondForm.quantity}</Typography>
                 <Typography variant="body2">Lab Grown: {activeTab.startsWith('primary') ? (primaryDiamondForm.labGrown? 'Yes' : 'No') : (secondaryDiamondForm.labGrown ? 'Yes' : 'No')}</Typography>
-                <Typography variant="body2">Exact Color: {activeTab.startsWith('primary') ? primaryDiamondForm.exactColor : secondaryDiamondForm.exactColor}</Typography>
+                <Typography variant="body2">Exact Color: {activeTab.startsWith('primary') ? primaryDiamondForm.exactColor : secondaryDiamondForm.exactColor}</Typography> */}
               </>
             ) : (
               <>
-                <Typography variant="body2">Type: {activeTab.startsWith('primary') ? primaryStoneForm.name : secondaryStoneForm.name}</Typography>
+              {stoneSummary.map((stone, index) => (
+                <div key={index}>
+                  <Typography variant="subtitle2" sx={{ mt: 2 }}>{stone.type} </Typography>
+                  <Typography variant="body2">Shape: {stone.shape}</Typography>
+                  <Typography variant="body2">Color: {stone.color}</Typography>
+                  <Typography variant="body2">Weight: {stone.weight}</Typography>
+                  <Typography variant="body2">Quantity: {stone.quantity}</Typography>
+                  <Typography variant="body2">Authentic: {stone.authentic ? 'Yes' : 'No'}</Typography>
+                </div>))}
+                {/* <Typography variant="body2">Type: {activeTab.startsWith('primary') ? primaryStoneForm.name : secondaryStoneForm.name}</Typography>
                 <Typography variant="body2">Shape: {activeTab.startsWith('primary') ? primaryStoneForm.shape : secondaryStoneForm.shape}</Typography>
                 <Typography variant="body2">Color: {activeTab.startsWith('primary') ? primaryStoneForm.color : secondaryStoneForm.color}</Typography>
                 <Typography variant="body2">Weight: {activeTab.startsWith('primary') ? primaryStoneForm.weight : secondaryStoneForm.weight} ct</Typography>
                 <Typography variant="body2">Quantity: {activeTab.startsWith('primary') ? primaryStoneForm.quantity : secondaryStoneForm.quantity}</Typography>
-                <Typography variant="body2">Authentic: {activeTab.startsWith('primary') ? primaryStoneForm.authentic? 'Yes' : 'No' : secondaryStoneForm.authentic? 'Yes' : 'No'}</Typography>
+                <Typography variant="body2">Authentic: {activeTab.startsWith('primary') ? primaryStoneForm.authentic? 'Yes' : 'No' : secondaryStoneForm.authentic? 'Yes' : 'No'}</Typography> */}
               </>
             )}
           </Paper>

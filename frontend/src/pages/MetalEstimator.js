@@ -11,7 +11,7 @@ import {
 } from '@mui/material';
 import axios from 'axios';
 
-const MetalEstimator = ({ onMetalValueChange, setMetalFormState }) => {
+const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) => {
   const [metalFormState, setMetalForm] = useState({
     preciousMetalType: '',
     nonPreciousMetalType: '',
@@ -111,15 +111,21 @@ const MetalEstimator = ({ onMetalValueChange, setMetalFormState }) => {
 
   const addMetal = () => {
     const newItem = {
-      type: 'Metal',
-      description: `${metalFormState.type} ${metalFormState.metalCategory} ${metalFormState.purity?.purity || ''} ${metalFormState.jewelryColor}`,
-      dimension: `${metalFormState.size}`,
-      weight: metalFormState.weight + ' g',
-      quantity: 1,
+      // type: 'Metal',
+      // description: `${metalFormState.type} ${metalFormState.metalCategory} ${metalFormState.purity?.purity || ''} ${metalFormState.jewelryColor}`,
+      // dimension: `${metalFormState.size}`,
+      // weight: metalFormState.weight + ' g',
+      // quantity: 1,
+      preciousMetalType: metalFormState.preciousMetalType,
+      nonPreciousMetalType: metalFormState.nonPreciousMetalType,
+      metalCategory: metalFormState.metalCategory,
+      jewelryColor: metalFormState.jewelryColor,
+      weight: metalFormState.weight,
+      purity: metalFormState.purity,
       estimatedValue: totalMetalValue
     };
 
-   // onAddMetal(newItem);
+    onAddMetal(newItem); 
     onMetalValueChange(totalMetalValue);
 
     // Reset form
