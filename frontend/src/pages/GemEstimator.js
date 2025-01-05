@@ -22,7 +22,9 @@ import {
   Checkbox,
   Slider,
   Radio,
-  RadioGroup
+  RadioGroup,
+  Tab,
+  InputAdornment
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
@@ -49,13 +51,51 @@ function GemEstimator() {
     setAddMetal(prev => prev.filter((_, i) => i !== index)); // Deletes the selected metal
   };
 
-  const handleDeleteDiamond = (index) => {
-    setDiamondSummary(prev => prev.filter((_, i) => i !== index)); // Deletes the selected diamond
+  const handleDeleteGem = (index, type, isPrimary) => {
+    const gemPosition = isPrimary ? 'primary' : 'secondary';
+    console.log("gem", gemPosition, isPrimary,type);
+  
+    if (type === 'diamond') {
+      setDiamondSummary(prev => prev.filter((_, i) => i !== index));
+    } else {
+      setStoneSummary(prev => prev.filter((_, i) => i !== index));
+    }
+        
+    // Clear the gem type when deleted
+    setAddedGemTypes(prev => ({
+      ...prev,
+      [gemPosition]: null
+    }));
   };
 
-  const handleDeleteStone = (index) => {
-    setStoneSummary(prev => prev.filter((_, i) => i !== index)); // Deletes the selected stone
+  const handleFinishEstimation = () => {
+    const newItem = {
+      weight: addMetal[0].weight,
+      purity: addMetal[0].purity?.purity || addMetal[0].purity.value,
+      type: addMetal[0].preciousMetalType + " " +  addedGemTypes.primary + " " + addedGemTypes.secondary,
+      category: addMetal[0].metalCategory,
+      priceEstimates: {
+        pawn: priceEstimates.pawn,
+        buy: priceEstimates.buy,
+        retail: priceEstimates.retail
+      }
+    };
+    setEstimatedItems(prev => [...prev, newItem]);
+
+    // Clear all summaries
+    setAddMetal([]);
+    setDiamondSummary([]);
+    setStoneSummary([]);
+    setAddedGemTypes({
+      primary: null,
+      secondary: null
+    });
   };
+
+  const [addedGemTypes, setAddedGemTypes] = useState({
+    primary: null,  // can be 'diamond' or 'stone'
+    secondary: null // can be 'diamond' or 'stone'
+  });
 
   const [diamondSummary, setDiamondSummary] = useState([]);
 
@@ -284,6 +324,14 @@ function GemEstimator() {
 
   const addDiamond = () => {
     const currentForm = getCurrentForm();
+    const isPrimary = activeTab.startsWith('primary');
+  
+  // Check if we can add this type of gem
+    const gemPosition = isPrimary ? 'primary' : 'secondary';
+    if (addedGemTypes[gemPosition] === 'stone') {
+      alert(`Please delete the existing ${gemPosition} stone before adding a diamond`);
+      return;
+    }
     const newItem = {
       shape: currentForm.shape,
       clarity: currentForm.clarity,
@@ -295,10 +343,14 @@ function GemEstimator() {
       quantity: currentForm.quantity,
       labGrown: currentForm.labGrown,
       isPrimary: activeTab.startsWith('primary'),
+      type: 'diamond'
     };
 
-    setEstimatedItems(prev => [...prev, newItem]);
     setDiamondSummary(prev => [...prev, newItem]);
+    setAddedGemTypes(prev => ({
+      ...prev,
+      [gemPosition]: 'diamond'
+    }));
     
     // Reset the current form after adding
     const resetForm = {
@@ -343,18 +395,30 @@ function GemEstimator() {
 
   const addStone = () => {
     const currentForm = getCurrentStoneForm();
+    const isPrimary = activeTab.startsWith('primary');
+
+    // Check if we can add this type of gem
+    const gemPosition = isPrimary ? 'primary' : 'secondary';
+    if (addedGemTypes[gemPosition] === 'diamond') {
+      alert(`Please delete the existing ${gemPosition} diamond before adding a stone`);
+      return;
+    }
     const newStone = {
-      type:  currentForm.name,
+      name:  currentForm.name,
       shape: currentForm.shape,
       weight: currentForm.weight+' ct',
       color: currentForm.color,
       quantity: currentForm.quantity,
       authentic: currentForm.authentic,
-      isPrimary: activeTab.startsWith('primary')
+      isPrimary: activeTab.startsWith('primary'),
+      type: 'stone'
     };
 
-    setEstimatedItems(prev => [...prev, newStone]);
     setStoneSummary(prev => [...prev, newStone]);
+    setAddedGemTypes(prev => ({
+      ...prev,
+      [gemPosition]: 'stone'
+    }));
 
     // Reset the form after adding
     if (activeTab.startsWith('primary')) {
@@ -632,7 +696,7 @@ function GemEstimator() {
       {/* Add button to switch between primary and secondary gems */}
       <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Typography variant="h6" sx={{ flexGrow: 1, mr: 2 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: ${estimatedItems.filter(item => item.type === (activeTab.includes('diamond') ? 'Diamond' : 'Stone')).reduce((total, stone) => total + stone.estimatedValue, 0).toFixed(2)}
+          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: 0
         </Typography>
         <Button 
           variant="contained" 
@@ -689,7 +753,7 @@ function GemEstimator() {
       </Grid>
       <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
         <Typography variant="h6" sx={{ flexGrow: 1, mr: 2 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: ${estimatedItems.filter(item => item.type === (activeTab.includes('diamond') ? 'Diamond' : 'Stone')).reduce((total, stone) => total + stone.estimatedValue, 0).toFixed(2)}
+          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: 0
         </Typography>
         <Button 
           variant="contained" 
@@ -792,6 +856,55 @@ function GemEstimator() {
       category => exactColor >= category.start && exactColor <= category.end
     )?.name || 'Colorless';
   };
+
+  // Add state for transaction types
+  const [itemTransactionTypes, setItemTransactionTypes] = useState({});
+
+  // Add handler for transaction type change
+  const handleTransactionTypeChange = (index, value) => {
+    setItemTransactionTypes(prev => ({
+      ...prev,
+      [index]: value
+    }));
+  };
+
+  useEffect(() => {
+    // Set default transaction type to 'pawn' for new items
+    setItemTransactionTypes(prev => {
+      const newTypes = { ...prev };
+      estimatedItems.forEach((_, index) => {
+        if (!newTypes[index]) {
+          newTypes[index] = 'pawn';
+        }
+      });
+      return newTypes;
+    });
+  }, [estimatedItems]);
+
+  // Add state for edited prices
+  const [editedPrices, setEditedPrices] = useState({});
+
+  // Add handler for price change
+  const handlePriceChange = (index, value) => {
+    const numValue = parseFloat(value) || 0;
+    setEditedPrices(prev => ({
+      ...prev,
+      [index]: numValue
+    }));
+  };
+
+  useEffect(() => {
+    // Initialize edited prices with default values
+    setEditedPrices(prev => {
+      const newPrices = { ...prev };
+      estimatedItems.forEach((item, index) => {
+        if (!newPrices[index]) {
+          newPrices[index] = item.priceEstimates.pawn;
+        }
+      });
+      return newPrices;
+    });
+  }, [estimatedItems]);
 
   return (
     <Container maxWidth="lg">
@@ -1162,7 +1275,7 @@ function GemEstimator() {
                             <Typography variant="body2">Lab Grown: {diamond.labGrown ? 'Yes' : 'No'}</Typography>
                             <Typography variant="body2">Exact Color: {diamond.exactColor}</Typography>
                           </div>
-                          <IconButton variant="outlined" onClick={() => handleDeleteDiamond(index)}
+                          <IconButton variant="outlined" onClick={() => handleDeleteGem(index, diamond.type, diamond.isPrimary)}
                                 sx={{
                                   position: 'absolute',
                                   top: 8,
@@ -1183,14 +1296,14 @@ function GemEstimator() {
                         <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative'}}>
                           <div>
                             <Typography variant="subtitle2">{stone.isPrimary ? 'Primary' : 'Secondary'} Stone</Typography>
-                            <Typography variant="body2">Type: {stone.type}</Typography>
+                            <Typography variant="body2">Type: {stone.name}</Typography>
                             <Typography variant="body2">Shape: {stone.shape}</Typography>
                             <Typography variant="body2">Color: {stone.color}</Typography>
                             <Typography variant="body2">Weight: {stone.weight}</Typography>
                             <Typography variant="body2">Quantity: {stone.quantity}</Typography>
                             <Typography variant="body2">Authentic: {stone.authentic ? 'Yes' : 'No'}</Typography>
                             </div>
-                            <IconButton variant="outlined" onClick={() => handleDeleteStone(index)}
+                            <IconButton variant="outlined" onClick={() => handleDeleteGem(index, stone.type, stone.isPrimary)}
                                 sx={{
                                   position: 'absolute',
                                   top: 8,
@@ -1204,6 +1317,20 @@ function GemEstimator() {
                     </Grid>
                 ))}
             </Grid>
+
+            {/* Finish Button */} 
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+            <Button
+              variant="contained"
+              color="primary"
+              size="large"
+              onClick={handleFinishEstimation}
+              disabled={addMetal.length === 0}
+              fullWidth
+            >
+              Finish
+            </Button>
+          </Box>
     </Paper>
 </Grid>
       </Grid>
@@ -1217,20 +1344,38 @@ function GemEstimator() {
               <Table>
                 <TableHead>
                   <TableRow>
-                    <TableCell>Type</TableCell>
                     <TableCell>Description</TableCell>
-                    <TableCell>Weight</TableCell>
-                    <TableCell>Quantity</TableCell>
+                    <TableCell>Transaction Type</TableCell>
+                    <TableCell>Price</TableCell>
                     <TableCell>Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {estimatedItems.map((item, index) => (
                     <TableRow key={index}>
-                      <TableCell>{item.type}</TableCell>
-                      <TableCell>{item.description}</TableCell>
-                      <TableCell>{item.weight}</TableCell>
-                      <TableCell>{item.quantity}</TableCell>
+                      <TableCell>{item.weight}g {item.purity} {item.type} {item.category}</TableCell>
+                      <TableCell>
+                        <Select
+                          value={itemTransactionTypes[index] || 'pawn'}
+                          onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
+                          size="small"
+                        >
+                          <MenuItem value="pawn">Pawn (${item.priceEstimates.pawn.toFixed(2)})</MenuItem>
+                          <MenuItem value="buy">Buy (${item.priceEstimates.buy.toFixed(2)})</MenuItem>
+                          <MenuItem value="retail">Retail (${item.priceEstimates.retail.toFixed(2)})</MenuItem>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <TextField 
+                          type="number"
+                          value={editedPrices[index] || item.priceEstimates[itemTransactionTypes[index] || 'pawn']}
+                          onChange={(e) => handlePriceChange(index, e.target.value)}
+                          InputProps={{
+                            startAdornment: <InputAdornment position="start">$</InputAdornment>
+                          }}
+                          size="small"
+                        />
+                      </TableCell>
                       <TableCell>
                         <IconButton
                           onClick={() => {
