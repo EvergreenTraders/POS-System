@@ -26,7 +26,6 @@ import {
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
-import { HexColorPicker } from 'react-colorful';
 import MetalEstimator from './MetalEstimator';
 
 function GemEstimator() {
@@ -105,7 +104,12 @@ function GemEstimator() {
 
   const [estimatedItems, setEstimatedItems] = useState([]);
   const [totalDiamondValue, setTotalDiamondValue] = useState(0);
-  const [estimates, setEstimates] = useState({
+  const [priceEstimates, setPriceEstimates] = useState({
+    pawn: 0,
+    buy: 0,
+    retail: 0
+  });
+  const [priceEstimatePercentages, setPriceEstimatePercentages] = useState({
     pawn: 0,
     buy: 0,
     retail: 0
@@ -136,6 +140,10 @@ function GemEstimator() {
   const [stoneColors, setStoneColors] = useState([]);
 
   useEffect(() => {
+    const savedSettings = localStorage.getItem('priceEstimateSettings');
+    if (savedSettings) {
+      setPriceEstimatePercentages(JSON.parse(savedSettings));
+    }
     const fetchAllData = async () => {
       try {
         // Fetch Stone Shapes
@@ -203,12 +211,12 @@ function GemEstimator() {
   useEffect(() => {
     // Calculate estimates whenever total values change
     const totalValue = totalMetalValue + totalDiamondValue;
-    setEstimates({
-      pawn: totalValue * 0.5,    // 50% of total value
-      buy: totalValue * 0.7,    // 70% of total value
-      retail: totalValue * 0.8,  // 80% of total value
+    setPriceEstimates({
+      pawn: totalValue * (priceEstimatePercentages.pawn / 100),
+      buy: totalValue * (priceEstimatePercentages.buy / 100),
+      retail: totalValue * (priceEstimatePercentages.retail / 100)
     });
-  }, [totalMetalValue, totalDiamondValue]);
+  }, [totalMetalValue, totalDiamondValue, priceEstimatePercentages]);
 
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
 
@@ -1105,9 +1113,9 @@ function GemEstimator() {
         <Grid item xs={12} md={3}>
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
           <Typography variant="h6">Price Estimates</Typography>
-            <Typography variant="body2">Pawn: ${estimates.pawn.toFixed(2)}</Typography>
-            <Typography variant="body2">Buy: ${estimates.buy.toFixed(2)}</Typography>
-            <Typography variant="body2">Retail: ${estimates.retail.toFixed(2)}</Typography>
+            <Typography variant="body2">Pawn: ${priceEstimates.pawn.toFixed(2)}</Typography>
+            <Typography variant="body2">Buy: ${priceEstimates.buy.toFixed(2)}</Typography>
+            <Typography variant="body2">Retail: ${priceEstimates.retail.toFixed(2)}</Typography>
 
             <Typography variant="h6">SUMMARY</Typography>
             <Grid container spacing={2} >
