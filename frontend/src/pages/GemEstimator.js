@@ -46,6 +46,18 @@ function GemEstimator() {
     setAddMetal(prev => [...prev, newItem]); 
   };
 
+  const handleDeleteMetal = (index) => {
+    setAddMetal(prev => prev.filter((_, i) => i !== index)); // Deletes the selected metal
+  };
+
+  const handleDeleteDiamond = (index) => {
+    setDiamondSummary(prev => prev.filter((_, i) => i !== index)); // Deletes the selected diamond
+  };
+
+  const handleDeleteStone = (index) => {
+    setStoneSummary(prev => prev.filter((_, i) => i !== index)); // Deletes the selected stone
+  };
+
   const [diamondSummary, setDiamondSummary] = useState([]);
 
   const [stoneSummary, setStoneSummary] = useState([]);
@@ -427,22 +439,41 @@ function GemEstimator() {
           </Box>
         </Grid>
 
-        {/* Stone Color Picker */}
-        <Grid item xs={12} md={4}>
-        <FormControl fullWidth sx={{ mb: 2 }}>
-          <InputLabel>Select Stone Color *</InputLabel>
-          <Select
-            name="color"
-            value={getCurrentStoneForm().color}
-            onChange={handleStoneChange}
-            required
-          >
-            {stoneColors.map(color => (
-              <MenuItem key={color.id} value={color.color}>{color.color}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        </Grid>
+
+          {/* Stone Color Picker */}
+          <Grid item xs={12} md={4}>
+              <FormControl fullWidth>
+                  <Typography variant="subtitle1"  sx={{ mb: 1}}>Color *</Typography>
+                  <Grid container sx={{  border: '1px solid black',   boxSizing: 'border-box'}}>
+                      {stoneColors.map((color, index) => (
+                          <Grid item xs={6} key={color.id}>
+                              <Paper
+                                  onClick={() => {
+                                      setCurrentStoneForm(prev => ({
+                                          ...prev,
+                                          color: color.color
+                                      }));
+                                  }}
+
+                                  sx={{
+                                      p: 1.5,
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      textAlign: 'center',
+                                      border: '1px solid black',
+                                      borderRadius: 0,
+                                      backgroundColor: getCurrentStoneForm().color === color.color ? 'mediumseagreen':'none'
+                                    }}
+                              >
+                                  {color.color}
+                              </Paper>
+                          </Grid>
+                      ))}
+                  </Grid>
+              </FormControl>
+          </Grid>
       </Grid>
 
       {/* Stone Shape */}
@@ -1079,50 +1110,94 @@ function GemEstimator() {
             <Typography variant="body2">Retail: ${estimates.retail.toFixed(2)}</Typography>
 
             <Typography variant="h6">SUMMARY</Typography>
+            <Grid container spacing={2} >
             {addMetal.map((metal, index) => (
-            <div key={index}>
-                <Typography variant="subtitle2">Metal</Typography>
-                <Typography variant="body2">Precious Metal Type: {metal.preciousMetalType}</Typography>
-                <Typography variant="body2">Non Precious Metal Type: {metal.nonPreciousMetalType}</Typography>
-                <Typography variant="body2">Purity: {metal.purity.purity || metal.purity.value}</Typography>
-                <Typography variant="body2">Category: {metal.metalCategory}</Typography>
-                <Typography variant="body2">Color: {metal.jewelryColor}</Typography>
-                <Typography variant="body2">Weight: {metal.weight}g</Typography>
-                <Typography variant="body2">Estimated Value: ${metal.estimatedValue.toFixed(2)}</Typography>
-            </div>
-        ))}
-
-            {activeTab.includes('diamond') ? (
-              <>
-              {diamondSummary.map((diamond, index) => (
-                <div key={index}>
-                  <Typography variant="subtitle2" sx={{ mt: 2 }}>{diamond.isPrimary ? 'Primary' : 'Secondary'} Diamond </Typography>
-                  <Typography variant="body2">Shape: {diamond.shape}</Typography>
-                  <Typography variant="body2">Clarity: {diamond.clarity}</Typography>
-                  <Typography variant="body2">Color: {diamond.color}</Typography>
-                  <Typography variant="body2">Cut: {diamond.cut}</Typography>
-                  <Typography variant="body2">Weight: {diamond.weight}</Typography>
-                  <Typography variant="body2">Quantity: {diamond.quantity}</Typography>
-                  <Typography variant="body2">Lab Grown: {diamond.labGrown ? 'Yes' : 'No'}</Typography>
-                  <Typography variant="body2">Exact Color: {diamond.exactColor}</Typography>
-                </div>))}
-              </>
-            ) : (
-              <>
-              {stoneSummary.map((stone, index) => (
-                <div key={index}>
-                  <Typography variant="subtitle2" sx={{ mt: 2 }}>{stone.isPrimary ? 'Primary' : 'Secondary'} Stone </Typography>
-                  <Typography variant="body2">Type: {stone.type}</Typography>
-                  <Typography variant="body2">Shape: {stone.shape}</Typography>
-                  <Typography variant="body2">Color: {stone.color}</Typography>
-                  <Typography variant="body2">Weight: {stone.weight}</Typography>
-                  <Typography variant="body2">Quantity: {stone.quantity}</Typography>
-                  <Typography variant="body2">Authentic: {stone.authentic ? 'Yes' : 'No'}</Typography>
-                </div>))}
-              </>
-            )}
-          </Paper>
+                <Grid item xs={12} key={index}>
+                    <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative' }}>
+                      <div>
+                        <Typography variant="subtitle2">Metal</Typography>
+                        <Typography variant="body2">Precious Metal Type: {metal.preciousMetalType}</Typography>
+                        <Typography variant="body2">Non Precious Metal Type: {metal.nonPreciousMetalType}</Typography>
+                        <Typography variant="body2">Purity: {metal.purity.purity || metal.purity.value}</Typography>
+                        <Typography variant="body2">Category: {metal.metalCategory}</Typography>
+                        <Typography variant="body2">Color: {metal.jewelryColor}</Typography>
+                        <Typography variant="body2">Weight: {metal.weight}g</Typography>
+                        <Typography variant="body2">Estimated Value: ${metal.estimatedValue.toFixed(2)}</Typography>
+                        </div>
+                        <IconButton variant="outlined" onClick={() => handleDeleteMetal(index)}
+                                sx={{
+                                  position: 'absolute',
+                                  top: 8,
+                                  right: 8,
+                                  minWidth: 'auto'
+                              }}
+                          >
+                              <DeleteIcon />
+                          </IconButton>
+                    </Paper>
+                </Grid>
+            ))}
         </Grid>
+
+            <Grid container spacing={2} sx={{ mt: 0.25 }}>
+                {diamondSummary.map((diamond, index) => (
+                    <Grid item xs={12} key={index}>
+                        <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative'}}>
+                          <div>
+                            <Typography variant="subtitle2">{diamond.isPrimary ? 'Primary' : 'Secondary'} Diamond</Typography>
+                            <Typography variant="body2">Shape: {diamond.shape}</Typography>
+                            <Typography variant="body2">Clarity: {diamond.clarity}</Typography>
+                            <Typography variant="body2">Color: {diamond.color}</Typography>
+                            <Typography variant="body2">Cut: {diamond.cut}</Typography>
+                            <Typography variant="body2">Weight: {diamond.weight}</Typography>
+                            <Typography variant="body2">Quantity: {diamond.quantity}</Typography>
+                            <Typography variant="body2">Lab Grown: {diamond.labGrown ? 'Yes' : 'No'}</Typography>
+                            <Typography variant="body2">Exact Color: {diamond.exactColor}</Typography>
+                          </div>
+                          <IconButton variant="outlined" onClick={() => handleDeleteDiamond(index)}
+                                sx={{
+                                  position: 'absolute',
+                                  top: 8,
+                                  right: 8,
+                                  minWidth: 'auto'
+                              }}
+                          >
+                              <DeleteIcon />
+                          </IconButton>
+                          </Paper>
+                    </Grid>
+                ))}
+            </Grid>
+            
+            <Grid container spacing={2} sx={{ mt: 0.25 }}>
+                {stoneSummary.map((stone, index) => (
+                    <Grid item xs={12} key={index}>
+                        <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative'}}>
+                          <div>
+                            <Typography variant="subtitle2">{stone.isPrimary ? 'Primary' : 'Secondary'} Stone</Typography>
+                            <Typography variant="body2">Type: {stone.type}</Typography>
+                            <Typography variant="body2">Shape: {stone.shape}</Typography>
+                            <Typography variant="body2">Color: {stone.color}</Typography>
+                            <Typography variant="body2">Weight: {stone.weight}</Typography>
+                            <Typography variant="body2">Quantity: {stone.quantity}</Typography>
+                            <Typography variant="body2">Authentic: {stone.authentic ? 'Yes' : 'No'}</Typography>
+                            </div>
+                            <IconButton variant="outlined" onClick={() => handleDeleteStone(index)}
+                                sx={{
+                                  position: 'absolute',
+                                  top: 8,
+                                  right: 8,
+                                  minWidth: 'auto'
+                              }}
+                          >
+                              <DeleteIcon />
+                          </IconButton>
+                        </Paper>
+                    </Grid>
+                ))}
+            </Grid>
+    </Paper>
+</Grid>
       </Grid>
 
       <Grid container spacing={1} sx={{ mt: 3 }}>
