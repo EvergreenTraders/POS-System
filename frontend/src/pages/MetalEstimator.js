@@ -6,6 +6,7 @@ import {
   MenuItem,
   TextField,
   Button,
+  Grid,
   Typography,
   Paper
 } from '@mui/material';
@@ -19,7 +20,8 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     jewelryColor: '',
     weight: '',
     price: '',
-    purity: { purity: '', value: 0 }
+    purity: { purity: '', value: 0 },
+    value: ''
   });
 
   const [preciousMetalTypes, setPreciousMetalTypes] = useState([]);
@@ -79,35 +81,45 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         fetchPurities(selectedPreciousMetalType.id);
       }
     
-    setMetalForm(prev => ({
-      ...prev,
-      preciousMetalType: value,
-      purity: { purity: '', value: 0 }
-    }));
-    return;
-  }
+      setMetalForm(prev => ({
+        ...prev,
+        preciousMetalType: value,
+        purity: { purity: '', value: 0 }
+      }));
+      return;
+    }
     if (name === 'nonPreciousMetalType') {
-    setMetalForm(prev => ({
-      ...prev,
-      nonPreciousMetalType: value,
-      purity: { purity: '', value: 0 }
-    }));
-    return;
-  }
-  // For purity, find the full purity object
-  if (name === 'purity') {
-    const selectedPurity = metalPurities.find(p => p.id === value);
-    setMetalForm(prev => ({
-      ...prev,
-      purity: selectedPurity || { purity: '', value: 0 }
-    }));
-  } else {
-    setMetalForm(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  }
-};
+      setMetalForm(prev => ({
+        ...prev,
+        nonPreciousMetalType: value,
+        purity: { purity: '', value: 0 }
+      }));
+      return;
+    }
+    // For purity, find the full purity object
+    if (name === 'purity') {
+      const selectedPurity = metalPurities.find(p => p.id === value);
+      setMetalForm(prev => ({
+        ...prev,
+        purity: selectedPurity || { purity: '', value: 0 }
+      }));
+    } 
+    else if (name === 'value') {
+      setMetalForm(prev => ({
+        ...prev,
+        purity: {
+          ...prev.purity,
+          value: value
+        }
+      }));
+    }
+    else {
+      setMetalForm(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
+  };
 
   const addMetal = () => {
     const newItem = {
@@ -136,7 +148,8 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       jewelryColor: '',
       weight: '',
       price: '',
-      purity: { purity: '', value: 0 }
+      purity: { purity: '', value: 0 },
+      value: ''
     });
   };
 
@@ -203,26 +216,52 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
           </Select>
         </FormControl>
       )}
-
+    <Grid container spacing={2}>
+      <Grid item xs={12} sm={metalFormState.preciousMetalType === 'Platinum' || metalFormState.preciousMetalType === 'Palladium' ? 12 : 6}>
       <FormControl fullWidth sx={{ mb: 2 }}>
-        <InputLabel>Select Metal Purity *</InputLabel>
+        <InputLabel> Purity *</InputLabel>
         <Select
           name="purity"
           value={metalFormState.purity?.id || ''}
-          onChange={handleMetalChange}
+          onChange={(e) => {
+            handleMetalChange(e);
+            // Find the selected purity object
+            const selectedPurityObj = metalPurities.find(p => p.id === e.target.value);
+            // Update the form with selected purity's value
+            setMetalFormState(prev => ({
+              ...prev,
+              value: selectedPurityObj ? selectedPurityObj.value : ''
+            }));
+          }}
           required
         >
           {metalPurities.map(purity => (
             <MenuItem key={purity.id} value={purity.id}>
-              {purity.purity === null 
-                ? `${purity.value}` 
-                : (purity.value === null 
-                  ? purity.purity 
-                  : `${purity.purity} - ${purity.value}`)}
+              {metalFormState.preciousMetalType === 'Platinum' || metalFormState.preciousMetalType === 'Palladium' 
+                ? purity.value 
+                : purity.purity}
             </MenuItem>
           ))}
         </Select>
       </FormControl>
+      </Grid>
+      <Grid item xs={12} sm={metalFormState.preciousMetalType !== 'Platinum' && metalFormState.preciousMetalType !== 'Palladium' ? 6 : 0}>
+        {metalFormState.preciousMetalType !== 'Platinum' && metalFormState.preciousMetalType !== 'Palladium' && (
+          <TextField
+            fullWidth
+            label="Value"
+            name="value"
+            type="decimal"
+            value={metalFormState.purity?.value || ''} 
+            onChange={handleMetalChange}
+            inputProps={{ 
+              inputMode: 'decimal',
+              pattern: '[0-9]*\\.?[0-9]*'
+            }}
+          />
+        )}
+      </Grid>
+    </Grid>
 
       <FormControl fullWidth sx={{ mb: 2 }}>
         <InputLabel>Select Metal Category *</InputLabel>
