@@ -24,11 +24,16 @@ import {
   Radio,
   RadioGroup,
   Tab,
-  InputAdornment
+  InputAdornment,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 import MetalEstimator from './MetalEstimator';
+import EditIcon from '@mui/icons-material/Edit';
 
 function GemEstimator() {
   const [metalFormState, setMetalFormState] = useState({});
@@ -906,6 +911,44 @@ function GemEstimator() {
     });
   }, [estimatedItems]);
 
+  // Add states for dialog
+  const [openDialog, setOpenDialog] = useState(false);
+  const [selectedItemIndex, setSelectedItemIndex] = useState(null);
+  const [itemDetails, setItemDetails] = useState({});
+
+  // Add handlers for dialog
+  const handleOpenDialog = (index) => {
+    setSelectedItemIndex(index);
+    setItemDetails(prev => ({
+      ...prev,
+      [index]: {
+        ...prev[index],
+        brand: prev[index]?.brand || '',
+        additionalInfo: prev[index]?.additionalInfo || '',
+        isVintage: prev[index]?.isVintage || false,
+        stamps: prev[index]?.stamps || ''
+      }
+    }));
+    setOpenDialog(true);
+  };
+
+  const handleCloseDialog = () => {
+    setOpenDialog(false);
+    setSelectedItemIndex(null);
+  };
+
+  const handleDetailChange = (field, value) => {
+    if (selectedItemIndex === null) return;
+    
+    setItemDetails(prev => ({
+      ...prev,
+      [selectedItemIndex]: {
+        ...prev[selectedItemIndex],
+        [field]: value
+      }
+    }));
+  };
+
   return (
     <Container maxWidth="lg">
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -1352,9 +1395,20 @@ function GemEstimator() {
                 </TableHead>
                 <TableBody>
                   {estimatedItems.map((item, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{item.weight}g {item.purity} {item.type} {item.category}</TableCell>
+                    <TableRow 
+                      key={index}
+                      onClick={() => handleOpenDialog(index)}
+                      sx={{ 
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                      }}
+                    >
                       <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Typography>{item.weight}g {item.purity} {item.type} {item.category}</Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <Select
                           value={itemTransactionTypes[index] || 'pawn'}
                           onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
@@ -1365,7 +1419,7 @@ function GemEstimator() {
                           <MenuItem value="retail">Retail (${item.priceEstimates.retail.toFixed(2)})</MenuItem>
                         </Select>
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <TextField 
                           type="number"
                           value={editedPrices[index] || item.priceEstimates[itemTransactionTypes[index] || 'pawn']}
@@ -1376,9 +1430,10 @@ function GemEstimator() {
                           size="small"
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <IconButton
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             const newItems = [...estimatedItems];
                             newItems.splice(index, 1);
                             setEstimatedItems(newItems);
@@ -1396,6 +1451,53 @@ function GemEstimator() {
         </Grid>
       </Grid>
 
+      {/* Details Dialog */}
+      <Dialog 
+        open={openDialog} 
+        onClose={handleCloseDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Item Details</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+            <TextField
+              label="Brand"
+              value={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.brand || '' : ''}
+              onChange={(e) => handleDetailChange('brand', e.target.value)}
+              fullWidth
+            />
+            <TextField
+              label="Additional Information/Damages"
+              value={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.additionalInfo || '' : ''}
+              onChange={(e) => handleDetailChange('additionalInfo', e.target.value)}
+              multiline
+              rows={4}
+              fullWidth
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.isVintage || false : false}
+                  onChange={(e) => handleDetailChange('isVintage', e.target.checked)}
+                />
+              }
+              label="Vintage"
+            />
+            <TextField
+              label="Stamps/Engraving"
+              value={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.stamps || '' : ''}
+              onChange={(e) => handleDetailChange('stamps', e.target.value)}
+              multiline
+              rows={2}
+              fullWidth
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDialog}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }
