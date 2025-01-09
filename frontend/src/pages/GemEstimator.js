@@ -78,7 +78,7 @@ function GemEstimator() {
       [gemPosition]: null
     }));
   };
-
+  
   const handleFinishEstimation = () => {
     const newItem = {
       weight: addMetal[0].weight,
@@ -305,6 +305,54 @@ function GemEstimator() {
   const videoRef = React.useRef(null);
   const [stream, setStream] = useState(null);
   const [isVideoReady, setIsVideoReady] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+  const handleNextImage = () => {
+    setCurrentImageIndex((prevIndex) => (prevIndex + 1) % images.length);
+  };
+
+  const handlePrevImage = () => {
+    setCurrentImageIndex((prevIndex) => (prevIndex - 1 + images.length) % images.length);
+  };
+
+  const [isPopupOpen, setIsPopupOpen] = useState(false);
+const [popupImageIndex, setPopupImageIndex] = useState(0);
+
+const openPopup = (index) => {
+    setPopupImageIndex(index);
+    setIsPopupOpen(true);
+};
+
+const closePopup = () => {
+    setIsPopupOpen(false);
+};
+
+const handleNextPopupImage = () => {
+    setPopupImageIndex((prevIndex) => (prevIndex + 1) % images.length);
+};
+
+const handlePrevPopupImage = () => {
+    setPopupImageIndex((prevIndex) => (prevIndex - 1 + images.length) % images.length);
+};
+
+// Popup Component
+const ImagePopup = ({ images, index }) => {
+    if (!images || images.length === 0) return null; // Check if images are defined and not empty
+    return (
+        <Dialog open={isPopupOpen} onClose={closePopup}>
+            <DialogContent sx={{ overflow: 'hidden' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <Button onClick={handlePrevPopupImage} disabled={index === 0}>◀</Button>
+                    <img src={images[index].url} alt="Popup Image" style={{ width: '500px', height: 'auto', transition: 'opacity 0.5s ease-in-out', opacity: isPopupOpen ? 1 : 0 }} />
+                    <Button onClick={handleNextPopupImage} disabled={index === images.length - 1}>▶</Button>
+                </Box>
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={closePopup}>Close</Button>
+            </DialogActions>
+        </Dialog>
+    );
+};
 
   // Clean up camera resources when component unmounts
   useEffect(() => {
@@ -981,7 +1029,6 @@ function GemEstimator() {
     )?.name || 'Colorless';
   };
 
-  // Add state for transaction types
   const [itemTransactionTypes, setItemTransactionTypes] = useState({});
 
   // Add handler for transaction type change
@@ -1413,32 +1460,14 @@ function GemEstimator() {
 
             {/* Image Gallery */}
             {images.length > 0 && (
-              <ImageList sx={{ width: '100%', height: 200, mb: 2 }} cols={2} rowHeight={100}>
-                {images.map((image, index) => (
-                  <ImageListItem key={index} sx={{ position: 'relative' }}>
-                    <img
-                      src={image.url}
-                      alt={`Uploaded ${index + 1}`}
-                      loading="lazy"
-                      style={{ height: '100%', objectFit: 'cover' }}
-                    />
-                    <IconButton
-                      sx={{
-                        position: 'absolute',
-                        top: 4,
-                        right: 4,
-                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                        '&:hover': { backgroundColor: 'rgba(0, 0, 0, 0.7)' },
-                      }}
-                      size="small"
-                      onClick={() => removeImage(index)}
-                    >
-                      <CloseIcon sx={{ color: 'white' }} fontSize="small" />
-                    </IconButton>
-                  </ImageListItem>
-                ))}
-              </ImageList>
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              <Button onClick={handlePrevImage} disabled={currentImageIndex === 0} >◀</Button>
+              <img src={images[currentImageIndex].url} alt="image" style={{ width: '50%', height: '100px', cursor: 'pointer', objectFit: 'cover' }} onClick={() => openPopup(currentImageIndex)}/>
+              <Button onClick={handleNextImage} disabled={currentImageIndex === images.length - 1}>▶</Button>
+            </Box>
             )}
+
+            <ImagePopup images={images} index={popupImageIndex}/>
 
             <Box sx={{ mb: 3 }}>
               <Typography variant="h6" sx={{ mb: 2 }}>Price Estimates</Typography>
@@ -1470,7 +1499,6 @@ function GemEstimator() {
                   p: 1.5,
                   borderBottom: '1px solid',
                   borderColor: 'divider',
-                  '&:hover': { bgcolor: 'action.hover' }
                 }}>
                   <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
                     Buy Value
