@@ -191,12 +191,16 @@ function GemEstimator() {
   const [stoneColors, setStoneColors] = useState([]);
 
   useEffect(() => {
-    const savedSettings = localStorage.getItem('priceEstimateSettings');
-    if (savedSettings) {
-      setPriceEstimatePercentages(JSON.parse(savedSettings));
-    }
     const fetchAllData = async () => {
       try {
+        //Fetch Price Estimate Percentages
+        const priceEstimatePercentagesResponse = await axios.get('http://localhost:5000/api/price_estimates');
+        const estimates = priceEstimatePercentagesResponse.data.reduce((acc, item) => {
+          acc[item.transaction_type] = item.estimate;
+          return acc;
+        }, {});
+        setPriceEstimatePercentages(estimates);
+
         // Fetch Stone Shapes
         const stoneShapesResponse = await axios.get('http://localhost:5000/api/stone_shape');
         const stoneShapesWithImages = stoneShapesResponse.data.map(shape => ({
@@ -267,6 +271,7 @@ function GemEstimator() {
       buy: totalValue * (priceEstimatePercentages.buy / 100),
       retail: totalValue * (priceEstimatePercentages.retail / 100)
     });
+
   }, [totalMetalValue, totalDiamondValue, priceEstimatePercentages]);
 
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
@@ -1000,31 +1005,6 @@ function GemEstimator() {
     });
   }, [estimatedItems]);
 
-  // Add state for edited prices
-  const [editedPrices, setEditedPrices] = useState({});
-
-  // Add handler for price change
-  const handlePriceChange = (index, value) => {
-    const numValue = parseFloat(value) || 0;
-    setEditedPrices(prev => ({
-      ...prev,
-      [index]: numValue
-    }));
-  };
-
-  useEffect(() => {
-    // Initialize edited prices with default values
-    setEditedPrices(prev => {
-      const newPrices = { ...prev };
-      estimatedItems.forEach((item, index) => {
-        if (!newPrices[index]) {
-          newPrices[index] = item.priceEstimates.pawn;
-        }
-      });
-      return newPrices;
-    });
-  }, [estimatedItems]);
-
   // Add states for dialog
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedItemIndex, setSelectedItemIndex] = useState(null);
@@ -1728,8 +1708,8 @@ function GemEstimator() {
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <TextField 
                             type="number"
-                            value={editedPrices[index] || item.priceEstimates[itemTransactionTypes[index] || 'pawn']}
-                            onChange={(e) => handlePriceChange(index, e.target.value)}
+                            value={item.priceEstimates[itemTransactionTypes[index] || 'pawn']}
+                            //onChange={(e) => handlePriceChange(index, e.target.value)}
                             InputProps={{
                               startAdornment: <InputAdornment position="start">$</InputAdornment>,
                               sx: {
