@@ -1361,7 +1361,7 @@ function GemEstimator() {
 
         {/* Summary Section */}
         <Grid item xs={12} md={3}>
-          <Paper sx={{ p: 2, height: '100%', overflow: 'auto' }}>
+          <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
             <Typography variant="h6">Images</Typography>
             <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
               <Button
