@@ -22,11 +22,24 @@ import {
   Checkbox,
   Slider,
   Radio,
-  RadioGroup
+  RadioGroup,
+  Tab,
+  InputAdornment,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Divider
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 import MetalEstimator from './MetalEstimator';
+import EditIcon from '@mui/icons-material/Edit';
+import PhotoCamera from '@mui/icons-material/PhotoCamera';
+import CloudUpload from '@mui/icons-material/CloudUpload';
+import ImageList from '@mui/material/ImageList';
+import ImageListItem from '@mui/material/ImageListItem';
+import CloseIcon from '@mui/icons-material/Close';
 
 function GemEstimator() {
   const [metalFormState, setMetalFormState] = useState({});
@@ -49,13 +62,51 @@ function GemEstimator() {
     setAddMetal(prev => prev.filter((_, i) => i !== index)); // Deletes the selected metal
   };
 
-  const handleDeleteDiamond = (index) => {
-    setDiamondSummary(prev => prev.filter((_, i) => i !== index)); // Deletes the selected diamond
+  const handleDeleteGem = (index, type, isPrimary) => {
+    const gemPosition = isPrimary ? 'primary' : 'secondary';
+    console.log("gem", gemPosition, isPrimary,type);
+  
+    if (type === 'diamond') {
+      setDiamondSummary(prev => prev.filter((_, i) => i !== index));
+    } else {
+      setStoneSummary(prev => prev.filter((_, i) => i !== index));
+    }
+        
+    // Clear the gem type when deleted
+    setAddedGemTypes(prev => ({
+      ...prev,
+      [gemPosition]: null
+    }));
+  };
+  
+  const handleFinishEstimation = () => {
+    const newItem = {
+      weight: addMetal[0].weight,
+      purity: addMetal[0].purity?.purity || addMetal[0].purity.value,
+      type: addMetal[0].preciousMetalType + " " +  addedGemTypes.primary + " " + addedGemTypes.secondary,
+      category: addMetal[0].metalCategory,
+      priceEstimates: {
+        pawn: priceEstimates.pawn,
+        buy: priceEstimates.buy,
+        retail: priceEstimates.retail
+      }
+    };
+    setEstimatedItems(prev => [...prev, newItem]);
+
+    // Clear all summaries
+    setAddMetal([]);
+    setDiamondSummary([]);
+    setStoneSummary([]);
+    setAddedGemTypes({
+      primary: null,
+      secondary: null
+    });
   };
 
-  const handleDeleteStone = (index) => {
-    setStoneSummary(prev => prev.filter((_, i) => i !== index)); // Deletes the selected stone
-  };
+  const [addedGemTypes, setAddedGemTypes] = useState({
+    primary: null,  // can be 'diamond' or 'stone'
+    secondary: null // can be 'diamond' or 'stone'
+  });
 
   const [diamondSummary, setDiamondSummary] = useState([]);
 
@@ -140,12 +191,16 @@ function GemEstimator() {
   const [stoneColors, setStoneColors] = useState([]);
 
   useEffect(() => {
-    const savedSettings = localStorage.getItem('priceEstimateSettings');
-    if (savedSettings) {
-      setPriceEstimatePercentages(JSON.parse(savedSettings));
-    }
     const fetchAllData = async () => {
       try {
+        //Fetch Price Estimate Percentages
+        const priceEstimatePercentagesResponse = await axios.get('http://localhost:5000/api/price_estimates');
+        const estimates = priceEstimatePercentagesResponse.data.reduce((acc, item) => {
+          acc[item.transaction_type] = item.estimate;
+          return acc;
+        }, {});
+        setPriceEstimatePercentages(estimates);
+
         // Fetch Stone Shapes
         const stoneShapesResponse = await axios.get('http://localhost:5000/api/stone_shape');
         const stoneShapesWithImages = stoneShapesResponse.data.map(shape => ({
@@ -216,6 +271,7 @@ function GemEstimator() {
       buy: totalValue * (priceEstimatePercentages.buy / 100),
       retail: totalValue * (priceEstimatePercentages.retail / 100)
     });
+
   }, [totalMetalValue, totalDiamondValue, priceEstimatePercentages]);
 
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
@@ -242,6 +298,162 @@ function GemEstimator() {
     } else {
       setSecondaryStoneForm(newForm);
     }
+  };
+
+  const [images, setImages] = useState([]);
+  const [showCamera, setShowCamera] = useState(false);
+  const videoRef = React.useRef(null);
+  const [stream, setStream] = useState(null);
+  const [isVideoReady, setIsVideoReady] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+  const handleNextImage = () => {
+    setCurrentImageIndex((prevIndex) => (prevIndex + 1) % images.length);
+  };
+
+  const handlePrevImage = () => {
+    setCurrentImageIndex((prevIndex) => (prevIndex - 1 + images.length) % images.length);
+  };
+
+  const [isPopupOpen, setIsPopupOpen] = useState(false);
+const [popupImageIndex, setPopupImageIndex] = useState(0);
+
+const openPopup = (index) => {
+    setPopupImageIndex(index);
+    setIsPopupOpen(true);
+};
+
+const closePopup = () => {
+    setIsPopupOpen(false);
+};
+
+const handleNextPopupImage = () => {
+    setPopupImageIndex((prevIndex) => (prevIndex + 1) % images.length);
+};
+
+const handlePrevPopupImage = () => {
+    setPopupImageIndex((prevIndex) => (prevIndex - 1 + images.length) % images.length);
+};
+
+// Popup Component
+const ImagePopup = ({ images, index }) => {
+    if (!images || images.length === 0) return null; // Check if images are defined and not empty
+    return (
+        <Dialog open={isPopupOpen} onClose={closePopup}>
+            <DialogContent sx={{ overflow: 'hidden' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <Button onClick={handlePrevPopupImage} disabled={index === 0}>◀</Button>
+                    <img src={images[index].url} alt="Popup Image" style={{ width: '500px', height: 'auto', transition: 'opacity 0.5s ease-in-out', opacity: isPopupOpen ? 1 : 0 }} />
+                    <Button onClick={handleNextPopupImage} disabled={index === images.length - 1}>▶</Button>
+                </Box>
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={closePopup}>Close</Button>
+            </DialogActions>
+        </Dialog>
+    );
+};
+
+  // Clean up camera resources when component unmounts
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [stream]);
+
+  // Handle video initialization when showCamera changes
+  useEffect(() => {
+    if (showCamera && videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.onloadedmetadata = () => {
+        videoRef.current.play().then(() => {
+          setIsVideoReady(true);
+        }).catch(err => {
+          console.error("Error playing video:", err);
+        });
+      };
+    }
+  }, [showCamera, stream]);
+
+  const handleFileUpload = (event) => {
+    const files = Array.from(event.target.files);
+    const newImages = files.map(file => ({
+      file,
+      url: URL.createObjectURL(file),
+      type: 'upload'
+    }));
+    setImages(prev => [...prev, ...newImages]);
+  };
+
+  const startCamera = async () => {
+    setIsVideoReady(false); // Reset video ready state
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } 
+      });
+      setStream(mediaStream);
+      setShowCamera(true);
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      alert("Could not access camera. Please make sure you have given permission.");
+    }
+  };
+
+  const stopCamera = () => {
+    setIsVideoReady(false);
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setStream(null);
+    setShowCamera(false);
+  };
+
+  const captureImage = () => {
+    if (!videoRef.current || !isVideoReady) {
+      console.log("Video ref:", videoRef.current, "Ready:", isVideoReady);
+      alert("Camera is not ready yet. Please wait a moment.");
+      return;
+    }
+
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth || 1280;
+      canvas.height = videoRef.current.videoHeight || 720;
+      
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      
+      canvas.toBlob(blob => {
+        if (!blob) {
+          alert("Failed to capture image. Please try again.");
+          return;
+        }
+        const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        const newImage = {
+          file,
+          url: URL.createObjectURL(file),
+          type: 'capture'
+        };
+        setImages(prev => [...prev, newImage]);
+        stopCamera();
+      }, 'image/jpeg', 0.8);
+    } catch (err) {
+      console.error("Error capturing image:", err);
+      alert("Failed to capture image. Please try again.");
+    }
+  };
+
+  const removeImage = (index) => {
+    setImages(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleExactColorChange = (event, newValue) => {
@@ -284,6 +496,14 @@ function GemEstimator() {
 
   const addDiamond = () => {
     const currentForm = getCurrentForm();
+    const isPrimary = activeTab.startsWith('primary');
+  
+  // Check if we can add this type of gem
+    const gemPosition = isPrimary ? 'primary' : 'secondary';
+    if (addedGemTypes[gemPosition] === 'stone') {
+      alert(`Please delete the existing ${gemPosition} stone before adding a diamond`);
+      return;
+    }
     const newItem = {
       shape: currentForm.shape,
       clarity: currentForm.clarity,
@@ -295,10 +515,14 @@ function GemEstimator() {
       quantity: currentForm.quantity,
       labGrown: currentForm.labGrown,
       isPrimary: activeTab.startsWith('primary'),
+      type: 'diamond'
     };
 
-    setEstimatedItems(prev => [...prev, newItem]);
     setDiamondSummary(prev => [...prev, newItem]);
+    setAddedGemTypes(prev => ({
+      ...prev,
+      [gemPosition]: 'diamond'
+    }));
     
     // Reset the current form after adding
     const resetForm = {
@@ -343,18 +567,30 @@ function GemEstimator() {
 
   const addStone = () => {
     const currentForm = getCurrentStoneForm();
+    const isPrimary = activeTab.startsWith('primary');
+
+    // Check if we can add this type of gem
+    const gemPosition = isPrimary ? 'primary' : 'secondary';
+    if (addedGemTypes[gemPosition] === 'diamond') {
+      alert(`Please delete the existing ${gemPosition} diamond before adding a stone`);
+      return;
+    }
     const newStone = {
-      type:  currentForm.name,
+      name:  currentForm.name,
       shape: currentForm.shape,
       weight: currentForm.weight+' ct',
       color: currentForm.color,
       quantity: currentForm.quantity,
       authentic: currentForm.authentic,
-      isPrimary: activeTab.startsWith('primary')
+      isPrimary: activeTab.startsWith('primary'),
+      type: 'stone'
     };
 
-    setEstimatedItems(prev => [...prev, newStone]);
     setStoneSummary(prev => [...prev, newStone]);
+    setAddedGemTypes(prev => ({
+      ...prev,
+      [gemPosition]: 'stone'
+    }));
 
     // Reset the form after adding
     if (activeTab.startsWith('primary')) {
@@ -632,7 +868,7 @@ function GemEstimator() {
       {/* Add button to switch between primary and secondary gems */}
       <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Typography variant="h6" sx={{ flexGrow: 1, mr: 2 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: ${estimatedItems.filter(item => item.type === (activeTab.includes('diamond') ? 'Diamond' : 'Stone')).reduce((total, stone) => total + stone.estimatedValue, 0).toFixed(2)}
+          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: 0
         </Typography>
         <Button 
           variant="contained" 
@@ -689,7 +925,7 @@ function GemEstimator() {
       </Grid>
       <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
         <Typography variant="h6" sx={{ flexGrow: 1, mr: 2 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: ${estimatedItems.filter(item => item.type === (activeTab.includes('diamond') ? 'Diamond' : 'Stone')).reduce((total, stone) => total + stone.estimatedValue, 0).toFixed(2)}
+          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: 0
         </Typography>
         <Button 
           variant="contained" 
@@ -791,6 +1027,67 @@ function GemEstimator() {
     return colorCategories.find(
       category => exactColor >= category.start && exactColor <= category.end
     )?.name || 'Colorless';
+  };
+
+  const [itemTransactionTypes, setItemTransactionTypes] = useState({});
+
+  // Add handler for transaction type change
+  const handleTransactionTypeChange = (index, value) => {
+    setItemTransactionTypes(prev => ({
+      ...prev,
+      [index]: value
+    }));
+  };
+
+  useEffect(() => {
+    // Set default transaction type to 'pawn' for new items
+    setItemTransactionTypes(prev => {
+      const newTypes = { ...prev };
+      estimatedItems.forEach((_, index) => {
+        if (!newTypes[index]) {
+          newTypes[index] = 'pawn';
+        }
+      });
+      return newTypes;
+    });
+  }, [estimatedItems]);
+
+  // Add states for dialog
+  const [openDialog, setOpenDialog] = useState(false);
+  const [selectedItemIndex, setSelectedItemIndex] = useState(null);
+  const [itemDetails, setItemDetails] = useState({});
+
+  // Add handlers for dialog
+  const handleOpenDialog = (index) => {
+    setSelectedItemIndex(index);
+    setItemDetails(prev => ({
+      ...prev,
+      [index]: {
+        ...prev[index],
+        brand: prev[index]?.brand || '',
+        additionalInfo: prev[index]?.additionalInfo || '',
+        isVintage: prev[index]?.isVintage || false,
+        stamps: prev[index]?.stamps || ''
+      }
+    }));
+    setOpenDialog(true);
+  };
+
+  const handleCloseDialog = () => {
+    setOpenDialog(false);
+    setSelectedItemIndex(null);
+  };
+
+  const handleDetailChange = (field, value) => {
+    if (selectedItemIndex === null) return;
+    
+    setItemDetails(prev => ({
+      ...prev,
+      [selectedItemIndex]: {
+        ...prev[selectedItemIndex],
+        [field]: value
+      }
+    }));
   };
 
   return (
@@ -1112,12 +1409,122 @@ function GemEstimator() {
         {/* Summary Section */}
         <Grid item xs={12} md={3}>
           <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
-          <Typography variant="h6">Price Estimates</Typography>
-            <Typography variant="body2">Pawn: ${priceEstimates.pawn.toFixed(2)}</Typography>
-            <Typography variant="body2">Buy: ${priceEstimates.buy.toFixed(2)}</Typography>
-            <Typography variant="body2">Retail: ${priceEstimates.retail.toFixed(2)}</Typography>
+            <Typography variant="h6">Images</Typography>
+            <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+              <Button
+                variant="outlined"
+                component="label"
+                startIcon={<CloudUpload />}
+                sx={{ flex: 1 }}
+              >
+                Upload
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  multiple
+                  onChange={handleFileUpload}
+                />
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={showCamera ? stopCamera : startCamera}
+                startIcon={<PhotoCamera />}
+                sx={{ flex: 1 }}
+              >
+                {showCamera ? 'Stop' : 'Camera'}
+              </Button>
+            </Box>
 
-            <Typography variant="h6">SUMMARY</Typography>
+            {/* Camera Preview */}
+            {showCamera && (
+              <Box sx={{ position: 'relative', mb: 2 }}>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  style={{ width: '100%', borderRadius: '8px' }}
+                />
+                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+                  <Button
+                    variant="contained"
+                    onClick={captureImage}
+                    startIcon={<PhotoCamera />}
+                    size="small"
+                  >
+                    Capture
+                  </Button>
+                </Box>
+              </Box>
+            )}
+
+            {/* Image Gallery */}
+            {images.length > 0 && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              <Button onClick={handlePrevImage} disabled={currentImageIndex === 0} >◀</Button>
+              <img src={images[currentImageIndex].url} alt="image" style={{ width: '50%', height: '100px', cursor: 'pointer', objectFit: 'cover' }} onClick={() => openPopup(currentImageIndex)}/>
+              <Button onClick={handleNextImage} disabled={currentImageIndex === images.length - 1}>▶</Button>
+            </Box>
+            )}
+
+            <ImagePopup images={images} index={popupImageIndex}/>
+
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h6" sx={{ mb: 2 }}>Price Estimates</Typography>
+              
+              <Box sx={{ 
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                overflow: 'hidden'
+              }}>
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  p: 1.5,
+                  borderBottom: '1px solid',
+                  borderColor: 'divider',
+                }}>
+                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
+                    Pawn Value
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
+                    ${priceEstimates.pawn.toFixed(2)}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  p: 1.5,
+                  borderBottom: '1px solid',
+                  borderColor: 'divider',
+                }}>
+                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
+                    Buy Value
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
+                    ${priceEstimates.buy.toFixed(2)}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  p: 1.5,
+                  '&:hover': { bgcolor: 'action.hover' }
+                }}>
+                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
+                    Retail Value
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
+                    ${priceEstimates.retail.toFixed(2)}
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+
+            <Typography variant="h6" sx={{ mt: 2 }}>SUMMARY</Typography>
             <Grid container spacing={2} >
             {addMetal.map((metal, index) => (
                 <Grid item xs={12} key={index}>
@@ -1162,7 +1569,7 @@ function GemEstimator() {
                             <Typography variant="body2">Lab Grown: {diamond.labGrown ? 'Yes' : 'No'}</Typography>
                             <Typography variant="body2">Exact Color: {diamond.exactColor}</Typography>
                           </div>
-                          <IconButton variant="outlined" onClick={() => handleDeleteDiamond(index)}
+                          <IconButton variant="outlined" onClick={() => handleDeleteGem(index, diamond.type, diamond.isPrimary)}
                                 sx={{
                                   position: 'absolute',
                                   top: 8,
@@ -1183,14 +1590,14 @@ function GemEstimator() {
                         <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative'}}>
                           <div>
                             <Typography variant="subtitle2">{stone.isPrimary ? 'Primary' : 'Secondary'} Stone</Typography>
-                            <Typography variant="body2">Type: {stone.type}</Typography>
+                            <Typography variant="body2">Type: {stone.name}</Typography>
                             <Typography variant="body2">Shape: {stone.shape}</Typography>
                             <Typography variant="body2">Color: {stone.color}</Typography>
                             <Typography variant="body2">Weight: {stone.weight}</Typography>
                             <Typography variant="body2">Quantity: {stone.quantity}</Typography>
                             <Typography variant="body2">Authentic: {stone.authentic ? 'Yes' : 'No'}</Typography>
                             </div>
-                            <IconButton variant="outlined" onClick={() => handleDeleteStone(index)}
+                            <IconButton variant="outlined" onClick={() => handleDeleteGem(index, stone.type, stone.isPrimary)}
                                 sx={{
                                   position: 'absolute',
                                   top: 8,
@@ -1204,6 +1611,20 @@ function GemEstimator() {
                     </Grid>
                 ))}
             </Grid>
+
+            {/* Finish Button */} 
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+            <Button
+              variant="contained"
+              color="primary"
+              size="large"
+              onClick={handleFinishEstimation}
+              disabled={addMetal.length === 0}
+              fullWidth
+            >
+              Finish
+            </Button>
+          </Box>
     </Paper>
 </Grid>
       </Grid>
@@ -1211,46 +1632,216 @@ function GemEstimator() {
       <Grid container spacing={1} sx={{ mt: 3 }}>
         {/* Estimated Items Section */}
         <Grid item xs={12}>
-          <Paper sx={{ p: 2, mt: 3, mb: 3 }}>
-            <Typography variant="h6" sx={{ mb: 2 }}>Estimated Items</Typography>
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Type</TableCell>
-                    <TableCell>Description</TableCell>
-                    <TableCell>Weight</TableCell>
-                    <TableCell>Quantity</TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {estimatedItems.map((item, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{item.type}</TableCell>
-                      <TableCell>{item.description}</TableCell>
-                      <TableCell>{item.weight}</TableCell>
-                      <TableCell>{item.quantity}</TableCell>
-                      <TableCell>
-                        <IconButton
-                          onClick={() => {
-                            const newItems = [...estimatedItems];
-                            newItems.splice(index, 1);
-                            setEstimatedItems(newItems);
-                          }}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </TableCell>
+          <Paper sx={{ p: 3, mt: 3, mb: 3, borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>Estimated Items</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {estimatedItems.length} {estimatedItems.length === 1 ? 'item' : 'items'}
+              </Typography>
+            </Box>
+            
+            {estimatedItems.length === 0 ? (
+              <Box sx={{ 
+                py: 6, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center',
+                bgcolor: 'grey.50',
+                borderRadius: 1
+              }}>
+                <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
+                  No items estimated yet
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Complete your estimation above to see items here
+                </Typography>
+              </Box>
+            ) : (
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Description</TableCell>
+                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Transaction Type</TableCell>
+                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Price</TableCell>
+                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Actions</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                  </TableHead>
+                  <TableBody>
+                    {estimatedItems.map((item, index) => (
+                      <TableRow 
+                        key={index}
+                        onClick={() => handleOpenDialog(index)}
+                        sx={{ 
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          '&:hover': {
+                            bgcolor: 'action.hover',
+                            '& .action-buttons': {
+                              opacity: 1
+                            }
+                          }
+                        }}
+                      >
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Box>
+                              <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
+                                {item.weight}g {item.purity} {item.type}
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                {item.category}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <Select
+                            value={itemTransactionTypes[index] || 'pawn'}
+                            onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
+                            size="small"
+                            sx={{ 
+                              minWidth: 150,
+                              '& .MuiSelect-select': {
+                                py: 1
+                              }
+                            }}
+                          >
+                            <MenuItem value="pawn">
+                              <Box>
+                                <Typography variant="body2">Pawn</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ${item.priceEstimates.pawn.toFixed(2)}
+                                </Typography>
+                              </Box>
+                            </MenuItem>
+                            <MenuItem value="buy">
+                              <Box>
+                                <Typography variant="body2">Buy</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ${item.priceEstimates.buy.toFixed(2)}
+                                </Typography>
+                              </Box>
+                            </MenuItem>
+                            <MenuItem value="retail">
+                              <Box>
+                                <Typography variant="body2">Retail</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ${item.priceEstimates.retail.toFixed(2)}
+                                </Typography>
+                              </Box>
+                            </MenuItem>
+                          </Select>
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <TextField 
+                            type="number"
+                            value={item.priceEstimates[itemTransactionTypes[index] || 'pawn']}
+                            //onChange={(e) => handlePriceChange(index, e.target.value)}
+                            InputProps={{
+                              startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                              sx: {
+                                '& input': {
+                                  py: 1
+                                }
+                              }
+                            }}
+                            size="small"
+                            sx={{ width: 150 }}
+                          />
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <Box className="action-buttons" sx={{ 
+                            opacity: 0.7,
+                            transition: 'opacity 0.2s',
+                            display: 'flex',
+                            gap: 1 
+                          }}>
+                            <IconButton
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenDialog(index);
+                              }}
+                              size="small"
+                              sx={{ color: 'primary.main' }}
+                            >
+                              <EditIcon />
+                            </IconButton>
+                            <IconButton
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const newItems = [...estimatedItems];
+                                newItems.splice(index, 1);
+                                setEstimatedItems(newItems);
+                              }}
+                              size="small"
+                              sx={{ color: 'error.main' }}
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
           </Paper>
         </Grid>
       </Grid>
 
+      <Grid container spacing={1} sx={{ mt: 3 }}>
+        {/* Remove the standalone image section */}
+      </Grid>
+
+      {/* Details Dialog */}
+      <Dialog 
+        open={openDialog} 
+        onClose={handleCloseDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Item Details</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+            <TextField
+              label="Brand"
+              value={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.brand || '' : ''}
+              onChange={(e) => handleDetailChange('brand', e.target.value)}
+              fullWidth
+            />
+            <TextField
+              label="Additional Information/Damages"
+              value={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.additionalInfo || '' : ''}
+              onChange={(e) => handleDetailChange('additionalInfo', e.target.value)}
+              multiline
+              rows={4}
+              fullWidth
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.isVintage || false : false}
+                  onChange={(e) => handleDetailChange('isVintage', e.target.checked)}
+                />
+              }
+              label="Vintage"
+            />
+            <TextField
+              label="Stamps/Engraving"
+              value={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.stamps || '' : ''}
+              onChange={(e) => handleDetailChange('stamps', e.target.value)}
+              multiline
+              rows={2}
+              fullWidth
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDialog}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }

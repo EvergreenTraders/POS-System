@@ -16,6 +16,7 @@ import {
   Tabs,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
+import axios from 'axios';
 
 const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
@@ -49,14 +50,8 @@ function SystemConfig() {
     phone: '',
     email: '',
     currency: 'USD',
-    timezone: 'UTC',
-    priceEstimates: {
-      pawn: 50,    // 50% for pawn
-      buy: 70,     // 70% for buy
-      retail: 80,  // 80% for retail
-    }
+    timezone: 'UTC'
   });
-
 
   const [securitySettings, setSecuritySettings] = useState({
     requirePasswordChange: true,
@@ -72,35 +67,38 @@ function SystemConfig() {
     dailyReports: false,
   });
 
+  const [priceEstimates, setPriceEstimates] = useState({
+    pawn: 0,
+    buy: 0,
+    retail: 0
+  });
+
+  useEffect(() => {
+    const fetchPriceEstimates = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/price_estimates');
+        const estimates = response.data.reduce((acc, item) => {
+          acc[item.transaction_type] = item.estimate;
+          return acc;
+        }, {});
+        setPriceEstimates(estimates);
+      } catch (error) {
+        console.error('Error fetching price estimates:', error);
+      }
+    };
+    fetchPriceEstimates();
+  }, []);
+
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
   };
 
   const handleGeneralSettingsChange = (event) => {
     const { name, value } = event.target;
-    
-    // Handle nested priceEstimates updates
-    if (name.startsWith('priceEstimates.')) {
-      const field = name.split('.')[1];
-      setGeneralSettings(prev => ({
-        ...prev,
-        priceEstimates: {
-          ...prev.priceEstimates,
-          [field]: Number(value)
-        }
-      }));
-      // Save to localStorage immediately
-      const updatedPriceEstimates = {
-        ...generalSettings.priceEstimates,
-        [field]: Number(value)
-      };
-      localStorage.setItem('priceEstimateSettings', JSON.stringify(updatedPriceEstimates));
-    } else {
-      setGeneralSettings(prev => ({
-        ...prev,
-        [name]: value
-      }));
-    }
+    setGeneralSettings(prev => ({
+      ...prev,
+      [name]: value
+    }));
   };
 
   const handleSecuritySettingsChange = (event) => {
@@ -119,32 +117,41 @@ function SystemConfig() {
     }));
   };
 
+  const handlePriceEstimatesChange = (event) => {
+    const { name, value } = event.target;
+    setPriceEstimates(prev => ({
+      ...prev,
+      [name]: Number(value)
+    }));
+  };
+
   const handleSaveSettings = async () => {
     try {
-      // Save price estimate percentages to localStorage
-      localStorage.setItem('priceEstimateSettings', JSON.stringify(generalSettings.priceEstimates));
-      
+
+      // Save price estimates
+      await axios.put('http://localhost:5000/api/price_estimates', {
+        estimates: [
+          { transaction_type: 'pawn', estimate: priceEstimates.pawn },
+          { transaction_type: 'buy', estimate: priceEstimates.buy },
+          { transaction_type: 'retail', estimate: priceEstimates.retail }
+        ]
+      });
+
       setSnackbar({
         open: true,
-        message: 'Settings saved successfully',
+        message: 'All settings updated successfully',
         severity: 'success',
       });
     } catch (error) {
+      console.error('Error saving settings:', error);
+      const errorMessage = error.response?.data?.message || 'An unexpected error occurred.';
       setSnackbar({
         open: true,
-        message: 'Error saving settings: ' + error.message,
+        message: 'Failed to update settings: ' + errorMessage,
         severity: 'error',
       });
     }
   };
-
-  // Initialize price estimate settings
-  useEffect(() => {
-    // Save initial price estimates if not already in localStorage
-    if (!localStorage.getItem('priceEstimateSettings')) {
-      localStorage.setItem('priceEstimateSettings', JSON.stringify(generalSettings.priceEstimates));
-    }
-  }, []);
 
   return (
     <Container>
@@ -232,10 +239,10 @@ function SystemConfig() {
                 <TextField
                   fullWidth
                   label="Pawn Percentage"
-                  name="priceEstimates.pawn"
+                  name="pawn"
                   type="number"
-                  value={generalSettings.priceEstimates.pawn}
-                  onChange={handleGeneralSettingsChange}
+                  value={priceEstimates.pawn}
+                  onChange={handlePriceEstimatesChange}
                   inputProps={{ min: 0, max: 100 }}
                 />
               </Grid>
@@ -243,10 +250,10 @@ function SystemConfig() {
                 <TextField
                   fullWidth
                   label="Buy Percentage"
-                  name="priceEstimates.buy"
+                  name="buy"
                   type="number"
-                  value={generalSettings.priceEstimates.buy}
-                  onChange={handleGeneralSettingsChange}
+                  value={priceEstimates.buy}
+                  onChange={handlePriceEstimatesChange}
                   inputProps={{ min: 0, max: 100 }}
                 />
               </Grid>
@@ -254,10 +261,10 @@ function SystemConfig() {
                 <TextField
                   fullWidth
                   label="Retail Percentage"
-                  name="priceEstimates.retail"
+                  name="retail"
                   type="number"
-                  value={generalSettings.priceEstimates.retail}
-                  onChange={handleGeneralSettingsChange}
+                  value={priceEstimates.retail}
+                  onChange={handlePriceEstimatesChange}
                   inputProps={{ min: 0, max: 100 }}
                 />
               </Grid>

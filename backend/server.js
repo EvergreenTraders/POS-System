@@ -457,6 +457,34 @@ app.get('/api/stone_color', async (req, res) => {
   }
 });
 
+// Price Estimates API Endpoint
+app.get('/api/price_estimates', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT transaction_type, estimate FROM price_estimates');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching price estimates:', error);
+    res.status(500).json({ error:'Internal Server Error'});
+  }
+});
+
+// PUT route for updating price estimates
+app.put('/api/price_estimates', async (req, res) => {
+  const estimates = req.body.estimates;
+  try {
+    for (const estimate of estimates) {
+      await pool.query(
+        'UPDATE price_estimates SET estimate = $1, updated_at = CURRENT_TIMESTAMP WHERE transaction_type = $2',
+        [estimate.estimate, estimate.transaction_type]
+      );
+    }
+    res.status(200).json({ message: 'Price estimates updated successfully.' });
+  } catch (error) {
+    console.error('Error updating price estimates:', error);
+    res.status(500).json({ message: 'Failed to update price estimates.' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);

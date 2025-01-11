@@ -123,11 +123,6 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
   const addMetal = () => {
     const newItem = {
-      // type: 'Metal',
-      // description: `${metalFormState.type} ${metalFormState.metalCategory} ${metalFormState.purity?.purity || ''} ${metalFormState.jewelryColor}`,
-      // dimension: `${metalFormState.size}`,
-      // weight: metalFormState.weight + ' g',
-      // quantity: 1,
       preciousMetalType: metalFormState.preciousMetalType,
       nonPreciousMetalType: metalFormState.nonPreciousMetalType,
       metalCategory: metalFormState.metalCategory,
