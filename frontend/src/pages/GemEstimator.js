@@ -157,6 +157,7 @@ function GemEstimator() {
 
   const [estimatedItems, setEstimatedItems] = useState([]);
   const [totalDiamondValue, setTotalDiamondValue] = useState(0);
+  const [totalStoneValue, setTotalStoneValue] = useState(0);
   const [priceEstimates, setPriceEstimates] = useState({
     pawn: 0,
     buy: 0,
@@ -881,10 +882,31 @@ const ImagePopup = ({ images, index }) => {
       </Grid>
 
       {/* Add button to switch between primary and secondary gems */}
-      <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Typography variant="h6" sx={{ flexGrow: 1, mr: 2 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: 0
+      <Grid item xs={12} sx={{ mt: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
+          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value $: 
         </Typography>
+        <TextField
+          size="small"
+          type="number"
+          value={totalStoneValue.toFixed(1)}
+          variant="standard"
+          onChange={(e) => {
+            const newValue = parseFloat(e.target.value);
+            setTotalStoneValue(newValue);
+          }}
+          inputProps={{ 
+            min: 0,
+            style: { width: '50px' }
+          }}
+          sx={{ 
+            ml: 1,
+            '& .MuiInputBase-root': {
+              ml: 0,
+              pl: 0
+            }
+          }}
+        />
         <Button 
           variant="contained" 
           color="primary" 
@@ -895,6 +917,7 @@ const ImagePopup = ({ images, index }) => {
               setActiveTab('primary_gem_stone');
             }
           }}
+          sx={{ ml: 2 }} 
         >
            {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
         </Button>
@@ -939,9 +962,32 @@ const ImagePopup = ({ images, index }) => {
         </Grid>
       </Grid>
       <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
-        <Typography variant="h6" sx={{ flexGrow: 1, mr: 2 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: 0
+        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
+          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value $: 
         </Typography>
+        <TextField
+          size="small"
+          type="decimal"
+          value={totalDiamondValue.toFixed(1)}
+          variant="standard"
+          onChange={(e) => {
+            const newValue = parseFloat(e.target.value);
+            setTotalDiamondValue(newValue);
+          }}
+          inputProps={{ 
+            min: 0,
+            inputMode: 'decimal',
+            pattern: '[0-9]*\\.?[0-9]*',
+            style: { width: '50px' }
+          }}
+          sx={{ 
+            ml: 1,
+            '& .MuiInputBase-root': {
+              ml: 0,
+              pl: 0
+            }
+          }}
+        />
         <Button 
           variant="contained" 
           color="primary" 
@@ -952,6 +998,7 @@ const ImagePopup = ({ images, index }) => {
               setActiveTab('primary_gem_diamond');
             }
           }}
+          sx={{ ml: 2 }}
         >
           {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
         </Button>
@@ -1501,11 +1548,31 @@ const ImagePopup = ({ images, index }) => {
                   borderColor: 'divider',
                 }}>
                   <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
-                    Pawn Value
+                    Pawn Value: $
                   </Typography>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-                    ${priceEstimates.pawn.toFixed(2)}
-                  </Typography>
+                  <TextField
+                    size="small"
+                    type="decimal"
+                    value={priceEstimates.pawn.toFixed(1)}
+                    variant="standard"
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value);
+                      setPriceEstimates(prev => ({ ...prev, pawn: newValue }));
+                    }}
+                    inputProps={{ 
+                      min: 0,
+                      inputMode: 'decimal',
+                      pattern: '[0-9]*\\.?[0-9]*',
+                      style: { width: '70px' }
+                    }}
+                    sx={{ 
+                      ml: 1,
+                      '& .MuiInputBase-root': {
+                        ml: 0,
+                        pl: 0
+                      }
+                    }}
+                  />
                 </Box>
 
                 <Box sx={{ 
@@ -1516,11 +1583,31 @@ const ImagePopup = ({ images, index }) => {
                   borderColor: 'divider',
                 }}>
                   <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
-                    Buy Value
+                    Buy Value: $
                   </Typography>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-                    ${priceEstimates.buy.toFixed(2)}
-                  </Typography>
+                  <TextField 
+                    size="small"
+                    type="decimal"
+                    value={priceEstimates.buy.toFixed(1)}
+                    variant="standard"
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value);
+                      setPriceEstimates(prev => ({ ...prev, buy: newValue }));
+                    }}
+                    inputProps={{ 
+                      min: 0,
+                      inputMode: 'decimal',
+                      pattern: '[0-9]*\\.?[0-9]*',
+                      style: { width: '70px' }
+                    }}
+                    sx={{ 
+                      ml: 1,
+                      '& .MuiInputBase-root': {
+                        ml: 0,
+                        pl: 0
+                      }
+                    }}
+                  />
                 </Box>
 
                 <Box sx={{ 
@@ -1529,12 +1616,32 @@ const ImagePopup = ({ images, index }) => {
                   p: 1.5,
                   '&:hover': { bgcolor: 'action.hover' }
                 }}>
-                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
-                    Retail Value
+                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary', ml: 0 }}>
+                    Retail Value: $
                   </Typography>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-                    ${priceEstimates.retail.toFixed(2)}
-                  </Typography>
+                  <TextField 
+                    size="small"
+                    type="decimal"
+                    value={priceEstimates.retail.toFixed(1)}
+                    variant="standard"
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value);
+                      setPriceEstimates(prev => ({ ...prev, retail: newValue }));
+                    }}
+                    inputProps={{ 
+                      min: 0,
+                      inputMode: 'decimal',
+                      pattern: '[0-9]*\\.?[0-9]*',
+                      style: { width: '70px' }
+                    }}
+                    sx={{ 
+                      ml: 1,
+                      '& .MuiInputBase-root': {
+                        ml: 0,
+                        pl: 0
+                      }
+                    }}
+                  />
                 </Box>
               </Box>
             </Box>
