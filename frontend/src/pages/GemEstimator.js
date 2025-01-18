@@ -40,6 +40,8 @@ import CloudUpload from '@mui/icons-material/CloudUpload';
 import ImageList from '@mui/material/ImageList';
 import ImageListItem from '@mui/material/ImageListItem';
 import CloseIcon from '@mui/icons-material/Close';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 
 function GemEstimator() {
   const [metalFormState, setMetalFormState] = useState({});
@@ -251,6 +253,7 @@ function GemEstimator() {
     };
 
     fetchAllData();
+    fetchDiamondSizes(1);
   }, []);
 
   const fetchDiamondSizes = async (diamondShapeId) => {
@@ -305,14 +308,24 @@ function GemEstimator() {
   const videoRef = React.useRef(null);
   const [stream, setStream] = useState(null);
   const [isVideoReady, setIsVideoReady] = useState(false);
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [currentShapeIndex, setCurrentShapeIndex] = useState(0);
 
   const handleNextImage = () => {
-    setCurrentImageIndex((prevIndex) => (prevIndex + 1) % images.length);
+    setCurrentShapeIndex((prevIndex) => {
+      const nextIndex = Math.min(prevIndex + 1, diamondShapes.length - 1);
+      setCurrentForm(prev => ({ ...prev, shape: diamondShapes[nextIndex].name })); // Update dropdown
+      fetchDiamondSizes(nextIndex+1);
+      return nextIndex;
+    });
   };
 
   const handlePrevImage = () => {
-    setCurrentImageIndex((prevIndex) => (prevIndex - 1 + images.length) % images.length);
+    setCurrentShapeIndex((prevIndex) => {
+      const prevIndexValue = Math.max(prevIndex - 1, 0);
+      setCurrentForm(prev => ({ ...prev, shape: diamondShapes[prevIndexValue].name })); // Update dropdown
+      fetchDiamondSizes(prevIndex);
+      return prevIndexValue;
+    });
   };
 
   const [isPopupOpen, setIsPopupOpen] = useState(false);
@@ -481,6 +494,8 @@ const ImagePopup = ({ images, index }) => {
       });
       if (selectedShape) {
         fetchDiamondSizes(selectedShape.id);
+        setCurrentShapeIndex(diamondShapes.findIndex(shape => shape.name === selectedShape.name));
+        setCurrentForm(prev => ({ ...prev, image: selectedShape.image })); // Update image
       } else {
         console.error("No shape found for:", value);
       }
@@ -1090,6 +1105,14 @@ const ImagePopup = ({ images, index }) => {
     }));
   };
 
+  useEffect(() => {
+    const defaultShape = diamondShapes.find(shape => shape.name === 'Round');
+    if (defaultShape) {
+      setCurrentForm(prev => ({ ...prev, shape: defaultShape.name }));
+      setCurrentShapeIndex(diamondShapes.findIndex(shape => shape.name === defaultShape.name));
+    }
+  }, []);
+
   return (
     <Container maxWidth="lg">
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -1179,127 +1202,120 @@ const ImagePopup = ({ images, index }) => {
                   </Box>
                   </Grid>
                 </Grid>
-                <Box sx={{ mb: 3 }}></Box>
-                {/* Shape Selection */}
-                <Typography variant="subtitle1" sx={{ mb: 1 }}>Shape *</Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-                  {diamondShapes.map((shape) => (
-                    <Paper
-                      key={shape.name}
-                      elevation={getCurrentForm().shape === shape.name ? 8 : 1}
-                      sx={{
-                        p: 1,
-                        cursor: 'pointer',
-                        width: 80,
-                        height: 80,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                      onClick={() => {
-                        // Simulate an event object similar to a form input
-                        const event = {
-                          target: {
-                            name: 'shape',
-                            value: shape.name
-                          }
-                        };
-                        
-                        // Update current form and call handleDiamondChange
-                        setCurrentForm(prev => ({ ...prev, shape: shape.name }));
-                        handleDiamondChange(event);
-                      }}
-                    >
-                      <Box
-                        component="img"
-                        src={shape.image}
-                        alt={shape.name}
-                        sx={{ width: 40, height: 40 }}
-                      />
-                      <Typography variant="caption" align="center">
-                        {shape.name}
-                      </Typography>
-                    </Paper>
-                  ))}
-                </Box>
 
-                {/* Size Section */}
-                <Grid container spacing={1} sx={{ mb: 0.5, alignItems: 'center' }}>
-                  <Grid item>
-                    <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
-                  </Grid>
-                  {getCurrentForm().quantity > 1 && (
-                    <Grid item>
-                      <FormControl sx={{ minWidth: 120 }}>
-                        <Select
-                          value={diamondValuationType}
-                          onChange={handleDiamondValuationTypeChange}
-                          displayEmpty
-                          size="small"
-                          sx={{
-                            '& .MuiOutlinedInput-notchedOutline': {
-                              border: 'none'
-                            },
-                            '&:hover .MuiOutlinedInput-notchedOutline': {
-                              border: 'none'
-                            },
-                            '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                              border: 'none'
-                            }
-                          }}
-                        >
-                          <MenuItem value="each">Each</MenuItem>
-                          <MenuItem value="total">Total</MenuItem>
-                        </Select>
-                      </FormControl>
+                <Grid container spacing={3} sx={{ mt: 0 }}>
+                {/* Shape Selection */}               
+                  <Grid item xs={12} md= {7} >
+                  <Typography variant="subtitle1" sx={{ mb: 0 }}>Shape *</Typography> {/* Reduced margin bottom */}
+                  <Grid container spacing={2} sx={{ mb: 1 }}>
+                    <Grid item xs={12}>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        {diamondShapes.length > 0 && (
+                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                            <img src={diamondShapes[currentShapeIndex]?.image} alt={diamondShapes[currentShapeIndex]?.name} style={{ width: '100px', height: '100px' }} />
+                            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+                              <IconButton onClick={handlePrevImage} disabled={currentShapeIndex === 0}>
+                                <ArrowBackIcon />
+                              </IconButton>
+                              <IconButton onClick={handleNextImage} disabled={currentShapeIndex === diamondShapes.length - 1}>
+                                <ArrowForwardIcon />
+                              </IconButton>
+                            </Box>
+                          </Box>
+                        )}
+                      </Box>
                     </Grid>
-                  )}
-                </Grid>
-                <Grid container spacing={2} sx={{ mb: 2 }}>
-                  <Grid item xs={12} sm={4}>
-                    <TextField
-                      fullWidth
-                      label="Weight (carats) *"
-                      name="weight"
-                      type="number"
-                      value={getCurrentForm().weight}
+                  </Grid>
+                  <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
+                    <InputLabel>Select Shape</InputLabel>
+                    <Select
+                      value={getCurrentForm().shape || 'Round'} // Default to 'Round'
                       onChange={handleDiamondChange}
-                      inputProps={{ step: "0.01", min: "0" }}
-                    />
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                        {/* Size Dropdown */}
-                    <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
-                      <InputLabel>Diamond Size</InputLabel>
-                      <Select
-                        fullWidth
-                        displayEmpty
-                        value={getCurrentForm().size || ''}
-                        name="size"
-                        onChange={(e) => {
-                          const selectedSize = e.target.value;
-                          
-                          // Find the selected size object
-                          const selectedSizeObj = diamondSizes.find(sizeObj => sizeObj.size === selectedSize);
-                          
-                          // Update the form with selected size and weight
-                          setCurrentForm(prev => ({
-                            ...prev, 
-                            size: selectedSize,
-                            weight: selectedSizeObj ? selectedSizeObj.weight : 0
-                          }));
-                        }}
-                      >
-                        {diamondSizes.map((sizeObj) => (
-                          <MenuItem key={sizeObj.size} value={sizeObj.size}>
-                            {sizeObj.size}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                </Grid>
+                      name="shape"
+                    >
+                      {diamondShapes.map((shape) => (
+                        <MenuItem key={shape.name} value={shape.name}>
+                          {shape.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
                   </Grid>
+
+                  <Grid item xs={12} md={5}>
+                    <Grid container spacing={1} sx={{ mb: 0.5, alignItems: 'center' }}>
+                      <Grid item>
+                        <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
+                      </Grid>
+                      {getCurrentForm().quantity > 1 && (
+                        <Grid item xs>
+                          <FormControl fullWidth variant="outlined">
+                            <Select
+                              value={diamondValuationType}
+                              onChange={handleDiamondValuationTypeChange}
+                              displayEmpty
+                              size="small"
+                              sx={{
+                                '& .MuiOutlinedInput-notchedOutline': {
+                                  border: 'none'
+                                },
+                                '&:hover .MuiOutlinedInput-notchedOutline': {
+                                  border: 'none'
+                                },
+                                '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                                  border: 'none'
+                                }
+                              }}
+                            >
+                              <MenuItem value="each">Each</MenuItem>
+                              <MenuItem value="total">Total</MenuItem>
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                      )}
+                    </Grid>
+                    <Grid container spacing={2} sx={{ mb: 2 }}>
+                      <Grid item xs={12} sm={12}>
+                      <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
+                          <InputLabel>Diamond Size</InputLabel>
+                          <Select
+                            fullWidth
+                            displayEmpty
+                            value={getCurrentForm().size || ''}
+                            name="size"
+                            onChange={(e) => {
+                              const selectedSize = e.target.value;
+                              const selectedSizeObj = diamondSizes.find(sizeObj => sizeObj.size === selectedSize);
+                              setCurrentForm(prev => ({
+                                ...prev, 
+                                size: selectedSize,
+                                weight: selectedSizeObj ? selectedSizeObj.weight : 0
+                              }));
+                            }}
+                            sx={{ width: '100%' }}
+                          >
+                            {diamondSizes.map((sizeObj) => (
+                              <MenuItem key={sizeObj.size} value={sizeObj.size}>
+                                {sizeObj.size}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <TextField
+                          fullWidth
+                          label="Weight (carats) *"
+                          name="weight"
+                          type="number"
+                          value={getCurrentForm().weight}
+                          onChange={handleDiamondChange}
+                          inputProps={{ step: "0.01", min: "0" }}
+                          sx={{ width: '100%', mb: 2 }} // Added margin bottom for spacing
+                        />
+                       
+                      </Grid>
+                    </Grid>
+                  </Grid>
+                </Grid>
 
                 {/* Color Selection */}
                 <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
@@ -1461,9 +1477,9 @@ const ImagePopup = ({ images, index }) => {
             {/* Image Gallery */}
             {images.length > 0 && (
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-              <Button onClick={handlePrevImage} disabled={currentImageIndex === 0} >◀</Button>
-              <img src={images[currentImageIndex].url} alt="image" style={{ width: '50%', height: '100px', cursor: 'pointer', objectFit: 'cover' }} onClick={() => openPopup(currentImageIndex)}/>
-              <Button onClick={handleNextImage} disabled={currentImageIndex === images.length - 1}>▶</Button>
+              <Button onClick={handlePrevImage} disabled={currentShapeIndex === 0} >◀</Button>
+              <img src={images[currentShapeIndex].url} alt="image" style={{ width: '50%', height: '100px', cursor: 'pointer', objectFit: 'cover' }} onClick={() => openPopup(currentShapeIndex)}/>
+              <Button onClick={handleNextImage} disabled={currentShapeIndex === images.length - 1}>▶</Button>
             </Box>
             )}
 
@@ -1471,8 +1487,7 @@ const ImagePopup = ({ images, index }) => {
 
             <Box sx={{ mb: 3 }}>
               <Typography variant="h6" sx={{ mb: 2 }}>Price Estimates</Typography>
-              
-              <Box sx={{ 
+　　             <Box sx={{ 
                 border: '1px solid',
                 borderColor: 'divider',
                 borderRadius: 1,

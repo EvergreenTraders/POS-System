@@ -8,7 +8,8 @@ import {
   Button,
   Grid,
   Typography,
-  Paper
+  Paper,
+  Box
 } from '@mui/material';
 import axios from 'axios';
 
@@ -213,32 +214,30 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       )}
     <Grid container spacing={2}>
       <Grid item xs={12} sm={metalFormState.preciousMetalType === 'Platinum' || metalFormState.preciousMetalType === 'Palladium' ? 12 : 6}>
-      <FormControl fullWidth sx={{ mb: 2 }}>
-        <InputLabel> Purity *</InputLabel>
-        <Select
-          name="purity"
-          value={metalFormState.purity?.id || ''}
-          onChange={(e) => {
-            handleMetalChange(e);
-            // Find the selected purity object
-            const selectedPurityObj = metalPurities.find(p => p.id === e.target.value);
-            // Update the form with selected purity's value
-            setMetalFormState(prev => ({
-              ...prev,
-              value: selectedPurityObj ? selectedPurityObj.value : ''
-            }));
-          }}
-          required
-        >
-          {metalPurities.map(purity => (
-            <MenuItem key={purity.id} value={purity.id}>
-              {metalFormState.preciousMetalType === 'Platinum' || metalFormState.preciousMetalType === 'Palladium' 
-                ? purity.value 
-                : purity.purity}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
+        <FormControl fullWidth sx={{ mb: 2 }}>
+          <InputLabel> Purity *</InputLabel>
+          <Select
+            name="purity"
+            value={metalFormState.purity?.id || ''}
+            onChange={(e) => {
+              handleMetalChange(e);
+              const selectedPurityObj = metalPurities.find(p => p.id === e.target.value);
+              setMetalFormState(prev => ({
+                ...prev,
+                value: selectedPurityObj ? selectedPurityObj.value : ''
+              }));
+            }}
+            required
+          >
+            {metalPurities.map(purity => (
+              <MenuItem key={purity.id} value={purity.id}>
+                {metalFormState.preciousMetalType === 'Platinum' || metalFormState.preciousMetalType === 'Palladium' 
+                  ? purity.value 
+                  : purity.purity}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Grid>
       <Grid item xs={12} sm={metalFormState.preciousMetalType !== 'Platinum' && metalFormState.preciousMetalType !== 'Palladium' ? 6 : 0}>
         {metalFormState.preciousMetalType !== 'Platinum' && metalFormState.preciousMetalType !== 'Palladium' && (
@@ -258,19 +257,19 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       </Grid>
     </Grid>
 
-      <FormControl fullWidth sx={{ mb: 2 }}>
-        <InputLabel>Select Metal Category *</InputLabel>
-        <Select
-          name="metalCategory"
-          value={metalFormState.metalCategory}
-          onChange={handleMetalChange}
-          required
-        >
-          {metalCategories.map(category => (
-            <MenuItem key={category.id} value={category.category}>{category.category}</MenuItem>
-          ))}
-        </Select>
-      </FormControl>
+    <FormControl fullWidth sx={{ mb: 2 }}>
+      <InputLabel>Select Metal Category *</InputLabel>
+      <Select
+        name="metalCategory"
+        value={metalFormState.metalCategory}
+        onChange={handleMetalChange}
+        required
+      >
+        {metalCategories.map(category => (
+          <MenuItem key={category.id} value={category.category}>{category.category}</MenuItem>
+        ))}
+      </Select>
+    </FormControl>
 
       <TextField
         fullWidth
@@ -300,9 +299,34 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         Add Metal
       </Button>
 
-      <Typography variant="h6" sx={{ mt: 2 }}>
-        Est. Metal Value: ${totalMetalValue.toFixed(2)}
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
+          Est. Metal Value: $
+        </Typography>
+        <TextField
+          size="small"
+          type="number"
+          value={totalMetalValue.toFixed(1)}
+          variant="standard"
+          onChange={(e) => {
+            const newValue = parseFloat(e.target.value);
+            setTotalMetalValue(newValue);
+            onMetalValueChange(newValue);
+          }}
+          inputProps={{ 
+            step: "0.1",
+            min: "0",
+            style: { width: '100px' }
+          }}
+          sx={{ 
+            ml: 1,
+            '& .MuiInputBase-root': {
+              ml: 0,
+              pl: 0
+            }
+          }}
+        />
+      </Box>
 
     </Paper>
   );
