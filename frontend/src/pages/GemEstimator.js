@@ -935,7 +935,7 @@ const ImagePopup = ({ images, index }) => {
   const renderDiamondEstimationTab = () => (
     <Grid container spacing={2} sx={{ p: 2 }}>
       <Grid container spacing={2} alignItems="center">
-        <Grid item xs={6}>
+        <Grid item xs={4}>
           <FormControl fullWidth variant="outlined">
             <InputLabel>Cut *</InputLabel>
             <Select
@@ -952,7 +952,22 @@ const ImagePopup = ({ images, index }) => {
             </Select>
           </FormControl>
         </Grid>
-        <Grid item xs={6}>
+        <Grid item xs={4}>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={getCurrentForm().labGrown}
+                onChange={(e) => setCurrentForm(prev => ({
+                  ...prev, 
+                  labGrown: e.target.checked
+                }))}
+                name="labGrown"
+              />
+            }
+            label="Lab Grown"
+          />
+        </Grid>
+        <Grid item xs={4}>
           <Grid container spacing={2} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Grid item xs={12}>
               <Button 
@@ -1226,46 +1241,15 @@ const ImagePopup = ({ images, index }) => {
             
             {(activeTab === 'primary_gem_diamond' || activeTab === 'secondary_gem_diamond') && (
               <Box>
-                <Grid container spacing={2} alignItems="center">
-                  <Grid item xs={6} sm={5}>
-                    <TextField
-                      fullWidth
-                      label="Quantity"
-                      name="quantity"
-                      type="number"
-                      value={getCurrentForm().quantity}
-                      onChange={handleDiamondChange}
-                      inputProps={{ min: "1" }}
-                    />
-                  </Grid>
-                  <Grid item xs={6} sm={7}>
-                  <Box sx={{ ml: 3 }}>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={getCurrentForm().labGrown}
-                          onChange={(e) => setCurrentForm(prev => ({
-                            ...prev, 
-                            labGrown: e.target.checked
-                          }))}
-                          name="labGrown"
-                        />
-                      }
-                      label="Lab Grown"
-                    />
-                  </Box>
-                  </Grid>
-                </Grid>
-
-                <Grid container spacing={3} sx={{ mt: 0 }}>
+                <Grid container spacing={1} sx={{ mt: 0 }}>
                 {/* Shape Selection */}               
                   <Grid item xs={12} md= {7} >
                   <Typography variant="subtitle1" sx={{ mb: 0 }}>Shape *</Typography> {/* Reduced margin bottom */}
                   <Grid container spacing={2} sx={{ mb: 1 }}>
-                    <Grid item xs={12}>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Grid item xs={4}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                         {diamondShapes.length > 0 && (
-                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <>
                             <img src={diamondShapes[currentShapeIndex]?.image} alt={diamondShapes[currentShapeIndex]?.name} style={{ width: '100px', height: '100px' }} />
                             <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
                               <IconButton onClick={handlePrevImage} disabled={currentShapeIndex === 0}>
@@ -1275,12 +1259,12 @@ const ImagePopup = ({ images, index }) => {
                                 <ArrowForwardIcon />
                               </IconButton>
                             </Box>
-                          </Box>
+                          </>
                         )}
                       </Box>
                     </Grid>
-                  </Grid>
-                  <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
+                  <Grid item xs={8} >
+                  <FormControl fullWidth variant="outlined" sx={{ width: '90%', ml:2, mt: 1, mb: 2 }}>
                     <InputLabel>Select Shape</InputLabel>
                     <Select
                       value={getCurrentForm().shape || 'Round'} // Default to 'Round'
@@ -1294,16 +1278,31 @@ const ImagePopup = ({ images, index }) => {
                       ))}
                     </Select>
                   </FormControl>
+
+                  <Grid item xs={6} sm={12}>
+                    <TextField
+                      fullWidth
+                      label="Quantity"
+                      name="quantity"
+                      type="number"
+                      value={getCurrentForm().quantity}
+                      onChange={handleDiamondChange}
+                      inputProps={{ min: "1" }}
+                      sx={{ width: '90%', ml: 2 }}
+                    />
                   </Grid>
+                </Grid>
+                </Grid>
+                </Grid>
 
                   <Grid item xs={12} md={5}>
-                    <Grid container spacing={1} sx={{ mb: 0.5, alignItems: 'center' }}>
+                    <Grid container sx={{ mb: 0.5, alignItems: 'center' }}>
                       <Grid item>
                         <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
                       </Grid>
                       {getCurrentForm().quantity > 1 && (
                         <Grid item xs>
-                          <FormControl fullWidth variant="outlined">
+                          <FormControl variant="outlined" sx={{ width: "50%", mb: 0 }}>
                             <Select
                               value={diamondValuationType}
                               onChange={handleDiamondValuationTypeChange}
