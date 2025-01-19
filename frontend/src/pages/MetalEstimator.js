@@ -78,7 +78,8 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
   const fetchSpotPrice = async () => {
     try {
-     const response = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=USD&currencies=XPD,XAU,XAG,XPT');
+      const response = {"data":{"rates":{"USDXAG":0,"USDXAU":0,"USDXPD":0,"USDXPT":0}}}
+    // const response = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=USD&currencies=XPD,XAU,XAG,XPT');
      setMetalSpotPrice({
         USDXAG: response.data.rates.USDXAG,
         USDXAU: response.data.rates.USDXAU,
@@ -126,13 +127,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         purity: selectedPurity || { purity: '', value: 0 }
       }));
     }
-
-    // if (name === 'spotPrice') {
-    //   setMetalForm(prev => ({
-    //     ...prev,
-    //     spotPrice: { spotPrice: '', value: 0 }
-    //   }))
-    // } 
+    
     else if (name === 'value') {
       setMetalForm(prev => ({
         ...prev,

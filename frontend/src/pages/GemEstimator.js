@@ -87,12 +87,15 @@ function GemEstimator() {
       purity: addMetal[0].purity?.purity || addMetal[0].purity.value,
       type: addMetal[0].preciousMetalType + " " +  addedGemTypes.primary + " " + addedGemTypes.secondary,
       category: addMetal[0].metalCategory,
-      priceEstimates: {
+      itemPriceEstimates: {
         pawn: priceEstimates.pawn,
         buy: priceEstimates.buy,
         retail: priceEstimates.retail
-      }
+      },
+      image: images[0]
     };
+    console.log("estimated items",newItem);
+
     setEstimatedItems(prev => [...prev, newItem]);
 
     // Clear all summaries
@@ -103,6 +106,9 @@ function GemEstimator() {
       primary: null,
       secondary: null
     });
+    setTimeout(() => {
+      setImages([]);
+    }, 1000);
   };
 
   const [addedGemTypes, setAddedGemTypes] = useState({
@@ -168,6 +174,7 @@ function GemEstimator() {
     buy: 0,
     retail: 0
   });
+  const [itemPriceEstimates, setItemPriceEstimates] = useState({ pawn: 0, buy: 0, retail: 0 });
 
   const [diamondValuationType, setDiamondValuationType] = useState('each');
 
@@ -1533,7 +1540,7 @@ const ImagePopup = ({ images, index }) => {
             <ImagePopup images={images} index={popupImageIndex}/>
 
             <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" sx={{ mb: 2 }}>Price Estimates</Typography>
+              <Typography variant="h6" sx={{ mb: 0 }}>Price Estimates</Typography>
 　　             <Box sx={{ 
                 border: '1px solid',
                 borderColor: 'divider',
@@ -1783,6 +1790,7 @@ const ImagePopup = ({ images, index }) => {
                 <Table>
                   <TableHead>
                     <TableRow>
+                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Image</TableCell>
                       <TableCell sx={{ fontWeight: 600, py: 2 }}>Description</TableCell>
                       <TableCell sx={{ fontWeight: 600, py: 2 }}>Transaction Type</TableCell>
                       <TableCell sx={{ fontWeight: 600, py: 2 }}>Price</TableCell>
@@ -1805,6 +1813,13 @@ const ImagePopup = ({ images, index }) => {
                           }
                         }}
                       >
+                        <TableCell>
+                            <img 
+                              src={item.image.url} 
+                              alt="Uploaded item" 
+                              style={{ width: '50px', height: '50px', objectFit: 'cover' }} 
+                            />
+                        </TableCell>
                         <TableCell>
                           <Box sx={{ display: 'flex', alignItems: 'center' }}>
                             <Box>
@@ -1833,7 +1848,7 @@ const ImagePopup = ({ images, index }) => {
                               <Box>
                                 <Typography variant="body2">Pawn</Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  ${item.priceEstimates.pawn.toFixed(2)}
+                                  ${item.itemPriceEstimates.pawn.toFixed(2)}
                                 </Typography>
                               </Box>
                             </MenuItem>
@@ -1841,7 +1856,7 @@ const ImagePopup = ({ images, index }) => {
                               <Box>
                                 <Typography variant="body2">Buy</Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  ${item.priceEstimates.buy.toFixed(2)}
+                                  ${item.itemPriceEstimates.buy.toFixed(2)}
                                 </Typography>
                               </Box>
                             </MenuItem>
@@ -1849,7 +1864,7 @@ const ImagePopup = ({ images, index }) => {
                               <Box>
                                 <Typography variant="body2">Retail</Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  ${item.priceEstimates.retail.toFixed(2)}
+                                  ${item.itemPriceEstimates.retail.toFixed(2)}
                                 </Typography>
                               </Box>
                             </MenuItem>
@@ -1858,7 +1873,7 @@ const ImagePopup = ({ images, index }) => {
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <TextField 
                             type="number"
-                            value={item.priceEstimates[itemTransactionTypes[index] || 'pawn']}
+                            value={item.itemPriceEstimates[itemTransactionTypes[index]]}
                             //onChange={(e) => handlePriceChange(index, e.target.value)}
                             InputProps={{
                               startAdornment: <InputAdornment position="start">$</InputAdornment>,
