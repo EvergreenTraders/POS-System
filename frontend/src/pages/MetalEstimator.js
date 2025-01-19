@@ -20,7 +20,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     metalCategory: '',
     jewelryColor: '',
     weight: '',
-    price: '',
+    spotPrice: 0,
     purity: { purity: '', value: 0 },
     value: ''
   });
@@ -31,6 +31,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
   const [metalPurities, setMetalPurities] = useState([]);
   const [metalColors, setMetalColors] = useState([]);
   const [totalMetalValue, setTotalMetalValue] = useState(0);
+  const [metalSpotPrice, setMetalSpotPrice] = useState({USDXAG: 0, USDXAU: 0, USDXPD: 0, USDXPT: 0 });
 
   useEffect(() => {
     setMetalFormState(metalFormState);
@@ -62,6 +63,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     };
 
     fetchAllData();
+    fetchSpotPrice();
   }, []);
 
   const fetchPurities = async (preciousMetalTypeId) => {
@@ -74,18 +76,37 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     }
   };
 
+  const fetchSpotPrice = async () => {
+    try {
+     const response = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=USD&currencies=XPD,XAU,XAG,XPT');
+     setMetalSpotPrice({
+        USDXAG: response.data.rates.USDXAG,
+        USDXAU: response.data.rates.USDXAU,
+        USDXPD: response.data.rates.USDXPD,
+        USDXPT: response.data.rates.USDXPT
+      });
+    } catch (error) {
+      console.error('Error fetching spot price:', error);
+    }
+  };
+
   const handleMetalChange = (event) => {
     const { name, value } = event.target;
+
     if (name === 'preciousMetalType') {
       const selectedPreciousMetalType = preciousMetalTypes.find(type => type.type === value);
       if (selectedPreciousMetalType) {
         fetchPurities(selectedPreciousMetalType.id);
       }
-    
       setMetalForm(prev => ({
         ...prev,
         preciousMetalType: value,
-        purity: { purity: '', value: 0 }
+        purity: { purity: '', value: 0 },
+        spotPrice: 
+        selectedPreciousMetalType.type === 'Silver' ? metalSpotPrice.USDXAG :
+        selectedPreciousMetalType.type === 'Gold' ? metalSpotPrice.USDXAU :
+        selectedPreciousMetalType.type === 'Platinum' ? metalSpotPrice.USDXPT : 
+        selectedPreciousMetalType.type === 'Palladium' ? metalSpotPrice.USDXPD : 0 
       }));
       return;
     }
@@ -104,7 +125,14 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         ...prev,
         purity: selectedPurity || { purity: '', value: 0 }
       }));
-    } 
+    }
+
+    // if (name === 'spotPrice') {
+    //   setMetalForm(prev => ({
+    //     ...prev,
+    //     spotPrice: { spotPrice: '', value: 0 }
+    //   }))
+    // } 
     else if (name === 'value') {
       setMetalForm(prev => ({
         ...prev,
@@ -143,7 +171,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       metalCategory: '',
       jewelryColor: '',
       weight: '',
-      price: '',
+      spotPrice: '',
       purity: { purity: '', value: 0 },
       value: ''
     });
@@ -151,9 +179,9 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
   const calculateMetalValue = () => {
     // Only calculate if all necessary fields are filled
-    if (metalFormState.weight && metalFormState.price && metalFormState.purity) {
+    if (metalFormState.weight && metalFormState.spotPrice && metalFormState.purity) {
       const percentageFactor = 0.7; 
-      setTotalMetalValue(metalFormState.price * metalFormState.purity.value * metalFormState.weight * percentageFactor);
+      setTotalMetalValue(metalFormState.spotPrice * metalFormState.purity.value * metalFormState.weight * percentageFactor);
     }
       
       else {
@@ -164,7 +192,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
   useEffect(() => {
     calculateMetalValue();
-  }, [metalFormState.weight, metalFormState.price, metalFormState.purity]);
+  }, [metalFormState.weight, metalFormState.spotPrice, metalFormState.purity]);
 
   return (
     <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
@@ -284,8 +312,8 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       <TextField
         fullWidth
         label="Spot Price/oz"
-        name="price"
-        value={metalFormState.price}
+        name="spotPrice"
+        value={metalFormState.spotPrice || ''}
         onChange={handleMetalChange}
         sx={{ mb: 2 }}
       />
