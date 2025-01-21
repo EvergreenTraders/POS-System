@@ -15,10 +15,10 @@ import axios from 'axios';
 
 const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) => {
   const [metalFormState, setMetalForm] = useState({
-    preciousMetalType: '',
+    preciousMetalType: 'Gold',
     nonPreciousMetalType: '',
     metalCategory: '',
-    jewelryColor: '',
+    jewelryColor: 'Yellow',
     weight: '',
     spotPrice: 0,
     purity: { purity: '', value: 0 },
@@ -127,7 +127,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         purity: selectedPurity || { purity: '', value: 0 }
       }));
     }
-    
+
     else if (name === 'value') {
       setMetalForm(prev => ({
         ...prev,
@@ -190,7 +190,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
   }, [metalFormState.weight, metalFormState.spotPrice, metalFormState.purity]);
 
   return (
-    <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
+    <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
       <Typography variant="h6" sx={{ mb: 2 }}>ESTIMATE METAL</Typography>
       <FormControl fullWidth sx={{ mb: 2 }}>
         <InputLabel>Select Precious Metal Type *</InputLabel>

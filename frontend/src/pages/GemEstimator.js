@@ -122,7 +122,7 @@ function GemEstimator() {
 
   // Primary gem form
   const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
-    shape: '',
+    shape: 'Round',
     clarity: '',
     color: 'Colorless',
     quantity: 1,
@@ -135,7 +135,7 @@ function GemEstimator() {
 
   // Secondary gem form
   const [secondaryDiamondForm, setSecondaryDiamondForm] = useState({
-    shape: '',
+    shape: 'Round',
     clarity: '',
     color: 'Colorless',
     quantity: 1,
@@ -549,7 +549,7 @@ const ImagePopup = ({ images, index }) => {
     
     // Reset the current form after adding
     const resetForm = {
-      shape: '',
+      shape: 'Round',
       clarity: '',
       color: 'Colorless',
       quantity: 1,
@@ -560,6 +560,7 @@ const ImagePopup = ({ images, index }) => {
       size: ''
     };
     setCurrentForm(resetForm);
+    setCurrentShapeIndex(0);
     
     // Reset exact color to default
     setExactColor('D');
@@ -1174,13 +1175,6 @@ const ImagePopup = ({ images, index }) => {
     }));
   };
 
-  useEffect(() => {
-    const defaultShape = diamondShapes.find(shape => shape.name === 'Round');
-    if (defaultShape) {
-      setCurrentForm(prev => ({ ...prev, shape: defaultShape.name }));
-      setCurrentShapeIndex(diamondShapes.findIndex(shape => shape.name === defaultShape.name));
-    }
-  }, []);
 
   return (
     <Container maxWidth="lg">
@@ -1195,7 +1189,7 @@ const ImagePopup = ({ images, index }) => {
 
         {/* Diamond Estimation Section */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
+          <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
               <Typography variant="h6" sx={{ mb: 0, mr: 2 }}>
                 {activeTab.startsWith('primary') ? 'EST. PRIMARY GEM' : 'EST. SECONDARY GEM'}
@@ -1477,7 +1471,7 @@ const ImagePopup = ({ images, index }) => {
 
         {/* Summary Section */}
         <Grid item xs={12} md={3}>
-          <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
+          <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
             <Typography variant="h6">Images</Typography>
             <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
               <Button
@@ -1754,10 +1748,10 @@ const ImagePopup = ({ images, index }) => {
             </Button>
           </Box>
     </Paper>
-</Grid>
+    </Grid>
       </Grid>
 
-      <Grid container spacing={1} sx={{ mt: 3 }}>
+      <Grid container spacing={0} sx={{ mt: 0 }}>
         {/* Estimated Items Section */}
         <Grid item xs={12}>
           <Paper sx={{ p: 3, mt: 3, mb: 3, borderRadius: 2 }}>
