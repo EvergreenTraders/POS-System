@@ -14,6 +14,11 @@ import {
   Snackbar,
   Tab,
   Tabs,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
@@ -67,25 +72,44 @@ function SystemConfig() {
     dailyReports: false,
   });
 
-  const [priceEstimates, setPriceEstimates] = useState({
-    pawn: 0,
-    buy: 0,
-    retail: 0
-  });
+  const [priceEstimates, setPriceEstimates] = useState({});
+  const [preciousMetalNames, setPreciousMetalNames] = useState({});
+  const [preciousMetalTypeId, setPreciousMetalTypeId] = useState('');
 
   useEffect(() => {
+    const fetchPreciousMetalNames = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/precious_metal_type');
+        const data = response.data;
+        const names = {};
+        data.forEach(metal => {
+          names[metal.id] = metal.type;
+        });
+        setPreciousMetalNames(names);
+      } catch (error) {
+        console.error('Error fetching precious metal names:', error);
+      }
+    };
+
     const fetchPriceEstimates = async () => {
       try {
         const response = await axios.get('http://localhost:5000/api/price_estimates');
-        const estimates = response.data.reduce((acc, item) => {
-          acc[item.transaction_type] = item.estimate;
-          return acc;
-        }, {});
-        setPriceEstimates(estimates);
+        const data = response.data;
+        const estimates = {};
+        data.forEach((estimate) => {
+          const metalType = estimate.precious_metal_type_id;
+          if (!estimates[metalType]) {
+            estimates[metalType] = [];
+          }
+          estimates[metalType].push(estimate);
+        });
+        setPriceEstimates(estimates); // Store organized data in state
       } catch (error) {
         console.error('Error fetching price estimates:', error);
       }
     };
+
+    fetchPreciousMetalNames();
     fetchPriceEstimates();
   }, []);
 
@@ -117,29 +141,32 @@ function SystemConfig() {
     }));
   };
 
-  const handlePriceEstimatesChange = (event) => {
+  const handlePriceEstimatesChange = (event, metalType) => {
     const { name, value } = event.target;
-    setPriceEstimates(prev => ({
-      ...prev,
-      [name]: Number(value)
-    }));
+    setPreciousMetalTypeId(metalType); // Save the current metal type ID
+    setPriceEstimates((prev) => {
+      const updatedEstimates = prev[metalType].map((estimate) => 
+        estimate.transaction_type === name ? { ...estimate, estimate: Number(value) } : estimate
+      );
+      return {
+        ...prev,
+        [metalType]: updatedEstimates,
+      };
+    });
   };
 
   const handleSaveSettings = async () => {
+    const precious_metal_type_id = preciousMetalTypeId; // Get the current metal type ID
+    const currentValues = priceEstimates[precious_metal_type_id];
+    // Save price estimates
     try {
-
-      // Save price estimates
       await axios.put('http://localhost:5000/api/price_estimates', {
-        estimates: [
-          { transaction_type: 'pawn', estimate: priceEstimates.pawn },
-          { transaction_type: 'buy', estimate: priceEstimates.buy },
-          { transaction_type: 'retail', estimate: priceEstimates.retail }
-        ]
+        precious_metal_type_id: precious_metal_type_id,
+        estimates: currentValues,
       });
-
       setSnackbar({
         open: true,
-        message: 'All settings updated successfully',
+        message: 'Settings updated successfully',
         severity: 'success',
       });
     } catch (error) {
@@ -232,42 +259,24 @@ function SystemConfig() {
 
           <ConfigSection>
             <Typography variant="h6" gutterBottom>
-              Price Estimate Percentages
+              Price Estimates
             </Typography>
             <Grid container spacing={3}>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  fullWidth
-                  label="Pawn Percentage"
-                  name="pawn"
-                  type="number"
-                  value={priceEstimates.pawn}
-                  onChange={handlePriceEstimatesChange}
-                  inputProps={{ min: 0, max: 100 }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  fullWidth
-                  label="Buy Percentage"
-                  name="buy"
-                  type="number"
-                  value={priceEstimates.buy}
-                  onChange={handlePriceEstimatesChange}
-                  inputProps={{ min: 0, max: 100 }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  fullWidth
-                  label="Retail Percentage"
-                  name="retail"
-                  type="number"
-                  value={priceEstimates.retail}
-                  onChange={handlePriceEstimatesChange}
-                  inputProps={{ min: 0, max: 100 }}
-                />
-              </Grid>
+              {Object.entries(priceEstimates).map(([key, estimates]) => (
+                estimates.map((estimate) => (
+                  <Grid item xs={12} sm={4} key={estimate.transaction_type}>
+                    <TextField
+                      fullWidth
+                      label={`${preciousMetalNames[key]} ${estimate.transaction_type} Percentage`}
+                      name={estimate.transaction_type}
+                      type="number"
+                      value={estimate.estimate}
+                      onChange={(event) => handlePriceEstimatesChange(event, key)}
+                      inputProps={{ min: 0, max: 100 }}
+                    />
+                  </Grid>
+                ))
+              ))}
             </Grid>
           </ConfigSection>
         </StyledPaper>

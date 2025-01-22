@@ -285,7 +285,7 @@ app.get('/api/metal_type', async (req, res) => {
 
 app.get('/api/metal_purity/:precious_metal_type_id', async (req, res) => {
   try {
-    const { precious_metal_type_id } = req.params;
+  const { precious_metal_type_id } = req.params;
     
     const query = 'SELECT * FROM metal_purity WHERE precious_metal_type_id = $1';
     const result = await pool.query(query, [precious_metal_type_id]);
@@ -460,28 +460,28 @@ app.get('/api/stone_color', async (req, res) => {
 // Price Estimates API Endpoint
 app.get('/api/price_estimates', async (req, res) => {
   try {
-    const result = await pool.query('SELECT transaction_type, estimate FROM price_estimates');
+    const result = await pool.query('SELECT * FROM price_estimates');
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching price estimates:', error);
-    res.status(500).json({ error:'Internal Server Error'});
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // PUT route for updating price estimates
 app.put('/api/price_estimates', async (req, res) => {
-  const estimates = req.body.estimates;
+  const { precious_metal_type_id, estimates } = req.body;
   try {
     for (const estimate of estimates) {
       await pool.query(
-        'UPDATE price_estimates SET estimate = $1, updated_at = CURRENT_TIMESTAMP WHERE transaction_type = $2',
-        [estimate.estimate, estimate.transaction_type]
+        'UPDATE price_estimates SET estimate = $1, updated_at = CURRENT_TIMESTAMP WHERE precious_metal_type_id = $2 AND transaction_type = $3',
+        [estimate.estimate, precious_metal_type_id, estimate.transaction_type]
       );
     }
     res.status(200).json({ message: 'Price estimates updated successfully.' });
   } catch (error) {
     console.error('Error updating price estimates:', error);
-    res.status(500).json({ message: 'Failed to update price estimates.' });
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

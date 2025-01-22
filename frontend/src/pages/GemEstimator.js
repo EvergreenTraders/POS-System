@@ -94,7 +94,6 @@ function GemEstimator() {
       },
       image: images[0]
     };
-    console.log("estimated items",newItem);
 
     setEstimatedItems(prev => [...prev, newItem]);
 
@@ -169,11 +168,7 @@ function GemEstimator() {
     buy: 0,
     retail: 0
   });
-  const [priceEstimatePercentages, setPriceEstimatePercentages] = useState({
-    pawn: 0,
-    buy: 0,
-    retail: 0
-  });
+  const [priceEstimatePercentages, setPriceEstimatePercentages] = useState({});
   const [itemPriceEstimates, setItemPriceEstimates] = useState({ pawn: 0, buy: 0, retail: 0 });
 
   const [diamondValuationType, setDiamondValuationType] = useState('each');
@@ -205,12 +200,17 @@ function GemEstimator() {
       try {
         //Fetch Price Estimate Percentages
         const priceEstimatePercentagesResponse = await axios.get('http://localhost:5000/api/price_estimates');
-        const estimates = priceEstimatePercentagesResponse.data.reduce((acc, item) => {
-          acc[item.transaction_type] = item.estimate;
-          return acc;
-        }, {});
+        const data = priceEstimatePercentagesResponse.data;
+        const estimates = {};
+        data.forEach((estimate) => {
+          const metalType = estimate.precious_metal_type_id;
+          if (!estimates[metalType]) {
+            estimates[metalType] = [];
+          }
+          estimates[metalType].push(estimate);
+        });
         setPriceEstimatePercentages(estimates);
-
+        
         // Fetch Stone Shapes
         const stoneShapesResponse = await axios.get('http://localhost:5000/api/stone_shape');
         const stoneShapesWithImages = stoneShapesResponse.data.map(shape => ({
@@ -277,10 +277,15 @@ function GemEstimator() {
   useEffect(() => {
     // Calculate estimates whenever total values change
     const totalValue = totalMetalValue + totalDiamondValue;
+    const estimates = priceEstimatePercentages[metalFormState.preciousMetalTypeId] || [];
+    const pawnEstimate = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
+    const buyEstimate = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
+    const retailEstimate = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
+
     setPriceEstimates({
-      pawn: totalValue * (priceEstimatePercentages.pawn / 100),
-      buy: totalValue * (priceEstimatePercentages.buy / 100),
-      retail: totalValue * (priceEstimatePercentages.retail / 100)
+      pawn: totalValue * (pawnEstimate / 100),
+      buy: totalValue * (buyEstimate / 100),
+      retail: totalValue * (retailEstimate / 100)
     });
 
   }, [totalMetalValue, totalDiamondValue, priceEstimatePercentages]);

@@ -15,6 +15,7 @@ import axios from 'axios';
 
 const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) => {
   const [metalFormState, setMetalForm] = useState({
+    preciousMetalTypeId: 1,
     preciousMetalType: 'Gold',
     nonPreciousMetalType: '',
     metalCategory: '',
@@ -63,6 +64,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     };
 
     fetchAllData();
+    fetchPurities(1);
     fetchSpotPrice();
   }, []);
 
@@ -78,7 +80,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
   const fetchSpotPrice = async () => {
     try {
-      const response = {"data":{"rates":{"USDXAG":0,"USDXAU":0,"USDXPD":0,"USDXPT":0}}}
+     const response = {"data":{"rates":{"USDXAG":20,"USDXAU":30,"USDXPD":40,"USDXPT":50}}}
     // const response = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=USD&currencies=XPD,XAU,XAG,XPT');
      setMetalSpotPrice({
         USDXAG: response.data.rates.USDXAG,
@@ -86,6 +88,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         USDXPD: response.data.rates.USDXPD,
         USDXPT: response.data.rates.USDXPT
       });
+      metalFormState.spotPrice = response.data.rates.USDXAU;
     } catch (error) {
       console.error('Error fetching spot price:', error);
     }
@@ -101,6 +104,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       }
       setMetalForm(prev => ({
         ...prev,
+        preciousMetalTypeId: selectedPreciousMetalType.id,
         preciousMetalType: value,
         purity: { purity: '', value: 0 },
         spotPrice: 
@@ -147,6 +151,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
   const addMetal = () => {
     const newItem = {
+      preciousMetalTypeId: metalFormState.preciousMetalTypeId,
       preciousMetalType: metalFormState.preciousMetalType,
       nonPreciousMetalType: metalFormState.nonPreciousMetalType,
       metalCategory: metalFormState.metalCategory,
@@ -161,12 +166,13 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
     // Reset form
     setMetalForm({
-      preciousMetalType: '',
+      preciousMetalTypeId: 1,
+      preciousMetalType: 'Gold',
       nonPreciousMetalType: '',
       metalCategory: '',
-      jewelryColor: '',
+      jewelryColor: 'Yellow',
       weight: '',
-      spotPrice: '',
+      spotPrice: 0,
       purity: { purity: '', value: 0 },
       value: ''
     });
@@ -308,7 +314,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         fullWidth
         label="Spot Price/oz"
         name="spotPrice"
-        value={metalFormState.spotPrice || ''}
+        value={metalFormState.spotPrice}
         onChange={handleMetalChange}
         sx={{ mb: 2 }}
       />
