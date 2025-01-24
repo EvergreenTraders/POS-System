@@ -283,6 +283,7 @@ app.get('/api/metal_type', async (req, res) => {
   }
 });
 
+// Metal Purity routes
 app.get('/api/metal_purity/:precious_metal_type_id', async (req, res) => {
   try {
   const { precious_metal_type_id } = req.params;
@@ -301,6 +302,7 @@ app.get('/api/metal_purity/:precious_metal_type_id', async (req, res) => {
   }
 });
 
+// Metal Category routes
 app.get('/api/metal_category', async (req, res) => {
   try {
     const query = 'SELECT * FROM metal_category';
@@ -312,6 +314,7 @@ app.get('/api/metal_category', async (req, res) => {
   }
 });
 
+// Metal Color routes
 app.get('/api/metal_color', async (req, res) => {
   try {
     const query = 'SELECT * FROM metal_color';
@@ -323,6 +326,7 @@ app.get('/api/metal_color', async (req, res) => {
   }
 });
 
+// Metal Style Category routes
 app.get('/api/metal_style_category', async (req, res) => {
   try {
     const query = 'SELECT * FROM metal_style_category';
@@ -334,6 +338,7 @@ app.get('/api/metal_style_category', async (req, res) => {
   }
 });
 
+// Metal Style Subcategory routes
 app.get('/api/metal_style_subcategory', async (req, res) => {
   try {
     const query = 'SELECT * FROM metal_style_subcategory';
@@ -453,6 +458,60 @@ app.get('/api/stone_color', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching stone colors:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Live Pricing API Endpoint
+app.get('/api/live_pricing', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT islivepricing FROM live_pricing LIMIT 1');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching live pricing:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PUT route for updating live pricing
+app.put('/api/live-pricing', async (req, res) => {
+  try {
+    const { isLivePricing } = req.body;
+    
+    // Update the live pricing in the database
+    const result = await pool.query('UPDATE live_pricing SET islivepricing = $1', [isLivePricing]);
+    
+    res.json({ message: 'Live pricing updated successfully' });
+  } catch (error) {
+    console.error('Error updating live pricing:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+
+// Spot Prices API Endpoint
+app.get('/api/spot_prices', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT precious_metal_type_id, spot_price FROM spot_prices');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching spot prices:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PUT route for updating spot prices
+app.put('/api/spot_prices', async (req, res) => {
+  try {
+    const { precious_metal_type_id, spot_price } = req.body;
+    
+    // Update the price
+    const updateQuery = 'UPDATE spot_prices SET spot_price = $1 WHERE precious_metal_type_id = $2';
+    await pool.query(updateQuery, [spot_price, precious_metal_type_id]);
+    
+    res.status(200).json({ message: 'Price updated successfully' });
+  } catch (error) {
+    console.error('Error updating spot price:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

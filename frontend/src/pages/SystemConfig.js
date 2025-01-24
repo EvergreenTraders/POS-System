@@ -75,6 +75,9 @@ function SystemConfig() {
   const [priceEstimates, setPriceEstimates] = useState({});
   const [preciousMetalNames, setPreciousMetalNames] = useState({});
   const [preciousMetalTypeId, setPreciousMetalTypeId] = useState('');
+  const [isLivePricing, setIsLivePricing] = useState(false);
+  const [updateMethod, setUpdateMethod] = useState(null);
+  const [spotPrices, setSpotPrices] = useState({});
 
   useEffect(() => {
     const fetchPreciousMetalNames = async () => {
@@ -88,6 +91,28 @@ function SystemConfig() {
         setPreciousMetalNames(names);
       } catch (error) {
         console.error('Error fetching precious metal names:', error);
+      }
+    };
+
+    const fetchLivePricing = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/live_pricing');
+        const data = response.data;
+        setIsLivePricing(data[0].islivepricing);
+      } catch (error) {
+        console.error('Error fetching live pricing:', error);
+      }
+    }
+    const fetchSpotPrices = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/spot_prices');
+        const prices = {};
+        response.data.forEach(item => {
+          prices[item.precious_metal_type_id] = item.spot_price;
+        })
+        setSpotPrices(prices); 
+      } catch (error) {
+        console.error('Error fetching spot prices:', error);
       }
     };
 
@@ -110,8 +135,17 @@ function SystemConfig() {
     };
 
     fetchPreciousMetalNames();
+    fetchLivePricing();
+    fetchSpotPrices();
     fetchPriceEstimates();
   }, []);
+
+  useEffect(() => {
+    if (isLivePricing) {
+      const updateMethod = window.confirm("Would you like to update the spot price each day? Click 'Cancel' for each transaction.");
+      setUpdateMethod(updateMethod);
+    }
+  }, [isLivePricing]);
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
@@ -141,6 +175,14 @@ function SystemConfig() {
     }));
   };
 
+  const handleSpotPriceChange = (event, metalType) => {
+    const { name, value } = event.target;
+    setSpotPrices((prev) => ({
+      ...prev,
+      [metalType]: value
+    }));
+  };
+
   const handlePriceEstimatesChange = (event, metalType) => {
     const { name, value } = event.target;
     setPreciousMetalTypeId(metalType); // Save the current metal type ID
@@ -156,14 +198,30 @@ function SystemConfig() {
   };
 
   const handleSaveSettings = async () => {
-    const precious_metal_type_id = preciousMetalTypeId; // Get the current metal type ID
-    const currentValues = priceEstimates[precious_metal_type_id];
-    // Save price estimates
+
     try {
-      await axios.put('http://localhost:5000/api/price_estimates', {
-        precious_metal_type_id: precious_metal_type_id,
-        estimates: currentValues,
+      // Make a PUT request to update spot prices
+      const updateSpotPrices = Object.keys(spotPrices).map(metalType => {
+        return axios.put('http://localhost:5000/api/spot_prices', {
+          precious_metal_type_id: metalType,
+          spot_price: spotPrices[metalType],
+        });
       });
+  
+      // Wait for all spot price updates to complete
+      await Promise.all(updateSpotPrices);
+
+      // Make a PUT request to update price estimates
+      const updatePriceEstimates = Object.keys(priceEstimates).map(metalType => {
+        return axios.put('http://localhost:5000/api/price_estimates', {
+          precious_metal_type_id: metalType,
+          estimates: priceEstimates[metalType],
+        });
+      });
+  
+      // Wait for all price estimate updates to complete
+      await Promise.all(updatePriceEstimates);
+
       setSnackbar({
         open: true,
         message: 'Settings updated successfully',
@@ -177,6 +235,18 @@ function SystemConfig() {
         message: 'Failed to update settings: ' + errorMessage,
         severity: 'error',
       });
+    }
+  };
+
+  const handleLivePricingChange = async (event) => {
+    const newLivePricing = event.target.checked;
+    setIsLivePricing(newLivePricing);
+    try {
+      const response = await axios.put('http://localhost:5000/api/live-pricing', {
+        isLivePricing: newLivePricing,
+      });
+    } catch (error) {
+      console.error('Error updating live pricing:', error);
     }
   };
 
@@ -258,26 +328,52 @@ function SystemConfig() {
           </ConfigSection>
 
           <ConfigSection>
+          <Box display="flex" alignItems="center">
             <Typography variant="h6" gutterBottom>
-              Price Estimates
+              Live Pricing
             </Typography>
-            <Grid container spacing={3}>
-              {Object.entries(priceEstimates).map(([key, estimates]) => (
-                estimates.map((estimate) => (
-                  <Grid item xs={12} sm={4} key={estimate.transaction_type}>
+            <Switch
+              checked={isLivePricing}
+              onChange={handleLivePricingChange}
+              color="primary"
+            />
+            </Box>
+             {!isLivePricing && (
+              <Grid container spacing={2}>
+                {Object.keys(preciousMetalNames).map((metal) => (
+                  <Grid item xs={12} sm={3} key={metal}>
                     <TextField
+                      label={`${preciousMetalNames[metal]} Spot Price`}
+                      value={spotPrices[metal]}
+                      onChange={(e) => handleSpotPriceChange(e, metal)}
                       fullWidth
-                      label={`${preciousMetalNames[key]} ${estimate.transaction_type} Percentage`}
-                      name={estimate.transaction_type}
-                      type="number"
-                      value={estimate.estimate}
-                      onChange={(event) => handlePriceEstimatesChange(event, key)}
-                      inputProps={{ min: 0, max: 100 }}
                     />
                   </Grid>
-                ))
-              ))}
-            </Grid>
+                ))}
+              </Grid>
+            )}
+            <Box mt={2}>
+              <Typography variant="h6" gutterBottom>
+                Price Estimates
+              </Typography>
+              <Grid container spacing={3}>
+                {Object.entries(priceEstimates).map(([key, estimates]) => (
+                  estimates.map((estimate) => (
+                    <Grid item xs={12} sm={4} key={estimate.transaction_type}>
+                      <TextField
+                        fullWidth
+                        label={`${preciousMetalNames[key]} ${estimate.transaction_type} Percentage`}
+                        name={estimate.transaction_type}
+                        type="number"
+                        value={estimate.estimate}
+                        onChange={(event) => handlePriceEstimatesChange(event, key)}
+                        inputProps={{ min: 0, max: 100 }}
+                      />
+                    </Grid>
+                  ))
+                ))}
+              </Grid>
+            </Box>
           </ConfigSection>
         </StyledPaper>
       </TabPanel>

@@ -33,6 +33,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
   const [metalColors, setMetalColors] = useState([]);
   const [totalMetalValue, setTotalMetalValue] = useState(0);
   const [metalSpotPrice, setMetalSpotPrice] = useState({USDXAG: 0, USDXAU: 0, USDXPD: 0, USDXPT: 0 });
+  const [isLivePricing, setIsLivePricing] = useState(false);
 
   useEffect(() => {
     setMetalFormState(metalFormState);
@@ -63,9 +64,21 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       }
     };
 
+    const fetchLivePricing = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/live_pricing');
+        const data = response.data;
+        setIsLivePricing(data[0].islivepricing);
+      } catch (error) {
+        console.error('Error fetching live pricing:', error);
+      }
+    };
+
     fetchAllData();
+    fetchLivePricing();
     fetchPurities(1);
-    fetchSpotPrice();
+    if(isLivePricing) fetchLiveSpotPrice();
+    else fetchManualSpotPrice();
   }, []);
 
   const fetchPurities = async (preciousMetalTypeId) => {
@@ -78,7 +91,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     }
   };
 
-  const fetchSpotPrice = async () => {
+  const fetchLiveSpotPrice = async () => {
     try {
      const response = {"data":{"rates":{"USDXAG":20,"USDXAU":30,"USDXPD":40,"USDXPT":50}}}
     // const response = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=USD&currencies=XPD,XAU,XAG,XPT');
@@ -91,6 +104,25 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       metalFormState.spotPrice = response.data.rates.USDXAU;
     } catch (error) {
       console.error('Error fetching spot price:', error);
+    }
+  };
+
+  const fetchManualSpotPrice = async () => {
+    try {
+      const response = await axios.get('http://localhost:5000/api/spot_prices');
+      const prices = {};
+      response.data.forEach(item => {
+        prices[item.precious_metal_type_id] = item.spot_price;
+      })
+      setMetalSpotPrice({
+        USDXAU: prices[1],
+        USDXPT: prices[2],
+        USDXAG: prices[3],
+        USDXPD: prices[4]
+      }); 
+      metalFormState.spotPrice = prices[1];
+    } catch (error) {
+      console.error('Error fetching spot prices:', error);
     }
   };
 
