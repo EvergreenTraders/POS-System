@@ -33,6 +33,8 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
   const [metalColors, setMetalColors] = useState([]);
   const [totalMetalValue, setTotalMetalValue] = useState(0);
   const [metalSpotPrice, setMetalSpotPrice] = useState({CADXAG: 0, CADXAU: 0, CADXPD: 0, CADXPT: 0 });
+  const [lastFetched, setLastFetched] = useState(null);
+  const [cachedRates, setCachedRates] = useState({});
   const [isLivePricing, setIsLivePricing] = useState(false);
   const [isPerDay, setIsPerDay] = useState(false);
   const [isPerTransaction, setIsPerTransaction] = useState(false);
@@ -100,51 +102,60 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     try {
       if(isPerTransaction) {
         const response = await axios.get('http://localhost:5000/api/live_spot_prices');
-        // const response = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=CAD&currencies=XPD,XAU,XAG,XPT');
+       // const response = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=CAD&currencies=XPD,XAU,XAG,XPT');
         setMetalSpotPrice({
-            CADXAG: response.data.rates.CADXAG.toFixed(2),
-            CADXAU: response.data.rates.CADXAU.toFixed(2),
-            CADXPD: response.data.rates.CADXPD.toFixed(2),
-            CADXPT: response.data.rates.CADXPT.toFixed(2)
+            CADXAG: (response.data.rates.CADXAG/31).toFixed(2),
+            CADXAU: (response.data.rates.CADXAU/31).toFixed(2),
+            CADXPD: (response.data.rates.CADXPD/31).toFixed(2),
+            CADXPT: (response.data.rates.CADXPT/31).toFixed(2)
           });
-          metalFormState.spotPrice = response.data.rates.CADXAU.toFixed(2);
+          metalFormState.spotPrice = (response.data.rates.CADXAU/31).toFixed(2);
     }
     else {
-      const response = await axios.get('http://localhost:5000/api/live_spot_prices');
-      const lastFetched = new Date(response.data[0].last_fetched);
       const now = new Date();
-      const rates = response.data[0];
 
       // Check if 24 hours have passed
       const hoursDifference = Math.abs(now - lastFetched) / 36e5; // Convert milliseconds to hours
       if (hoursDifference >= 24) {
         const apiResponse = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=CAD&currencies=XPD,XAU,XAG,XPT');
-        rates = apiResponse.data.rates;
+        const rates = apiResponse.data.rates;
+
+        // Update state with new rates and timestamp
+        setCachedRates({
+          CADXAG: (rates.CADXAG / 31).toFixed(2),
+          CADXAU: (rates.CADXAU / 31).toFixed(2),
+          CADXPD: (rates.CADXPD / 31).toFixed(2),
+          CADXPT: (rates.CADXPT / 31).toFixed(2)
+      });
+      setLastFetched(now);
 
         // Update the database with new prices and the current timestamp
         await axios.put('http://localhost:5000/api/live_spot_prices', {
-            CADXAG: rates.CADXAG.toFixed(2),
-            CADXAU: rates.CADXAU.toFixed(2),
-            CADXPD: rates.CADXPD.toFixed(2),
-            CADXPT: rates.CADXPT.toFixed(2),
+            CADXAG: (rates.CADXAG/31).toFixed(2),
+            CADXAU: (rates.CADXAU/31).toFixed(2),
+            CADXPD: (rates.CADXPD/31).toFixed(2),
+            CADXPT: (rates.CADXPT/31).toFixed(2),
             last_fetched: now.toISOString()
         });
         setMetalSpotPrice({
-          CADXAG: rates.CADXAG.toFixed(2),
-          CADXAU: rates.CADXAU.toFixed(2),
-          CADXPD: rates.CADXPD.toFixed(2),
-          CADXPT: rates.CADXPT.toFixed(2)
+          CADXAG: (rates.CADXAG/31).toFixed(2),
+          CADXAU: (rates.CADXAU/31).toFixed(2),
+          CADXPD: (rates.CADXPD/31).toFixed(2),
+          CADXPT: (rates.CADXPT/31).toFixed(2)
       });
+      metalFormState.spotPrice = (rates.CADXAU / 31).toFixed(2);
       } else {
-        setMetalSpotPrice({
-          CADXAG: rates.cadxag,
-          CADXAU: rates.cadxau,
-          CADXPD: rates.cadxpd,
-          CADXPT: rates.cadxpt
-      });
+        setMetalSpotPrice(cachedRates);
+        metalFormState.spotPrice = cachedRates.CADXAU;
+      //   setMetalSpotPrice({
+      //     CADXAG: rates.cadxag,
+      //     CADXAU: rates.cadxau,
+      //     CADXPD: rates.cadxpd,
+      //     CADXPT: rates.cadxpt
+      // });
       }
 
-      metalFormState.spotPrice = rates.cadxau;
+      //metalFormState.spotPrice = rates.cadxau;
      
     }} catch (error) {
       console.error('Error fetching spot price:', error);
@@ -275,6 +286,14 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
   return (
     <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
       <Typography variant="h6" sx={{ mb: 2 }}>ESTIMATE METAL</Typography>
+      <TextField
+        fullWidth
+        label="Weight (g) *"
+        name="weight"
+        value={metalFormState.weight}
+        onChange={handleMetalChange}
+        sx={{ mb: 2 }}
+      />
       <FormControl fullWidth sx={{ mb: 2 }}>
         <InputLabel>Select Precious Metal Type *</InputLabel>
         <Select
@@ -378,14 +397,6 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       </Select>
     </FormControl>
 
-      <TextField
-        fullWidth
-        label="Weight (g) *"
-        name="weight"
-        value={metalFormState.weight}
-        onChange={handleMetalChange}
-        sx={{ mb: 2 }}
-      />
       <Box display="flex" alignItems="center">
       <TextField
         fullWidth
