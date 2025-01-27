@@ -465,7 +465,7 @@ app.get('/api/stone_color', async (req, res) => {
 // Live Pricing API Endpoint
 app.get('/api/live_pricing', async (req, res) => {
   try {
-    const result = await pool.query('SELECT islivepricing FROM live_pricing LIMIT 1');
+    const result = await pool.query('SELECT islivepricing,per_day,per_transaction FROM live_pricing LIMIT 1');
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching live pricing:', error);
@@ -474,12 +474,12 @@ app.get('/api/live_pricing', async (req, res) => {
 });
 
 // PUT route for updating live pricing
-app.put('/api/live-pricing', async (req, res) => {
+app.put('/api/live_pricing', async (req, res) => {
   try {
-    const { isLivePricing } = req.body;
+    const { isLivePricing, per_day, per_transaction } = req.body;
     
     // Update the live pricing in the database
-    const result = await pool.query('UPDATE live_pricing SET islivepricing = $1', [isLivePricing]);
+    const result = await pool.query('UPDATE live_pricing SET islivepricing = $1, per_day = $2, per_transaction = $3', [isLivePricing, per_day, per_transaction]);
     
     res.json({ message: 'Live pricing updated successfully' });
   } catch (error) {
@@ -488,6 +488,30 @@ app.put('/api/live-pricing', async (req, res) => {
   }
 });
 
+// Live Spot Prices API Endpoint
+app.get('/api/live_spot_prices', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM live_spot_prices');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching live spot prices:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PUT route for updating live spot prices
+app.put('/api/live_spot_prices', async (req, res) => {
+  try {
+    const { CADXAG, CADXAU, CADXPD, CADXPT, last_fetched } = req.body;
+    
+    // Update the price
+    await pool.query('UPDATE live_spot_prices SET CADXAG = $1, CADXAU = $2, CADXPD = $3, CADXPT = $4, last_fetched = $5', [CADXAG, CADXAU, CADXPD, CADXPT, last_fetched]);
+    res.json({ message: 'Spot prices updated successfully' });
+  } catch (error) {
+    console.error('Error updating live spot price:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
 // Spot Prices API Endpoint
 app.get('/api/spot_prices', async (req, res) => {

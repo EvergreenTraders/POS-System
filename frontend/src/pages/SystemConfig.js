@@ -76,6 +76,8 @@ function SystemConfig() {
   const [preciousMetalNames, setPreciousMetalNames] = useState({});
   const [preciousMetalTypeId, setPreciousMetalTypeId] = useState('');
   const [isLivePricing, setIsLivePricing] = useState(false);
+  const [isPerDay, setIsPerDay] = useState(false);
+  const [isPerTransaction, setIsPerTransaction] = useState(false);
   const [updateMethod, setUpdateMethod] = useState(null);
   const [spotPrices, setSpotPrices] = useState({});
 
@@ -99,6 +101,8 @@ function SystemConfig() {
         const response = await axios.get('http://localhost:5000/api/live_pricing');
         const data = response.data;
         setIsLivePricing(data[0].islivepricing);
+        setIsPerDay(data[0].per_day);
+        setIsPerTransaction(data[0].per_transaction);
       } catch (error) {
         console.error('Error fetching live pricing:', error);
       }
@@ -139,13 +143,6 @@ function SystemConfig() {
     fetchSpotPrices();
     fetchPriceEstimates();
   }, []);
-
-  useEffect(() => {
-    if (isLivePricing) {
-      const updateMethod = window.confirm("Would you like to update the spot price each day? Click 'Cancel' for each transaction.");
-      setUpdateMethod(updateMethod);
-    }
-  }, [isLivePricing]);
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
@@ -240,10 +237,19 @@ function SystemConfig() {
 
   const handleLivePricingChange = async (event) => {
     const newLivePricing = event.target.checked;
+    const selectedValue = event.target.value;
+
+    const newPerDay = selectedValue === 'daily';
+    const newPerTransaction = selectedValue === 'transaction';
     setIsLivePricing(newLivePricing);
+    setIsPerDay(newPerDay);
+    setIsPerTransaction(newPerTransaction);
+
     try {
-      const response = await axios.put('http://localhost:5000/api/live-pricing', {
+      const response = await axios.put('http://localhost:5000/api/live_pricing', {
         isLivePricing: newLivePricing,
+        per_day: newPerDay,
+        per_transaction: newPerTransaction
       });
     } catch (error) {
       console.error('Error updating live pricing:', error);
@@ -338,7 +344,34 @@ function SystemConfig() {
               color="primary"
             />
             </Box>
-             {!isLivePricing && (
+            {isLivePricing ? (
+              <div>
+                <div>
+                  <label>
+                    <input
+                      type="radio"
+                      value="daily"
+                      checked={isPerDay}
+                      onChange={handleLivePricingChange}
+                      style={{ accentColor: 'green' }}
+                    />
+                    Update Spot Prices Daily
+                  </label>
+                </div>
+                <div>
+                <label>
+                  <input
+                    type="radio"
+                    value="transaction"
+                    checked={isPerTransaction}
+                    onChange={handleLivePricingChange}
+                    style={{ accentColor: 'green' }}
+                  />
+                  Update Spot Prices for Each Transaction
+                </label>
+                </div>
+              </div>
+            ) : (
               <Grid container spacing={2}>
                 {Object.keys(preciousMetalNames).map((metal) => (
                   <Grid item xs={12} sm={3} key={metal}>

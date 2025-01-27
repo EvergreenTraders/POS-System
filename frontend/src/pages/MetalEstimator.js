@@ -32,8 +32,10 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
   const [metalPurities, setMetalPurities] = useState([]);
   const [metalColors, setMetalColors] = useState([]);
   const [totalMetalValue, setTotalMetalValue] = useState(0);
-  const [metalSpotPrice, setMetalSpotPrice] = useState({USDXAG: 0, USDXAU: 0, USDXPD: 0, USDXPT: 0 });
+  const [metalSpotPrice, setMetalSpotPrice] = useState({CADXAG: 0, CADXAU: 0, CADXPD: 0, CADXPT: 0 });
   const [isLivePricing, setIsLivePricing] = useState(false);
+  const [isPerDay, setIsPerDay] = useState(false);
+  const [isPerTransaction, setIsPerTransaction] = useState(false);
 
   useEffect(() => {
     setMetalFormState(metalFormState);
@@ -67,8 +69,13 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     const fetchLivePricing = async () => {
       try {
         const response = await axios.get('http://localhost:5000/api/live_pricing');
-        const data = response.data;
+        const data = response.data;       
         setIsLivePricing(data[0].islivepricing);
+        setIsPerDay(data[0].per_day);
+        setIsPerTransaction(data[0].per_transaction);
+        
+        if(data[0].islivepricing) fetchLiveSpotPrice();
+        else fetchManualSpotPrice();
       } catch (error) {
         console.error('Error fetching live pricing:', error);
       }
@@ -77,8 +84,6 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     fetchAllData();
     fetchLivePricing();
     fetchPurities(1);
-    if(isLivePricing) fetchLiveSpotPrice();
-    else fetchManualSpotPrice();
   }, []);
 
   const fetchPurities = async (preciousMetalTypeId) => {
@@ -93,32 +98,72 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
   const fetchLiveSpotPrice = async () => {
     try {
-     const response = {"data":{"rates":{"USDXAG":20,"USDXAU":30,"USDXPD":40,"USDXPT":50}}}
-    // const response = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=USD&currencies=XPD,XAU,XAG,XPT');
-     setMetalSpotPrice({
-        USDXAG: response.data.rates.USDXAG,
-        USDXAU: response.data.rates.USDXAU,
-        USDXPD: response.data.rates.USDXPD,
-        USDXPT: response.data.rates.USDXPT
+      if(isPerTransaction) {
+        const response = await axios.get('http://localhost:5000/api/live_spot_prices');
+        // const response = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=CAD&currencies=XPD,XAU,XAG,XPT');
+        setMetalSpotPrice({
+            CADXAG: response.data.rates.CADXAG.toFixed(2),
+            CADXAU: response.data.rates.CADXAU.toFixed(2),
+            CADXPD: response.data.rates.CADXPD.toFixed(2),
+            CADXPT: response.data.rates.CADXPT.toFixed(2)
+          });
+          metalFormState.spotPrice = response.data.rates.CADXAU.toFixed(2);
+    }
+    else {
+      const response = await axios.get('http://localhost:5000/api/live_spot_prices');
+      const lastFetched = new Date(response.data[0].last_fetched);
+      const now = new Date();
+      const rates = response.data[0];
+
+      // Check if 24 hours have passed
+      const hoursDifference = Math.abs(now - lastFetched) / 36e5; // Convert milliseconds to hours
+      if (hoursDifference >= 24) {
+        const apiResponse = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=CAD&currencies=XPD,XAU,XAG,XPT');
+        rates = apiResponse.data.rates;
+
+        // Update the database with new prices and the current timestamp
+        await axios.put('http://localhost:5000/api/live_spot_prices', {
+            CADXAG: rates.CADXAG.toFixed(2),
+            CADXAU: rates.CADXAU.toFixed(2),
+            CADXPD: rates.CADXPD.toFixed(2),
+            CADXPT: rates.CADXPT.toFixed(2),
+            last_fetched: now.toISOString()
+        });
+        setMetalSpotPrice({
+          CADXAG: rates.CADXAG.toFixed(2),
+          CADXAU: rates.CADXAU.toFixed(2),
+          CADXPD: rates.CADXPD.toFixed(2),
+          CADXPT: rates.CADXPT.toFixed(2)
       });
-      metalFormState.spotPrice = response.data.rates.USDXAU;
-    } catch (error) {
+      } else {
+        setMetalSpotPrice({
+          CADXAG: rates.cadxag,
+          CADXAU: rates.cadxau,
+          CADXPD: rates.cadxpd,
+          CADXPT: rates.cadxpt
+      });
+      }
+
+      metalFormState.spotPrice = rates.cadxau;
+     
+    }} catch (error) {
       console.error('Error fetching spot price:', error);
     }
   };
 
   const fetchManualSpotPrice = async () => {
     try {
+      console.log("I'm manual");
       const response = await axios.get('http://localhost:5000/api/spot_prices');
       const prices = {};
       response.data.forEach(item => {
         prices[item.precious_metal_type_id] = item.spot_price;
       })
       setMetalSpotPrice({
-        USDXAU: prices[1],
-        USDXPT: prices[2],
-        USDXAG: prices[3],
-        USDXPD: prices[4]
+        CADXAU: prices[1],
+        CADXPT: prices[2],
+        CADXAG: prices[3],
+        CADXPD: prices[4]
       }); 
       metalFormState.spotPrice = prices[1];
     } catch (error) {
@@ -140,10 +185,10 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         preciousMetalType: value,
         purity: { purity: '', value: 0 },
         spotPrice: 
-        selectedPreciousMetalType.type === 'Silver' ? metalSpotPrice.USDXAG :
-        selectedPreciousMetalType.type === 'Gold' ? metalSpotPrice.USDXAU :
-        selectedPreciousMetalType.type === 'Platinum' ? metalSpotPrice.USDXPT : 
-        selectedPreciousMetalType.type === 'Palladium' ? metalSpotPrice.USDXPD : 0 
+        selectedPreciousMetalType.type === 'Silver' ? metalSpotPrice.CADXAG :
+        selectedPreciousMetalType.type === 'Gold' ? metalSpotPrice.CADXAU :
+        selectedPreciousMetalType.type === 'Platinum' ? metalSpotPrice.CADXPT : 
+        selectedPreciousMetalType.type === 'Palladium' ? metalSpotPrice.CADXPD : 0 
       }));
       return;
     }
@@ -341,7 +386,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         onChange={handleMetalChange}
         sx={{ mb: 2 }}
       />
-
+      <Box display="flex" alignItems="center">
       <TextField
         fullWidth
         label="Spot Price/oz"
@@ -350,7 +395,17 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         onChange={handleMetalChange}
         sx={{ mb: 2 }}
       />
-
+    {isPerTransaction && (
+    <Button
+        variant="contained"
+        color="primary"
+        onClick={fetchLiveSpotPrice} 
+        sx={{ mb: 1 }}
+    >
+        Update
+    </Button>
+    )}
+    </Box>
       <Button
         variant="contained"
         onClick={addMetal}

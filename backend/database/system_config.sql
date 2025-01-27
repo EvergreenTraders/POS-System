@@ -1,15 +1,28 @@
 DO $$
 BEGIN
     -- live pricing
-    Drop table if exists live_pricing;
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'live_pricing') THEN    
         CREATE TABLE live_pricing (
             islivepricing BOOLEAN NOT NULL DEFAULT FALSE,
+            per_day BOOLEAN NOT NULL DEFAULT FALSE,
+            per_transaction BOOLEAN NOT NULL DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        INSERT INTO live_pricing (islivepricing) VALUES (FALSE);
+        INSERT INTO live_pricing (islivepricing, per_day, per_transaction) VALUES (FALSE, FALSE, FALSE);
     END IF;
+
+    -- live spot prices
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'live_spot_prices') THEN    
+        CREATE TABLE live_spot_prices (
+            CADXAG DECIMAL(10, 2) NOT NULL,
+            CADXAU DECIMAL(10, 2) NOT NULL,
+            CADXPD DECIMAL(10, 2) NOT NULL,
+            CADXPT DECIMAL(10, 2) NOT NULL,
+            last_fetched TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO live_spot_prices (CADXAG, CADXAU, CADXPD, CADXPT) VALUES (2400.00, 1000.00, 800.00, 2500.00);
+    END IF;   
 
     -- manual spot prices
      IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'spot_prices') THEN    
