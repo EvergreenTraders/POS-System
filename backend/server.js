@@ -462,6 +462,31 @@ app.get('/api/stone_color', async (req, res) => {
   }
 });
 
+// User preferences API Endpoint
+app.get('/api/user_preferences', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM user_preferences');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching user preferences:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+})
+
+// PUT route for updating user preferences
+app.put('/api/user_preferences', async (req, res) => {
+  try {
+    const { name, value } = req.body;
+    const result = await pool.query(
+      'UPDATE user_preferences SET preference_value = $2 WHERE preference_name = $1 RETURNING *',
+      [name, value]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error updating user preferences:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+})
 // Live Pricing API Endpoint
 app.get('/api/live_pricing', async (req, res) => {
   try {

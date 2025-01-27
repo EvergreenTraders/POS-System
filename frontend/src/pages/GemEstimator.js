@@ -47,6 +47,7 @@ function GemEstimator() {
   const [metalFormState, setMetalFormState] = useState({});
   const [totalMetalValue, setTotalMetalValue] = useState(0);
   const [addMetal, setAddMetal] = useState([]);
+  const [isCameraEnabled, setIsCameraEnabled] = useState(false);
 
   const handleMetalFormChange = (formState) => {
       setMetalFormState(formState);
@@ -100,8 +101,6 @@ function GemEstimator() {
       },
       image: images[0]
     };
-
-    console.log("metal",addMetal,diamondSummary,stoneSummary);
 
     setEstimatedItems(prev => [...prev, newItem]);
 
@@ -268,8 +267,19 @@ function GemEstimator() {
       }
     };
 
+    const fetchCameraPreference = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/user_preferences');
+        const cameraPreference = response.data.find(pref => pref.preference_name === 'cameraEnabled');
+        setIsCameraEnabled(cameraPreference ? cameraPreference.preference_value === 'true' : false);
+      } catch (error) {
+        console.error('Error fetching camera preference:', error);
+      }
+    };
+    
     fetchAllData();
     fetchDiamondSizes(1);
+    fetchCameraPreference();
   }, []);
 
   const fetchDiamondSizes = async (diamondShapeId) => {
@@ -1485,7 +1495,7 @@ const ImagePopup = ({ images, index }) => {
         {/* Summary Section */}
         <Grid item xs={12} md={3}>
           <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
-            <Typography variant="h6">Images</Typography>
+            <Typography variant="h6">Images{isCameraEnabled && ' *'}</Typography>
             <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
               <Button
                 variant="outlined"
@@ -1754,7 +1764,7 @@ const ImagePopup = ({ images, index }) => {
               color="primary"
               size="large"
               onClick={handleFinishEstimation}
-              disabled={addMetal.length === 0}
+              disabled={addMetal.length === 0 || (isCameraEnabled && images.length === 0)}
               fullWidth
             >
               Finish
@@ -1821,8 +1831,8 @@ const ImagePopup = ({ images, index }) => {
                       >
                         <TableCell>
                             <img 
-                              src={item.image.url} 
-                              alt="Uploaded item" 
+                              src={item.image?.url || ''} 
+                              alt="No image" 
                               style={{ width: '50px', height: '50px', objectFit: 'cover' }} 
                             />
                         </TableCell>

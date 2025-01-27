@@ -1,5 +1,19 @@
 DO $$
 BEGIN
+    -- user preferences
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'user_preferences') THEN    
+        CREATE TABLE user_preferences (
+            id SERIAL PRIMARY KEY,
+            preference_name VARCHAR(255) NOT NULL,
+            preference_value VARCHAR(255),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (preference_name) 
+        );
+        INSERT INTO user_preferences (preference_name, preference_value) VALUES 
+            ('cameraEnabled', TRUE);
+    END IF;
+
     -- live pricing
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'live_pricing') THEN    
         CREATE TABLE live_pricing (

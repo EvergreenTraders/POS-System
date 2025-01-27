@@ -72,6 +72,8 @@ function SystemConfig() {
     dailyReports: false,
   });
 
+  const [isCameraEnabled, setIsCameraEnabled] = useState(false);
+
   const [priceEstimates, setPriceEstimates] = useState({});
   const [preciousMetalNames, setPreciousMetalNames] = useState({});
   const [preciousMetalTypeId, setPreciousMetalTypeId] = useState('');
@@ -138,10 +140,21 @@ function SystemConfig() {
       }
     };
 
+    const fetchCameraPreference = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/user_preferences');
+        const cameraPreference = response.data.find(pref => pref.preference_name === 'cameraEnabled');
+        setIsCameraEnabled(cameraPreference ? cameraPreference.preference_value === 'true' : false);
+      } catch (error) {
+        console.error('Error fetching camera preference:', error);
+      }
+    };
+
     fetchPreciousMetalNames();
     fetchLivePricing();
     fetchSpotPrices();
     fetchPriceEstimates();
+    fetchCameraPreference();
   }, []);
 
   const handleTabChange = (event, newValue) => {
@@ -256,6 +269,25 @@ function SystemConfig() {
     }
   };
 
+  const handleCameraToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsCameraEnabled(newValue);
+    try {
+      await axios.put('http://localhost:5000/api/user_preferences', {
+        name: 'cameraEnabled',
+        value: newValue.toString()
+      });
+    } catch (error) {
+      console.error('Error updating camera preference:', error);
+      setIsCameraEnabled(!newValue); // Revert on error
+      setSnackbar({
+        open: true,
+        message: 'Failed to update camera settings',
+        severity: 'error',
+      });
+    }
+  };
+
   return (
     <Container>
       <Box sx={{ mb: 1 }}>
@@ -331,6 +363,19 @@ function SystemConfig() {
                 />
               </Grid>
             </Grid>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Box display="flex" alignItems="center">
+              <Typography variant="h6" gutterBottom>
+                Camera
+              </Typography>
+              <Switch
+                checked={isCameraEnabled}
+                onChange={handleCameraToggle}
+                color="primary"
+              />
+            </Box>
           </ConfigSection>
 
           <ConfigSection>
