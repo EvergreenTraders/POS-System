@@ -98,6 +98,18 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     }
   };
 
+  /**
+   * Fetches the live spot prices for gold, silver, platinum, and palladium
+   * from the API and updates the state with the new prices.
+   *
+   * If the user has selected the "per transaction" pricing option, fetches
+   * the prices from the database.
+   *
+   * If the user has selected the "per day" pricing option, checks if 24
+   * hours have passed since the last fetch. If so, fetches the prices from
+   * the API and updates the database with the new prices and the current
+   * timestamp. Otherwise, uses the cached prices.
+   */
   const fetchLiveSpotPrice = async () => {
     try {
       if(isPerTransaction) {
@@ -164,7 +176,6 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
   const fetchManualSpotPrice = async () => {
     try {
-      console.log("I'm manual");
       const response = await axios.get('http://localhost:5000/api/spot_prices');
       const prices = {};
       response.data.forEach(item => {

@@ -81,11 +81,17 @@ function GemEstimator() {
     }));
   };
   
+  const getInitials = (str) => {
+    return str.split(' ').map(word => word.charAt(0).toUpperCase()).join('');
+  };
+
   const handleFinishEstimation = () => {
     const newItem = {
       weight: addMetal[0].weight,
+      metal: getInitials(addMetal[0].jewelryColor) + getInitials(addMetal[0].preciousMetalType),
       purity: addMetal[0].purity?.purity || addMetal[0].purity.value,
-      type: addMetal[0].preciousMetalType + " " +  addedGemTypes.primary + " " + addedGemTypes.secondary,
+      gems: (addedGemTypes.primary ? (addedGemTypes.primary === 'diamond' ? 
+            `${diamondSummary[0].shape}` : `${stoneSummary[0].name}`) : ''), 
       category: addMetal[0].metalCategory,
       itemPriceEstimates: {
         pawn: priceEstimates.pawn,
@@ -94,6 +100,8 @@ function GemEstimator() {
       },
       image: images[0]
     };
+
+    console.log("metal",addMetal,diamondSummary,stoneSummary);
 
     setEstimatedItems(prev => [...prev, newItem]);
 
@@ -1822,7 +1830,7 @@ const ImagePopup = ({ images, index }) => {
                           <Box sx={{ display: 'flex', alignItems: 'center' }}>
                             <Box>
                               <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
-                                {item.weight}g {item.purity} {item.type}
+                                {item.weight}g {item.purity} {item.metal} {item.gems}
                               </Typography>
                               <Typography variant="body2" color="text.secondary">
                                 {item.category}
