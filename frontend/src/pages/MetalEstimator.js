@@ -8,18 +8,20 @@ import {
   Button,
   Grid,
   Typography,
-  Paper
+  Paper,
+  Box
 } from '@mui/material';
 import axios from 'axios';
 
 const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) => {
   const [metalFormState, setMetalForm] = useState({
-    preciousMetalType: '',
+    preciousMetalTypeId: 1,
+    preciousMetalType: 'Gold',
     nonPreciousMetalType: '',
     metalCategory: '',
-    jewelryColor: '',
+    jewelryColor: 'Yellow',
     weight: '',
-    price: '',
+    spotPrice: 0,
     purity: { purity: '', value: 0 },
     value: ''
   });
@@ -30,6 +32,12 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
   const [metalPurities, setMetalPurities] = useState([]);
   const [metalColors, setMetalColors] = useState([]);
   const [totalMetalValue, setTotalMetalValue] = useState(0);
+  const [metalSpotPrice, setMetalSpotPrice] = useState({CADXAG: 0, CADXAU: 0, CADXPD: 0, CADXPT: 0 });
+  const [lastFetched, setLastFetched] = useState(null);
+  const [cachedRates, setCachedRates] = useState({});
+  const [isLivePricing, setIsLivePricing] = useState(false);
+  const [isPerDay, setIsPerDay] = useState(false);
+  const [isPerTransaction, setIsPerTransaction] = useState(false);
 
   useEffect(() => {
     setMetalFormState(metalFormState);
@@ -60,7 +68,24 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       }
     };
 
+    const fetchLivePricing = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/live_pricing');
+        const data = response.data;       
+        setIsLivePricing(data[0].islivepricing);
+        setIsPerDay(data[0].per_day);
+        setIsPerTransaction(data[0].per_transaction);
+        
+        if(data[0].islivepricing) fetchLiveSpotPrice();
+        else fetchManualSpotPrice();
+      } catch (error) {
+        console.error('Error fetching live pricing:', error);
+      }
+    };
+
     fetchAllData();
+    fetchLivePricing();
+    fetchPurities(1);
   }, []);
 
   const fetchPurities = async (preciousMetalTypeId) => {
@@ -73,18 +98,119 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     }
   };
 
+  /**
+   * Fetches the live spot prices for gold, silver, platinum, and palladium
+   * from the API and updates the state with the new prices.
+   *
+   * If the user has selected the "per transaction" pricing option, fetches
+   * the prices from the database.
+   *
+   * If the user has selected the "per day" pricing option, checks if 24
+   * hours have passed since the last fetch. If so, fetches the prices from
+   * the API and updates the database with the new prices and the current
+   * timestamp. Otherwise, uses the cached prices.
+   */
+  const fetchLiveSpotPrice = async () => {
+    try {
+      if(isPerTransaction) {
+        const response = await axios.get('http://localhost:5000/api/live_spot_prices');
+       // const response = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=CAD&currencies=XPD,XAU,XAG,XPT');
+        setMetalSpotPrice({
+            CADXAG: (response.data.rates.CADXAG/31).toFixed(2),
+            CADXAU: (response.data.rates.CADXAU/31).toFixed(2),
+            CADXPD: (response.data.rates.CADXPD/31).toFixed(2),
+            CADXPT: (response.data.rates.CADXPT/31).toFixed(2)
+          });
+          metalFormState.spotPrice = (response.data.rates.CADXAU/31).toFixed(2);
+    }
+    else {
+      const now = new Date();
+
+      // Check if 24 hours have passed
+      const hoursDifference = Math.abs(now - lastFetched) / 36e5; // Convert milliseconds to hours
+      if (hoursDifference >= 24) {
+        const apiResponse = await axios.get('https://api.metalpriceapi.com/v1/latest?api_key=8b7bc38e033b653f05f39fd6dc809ca4&base=CAD&currencies=XPD,XAU,XAG,XPT');
+        const rates = apiResponse.data.rates;
+
+        // Update state with new rates and timestamp
+        setCachedRates({
+          CADXAG: (rates.CADXAG / 31).toFixed(2),
+          CADXAU: (rates.CADXAU / 31).toFixed(2),
+          CADXPD: (rates.CADXPD / 31).toFixed(2),
+          CADXPT: (rates.CADXPT / 31).toFixed(2)
+      });
+      setLastFetched(now);
+
+        // Update the database with new prices and the current timestamp
+        await axios.put('http://localhost:5000/api/live_spot_prices', {
+            CADXAG: (rates.CADXAG/31).toFixed(2),
+            CADXAU: (rates.CADXAU/31).toFixed(2),
+            CADXPD: (rates.CADXPD/31).toFixed(2),
+            CADXPT: (rates.CADXPT/31).toFixed(2),
+            last_fetched: now.toISOString()
+        });
+        setMetalSpotPrice({
+          CADXAG: (rates.CADXAG/31).toFixed(2),
+          CADXAU: (rates.CADXAU/31).toFixed(2),
+          CADXPD: (rates.CADXPD/31).toFixed(2),
+          CADXPT: (rates.CADXPT/31).toFixed(2)
+      });
+      metalFormState.spotPrice = (rates.CADXAU / 31).toFixed(2);
+      } else {
+        setMetalSpotPrice(cachedRates);
+        metalFormState.spotPrice = cachedRates.CADXAU;
+      //   setMetalSpotPrice({
+      //     CADXAG: rates.cadxag,
+      //     CADXAU: rates.cadxau,
+      //     CADXPD: rates.cadxpd,
+      //     CADXPT: rates.cadxpt
+      // });
+      }
+
+      //metalFormState.spotPrice = rates.cadxau;
+     
+    }} catch (error) {
+      console.error('Error fetching spot price:', error);
+    }
+  };
+
+  const fetchManualSpotPrice = async () => {
+    try {
+      const response = await axios.get('http://localhost:5000/api/spot_prices');
+      const prices = {};
+      response.data.forEach(item => {
+        prices[item.precious_metal_type_id] = item.spot_price;
+      })
+      setMetalSpotPrice({
+        CADXAU: prices[1],
+        CADXPT: prices[2],
+        CADXAG: prices[3],
+        CADXPD: prices[4]
+      }); 
+      metalFormState.spotPrice = prices[1];
+    } catch (error) {
+      console.error('Error fetching spot prices:', error);
+    }
+  };
+
   const handleMetalChange = (event) => {
     const { name, value } = event.target;
+
     if (name === 'preciousMetalType') {
       const selectedPreciousMetalType = preciousMetalTypes.find(type => type.type === value);
       if (selectedPreciousMetalType) {
         fetchPurities(selectedPreciousMetalType.id);
       }
-    
       setMetalForm(prev => ({
         ...prev,
+        preciousMetalTypeId: selectedPreciousMetalType.id,
         preciousMetalType: value,
-        purity: { purity: '', value: 0 }
+        purity: { purity: '', value: 0 },
+        spotPrice: 
+        selectedPreciousMetalType.type === 'Silver' ? metalSpotPrice.CADXAG :
+        selectedPreciousMetalType.type === 'Gold' ? metalSpotPrice.CADXAU :
+        selectedPreciousMetalType.type === 'Platinum' ? metalSpotPrice.CADXPT : 
+        selectedPreciousMetalType.type === 'Palladium' ? metalSpotPrice.CADXPD : 0 
       }));
       return;
     }
@@ -103,7 +229,8 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         ...prev,
         purity: selectedPurity || { purity: '', value: 0 }
       }));
-    } 
+    }
+
     else if (name === 'value') {
       setMetalForm(prev => ({
         ...prev,
@@ -123,6 +250,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
   const addMetal = () => {
     const newItem = {
+      preciousMetalTypeId: metalFormState.preciousMetalTypeId,
       preciousMetalType: metalFormState.preciousMetalType,
       nonPreciousMetalType: metalFormState.nonPreciousMetalType,
       metalCategory: metalFormState.metalCategory,
@@ -137,12 +265,13 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
     // Reset form
     setMetalForm({
-      preciousMetalType: '',
+      preciousMetalTypeId: 1,
+      preciousMetalType: 'Gold',
       nonPreciousMetalType: '',
       metalCategory: '',
-      jewelryColor: '',
+      jewelryColor: 'Yellow',
       weight: '',
-      price: '',
+      spotPrice: 0,
       purity: { purity: '', value: 0 },
       value: ''
     });
@@ -150,9 +279,9 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
   const calculateMetalValue = () => {
     // Only calculate if all necessary fields are filled
-    if (metalFormState.weight && metalFormState.price && metalFormState.purity) {
+    if (metalFormState.weight && metalFormState.spotPrice && metalFormState.purity) {
       const percentageFactor = 0.7; 
-      setTotalMetalValue(metalFormState.price * metalFormState.purity.value * metalFormState.weight * percentageFactor);
+      setTotalMetalValue(metalFormState.spotPrice * metalFormState.purity.value * metalFormState.weight * percentageFactor);
     }
       
       else {
@@ -163,11 +292,19 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
 
   useEffect(() => {
     calculateMetalValue();
-  }, [metalFormState.weight, metalFormState.price, metalFormState.purity]);
+  }, [metalFormState.weight, metalFormState.spotPrice, metalFormState.purity]);
 
   return (
-    <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
+    <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
       <Typography variant="h6" sx={{ mb: 2 }}>ESTIMATE METAL</Typography>
+      <TextField
+        fullWidth
+        label="Weight (g) *"
+        name="weight"
+        value={metalFormState.weight}
+        onChange={handleMetalChange}
+        sx={{ mb: 2 }}
+      />
       <FormControl fullWidth sx={{ mb: 2 }}>
         <InputLabel>Select Precious Metal Type *</InputLabel>
         <Select
@@ -213,32 +350,30 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       )}
     <Grid container spacing={2}>
       <Grid item xs={12} sm={metalFormState.preciousMetalType === 'Platinum' || metalFormState.preciousMetalType === 'Palladium' ? 12 : 6}>
-      <FormControl fullWidth sx={{ mb: 2 }}>
-        <InputLabel> Purity *</InputLabel>
-        <Select
-          name="purity"
-          value={metalFormState.purity?.id || ''}
-          onChange={(e) => {
-            handleMetalChange(e);
-            // Find the selected purity object
-            const selectedPurityObj = metalPurities.find(p => p.id === e.target.value);
-            // Update the form with selected purity's value
-            setMetalFormState(prev => ({
-              ...prev,
-              value: selectedPurityObj ? selectedPurityObj.value : ''
-            }));
-          }}
-          required
-        >
-          {metalPurities.map(purity => (
-            <MenuItem key={purity.id} value={purity.id}>
-              {metalFormState.preciousMetalType === 'Platinum' || metalFormState.preciousMetalType === 'Palladium' 
-                ? purity.value 
-                : purity.purity}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
+        <FormControl fullWidth sx={{ mb: 2 }}>
+          <InputLabel> Purity *</InputLabel>
+          <Select
+            name="purity"
+            value={metalFormState.purity?.id || ''}
+            onChange={(e) => {
+              handleMetalChange(e);
+              const selectedPurityObj = metalPurities.find(p => p.id === e.target.value);
+              setMetalFormState(prev => ({
+                ...prev,
+                value: selectedPurityObj ? selectedPurityObj.value : ''
+              }));
+            }}
+            required
+          >
+            {metalPurities.map(purity => (
+              <MenuItem key={purity.id} value={purity.id}>
+                {metalFormState.preciousMetalType === 'Platinum' || metalFormState.preciousMetalType === 'Palladium' 
+                  ? purity.value 
+                  : purity.purity}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Grid>
       <Grid item xs={12} sm={metalFormState.preciousMetalType !== 'Platinum' && metalFormState.preciousMetalType !== 'Palladium' ? 6 : 0}>
         {metalFormState.preciousMetalType !== 'Platinum' && metalFormState.preciousMetalType !== 'Palladium' && (
@@ -250,6 +385,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
             value={metalFormState.purity?.value || ''} 
             onChange={handleMetalChange}
             inputProps={{ 
+              min: 0,
               inputMode: 'decimal',
               pattern: '[0-9]*\\.?[0-9]*'
             }}
@@ -258,38 +394,40 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       </Grid>
     </Grid>
 
-      <FormControl fullWidth sx={{ mb: 2 }}>
-        <InputLabel>Select Metal Category *</InputLabel>
-        <Select
-          name="metalCategory"
-          value={metalFormState.metalCategory}
-          onChange={handleMetalChange}
-          required
-        >
-          {metalCategories.map(category => (
-            <MenuItem key={category.id} value={category.category}>{category.category}</MenuItem>
-          ))}
-        </Select>
-      </FormControl>
-
-      <TextField
-        fullWidth
-        label="Weight (g) *"
-        name="weight"
-        value={metalFormState.weight}
+    <FormControl fullWidth sx={{ mb: 2 }}>
+      <InputLabel>Select Metal Category *</InputLabel>
+      <Select
+        name="metalCategory"
+        value={metalFormState.metalCategory}
         onChange={handleMetalChange}
-        sx={{ mb: 2 }}
-      />
+        required
+      >
+        {metalCategories.map(category => (
+          <MenuItem key={category.id} value={category.category}>{category.category}</MenuItem>
+        ))}
+      </Select>
+    </FormControl>
 
+      <Box display="flex" alignItems="center">
       <TextField
         fullWidth
         label="Spot Price/oz"
-        name="price"
-        value={metalFormState.price}
+        name="spotPrice"
+        value={metalFormState.spotPrice}
         onChange={handleMetalChange}
         sx={{ mb: 2 }}
       />
-
+    {isPerTransaction && (
+    <Button
+        variant="contained"
+        color="primary"
+        onClick={fetchLiveSpotPrice} 
+        sx={{ mb: 1 }}
+    >
+        Update
+    </Button>
+    )}
+    </Box>
       <Button
         variant="contained"
         onClick={addMetal}
@@ -300,9 +438,35 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         Add Metal
       </Button>
 
-      <Typography variant="h6" sx={{ mt: 2 }}>
-        Est. Metal Value: ${totalMetalValue.toFixed(2)}
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
+          Est. Metal Value: $
+        </Typography>
+        <TextField
+          size="small"
+          type="decimal"
+          value={totalMetalValue.toFixed(1)}
+          variant="standard"
+          onChange={(e) => {
+            const newValue = parseFloat(e.target.value);
+            setTotalMetalValue(newValue);
+            onMetalValueChange(newValue);
+          }}
+          inputProps={{ 
+            min: 0,
+            inputMode: 'decimal',
+            pattern: '[0-9]*\\.?[0-9]*',
+            style: { width: '100px' }
+          }}
+          sx={{ 
+            ml: 1,
+            '& .MuiInputBase-root': {
+              ml: 0,
+              pl: 0
+            }
+          }}
+        />
+      </Box>
 
     </Paper>
   );

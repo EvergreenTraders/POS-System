@@ -14,6 +14,11 @@ import {
   Snackbar,
   Tab,
   Tabs,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
@@ -67,26 +72,89 @@ function SystemConfig() {
     dailyReports: false,
   });
 
-  const [priceEstimates, setPriceEstimates] = useState({
-    pawn: 0,
-    buy: 0,
-    retail: 0
-  });
+  const [isCameraEnabled, setIsCameraEnabled] = useState(false);
+
+  const [priceEstimates, setPriceEstimates] = useState({});
+  const [preciousMetalNames, setPreciousMetalNames] = useState({});
+  const [preciousMetalTypeId, setPreciousMetalTypeId] = useState('');
+  const [isLivePricing, setIsLivePricing] = useState(false);
+  const [isPerDay, setIsPerDay] = useState(false);
+  const [isPerTransaction, setIsPerTransaction] = useState(false);
+  const [updateMethod, setUpdateMethod] = useState(null);
+  const [spotPrices, setSpotPrices] = useState({});
 
   useEffect(() => {
+    const fetchPreciousMetalNames = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/precious_metal_type');
+        const data = response.data;
+        const names = {};
+        data.forEach(metal => {
+          names[metal.id] = metal.type;
+        });
+        setPreciousMetalNames(names);
+      } catch (error) {
+        console.error('Error fetching precious metal names:', error);
+      }
+    };
+
+    const fetchLivePricing = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/live_pricing');
+        const data = response.data;
+        setIsLivePricing(data[0].islivepricing);
+        setIsPerDay(data[0].per_day);
+        setIsPerTransaction(data[0].per_transaction);
+      } catch (error) {
+        console.error('Error fetching live pricing:', error);
+      }
+    }
+    const fetchSpotPrices = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/spot_prices');
+        const prices = {};
+        response.data.forEach(item => {
+          prices[item.precious_metal_type_id] = item.spot_price;
+        })
+        setSpotPrices(prices); 
+      } catch (error) {
+        console.error('Error fetching spot prices:', error);
+      }
+    };
+
     const fetchPriceEstimates = async () => {
       try {
         const response = await axios.get('http://localhost:5000/api/price_estimates');
-        const estimates = response.data.reduce((acc, item) => {
-          acc[item.transaction_type] = item.estimate;
-          return acc;
-        }, {});
-        setPriceEstimates(estimates);
+        const data = response.data;
+        const estimates = {};
+        data.forEach((estimate) => {
+          const metalType = estimate.precious_metal_type_id;
+          if (!estimates[metalType]) {
+            estimates[metalType] = [];
+          }
+          estimates[metalType].push(estimate);
+        });
+        setPriceEstimates(estimates); // Store organized data in state
       } catch (error) {
         console.error('Error fetching price estimates:', error);
       }
     };
+
+    const fetchCameraPreference = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/user_preferences');
+        const cameraPreference = response.data.find(pref => pref.preference_name === 'cameraEnabled');
+        setIsCameraEnabled(cameraPreference ? cameraPreference.preference_value === 'true' : false);
+      } catch (error) {
+        console.error('Error fetching camera preference:', error);
+      }
+    };
+
+    fetchPreciousMetalNames();
+    fetchLivePricing();
+    fetchSpotPrices();
     fetchPriceEstimates();
+    fetchCameraPreference();
   }, []);
 
   const handleTabChange = (event, newValue) => {
@@ -117,29 +185,56 @@ function SystemConfig() {
     }));
   };
 
-  const handlePriceEstimatesChange = (event) => {
+  const handleSpotPriceChange = (event, metalType) => {
     const { name, value } = event.target;
-    setPriceEstimates(prev => ({
+    setSpotPrices((prev) => ({
       ...prev,
-      [name]: Number(value)
+      [metalType]: value
     }));
   };
 
-  const handleSaveSettings = async () => {
-    try {
+  const handlePriceEstimatesChange = (event, metalType) => {
+    const { name, value } = event.target;
+    setPreciousMetalTypeId(metalType); // Save the current metal type ID
+    setPriceEstimates((prev) => {
+      const updatedEstimates = prev[metalType].map((estimate) => 
+        estimate.transaction_type === name ? { ...estimate, estimate: Number(value) } : estimate
+      );
+      return {
+        ...prev,
+        [metalType]: updatedEstimates,
+      };
+    });
+  };
 
-      // Save price estimates
-      await axios.put('http://localhost:5000/api/price_estimates', {
-        estimates: [
-          { transaction_type: 'pawn', estimate: priceEstimates.pawn },
-          { transaction_type: 'buy', estimate: priceEstimates.buy },
-          { transaction_type: 'retail', estimate: priceEstimates.retail }
-        ]
+  const handleSaveSettings = async () => {
+
+    try {
+      // Make a PUT request to update spot prices
+      const updateSpotPrices = Object.keys(spotPrices).map(metalType => {
+        return axios.put('http://localhost:5000/api/spot_prices', {
+          precious_metal_type_id: metalType,
+          spot_price: spotPrices[metalType],
+        });
       });
+  
+      // Wait for all spot price updates to complete
+      await Promise.all(updateSpotPrices);
+
+      // Make a PUT request to update price estimates
+      const updatePriceEstimates = Object.keys(priceEstimates).map(metalType => {
+        return axios.put('http://localhost:5000/api/price_estimates', {
+          precious_metal_type_id: metalType,
+          estimates: priceEstimates[metalType],
+        });
+      });
+  
+      // Wait for all price estimate updates to complete
+      await Promise.all(updatePriceEstimates);
 
       setSnackbar({
         open: true,
-        message: 'All settings updated successfully',
+        message: 'Settings updated successfully',
         severity: 'success',
       });
     } catch (error) {
@@ -148,6 +243,46 @@ function SystemConfig() {
       setSnackbar({
         open: true,
         message: 'Failed to update settings: ' + errorMessage,
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleLivePricingChange = async (event) => {
+    const newLivePricing = event.target.checked;
+    const selectedValue = event.target.value;
+
+    const newPerDay = selectedValue === 'daily';
+    const newPerTransaction = selectedValue === 'transaction';
+    setIsLivePricing(newLivePricing);
+    setIsPerDay(newPerDay);
+    setIsPerTransaction(newPerTransaction);
+
+    try {
+      const response = await axios.put('http://localhost:5000/api/live_pricing', {
+        isLivePricing: newLivePricing,
+        per_day: newPerDay,
+        per_transaction: newPerTransaction
+      });
+    } catch (error) {
+      console.error('Error updating live pricing:', error);
+    }
+  };
+
+  const handleCameraToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsCameraEnabled(newValue);
+    try {
+      await axios.put('http://localhost:5000/api/user_preferences', {
+        name: 'cameraEnabled',
+        value: newValue.toString()
+      });
+    } catch (error) {
+      console.error('Error updating camera preference:', error);
+      setIsCameraEnabled(!newValue); // Revert on error
+      setSnackbar({
+        open: true,
+        message: 'Failed to update camera settings',
         severity: 'error',
       });
     }
@@ -231,44 +366,92 @@ function SystemConfig() {
           </ConfigSection>
 
           <ConfigSection>
+            <Box display="flex" alignItems="center">
+              <Typography variant="h6" gutterBottom>
+                Camera
+              </Typography>
+              <Switch
+                checked={isCameraEnabled}
+                onChange={handleCameraToggle}
+                color="primary"
+              />
+            </Box>
+          </ConfigSection>
+
+          <ConfigSection>
+          <Box display="flex" alignItems="center">
             <Typography variant="h6" gutterBottom>
-              Price Estimate Percentages
+              Live Pricing
             </Typography>
-            <Grid container spacing={3}>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  fullWidth
-                  label="Pawn Percentage"
-                  name="pawn"
-                  type="number"
-                  value={priceEstimates.pawn}
-                  onChange={handlePriceEstimatesChange}
-                  inputProps={{ min: 0, max: 100 }}
-                />
+            <Switch
+              checked={isLivePricing}
+              onChange={handleLivePricingChange}
+              color="primary"
+            />
+            </Box>
+            {isLivePricing ? (
+              <div>
+                <div>
+                  <label>
+                    <input
+                      type="radio"
+                      value="daily"
+                      checked={isPerDay}
+                      onChange={handleLivePricingChange}
+                      style={{ accentColor: 'green' }}
+                    />
+                    Update Spot Prices Daily
+                  </label>
+                </div>
+                <div>
+                <label>
+                  <input
+                    type="radio"
+                    value="transaction"
+                    checked={isPerTransaction}
+                    onChange={handleLivePricingChange}
+                    style={{ accentColor: 'green' }}
+                  />
+                  Update Spot Prices for Each Transaction
+                </label>
+                </div>
+              </div>
+            ) : (
+              <Grid container spacing={2}>
+                {Object.keys(preciousMetalNames).map((metal) => (
+                  <Grid item xs={12} sm={3} key={metal}>
+                    <TextField
+                      label={`${preciousMetalNames[metal]} Spot Price`}
+                      value={spotPrices[metal]}
+                      onChange={(e) => handleSpotPriceChange(e, metal)}
+                      fullWidth
+                    />
+                  </Grid>
+                ))}
               </Grid>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  fullWidth
-                  label="Buy Percentage"
-                  name="buy"
-                  type="number"
-                  value={priceEstimates.buy}
-                  onChange={handlePriceEstimatesChange}
-                  inputProps={{ min: 0, max: 100 }}
-                />
+            )}
+            <Box mt={2}>
+              <Typography variant="h6" gutterBottom>
+                Price Estimates
+              </Typography>
+              <Grid container spacing={3}>
+                {Object.entries(priceEstimates).map(([key, estimates]) => (
+                  estimates.map((estimate) => (
+                    <Grid item xs={12} sm={4} key={estimate.transaction_type}>
+                      <TextField
+                        fullWidth
+                        label={`${preciousMetalNames[key]} ${estimate.transaction_type} Percentage`}
+                        name={estimate.transaction_type}
+                        type="number"
+                        value={estimate.estimate}
+                        onChange={(event) => handlePriceEstimatesChange(event, key)}
+                        inputProps={{ min: 0, max: 100 }}
+                      />
+                    </Grid>
+                  ))
+                ))}
               </Grid>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  fullWidth
-                  label="Retail Percentage"
-                  name="retail"
-                  type="number"
-                  value={priceEstimates.retail}
-                  onChange={handlePriceEstimatesChange}
-                  inputProps={{ min: 0, max: 100 }}
-                />
-              </Grid>
-            </Grid>
+            </Box>
           </ConfigSection>
         </StyledPaper>
       </TabPanel>

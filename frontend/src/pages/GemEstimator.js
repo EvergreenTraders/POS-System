@@ -40,11 +40,14 @@ import CloudUpload from '@mui/icons-material/CloudUpload';
 import ImageList from '@mui/material/ImageList';
 import ImageListItem from '@mui/material/ImageListItem';
 import CloseIcon from '@mui/icons-material/Close';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 
 function GemEstimator() {
   const [metalFormState, setMetalFormState] = useState({});
   const [totalMetalValue, setTotalMetalValue] = useState(0);
   const [addMetal, setAddMetal] = useState([]);
+  const [isCameraEnabled, setIsCameraEnabled] = useState(false);
 
   const handleMetalFormChange = (formState) => {
       setMetalFormState(formState);
@@ -79,18 +82,26 @@ function GemEstimator() {
     }));
   };
   
+  const getInitials = (str) => {
+    return str.split(' ').map(word => word.charAt(0).toUpperCase()).join('');
+  };
+
   const handleFinishEstimation = () => {
     const newItem = {
       weight: addMetal[0].weight,
+      metal: getInitials(addMetal[0].jewelryColor) + getInitials(addMetal[0].preciousMetalType),
       purity: addMetal[0].purity?.purity || addMetal[0].purity.value,
-      type: addMetal[0].preciousMetalType + " " +  addedGemTypes.primary + " " + addedGemTypes.secondary,
+      gems: (addedGemTypes.primary ? (addedGemTypes.primary === 'diamond' ? 
+            `${diamondSummary[0].shape}` : `${stoneSummary[0].name}`) : ''), 
       category: addMetal[0].metalCategory,
-      priceEstimates: {
+      itemPriceEstimates: {
         pawn: priceEstimates.pawn,
         buy: priceEstimates.buy,
         retail: priceEstimates.retail
-      }
+      },
+      image: images[0]
     };
+
     setEstimatedItems(prev => [...prev, newItem]);
 
     // Clear all summaries
@@ -101,6 +112,9 @@ function GemEstimator() {
       primary: null,
       secondary: null
     });
+    setTimeout(() => {
+      setImages([]);
+    }, 1000);
   };
 
   const [addedGemTypes, setAddedGemTypes] = useState({
@@ -114,7 +128,7 @@ function GemEstimator() {
 
   // Primary gem form
   const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
-    shape: '',
+    shape: 'Round',
     clarity: '',
     color: 'Colorless',
     quantity: 1,
@@ -127,7 +141,7 @@ function GemEstimator() {
 
   // Secondary gem form
   const [secondaryDiamondForm, setSecondaryDiamondForm] = useState({
-    shape: '',
+    shape: 'Round',
     clarity: '',
     color: 'Colorless',
     quantity: 1,
@@ -155,16 +169,14 @@ function GemEstimator() {
 
   const [estimatedItems, setEstimatedItems] = useState([]);
   const [totalDiamondValue, setTotalDiamondValue] = useState(0);
+  const [totalStoneValue, setTotalStoneValue] = useState(0);
   const [priceEstimates, setPriceEstimates] = useState({
     pawn: 0,
     buy: 0,
     retail: 0
   });
-  const [priceEstimatePercentages, setPriceEstimatePercentages] = useState({
-    pawn: 0,
-    buy: 0,
-    retail: 0
-  });
+  const [priceEstimatePercentages, setPriceEstimatePercentages] = useState({});
+  const [itemPriceEstimates, setItemPriceEstimates] = useState({ pawn: 0, buy: 0, retail: 0 });
 
   const [diamondValuationType, setDiamondValuationType] = useState('each');
 
@@ -195,12 +207,17 @@ function GemEstimator() {
       try {
         //Fetch Price Estimate Percentages
         const priceEstimatePercentagesResponse = await axios.get('http://localhost:5000/api/price_estimates');
-        const estimates = priceEstimatePercentagesResponse.data.reduce((acc, item) => {
-          acc[item.transaction_type] = item.estimate;
-          return acc;
-        }, {});
+        const data = priceEstimatePercentagesResponse.data;
+        const estimates = {};
+        data.forEach((estimate) => {
+          const metalType = estimate.precious_metal_type_id;
+          if (!estimates[metalType]) {
+            estimates[metalType] = [];
+          }
+          estimates[metalType].push(estimate);
+        });
         setPriceEstimatePercentages(estimates);
-
+        
         // Fetch Stone Shapes
         const stoneShapesResponse = await axios.get('http://localhost:5000/api/stone_shape');
         const stoneShapesWithImages = stoneShapesResponse.data.map(shape => ({
@@ -250,7 +267,19 @@ function GemEstimator() {
       }
     };
 
+    const fetchCameraPreference = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/user_preferences');
+        const cameraPreference = response.data.find(pref => pref.preference_name === 'cameraEnabled');
+        setIsCameraEnabled(cameraPreference ? cameraPreference.preference_value === 'true' : false);
+      } catch (error) {
+        console.error('Error fetching camera preference:', error);
+      }
+    };
+    
     fetchAllData();
+    fetchDiamondSizes(1);
+    fetchCameraPreference();
   }, []);
 
   const fetchDiamondSizes = async (diamondShapeId) => {
@@ -266,10 +295,15 @@ function GemEstimator() {
   useEffect(() => {
     // Calculate estimates whenever total values change
     const totalValue = totalMetalValue + totalDiamondValue;
+    const estimates = priceEstimatePercentages[metalFormState.preciousMetalTypeId] || [];
+    const pawnEstimate = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
+    const buyEstimate = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
+    const retailEstimate = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
+
     setPriceEstimates({
-      pawn: totalValue * (priceEstimatePercentages.pawn / 100),
-      buy: totalValue * (priceEstimatePercentages.buy / 100),
-      retail: totalValue * (priceEstimatePercentages.retail / 100)
+      pawn: totalValue * (pawnEstimate / 100),
+      buy: totalValue * (buyEstimate / 100),
+      retail: totalValue * (retailEstimate / 100)
     });
 
   }, [totalMetalValue, totalDiamondValue, priceEstimatePercentages]);
@@ -305,14 +339,24 @@ function GemEstimator() {
   const videoRef = React.useRef(null);
   const [stream, setStream] = useState(null);
   const [isVideoReady, setIsVideoReady] = useState(false);
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [currentShapeIndex, setCurrentShapeIndex] = useState(0);
 
   const handleNextImage = () => {
-    setCurrentImageIndex((prevIndex) => (prevIndex + 1) % images.length);
+    setCurrentShapeIndex((prevIndex) => {
+      const nextIndex = Math.min(prevIndex + 1, diamondShapes.length - 1);
+      setCurrentForm(prev => ({ ...prev, shape: diamondShapes[nextIndex].name })); // Update dropdown
+      fetchDiamondSizes(nextIndex+1);
+      return nextIndex;
+    });
   };
 
   const handlePrevImage = () => {
-    setCurrentImageIndex((prevIndex) => (prevIndex - 1 + images.length) % images.length);
+    setCurrentShapeIndex((prevIndex) => {
+      const prevIndexValue = Math.max(prevIndex - 1, 0);
+      setCurrentForm(prev => ({ ...prev, shape: diamondShapes[prevIndexValue].name })); // Update dropdown
+      fetchDiamondSizes(prevIndex);
+      return prevIndexValue;
+    });
   };
 
   const [isPopupOpen, setIsPopupOpen] = useState(false);
@@ -481,6 +525,8 @@ const ImagePopup = ({ images, index }) => {
       });
       if (selectedShape) {
         fetchDiamondSizes(selectedShape.id);
+        setCurrentShapeIndex(diamondShapes.findIndex(shape => shape.name === selectedShape.name));
+        setCurrentForm(prev => ({ ...prev, image: selectedShape.image })); // Update image
       } else {
         console.error("No shape found for:", value);
       }
@@ -526,7 +572,7 @@ const ImagePopup = ({ images, index }) => {
     
     // Reset the current form after adding
     const resetForm = {
-      shape: '',
+      shape: 'Round',
       clarity: '',
       color: 'Colorless',
       quantity: 1,
@@ -537,6 +583,7 @@ const ImagePopup = ({ images, index }) => {
       size: ''
     };
     setCurrentForm(resetForm);
+    setCurrentShapeIndex(0);
     
     // Reset exact color to default
     setExactColor('D');
@@ -866,10 +913,31 @@ const ImagePopup = ({ images, index }) => {
       </Grid>
 
       {/* Add button to switch between primary and secondary gems */}
-      <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Typography variant="h6" sx={{ flexGrow: 1, mr: 2 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: 0
+      <Grid item xs={12} sx={{ mt: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
+          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value $: 
         </Typography>
+        <TextField
+          size="small"
+          type="number"
+          value={totalStoneValue.toFixed(1)}
+          variant="standard"
+          onChange={(e) => {
+            const newValue = parseFloat(e.target.value);
+            setTotalStoneValue(newValue);
+          }}
+          inputProps={{ 
+            min: 0,
+            style: { width: '50px' }
+          }}
+          sx={{ 
+            ml: 1,
+            '& .MuiInputBase-root': {
+              ml: 0,
+              pl: 0
+            }
+          }}
+        />
         <Button 
           variant="contained" 
           color="primary" 
@@ -880,6 +948,7 @@ const ImagePopup = ({ images, index }) => {
               setActiveTab('primary_gem_stone');
             }
           }}
+          sx={{ ml: 2 }} 
         >
            {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
         </Button>
@@ -890,7 +959,7 @@ const ImagePopup = ({ images, index }) => {
   const renderDiamondEstimationTab = () => (
     <Grid container spacing={2} sx={{ p: 2 }}>
       <Grid container spacing={2} alignItems="center">
-        <Grid item xs={6}>
+        <Grid item xs={4}>
           <FormControl fullWidth variant="outlined">
             <InputLabel>Cut *</InputLabel>
             <Select
@@ -907,7 +976,22 @@ const ImagePopup = ({ images, index }) => {
             </Select>
           </FormControl>
         </Grid>
-        <Grid item xs={6}>
+        <Grid item xs={4}>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={getCurrentForm().labGrown}
+                onChange={(e) => setCurrentForm(prev => ({
+                  ...prev, 
+                  labGrown: e.target.checked
+                }))}
+                name="labGrown"
+              />
+            }
+            label="Lab Grown"
+          />
+        </Grid>
+        <Grid item xs={4}>
           <Grid container spacing={2} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Grid item xs={12}>
               <Button 
@@ -924,9 +1008,32 @@ const ImagePopup = ({ images, index }) => {
         </Grid>
       </Grid>
       <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
-        <Typography variant="h6" sx={{ flexGrow: 1, mr: 2 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value: 0
+        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
+          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value $: 
         </Typography>
+        <TextField
+          size="small"
+          type="decimal"
+          value={totalDiamondValue.toFixed(1)}
+          variant="standard"
+          onChange={(e) => {
+            const newValue = parseFloat(e.target.value);
+            setTotalDiamondValue(newValue);
+          }}
+          inputProps={{ 
+            min: 0,
+            inputMode: 'decimal',
+            pattern: '[0-9]*\\.?[0-9]*',
+            style: { width: '50px' }
+          }}
+          sx={{ 
+            ml: 1,
+            '& .MuiInputBase-root': {
+              ml: 0,
+              pl: 0
+            }
+          }}
+        />
         <Button 
           variant="contained" 
           color="primary" 
@@ -937,6 +1044,7 @@ const ImagePopup = ({ images, index }) => {
               setActiveTab('primary_gem_diamond');
             }
           }}
+          sx={{ ml: 2 }}
         >
           {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
         </Button>
@@ -1090,6 +1198,7 @@ const ImagePopup = ({ images, index }) => {
     }));
   };
 
+
   return (
     <Container maxWidth="lg">
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -1103,7 +1212,7 @@ const ImagePopup = ({ images, index }) => {
 
         {/* Diamond Estimation Section */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
+          <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
               <Typography variant="h6" sx={{ mb: 0, mr: 2 }}>
                 {activeTab.startsWith('primary') ? 'EST. PRIMARY GEM' : 'EST. SECONDARY GEM'}
@@ -1149,8 +1258,45 @@ const ImagePopup = ({ images, index }) => {
             
             {(activeTab === 'primary_gem_diamond' || activeTab === 'secondary_gem_diamond') && (
               <Box>
-                <Grid container spacing={2} alignItems="center">
-                  <Grid item xs={6} sm={5}>
+                <Grid container spacing={1} sx={{ mt: 0 }}>
+                {/* Shape Selection */}               
+                  <Grid item xs={12} md= {7} >
+                  <Typography variant="subtitle1" sx={{ mb: 0 }}>Shape *</Typography> {/* Reduced margin bottom */}
+                  <Grid container spacing={2} sx={{ mb: 1 }}>
+                    <Grid item xs={4}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                        {diamondShapes.length > 0 && (
+                          <>
+                            <img src={diamondShapes[currentShapeIndex]?.image} alt={diamondShapes[currentShapeIndex]?.name} style={{ width: '100px', height: '100px' }} />
+                            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+                              <IconButton onClick={handlePrevImage} disabled={currentShapeIndex === 0}>
+                                <ArrowBackIcon />
+                              </IconButton>
+                              <IconButton onClick={handleNextImage} disabled={currentShapeIndex === diamondShapes.length - 1}>
+                                <ArrowForwardIcon />
+                              </IconButton>
+                            </Box>
+                          </>
+                        )}
+                      </Box>
+                    </Grid>
+                  <Grid item xs={8} >
+                  <FormControl fullWidth variant="outlined" sx={{ width: '90%', ml:2, mt: 1, mb: 2 }}>
+                    <InputLabel>Select Shape</InputLabel>
+                    <Select
+                      value={getCurrentForm().shape || 'Round'} // Default to 'Round'
+                      onChange={handleDiamondChange}
+                      name="shape"
+                    >
+                      {diamondShapes.map((shape) => (
+                        <MenuItem key={shape.name} value={shape.name}>
+                          {shape.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+
+                  <Grid item xs={6} sm={12}>
                     <TextField
                       fullWidth
                       label="Quantity"
@@ -1159,147 +1305,87 @@ const ImagePopup = ({ images, index }) => {
                       value={getCurrentForm().quantity}
                       onChange={handleDiamondChange}
                       inputProps={{ min: "1" }}
+                      sx={{ width: '90%', ml: 2 }}
                     />
-                  </Grid>
-                  <Grid item xs={6} sm={7}>
-                  <Box sx={{ ml: 3 }}>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={getCurrentForm().labGrown}
-                          onChange={(e) => setCurrentForm(prev => ({
-                            ...prev, 
-                            labGrown: e.target.checked
-                          }))}
-                          name="labGrown"
-                        />
-                      }
-                      label="Lab Grown"
-                    />
-                  </Box>
                   </Grid>
                 </Grid>
-                <Box sx={{ mb: 3 }}></Box>
-                {/* Shape Selection */}
-                <Typography variant="subtitle1" sx={{ mb: 1 }}>Shape *</Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-                  {diamondShapes.map((shape) => (
-                    <Paper
-                      key={shape.name}
-                      elevation={getCurrentForm().shape === shape.name ? 8 : 1}
-                      sx={{
-                        p: 1,
-                        cursor: 'pointer',
-                        width: 80,
-                        height: 80,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                      onClick={() => {
-                        // Simulate an event object similar to a form input
-                        const event = {
-                          target: {
-                            name: 'shape',
-                            value: shape.name
-                          }
-                        };
-                        
-                        // Update current form and call handleDiamondChange
-                        setCurrentForm(prev => ({ ...prev, shape: shape.name }));
-                        handleDiamondChange(event);
-                      }}
-                    >
-                      <Box
-                        component="img"
-                        src={shape.image}
-                        alt={shape.name}
-                        sx={{ width: 40, height: 40 }}
-                      />
-                      <Typography variant="caption" align="center">
-                        {shape.name}
-                      </Typography>
-                    </Paper>
-                  ))}
-                </Box>
+                </Grid>
+                </Grid>
 
-                {/* Size Section */}
-                <Grid container spacing={1} sx={{ mb: 0.5, alignItems: 'center' }}>
-                  <Grid item>
-                    <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
-                  </Grid>
-                  {getCurrentForm().quantity > 1 && (
-                    <Grid item>
-                      <FormControl sx={{ minWidth: 120 }}>
-                        <Select
-                          value={diamondValuationType}
-                          onChange={handleDiamondValuationTypeChange}
-                          displayEmpty
-                          size="small"
-                          sx={{
-                            '& .MuiOutlinedInput-notchedOutline': {
-                              border: 'none'
-                            },
-                            '&:hover .MuiOutlinedInput-notchedOutline': {
-                              border: 'none'
-                            },
-                            '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                              border: 'none'
-                            }
-                          }}
-                        >
-                          <MenuItem value="each">Each</MenuItem>
-                          <MenuItem value="total">Total</MenuItem>
-                        </Select>
-                      </FormControl>
+                  <Grid item xs={12} md={5}>
+                    <Grid container sx={{ mb: 0.5, alignItems: 'center' }}>
+                      <Grid item>
+                        <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
+                      </Grid>
+                      {getCurrentForm().quantity > 1 && (
+                        <Grid item xs>
+                          <FormControl variant="outlined" sx={{ width: "50%", mb: 0 }}>
+                            <Select
+                              value={diamondValuationType}
+                              onChange={handleDiamondValuationTypeChange}
+                              displayEmpty
+                              size="small"
+                              sx={{
+                                '& .MuiOutlinedInput-notchedOutline': {
+                                  border: 'none'
+                                },
+                                '&:hover .MuiOutlinedInput-notchedOutline': {
+                                  border: 'none'
+                                },
+                                '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                                  border: 'none'
+                                }
+                              }}
+                            >
+                              <MenuItem value="each">Each</MenuItem>
+                              <MenuItem value="total">Total</MenuItem>
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                      )}
                     </Grid>
-                  )}
-                </Grid>
-                <Grid container spacing={2} sx={{ mb: 2 }}>
-                  <Grid item xs={12} sm={4}>
-                    <TextField
-                      fullWidth
-                      label="Weight (carats) *"
-                      name="weight"
-                      type="number"
-                      value={getCurrentForm().weight}
-                      onChange={handleDiamondChange}
-                      inputProps={{ step: "0.01", min: "0" }}
-                    />
+                    <Grid container spacing={2} sx={{ mb: 2 }}>
+                      <Grid item xs={12} sm={12}>
+                      <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
+                          <InputLabel>Diamond Size</InputLabel>
+                          <Select
+                            fullWidth
+                            displayEmpty
+                            value={getCurrentForm().size || ''}
+                            name="size"
+                            onChange={(e) => {
+                              const selectedSize = e.target.value;
+                              const selectedSizeObj = diamondSizes.find(sizeObj => sizeObj.size === selectedSize);
+                              setCurrentForm(prev => ({
+                                ...prev, 
+                                size: selectedSize,
+                                weight: selectedSizeObj ? selectedSizeObj.weight : 0
+                              }));
+                            }}
+                            sx={{ width: '100%' }}
+                          >
+                            {diamondSizes.map((sizeObj) => (
+                              <MenuItem key={sizeObj.size} value={sizeObj.size}>
+                                {sizeObj.size}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <TextField
+                          fullWidth
+                          label="Weight (carats) *"
+                          name="weight"
+                          type="number"
+                          value={getCurrentForm().weight}
+                          onChange={handleDiamondChange}
+                          inputProps={{ step: "0.01", min: "0" }}
+                          sx={{ width: '100%', mb: 2 }} // Added margin bottom for spacing
+                        />
+                       
+                      </Grid>
                     </Grid>
-                    <Grid item xs={12} sm={6}>
-                        {/* Size Dropdown */}
-                    <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
-                      <InputLabel>Diamond Size</InputLabel>
-                      <Select
-                        fullWidth
-                        displayEmpty
-                        value={getCurrentForm().size || ''}
-                        name="size"
-                        onChange={(e) => {
-                          const selectedSize = e.target.value;
-                          
-                          // Find the selected size object
-                          const selectedSizeObj = diamondSizes.find(sizeObj => sizeObj.size === selectedSize);
-                          
-                          // Update the form with selected size and weight
-                          setCurrentForm(prev => ({
-                            ...prev, 
-                            size: selectedSize,
-                            weight: selectedSizeObj ? selectedSizeObj.weight : 0
-                          }));
-                        }}
-                      >
-                        {diamondSizes.map((sizeObj) => (
-                          <MenuItem key={sizeObj.size} value={sizeObj.size}>
-                            {sizeObj.size}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                </Grid>
                   </Grid>
+                </Grid>
 
                 {/* Color Selection */}
                 <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
@@ -1408,8 +1494,8 @@ const ImagePopup = ({ images, index }) => {
 
         {/* Summary Section */}
         <Grid item xs={12} md={3}>
-          <Paper sx={{ p: 2, height: '500px', overflow: 'auto' }}>
-            <Typography variant="h6">Images</Typography>
+          <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
+            <Typography variant="h6">Images{isCameraEnabled && ' *'}</Typography>
             <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
               <Button
                 variant="outlined"
@@ -1461,18 +1547,17 @@ const ImagePopup = ({ images, index }) => {
             {/* Image Gallery */}
             {images.length > 0 && (
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-              <Button onClick={handlePrevImage} disabled={currentImageIndex === 0} >◀</Button>
-              <img src={images[currentImageIndex].url} alt="image" style={{ width: '50%', height: '100px', cursor: 'pointer', objectFit: 'cover' }} onClick={() => openPopup(currentImageIndex)}/>
-              <Button onClick={handleNextImage} disabled={currentImageIndex === images.length - 1}>▶</Button>
+              <Button onClick={handlePrevImage} disabled={currentShapeIndex === 0} >◀</Button>
+              <img src={images[currentShapeIndex].url} alt="image" style={{ width: '50%', height: '100px', cursor: 'pointer', objectFit: 'cover' }} onClick={() => openPopup(currentShapeIndex)}/>
+              <Button onClick={handleNextImage} disabled={currentShapeIndex === images.length - 1}>▶</Button>
             </Box>
             )}
 
             <ImagePopup images={images} index={popupImageIndex}/>
 
             <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" sx={{ mb: 2 }}>Price Estimates</Typography>
-              
-              <Box sx={{ 
+              <Typography variant="h6" sx={{ mb: 0 }}>Price Estimates</Typography>
+　　             <Box sx={{ 
                 border: '1px solid',
                 borderColor: 'divider',
                 borderRadius: 1,
@@ -1486,11 +1571,31 @@ const ImagePopup = ({ images, index }) => {
                   borderColor: 'divider',
                 }}>
                   <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
-                    Pawn Value
+                    Pawn Value: $
                   </Typography>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-                    ${priceEstimates.pawn.toFixed(2)}
-                  </Typography>
+                  <TextField
+                    size="small"
+                    type="decimal"
+                    value={priceEstimates.pawn.toFixed(1)}
+                    variant="standard"
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value);
+                      setPriceEstimates(prev => ({ ...prev, pawn: newValue }));
+                    }}
+                    inputProps={{ 
+                      min: 0,
+                      inputMode: 'decimal',
+                      pattern: '[0-9]*\\.?[0-9]*',
+                      style: { width: '70px' }
+                    }}
+                    sx={{ 
+                      ml: 1,
+                      '& .MuiInputBase-root': {
+                        ml: 0,
+                        pl: 0
+                      }
+                    }}
+                  />
                 </Box>
 
                 <Box sx={{ 
@@ -1501,11 +1606,31 @@ const ImagePopup = ({ images, index }) => {
                   borderColor: 'divider',
                 }}>
                   <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
-                    Buy Value
+                    Buy Value: $
                   </Typography>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-                    ${priceEstimates.buy.toFixed(2)}
-                  </Typography>
+                  <TextField 
+                    size="small"
+                    type="decimal"
+                    value={priceEstimates.buy.toFixed(1)}
+                    variant="standard"
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value);
+                      setPriceEstimates(prev => ({ ...prev, buy: newValue }));
+                    }}
+                    inputProps={{ 
+                      min: 0,
+                      inputMode: 'decimal',
+                      pattern: '[0-9]*\\.?[0-9]*',
+                      style: { width: '70px' }
+                    }}
+                    sx={{ 
+                      ml: 1,
+                      '& .MuiInputBase-root': {
+                        ml: 0,
+                        pl: 0
+                      }
+                    }}
+                  />
                 </Box>
 
                 <Box sx={{ 
@@ -1514,12 +1639,32 @@ const ImagePopup = ({ images, index }) => {
                   p: 1.5,
                   '&:hover': { bgcolor: 'action.hover' }
                 }}>
-                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
-                    Retail Value
+                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary', ml: 0 }}>
+                    Retail Value: $
                   </Typography>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-                    ${priceEstimates.retail.toFixed(2)}
-                  </Typography>
+                  <TextField 
+                    size="small"
+                    type="decimal"
+                    value={priceEstimates.retail.toFixed(1)}
+                    variant="standard"
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value);
+                      setPriceEstimates(prev => ({ ...prev, retail: newValue }));
+                    }}
+                    inputProps={{ 
+                      min: 0,
+                      inputMode: 'decimal',
+                      pattern: '[0-9]*\\.?[0-9]*',
+                      style: { width: '70px' }
+                    }}
+                    sx={{ 
+                      ml: 1,
+                      '& .MuiInputBase-root': {
+                        ml: 0,
+                        pl: 0
+                      }
+                    }}
+                  />
                 </Box>
               </Box>
             </Box>
@@ -1619,17 +1764,17 @@ const ImagePopup = ({ images, index }) => {
               color="primary"
               size="large"
               onClick={handleFinishEstimation}
-              disabled={addMetal.length === 0}
+              disabled={addMetal.length === 0 || (isCameraEnabled && images.length === 0)}
               fullWidth
             >
               Finish
             </Button>
           </Box>
     </Paper>
-</Grid>
+    </Grid>
       </Grid>
 
-      <Grid container spacing={1} sx={{ mt: 3 }}>
+      <Grid container spacing={0} sx={{ mt: 0 }}>
         {/* Estimated Items Section */}
         <Grid item xs={12}>
           <Paper sx={{ p: 3, mt: 3, mb: 3, borderRadius: 2 }}>
@@ -1661,6 +1806,7 @@ const ImagePopup = ({ images, index }) => {
                 <Table>
                   <TableHead>
                     <TableRow>
+                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Image</TableCell>
                       <TableCell sx={{ fontWeight: 600, py: 2 }}>Description</TableCell>
                       <TableCell sx={{ fontWeight: 600, py: 2 }}>Transaction Type</TableCell>
                       <TableCell sx={{ fontWeight: 600, py: 2 }}>Price</TableCell>
@@ -1684,10 +1830,17 @@ const ImagePopup = ({ images, index }) => {
                         }}
                       >
                         <TableCell>
+                            <img 
+                              src={item.image?.url || ''} 
+                              alt="No image" 
+                              style={{ width: '50px', height: '50px', objectFit: 'cover' }} 
+                            />
+                        </TableCell>
+                        <TableCell>
                           <Box sx={{ display: 'flex', alignItems: 'center' }}>
                             <Box>
                               <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
-                                {item.weight}g {item.purity} {item.type}
+                                {item.weight}g {item.purity} {item.metal} {item.gems}
                               </Typography>
                               <Typography variant="body2" color="text.secondary">
                                 {item.category}
@@ -1711,7 +1864,7 @@ const ImagePopup = ({ images, index }) => {
                               <Box>
                                 <Typography variant="body2">Pawn</Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  ${item.priceEstimates.pawn.toFixed(2)}
+                                  ${item.itemPriceEstimates.pawn.toFixed(2)}
                                 </Typography>
                               </Box>
                             </MenuItem>
@@ -1719,7 +1872,7 @@ const ImagePopup = ({ images, index }) => {
                               <Box>
                                 <Typography variant="body2">Buy</Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  ${item.priceEstimates.buy.toFixed(2)}
+                                  ${item.itemPriceEstimates.buy.toFixed(2)}
                                 </Typography>
                               </Box>
                             </MenuItem>
@@ -1727,7 +1880,7 @@ const ImagePopup = ({ images, index }) => {
                               <Box>
                                 <Typography variant="body2">Retail</Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  ${item.priceEstimates.retail.toFixed(2)}
+                                  ${item.itemPriceEstimates.retail.toFixed(2)}
                                 </Typography>
                               </Box>
                             </MenuItem>
@@ -1736,7 +1889,7 @@ const ImagePopup = ({ images, index }) => {
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <TextField 
                             type="number"
-                            value={item.priceEstimates[itemTransactionTypes[index] || 'pawn']}
+                            value={item.itemPriceEstimates[itemTransactionTypes[index]]}
                             //onChange={(e) => handlePriceChange(index, e.target.value)}
                             InputProps={{
                               startAdornment: <InputAdornment position="start">$</InputAdornment>,
