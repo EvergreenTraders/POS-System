@@ -155,7 +155,7 @@ function GemEstimator() {
   const initialStoneForm = {
     name: '',
     shape: '',
-    color: '#000000',
+    color: 'Red',
     weight: '',
     width: '',
     depth: '',
@@ -197,6 +197,7 @@ function GemEstimator() {
   const [diamondColors, setDiamondColors] = useState([]);
 
   const [stoneTypes, setStoneTypes] = useState([]);
+  const [colorSpecificStoneTypes, setColorSpecificStoneTypes] = useState([]);
 
   const [stoneShapes, setStoneShapes] = useState([]);
 
@@ -218,6 +219,34 @@ function GemEstimator() {
         });
         setPriceEstimatePercentages(estimates);
         
+        // Fetch Stone Types
+        const stoneTypesResponse = await axios.get('http://localhost:5000/api/stone_types');
+        const stoneTypesData = stoneTypesResponse.data;
+        setColorSpecificStoneTypes(stoneTypesData);
+        
+        // Group stone types by color for the dropdown
+        const uniqueTypes = [...new Set(stoneTypesData.map(type => type.type))];
+        const typesWithImages = uniqueTypes.map(type => {
+          const stoneData = stoneTypesData.find(s => s.type === type);
+          return {
+            name: type,
+            image: stoneData.image_path.replace('.jpg', '.png')
+          };
+        });
+        setStoneTypes(typesWithImages);
+
+        // Update the initial stone form with the first color from the data
+        if (stoneTypesData.length > 0) {
+          setPrimaryStoneForm(prev => ({
+            ...prev,
+            color: 'Red'
+          }));
+          setSecondaryStoneForm(prev => ({
+            ...prev,
+            color: 'Red'
+          }));
+        }
+
         // Fetch Stone Shapes
         const stoneShapesResponse = await axios.get('http://localhost:5000/api/stone_shape');
         const stoneShapesWithImages = stoneShapesResponse.data.map(shape => ({
@@ -225,14 +254,6 @@ function GemEstimator() {
           image: shape.image_path.replace('.jpg', '.png')
         }));
         setStoneShapes(stoneShapesWithImages);
-
-        // Fetch Stone Types
-        const stoneTypesResponse = await axios.get('http://localhost:5000/api/stone_type');
-        const typesWithImages = stoneTypesResponse.data.map(type => ({
-          name: type.type,
-          image: type.image_path.replace('.jpg', '.png')
-        }));
-        setStoneTypes(typesWithImages);
 
         // Fetch Stone Colors
         const stoneColorsResponse = await axios.get('http://localhost:5000/api/stone_color');
@@ -544,12 +565,19 @@ const ImagePopup = ({ images, index }) => {
     const currentForm = getCurrentForm();
     const isPrimary = activeTab.startsWith('primary');
   
-  // Check if we can add this type of gem
+    // Check if we can add this type of gem
     const gemPosition = isPrimary ? 'primary' : 'secondary';
     if (addedGemTypes[gemPosition] === 'stone') {
       alert(`Please delete the existing ${gemPosition} stone before adding a diamond`);
       return;
     }
+
+    // For primary gems, check if there's already one in the array
+    if (isPrimary && (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary))) {
+      alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
+      return;
+    }
+
     const newItem = {
       shape: currentForm.shape,
       clarity: currentForm.clarity,
@@ -560,7 +588,7 @@ const ImagePopup = ({ images, index }) => {
       weight: currentForm.weight,
       quantity: currentForm.quantity,
       labGrown: currentForm.labGrown,
-      isPrimary: activeTab.startsWith('primary'),
+      isPrimary: isPrimary,
       type: 'diamond'
     };
 
@@ -601,10 +629,12 @@ const ImagePopup = ({ images, index }) => {
   };
 
   const handleStoneTypeChange = (event) => {
-    const selectedStone = stoneTypes.find(stone => stone.name === event.target.value);
+    const selectedStoneType = event.target.value;
+    const selectedStone = colorSpecificStoneTypes.find(stone => stone.type === selectedStoneType);
     setCurrentStoneForm(prev => ({
       ...prev,
-      name: selectedStone ? selectedStone.name : '',
+      name: selectedStone ? selectedStone.type : '',
+      color: selectedStone ? selectedStone.color : prev.color
     }));
   };
 
@@ -622,14 +652,21 @@ const ImagePopup = ({ images, index }) => {
       alert(`Please delete the existing ${gemPosition} diamond before adding a stone`);
       return;
     }
+
+    // For primary gems, check if there's already one in the array
+    if (isPrimary && (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary))) {
+      alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
+      return;
+    }
+
     const newStone = {
-      name:  currentForm.name,
+      name: currentForm.name,
       shape: currentForm.shape,
       weight: currentForm.weight+' ct',
       color: currentForm.color,
       quantity: currentForm.quantity,
       authentic: currentForm.authentic,
-      isPrimary: activeTab.startsWith('primary'),
+      isPrimary: isPrimary,
       type: 'stone'
     };
 
@@ -700,71 +737,72 @@ const ImagePopup = ({ images, index }) => {
         <Grid item xs={12} md={8}>
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Type *</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-            {stoneTypes.map((stone) => (
-              <Paper
-                key={stone.name}
-                elevation={getCurrentStoneForm().name === stone.name ? 8 : 1}
-                sx={{
-                  p: 1,
-                  cursor: 'pointer',
-                  width: 80,
-                  height: 80,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-                onClick={() => handleStoneTypeChange({ target: { value: stone.name } })}
-              >
-                <Box
-                  component="img"
-                  src={stone.image}
-                  alt={stone.name}
-                  sx={{ width: 40, height: 40 }}
-                />
-                <Typography variant="caption" align="center">
-                  {stone.name}
-                </Typography>
-              </Paper>
-            ))}
+            {colorSpecificStoneTypes
+              .filter(stone => stone.color === getCurrentStoneForm().color)
+              .map((stone) => (
+                <Paper
+                  key={stone.type}
+                  elevation={getCurrentStoneForm().name === stone.type ? 8 : 1}
+                  sx={{
+                    p: 1,
+                    cursor: 'pointer',
+                    width: 80,
+                    height: 80,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  onClick={() => handleStoneTypeChange({ target: { value: stone.type } })}
+                >
+                  <Box
+                    component="img"
+                    src={stone.image_path}
+                    alt={stone.type}
+                    sx={{ width: 40, height: 40 }}
+                  />
+                  <Typography variant="caption" align="center">
+                    {stone.type}
+                  </Typography>
+                </Paper>
+              ))}
           </Box>
         </Grid>
 
+        {/* Stone Color Picker */}
+        <Grid item xs={12} md={4}>
+          <FormControl fullWidth>
+            <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
+            <Grid container sx={{ border: '1px solid black', boxSizing: 'border-box'}}>
+              {stoneColors.map((color, index) => (
+                <Grid item xs={6} key={color.id}>
+                  <Paper
+                    onClick={() => {
+                      setCurrentStoneForm(prev => ({
+                        ...prev,
+                        color: color.color
+                      }));
+                    }}
 
-          {/* Stone Color Picker */}
-          <Grid item xs={12} md={4}>
-              <FormControl fullWidth>
-                  <Typography variant="subtitle1"  sx={{ mb: 1}}>Color *</Typography>
-                  <Grid container sx={{  border: '1px solid black',   boxSizing: 'border-box'}}>
-                      {stoneColors.map((color, index) => (
-                          <Grid item xs={6} key={color.id}>
-                              <Paper
-                                  onClick={() => {
-                                      setCurrentStoneForm(prev => ({
-                                          ...prev,
-                                          color: color.color
-                                      }));
-                                  }}
-
-                                  sx={{
-                                      p: 1.5,
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      textAlign: 'center',
-                                      border: '1px solid black',
-                                      borderRadius: 0,
-                                      backgroundColor: getCurrentStoneForm().color === color.color ? 'mediumseagreen':'none'
-                                    }}
-                              >
-                                  {color.color}
-                              </Paper>
-                          </Grid>
-                      ))}
-                  </Grid>
-              </FormControl>
-          </Grid>
+                    sx={{
+                      p: 1.5,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      textAlign: 'center',
+                      border: '1px solid black',
+                      borderRadius: 0,
+                      backgroundColor: getCurrentStoneForm().color === color.color ? 'mediumseagreen':'none'
+                    }}
+                  >
+                    {color.color}
+                  </Paper>
+                </Grid>
+              ))}
+            </Grid>
+          </FormControl>
+        </Grid>
       </Grid>
 
       {/* Stone Shape */}

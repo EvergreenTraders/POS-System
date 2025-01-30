@@ -462,6 +462,18 @@ app.get('/api/stone_color', async (req, res) => {
   }
 });
 
+// Stone types route
+app.get('/api/stone_types', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM stone_types ORDER BY id ASC';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching stone types:', err);
+    res.status(500).json({ error: 'Failed to fetch stone types' });
+  }
+});
+
 // User preferences API Endpoint
 app.get('/api/user_preferences', async (req, res) => {
   try {
