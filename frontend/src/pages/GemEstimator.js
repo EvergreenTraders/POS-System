@@ -42,8 +42,10 @@ import ImageListItem from '@mui/material/ImageListItem';
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import { useNavigate } from 'react-router-dom';
 
 function GemEstimator() {
+  const navigate = useNavigate();
   const [metalFormState, setMetalFormState] = useState({});
   const [totalMetalValue, setTotalMetalValue] = useState(0);
   const [addMetal, setAddMetal] = useState([]);
@@ -1282,6 +1284,10 @@ const ImagePopup = ({ images, index }) => {
     
   };
 
+  const handleCheckout = () => {
+    navigate('/checkout', { state: { items: estimatedItems } });
+  };
+
   return (
     <Container maxWidth="lg">
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -1860,169 +1866,158 @@ const ImagePopup = ({ images, index }) => {
       <Grid container spacing={0} sx={{ mt: 0 }}>
         {/* Estimated Items Section */}
         <Grid item xs={12}>
-          <Paper sx={{ p: 3, mt: 3, mb: 3, borderRadius: 2 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>Estimated Items</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {estimatedItems.length} {estimatedItems.length === 1 ? 'item' : 'items'}
-              </Typography>
-            </Box>
-            
-            {estimatedItems.length === 0 ? (
-              <Box sx={{ 
-                py: 6, 
-                display: 'flex', 
-                flexDirection: 'column', 
-                alignItems: 'center',
-                bgcolor: 'grey.50',
-                borderRadius: 1
-              }}>
-                <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
-                  No items estimated yet
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Complete your estimation above to see items here
-                </Typography>
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Image</TableCell>
-                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Description</TableCell>
-                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Transaction Type</TableCell>
-                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Price</TableCell>
-                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {estimatedItems.map((item, index) => (
-                      <TableRow 
-                        key={index}
-                        onClick={() => handleOpenDialog(index)}
-                        sx={{ 
-                          cursor: 'pointer',
-                          transition: 'all 0.2s',
-                          '&:hover': {
-                            bgcolor: 'action.hover',
-                            '& .action-buttons': {
-                              opacity: 1
-                            }
+          <Paper elevation={3} sx={{ p: 2, mt: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Estimated Items
+            </Typography>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Image</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Description</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Transaction Type</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Price</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {estimatedItems.map((item, index) => (
+                    <TableRow 
+                      key={index}
+                      onClick={() => handleOpenDialog(index)}
+                      sx={{ 
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        '&:hover': {
+                          bgcolor: 'action.hover',
+                          '& .action-buttons': {
+                            opacity: 1
                           }
-                        }}
-                      >
-                        <TableCell>
-                            <img 
-                              src={item.image?.url || ''} 
-                              alt="No image" 
-                              style={{ width: '50px', height: '50px', objectFit: 'cover' }} 
-                            />
-                        </TableCell>
-                        <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        }
+                      }}
+                    >
+                      <TableCell>
+                          <img 
+                            src={item.image?.url || ''} 
+                            alt="No image" 
+                            style={{ width: '50px', height: '50px', objectFit: 'cover' }} 
+                          />
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Box>
+                            <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
+                              {item.weight}g {item.purity} {item.metal} {item.gems}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {item.category}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Select
+                          value={itemTransactionTypes[index] || 'pawn'}
+                          onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
+                          size="small"
+                          sx={{ 
+                            minWidth: 150,
+                            '& .MuiSelect-select': {
+                              py: 1
+                            }
+                          }}
+                        >
+                          <MenuItem value="pawn">
                             <Box>
-                              <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
-                                {item.weight}g {item.purity} {item.metal} {item.gems}
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                {item.category}
+                              <Typography variant="body2">Pawn</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                ${item.itemPriceEstimates.pawn.toFixed(2)}
                               </Typography>
                             </Box>
-                          </Box>
-                        </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <Select
-                            value={itemTransactionTypes[index] || 'pawn'}
-                            onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
-                            size="small"
-                            sx={{ 
-                              minWidth: 150,
-                              '& .MuiSelect-select': {
+                          </MenuItem>
+                          <MenuItem value="buy">
+                            <Box>
+                              <Typography variant="body2">Buy</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                ${item.itemPriceEstimates.buy.toFixed(2)}
+                              </Typography>
+                            </Box>
+                          </MenuItem>
+                          <MenuItem value="retail">
+                            <Box>
+                              <Typography variant="body2">Retail</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                ${item.itemPriceEstimates.retail.toFixed(2)}
+                              </Typography>
+                            </Box>
+                          </MenuItem>
+                        </Select>
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <TextField 
+                          type="number"
+                          value={item.itemPriceEstimates[itemTransactionTypes[index]]}
+                          //onChange={(e) => handlePriceChange(index, e.target.value)}
+                          InputProps={{
+                            startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                            sx: {
+                              '& input': {
                                 py: 1
                               }
-                            }}
-                          >
-                            <MenuItem value="pawn">
-                              <Box>
-                                <Typography variant="body2">Pawn</Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  ${item.itemPriceEstimates.pawn.toFixed(2)}
-                                </Typography>
-                              </Box>
-                            </MenuItem>
-                            <MenuItem value="buy">
-                              <Box>
-                                <Typography variant="body2">Buy</Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  ${item.itemPriceEstimates.buy.toFixed(2)}
-                                </Typography>
-                              </Box>
-                            </MenuItem>
-                            <MenuItem value="retail">
-                              <Box>
-                                <Typography variant="body2">Retail</Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  ${item.itemPriceEstimates.retail.toFixed(2)}
-                                </Typography>
-                              </Box>
-                            </MenuItem>
-                          </Select>
-                        </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <TextField 
-                            type="number"
-                            value={item.itemPriceEstimates[itemTransactionTypes[index]]}
-                            //onChange={(e) => handlePriceChange(index, e.target.value)}
-                            InputProps={{
-                              startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                              sx: {
-                                '& input': {
-                                  py: 1
-                                }
-                              }
+                            }
+                          }}
+                          size="small"
+                          sx={{ width: 150 }}
+                        />
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Box className="action-buttons" sx={{ 
+                          opacity: 0.7,
+                          transition: 'opacity 0.2s',
+                          display: 'flex',
+                          gap: 1 
+                        }}>
+                          <IconButton
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenDialog(index);
                             }}
                             size="small"
-                            sx={{ width: 150 }}
-                          />
-                        </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <Box className="action-buttons" sx={{ 
-                            opacity: 0.7,
-                            transition: 'opacity 0.2s',
-                            display: 'flex',
-                            gap: 1 
-                          }}>
-                            <IconButton
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenDialog(index);
-                              }}
-                              size="small"
-                              sx={{ color: 'primary.main' }}
-                            >
-                              <EditIcon />
-                            </IconButton>
-                            <IconButton
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const newItems = [...estimatedItems];
-                                newItems.splice(index, 1);
-                                setEstimatedItems(newItems);
-                              }}
-                              size="small"
-                              sx={{ color: 'error.main' }}
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </Box>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
+                            sx={{ color: 'primary.main' }}
+                          >
+                            <EditIcon />
+                          </IconButton>
+                          <IconButton
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const newItems = [...estimatedItems];
+                              newItems.splice(index, 1);
+                              setEstimatedItems(newItems);
+                            }}
+                            size="small"
+                            sx={{ color: 'error.main' }}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleCheckout}
+                disabled={estimatedItems.length === 0}
+                startIcon={<ArrowForwardIcon />}
+              >
+                Proceed to Checkout
+              </Button>
+            </Box>
           </Paper>
         </Grid>
       </Grid>
