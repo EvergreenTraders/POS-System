@@ -67,7 +67,6 @@ function GemEstimator() {
 
   const handleDeleteGem = (index, type, isPrimary) => {
     const gemPosition = isPrimary ? 'primary' : 'secondary';
-    console.log("gem", gemPosition, isPrimary,type);
   
     if (type === 'diamond') {
       setDiamondSummary(prev => prev.filter((_, i) => i !== index));
@@ -87,8 +86,11 @@ function GemEstimator() {
   };
 
   const handleFinishEstimation = () => {
+    const gemWeightInGrams = calculateTotalGemWeight();
+    const totalWeight = parseFloat(addMetal[0].weight || 0) + gemWeightInGrams;
+
     const newItem = {
-      weight: addMetal[0].weight,
+      weight: totalWeight.toFixed(2),
       metal: getInitials(addMetal[0].jewelryColor) + getInitials(addMetal[0].preciousMetalType),
       purity: addMetal[0].purity?.purity || addMetal[0].purity.value,
       gems: (addedGemTypes.primary ? (addedGemTypes.primary === 'diamond' ? 
@@ -203,6 +205,8 @@ function GemEstimator() {
 
   const [stoneColors, setStoneColors] = useState([]);
 
+  const [caratConversion, setCaratConversion] = useState(null);
+
   useEffect(() => {
     const fetchAllData = async () => {
       try {
@@ -288,6 +292,17 @@ function GemEstimator() {
       }
     };
 
+    const fetchCaratConversion = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/carat-conversion');
+        if (response.data && response.data.length > 0) {
+          setCaratConversion(response.data[0]);
+        }
+      } catch (error) {
+        console.error('Error fetching carat conversion:', error);
+      }
+    };
+
     const fetchCameraPreference = async () => {
       try {
         const response = await axios.get('http://localhost:5000/api/user_preferences');
@@ -300,6 +315,7 @@ function GemEstimator() {
     
     fetchAllData();
     fetchDiamondSizes(1);
+    fetchCaratConversion();
     fetchCameraPreference();
   }, []);
 
@@ -1236,6 +1252,35 @@ const ImagePopup = ({ images, index }) => {
     }));
   };
 
+  const calculateTotalGemWeight = () => {
+    if (!caratConversion) return 0;
+
+    let totalCarats = 0;
+
+    // Add primary diamond weight if exists
+    if (addedGemTypes.primary === 'diamond' && diamondSummary.length > 0) {
+      totalCarats += parseFloat(diamondSummary[0].weight || 0) * parseFloat(diamondSummary[0].quantity || 1);
+    }
+
+    // Add primary stone weight if exists
+    if (addedGemTypes.primary === 'stone' && stoneSummary.length > 0) {
+      totalCarats += parseFloat(stoneSummary[0].weight || 0) * parseFloat(stoneSummary[0].quantity || 1);
+    }
+
+    // Add secondary diamond weight if exists
+    if (addedGemTypes.secondary === 'diamond' && diamondSummary.length > 1) {
+      totalCarats += parseFloat(diamondSummary[1].weight || 0) * parseFloat(diamondSummary[1].quantity || 1);
+    }
+
+    // Add secondary stone weight if exists
+    if (addedGemTypes.secondary === 'stone' && stoneSummary.length > 1) {
+      totalCarats += parseFloat(stoneSummary[1].weight || 0) * parseFloat(stoneSummary[1].quantity || 1);
+    }
+
+    // Convert total carats to grams
+    return totalCarats * parseFloat(caratConversion.grams);
+    
+  };
 
   return (
     <Container maxWidth="lg">

@@ -76,4 +76,20 @@ BEGIN
     (4, 'buy', 40.00),
     (4, 'retail', 50.00);
     END IF;
+
+    -- carat to gram conversion
+    drop table if exists carat_to_gram_conversion;
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'carat_to_gram_conversion') THEN    
+        CREATE TABLE carat_to_gram_conversion (
+            id SERIAL PRIMARY KEY,
+            carats INT NOT NULL DEFAULT 1,
+            grams DECIMAL(10, 2) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        
+        -- Insert default conversion value
+        INSERT INTO carat_to_gram_conversion (carats, grams) VALUES (1, 0.20);
+    END IF;
+
 END $$;

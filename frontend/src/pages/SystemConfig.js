@@ -82,6 +82,8 @@ function SystemConfig() {
   const [isPerTransaction, setIsPerTransaction] = useState(false);
   const [updateMethod, setUpdateMethod] = useState(null);
   const [spotPrices, setSpotPrices] = useState({});
+  const [caratConversion, setCaratConversion] = useState(null);
+  const [gramsInput, setGramsInput] = useState('');
 
   useEffect(() => {
     const fetchPreciousMetalNames = async () => {
@@ -150,11 +152,29 @@ function SystemConfig() {
       }
     };
 
+    const fetchCaratConversion = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/carat-conversion');
+        if (response.data && response.data.length > 0) {
+          setCaratConversion(response.data[0]);
+          setGramsInput(response.data[0].grams.toString());
+        }
+      } catch (error) {
+        console.error('Error fetching carat conversion:', error);
+        setSnackbar({
+          open: true,
+          message: 'Failed to fetch carat conversion data',
+          severity: 'error',
+        });
+      }
+    };
+
     fetchPreciousMetalNames();
     fetchLivePricing();
     fetchSpotPrices();
     fetchPriceEstimates();
     fetchCameraPreference();
+    fetchCaratConversion();
   }, []);
 
   const handleTabChange = (event, newValue) => {
@@ -288,6 +308,28 @@ function SystemConfig() {
     }
   };
 
+  const handleCaratConversionUpdate = async (newGrams) => {
+    try {
+      const response = await axios.put('http://localhost:5000/api/carat-conversion', {
+        grams: parseFloat(newGrams)
+      });
+      setCaratConversion(response.data);
+      setGramsInput(response.data.grams.toString());
+      setSnackbar({
+        open: true,
+        message: 'Carat conversion updated successfully',
+        severity: 'success',
+      });
+    } catch (error) {
+      console.error('Error updating carat conversion:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update carat conversion',
+        severity: 'error',
+      });
+    }
+  };
+
   return (
     <Container>
       <Box sx={{ mb: 1 }}>
@@ -379,15 +421,46 @@ function SystemConfig() {
           </ConfigSection>
 
           <ConfigSection>
-          <Box display="flex" alignItems="center">
             <Typography variant="h6" gutterBottom>
-              Live Pricing
+              Carat to Gram Conversion
             </Typography>
-            <Switch
-              checked={isLivePricing}
-              onChange={handleLivePricingChange}
-              color="primary"
-            />
+            <Box sx={{ mt: 1 }}>
+              <TextField
+                label="Grams per Carat"
+                type="number"
+                value={gramsInput}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setGramsInput(value);
+                }}
+                onBlur={() => {
+                  if (gramsInput && !isNaN(gramsInput)) {
+                    handleCaratConversionUpdate(gramsInput);
+                  }
+                }}
+                inputProps={{
+                  step: "0.01",
+                  min: "0",
+                }}
+                size="small"
+                sx={{ width: '200px' }}
+              />
+              <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                Standard conversion: 1 carat = 0.2 grams
+              </Typography>
+            </Box>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Box display="flex" alignItems="center">
+              <Typography variant="h6" gutterBottom>
+                Live Pricing
+              </Typography>
+              <Switch
+                checked={isLivePricing}
+                onChange={handleLivePricingChange}
+                color="primary"
+              />
             </Box>
             {isLivePricing ? (
               <div>
