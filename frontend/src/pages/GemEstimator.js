@@ -104,7 +104,7 @@ function GemEstimator() {
         buy: priceEstimates.buy,
         retail: priceEstimates.retail
       },
-      image: images[0]
+      image: images.find(img => img.isPrimary) || images[0]
     };
 
     setEstimatedItems(prev => [...prev, newItem]);
@@ -383,8 +383,21 @@ function GemEstimator() {
   const [stream, setStream] = useState(null);
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [currentShapeIndex, setCurrentShapeIndex] = useState(0);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [isPopupOpen, setIsPopupOpen] = useState(false);
+  const [popupImageIndex, setPopupImageIndex] = useState(0);
 
-  const handleNextImage = () => {
+  const openPopup = (index) => {
+    setPopupImageIndex(index);
+    setIsPopupOpen(true);
+  };
+
+  const closePopup = () => {
+    setIsPopupOpen(false);
+  };
+
+  // Diamond shape navigation
+  const handleNextShape = () => {
     setCurrentShapeIndex((prevIndex) => {
       const nextIndex = Math.min(prevIndex + 1, diamondShapes.length - 1);
       setCurrentForm(prev => ({ ...prev, shape: diamondShapes[nextIndex].name })); // Update dropdown
@@ -393,7 +406,7 @@ function GemEstimator() {
     });
   };
 
-  const handlePrevImage = () => {
+  const handlePrevShape = () => {
     setCurrentShapeIndex((prevIndex) => {
       const prevIndexValue = Math.max(prevIndex - 1, 0);
       setCurrentForm(prev => ({ ...prev, shape: diamondShapes[prevIndexValue].name })); // Update dropdown
@@ -402,67 +415,114 @@ function GemEstimator() {
     });
   };
 
-  const [isPopupOpen, setIsPopupOpen] = useState(false);
-const [popupImageIndex, setPopupImageIndex] = useState(0);
+  // Image gallery navigation
+  const handleNextImage = () => {
+    setCurrentImageIndex((prevIndex) => Math.min(prevIndex + 1, images.length - 1));
+  };
 
-const openPopup = (index) => {
-    setPopupImageIndex(index);
-    setIsPopupOpen(true);
-};
+  const handlePrevImage = () => {
+    setCurrentImageIndex((prevIndex) => Math.max(prevIndex - 1, 0));
+  };
 
-const closePopup = () => {
-    setIsPopupOpen(false);
-};
+  const handleNextPopupImage = () => {
+    setPopupImageIndex((prevIndex) => Math.min(prevIndex + 1, images.length - 1));
+  };
 
-const handleNextPopupImage = () => {
-    setPopupImageIndex((prevIndex) => (prevIndex + 1) % images.length);
-};
+  const handlePrevPopupImage = () => {
+    setPopupImageIndex((prevIndex) => Math.max(prevIndex - 1, 0));
+  };
 
-const handlePrevPopupImage = () => {
-    setPopupImageIndex((prevIndex) => (prevIndex - 1 + images.length) % images.length);
-};
+  // Popup Component
+  const ImagePopup = ({ images, index }) => {
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-// Popup Component
-const ImagePopup = ({ images, index }) => {
-    if (!images || images.length === 0) return null; // Check if images are defined and not empty
-    return (
-        <Dialog open={isPopupOpen} onClose={closePopup}>
-            <DialogContent sx={{ overflow: 'hidden' }}>
-                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                    <Button onClick={handlePrevPopupImage} disabled={index === 0}>◀</Button>
-                    <img src={images[index].url} alt="Popup Image" style={{ width: '500px', height: 'auto', transition: 'opacity 0.5s ease-in-out', opacity: isPopupOpen ? 1 : 0 }} />
-                    <Button onClick={handleNextPopupImage} disabled={index === images.length - 1}>▶</Button>
-                </Box>
-            </DialogContent>
-            <DialogActions>
-                <Button onClick={closePopup}>Close</Button>
-            </DialogActions>
-        </Dialog>
-    );
-};
-
-  // Clean up camera resources when component unmounts
-  useEffect(() => {
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
+    const handleDelete = () => {
+      setImages(prev => prev.filter((_, i) => i !== index));
+      setShowDeleteConfirm(false);
+      closePopup();
     };
-  }, [stream]);
 
-  // Handle video initialization when showCamera changes
-  useEffect(() => {
-    if (showCamera && videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-      videoRef.current.onloadedmetadata = () => {
-        videoRef.current.play().then(() => {
-          setIsVideoReady(true);
-        }).catch(err => {
-          console.error("Error playing video:", err);
-        });
-      };
-    }
-  }, [showCamera, stream]);
+    const handleMakePrimary = (event) => {
+      const newImages = [...images];
+      // Remove primary flag from all images
+      newImages.forEach(img => img.isPrimary = false);
+      // Set primary flag for current image
+      newImages[index].isPrimary = event.target.checked;
+      setImages(newImages);
+    };
+
+    if (!images || images.length === 0) return null;
+
+    return (
+      <>
+        <Dialog open={isPopupOpen} onClose={closePopup} maxWidth="md">
+          <DialogContent sx={{ overflow: 'hidden' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', gap: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                <Button onClick={handlePrevPopupImage} disabled={index === 0}>◀</Button>
+                <img 
+                  src={images[index].url} 
+                  alt="Popup Image" 
+                  style={{ 
+                    width: '500px', 
+                    height: 'auto', 
+                    transition: 'opacity 0.5s ease-in-out', 
+                    opacity: isPopupOpen ? 1 : 0 
+                  }} 
+                />
+                <Button onClick={handleNextPopupImage} disabled={index === images.length - 1}>▶</Button>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={images[index].isPrimary || false}
+                      onChange={handleMakePrimary}
+                    />
+                  }
+                  label="Make Primary"
+                />
+                <Button 
+                  variant="contained" 
+                  color="error" 
+                  startIcon={<DeleteIcon />}
+                  onClick={() => setShowDeleteConfirm(true)}
+                >
+                  Delete
+                </Button>
+              </Box>
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={closePopup}>Close</Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog
+          open={showDeleteConfirm}
+          onClose={() => setShowDeleteConfirm(false)}
+          aria-labelledby="delete-dialog-title"
+          aria-describedby="delete-dialog-description"
+        >
+          <DialogTitle id="delete-dialog-title">
+            {"Delete Image"}
+          </DialogTitle>
+          <DialogContent>
+            <Typography>
+              Are you sure you want to delete this image? This action cannot be undone.
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+            <Button onClick={handleDelete} color="error" variant="contained" autoFocus>
+              Delete
+            </Button>
+          </DialogActions>
+        </Dialog>
+      </>
+    );
+  };
 
   const handleFileUpload = (event) => {
     const files = Array.from(event.target.files);
@@ -1362,10 +1422,10 @@ const ImagePopup = ({ images, index }) => {
                           <>
                             <img src={diamondShapes[currentShapeIndex]?.image} alt={diamondShapes[currentShapeIndex]?.name} style={{ width: '100px', height: '100px' }} />
                             <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
-                              <IconButton onClick={handlePrevImage} disabled={currentShapeIndex === 0}>
+                              <IconButton onClick={handlePrevShape} disabled={currentShapeIndex === 0}>
                                 <ArrowBackIcon />
                               </IconButton>
-                              <IconButton onClick={handleNextImage} disabled={currentShapeIndex === diamondShapes.length - 1}>
+                              <IconButton onClick={handleNextShape} disabled={currentShapeIndex === diamondShapes.length - 1}>
                                 <ArrowForwardIcon />
                               </IconButton>
                             </Box>
@@ -1640,9 +1700,9 @@ const ImagePopup = ({ images, index }) => {
             {/* Image Gallery */}
             {images.length > 0 && (
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-              <Button onClick={handlePrevImage} disabled={currentShapeIndex === 0} >◀</Button>
-              <img src={images[currentShapeIndex].url} alt="image" style={{ width: '50%', height: '100px', cursor: 'pointer', objectFit: 'cover' }} onClick={() => openPopup(currentShapeIndex)}/>
-              <Button onClick={handleNextImage} disabled={currentShapeIndex === images.length - 1}>▶</Button>
+              <Button onClick={handlePrevImage} disabled={currentImageIndex === 0} >◀</Button>
+              <img src={images[currentImageIndex].url} alt="image" style={{ width: '50%', height: '100px', cursor: 'pointer', objectFit: 'cover' }} onClick={() => openPopup(currentImageIndex)}/>
+              <Button onClick={handleNextImage} disabled={currentImageIndex === images.length - 1}>▶</Button>
             </Box>
             )}
 
