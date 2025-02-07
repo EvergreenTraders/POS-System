@@ -1,7 +1,7 @@
 DO $$
 BEGIN
+
     -- user preferences
-    drop table if exists user_preferences;
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'user_preferences') THEN    
         CREATE TABLE user_preferences (
             id SERIAL PRIMARY KEY,
@@ -52,6 +52,21 @@ BEGIN
         (2, 1000.00),
         (3, 800.00),
         (4, 2500.00);
+    END IF;
+
+    -- diamond estimates
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'diamond_estimates') THEN    
+        CREATE TABLE diamond_estimates (
+            id SERIAL PRIMARY KEY,
+            transaction_type VARCHAR(20),
+            estimate DECIMAL(5, 2),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO diamond_estimates (transaction_type, estimate) VALUES
+    ('pawn', 60.00),
+    ('buy', 70.00),
+    ('retail', 80.00);
     END IF;
 
     -- Drop the price_estimates table if it exists

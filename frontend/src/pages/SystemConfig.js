@@ -85,6 +85,7 @@ function SystemConfig() {
   const [caratConversion, setCaratConversion] = useState(null);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [gramsInput, setGramsInput] = useState('');
+  const [diamondEstimates, setDiamondEstimates] = useState([]);
 
   useEffect(() => {
     const fetchPreciousMetalNames = async () => {
@@ -143,6 +144,20 @@ function SystemConfig() {
       }
     };
 
+    const fetchDiamondEstimates = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/diamond_estimates');
+        setDiamondEstimates(response.data);
+      } catch (error) {
+        console.error('Error fetching diamond estimates:', error);
+        setSnackbar({
+          open: true,
+          message: 'Failed to fetch diamond estimates',
+          severity: 'error',
+        });
+      }
+    };
+
     const fetchUserPreference = async () => {
       try {
         const response = await axios.get('http://localhost:5000/api/user_preferences');
@@ -176,6 +191,7 @@ function SystemConfig() {
     fetchLivePricing();
     fetchSpotPrices();
     fetchPriceEstimates();
+    fetchDiamondEstimates();
     fetchUserPreference();
     fetchCaratConversion();
   }, []);
@@ -228,6 +244,43 @@ function SystemConfig() {
         [metalType]: updatedEstimates,
       };
     });
+  };
+
+  const handleDiamondEstimatesChange = async (event, transactionType) => {
+    const { value } = event.target;
+    const newValue = Number(value);
+
+    // Update local state first for immediate feedback
+    setDiamondEstimates(prevEstimates => 
+      prevEstimates.map(estimate => 
+        estimate.transaction_type === transactionType 
+          ? { ...estimate, estimate: newValue }
+          : estimate
+      )
+    );
+
+    try {
+      // Then update the server
+      await axios.put('http://localhost:5000/api/diamond_estimates', {
+        transaction_type: transactionType,
+        estimate: newValue
+      });
+    } catch (error) {
+      console.error('Error updating diamond estimates:', error);
+      // Revert the local state on error
+      setDiamondEstimates(prevEstimates => 
+        prevEstimates.map(estimate => 
+          estimate.transaction_type === transactionType 
+            ? { ...estimate, estimate: estimate.estimate }
+            : estimate
+        )
+      );
+      setSnackbar({
+        open: true,
+        message: 'Failed to update diamond estimate',
+        severity: 'error',
+      });
+    }
   };
 
   const handleSaveSettings = async () => {
@@ -539,6 +592,22 @@ function SystemConfig() {
                 Price Estimates
               </Typography>
               <Grid container spacing={3}>
+                {Array.isArray(diamondEstimates) && 
+                  [...diamondEstimates]
+                    .sort((a, b) => a.id - b.id)
+                    .map((estimate) => (
+                      <Grid item xs={12} sm={4} key={estimate.transaction_type}>
+                        <TextField
+                          fullWidth
+                          label={`Diamond ${estimate.transaction_type} Percentage`}
+                          type="number"
+                          value={estimate.estimate}
+                          onChange={(event) => handleDiamondEstimatesChange(event, estimate.transaction_type)}
+                          inputProps={{ min: 0, max: 100 }}
+                        />
+                      </Grid>
+                    ))
+                }
                 {Object.entries(priceEstimates).map(([key, estimates]) => (
                   estimates.map((estimate) => (
                     <Grid item xs={12} sm={4} key={estimate.transaction_type}>
