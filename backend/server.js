@@ -490,7 +490,7 @@ app.put('/api/diamond_estimates', async (req, res) => {
   try {
     const { transaction_type, estimate } = req.body;
     const result = await pool.query(
-      'UPDATE diamond_estimates SET estimate = $2 WHERE transaction_type = $1 RETURNING *',
+      'UPDATE diamond_estimates SET estimate = $2, updated_at = CURRENT_TIMESTAMP WHERE transaction_type = $1 RETURNING *',
       [transaction_type, estimate]
     );
     res.json(result.rows);
