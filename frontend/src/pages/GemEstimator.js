@@ -50,6 +50,7 @@ function GemEstimator() {
   const [totalMetalValue, setTotalMetalValue] = useState(0);
   const [addMetal, setAddMetal] = useState([]);
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
+  const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
 
   const handleMetalFormChange = (formState) => {
       setMetalFormState(formState);
@@ -88,7 +89,7 @@ function GemEstimator() {
   };
 
   const handleFinishEstimation = () => {
-    const gemWeightInGrams = calculateTotalGemWeight();
+    const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
     const totalWeight = parseFloat(addMetal[0].weight || 0) + gemWeightInGrams;
 
     const newItem = {
@@ -305,11 +306,13 @@ function GemEstimator() {
       }
     };
 
-    const fetchCameraPreference = async () => {
+    const fetchUserPreference = async () => {
       try {
         const response = await axios.get('http://localhost:5000/api/user_preferences');
         const cameraPreference = response.data.find(pref => pref.preference_name === 'cameraEnabled');
         setIsCameraEnabled(cameraPreference ? cameraPreference.preference_value === 'true' : false);
+        const caratConversionPreference = response.data.find(pref => pref.preference_name === 'caratConversion');
+        setIsCaratConversionEnabled(caratConversionPreference ? caratConversionPreference.preference_value === 'true' : false);
       } catch (error) {
         console.error('Error fetching camera preference:', error);
       }
@@ -317,8 +320,9 @@ function GemEstimator() {
     
     fetchAllData();
     fetchDiamondSizes(1);
-    fetchCaratConversion();
-    fetchCameraPreference();
+    fetchUserPreference();
+    if(isCaratConversionEnabled) 
+        fetchCaratConversion();
   }, []);
 
   const fetchDiamondSizes = async (diamondShapeId) => {

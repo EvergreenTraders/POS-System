@@ -83,6 +83,7 @@ function SystemConfig() {
   const [updateMethod, setUpdateMethod] = useState(null);
   const [spotPrices, setSpotPrices] = useState({});
   const [caratConversion, setCaratConversion] = useState(null);
+  const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [gramsInput, setGramsInput] = useState('');
 
   useEffect(() => {
@@ -142,11 +143,13 @@ function SystemConfig() {
       }
     };
 
-    const fetchCameraPreference = async () => {
+    const fetchUserPreference = async () => {
       try {
         const response = await axios.get('http://localhost:5000/api/user_preferences');
         const cameraPreference = response.data.find(pref => pref.preference_name === 'cameraEnabled');
         setIsCameraEnabled(cameraPreference ? cameraPreference.preference_value === 'true' : false);
+        const caratConversionPreference = response.data.find(pref => pref.preference_name === 'caratConversion');
+        setIsCaratConversionEnabled(caratConversionPreference ? caratConversionPreference.preference_value === 'true' : false);
       } catch (error) {
         console.error('Error fetching camera preference:', error);
       }
@@ -173,7 +176,7 @@ function SystemConfig() {
     fetchLivePricing();
     fetchSpotPrices();
     fetchPriceEstimates();
-    fetchCameraPreference();
+    fetchUserPreference();
     fetchCaratConversion();
   }, []);
 
@@ -330,6 +333,26 @@ function SystemConfig() {
     }
   };
 
+  const handleCaratConversionToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsCaratConversionEnabled(newValue);
+    try {
+      await axios.put('http://localhost:5000/api/user_preferences', {
+        name: 'caratConversion',
+        value: newValue.toString()
+      });
+    } catch (error) {
+      console.error('Error updating carat conversion:', error);
+      setIsCaratConversionEnabled(!newValue); 
+      setSnackbar({
+        open: true,
+        message: 'Failed to update carat conversion',
+        severity: 'error',
+      });
+    }
+  };
+
+
   return (
     <Container>
       <Box sx={{ mb: 1 }}>
@@ -421,9 +444,16 @@ function SystemConfig() {
           </ConfigSection>
 
           <ConfigSection>
-            <Typography variant="h6" gutterBottom>
-              Carat to Gram Conversion
-            </Typography>
+            <Box display="flex" alignItems="center">
+              <Typography variant="h6" gutterBottom>
+                Carat to Gram Conversion
+              </Typography>
+              <Switch
+                checked={isCaratConversionEnabled}
+                onChange={handleCaratConversionToggle}
+                color="primary"
+              />
+            </Box>
             <Box sx={{ mt: 1 }}>
               <TextField
                 label="Grams per Carat"
@@ -444,6 +474,7 @@ function SystemConfig() {
                 }}
                 size="small"
                 sx={{ width: '200px' }}
+                disabled={!isCaratConversionEnabled}
               />
               <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
                 Standard conversion: 1 carat = 0.2 grams

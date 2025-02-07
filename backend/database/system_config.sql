@@ -1,6 +1,7 @@
 DO $$
 BEGIN
     -- user preferences
+    drop table if exists user_preferences;
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'user_preferences') THEN    
         CREATE TABLE user_preferences (
             id SERIAL PRIMARY KEY,
@@ -11,7 +12,8 @@ BEGIN
             UNIQUE (preference_name) 
         );
         INSERT INTO user_preferences (preference_name, preference_value) VALUES 
-            ('cameraEnabled', TRUE);
+            ('cameraEnabled', TRUE),
+            ('caratConversion', TRUE);
     END IF;
 
     -- live pricing
@@ -78,7 +80,6 @@ BEGIN
     END IF;
 
     -- carat to gram conversion
-    drop table if exists carat_to_gram_conversion;
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'carat_to_gram_conversion') THEN    
         CREATE TABLE carat_to_gram_conversion (
             id SERIAL PRIMARY KEY,
