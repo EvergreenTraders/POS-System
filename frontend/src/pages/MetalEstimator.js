@@ -19,7 +19,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     preciousMetalType: 'Gold',
     nonPreciousMetalType: '',
     metalCategory: '',
-    jewelryColor: 'Yellow',
+    jewelryColor: 'Yellow',  // Since initial metal is Gold
     weight: '',
     spotPrice: 0,
     purity: { purity: '', value: 0 },
@@ -244,6 +244,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         preciousMetalTypeId: selectedPreciousMetalType.id,
         preciousMetalType: value,
         purity: { purity: '', value: 0 },
+        jewelryColor: value === 'Gold' ? 'Yellow' : null,
         spotPrice: 
         selectedPreciousMetalType.type === 'Silver' ? metalSpotPrice.CADXAG :
         selectedPreciousMetalType.type === 'Gold' ? metalSpotPrice.CADXAU :
@@ -301,15 +302,16 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     onAddMetal(newItem); 
     onMetalValueChange(totalMetalValue);
 
-    // Reset form
+    // Reset form to Gold purities
+    fetchPurities(1);
     setMetalForm({
       preciousMetalTypeId: 1,
       preciousMetalType: 'Gold',
       nonPreciousMetalType: '',
       metalCategory: '',
-      jewelryColor: 'Yellow',
+      jewelryColor: 'Yellow',  // Since default metal is Gold
       weight: '',
-      spotPrice: 0,
+      spotPrice: metalSpotPrice.CADXAU,
       purity: { purity: '', value: 0 },
       value: ''
     });

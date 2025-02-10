@@ -94,7 +94,9 @@ function GemEstimator() {
 
     const newItem = {
       weight: totalWeight.toFixed(2),
-      metal: getInitials(addMetal[0].jewelryColor) + getInitials(addMetal[0].preciousMetalType),
+      metal: addMetal[0].preciousMetalType === 'Gold' ? 
+        getInitials(addMetal[0].jewelryColor) + getInitials(addMetal[0].preciousMetalType) :
+        getInitials(addMetal[0].preciousMetalType),
       purity: addMetal[0].purity?.purity || addMetal[0].purity.value,
       gems: (addedGemTypes.primary ? (addedGemTypes.primary === 'diamond' ? 
             `${diamondSummary[0].shape}` : `${stoneSummary[0].name}`) : ''), 
