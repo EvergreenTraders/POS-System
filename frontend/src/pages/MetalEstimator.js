@@ -39,6 +39,41 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
   const [isPerDay, setIsPerDay] = useState(false);
   const [isPerTransaction, setIsPerTransaction] = useState(false);
 
+  // Add refs for form fields
+  const weightRef = React.useRef(null);
+  const preciousMetalTypeRef = React.useRef(null);
+  const nonPreciousMetalTypeRef = React.useRef(null);
+  const jewelryColorRef = React.useRef(null);
+  const purityRef = React.useRef(null);
+  const metalCategoryRef = React.useRef(null);
+  const spotPriceRef = React.useRef(null);
+  const addButtonRef = React.useRef(null);
+
+  // Focus on weight input when component mounts
+  useEffect(() => {
+    if (weightRef.current) {
+      weightRef.current.focus();
+    }
+  }, []);
+
+  // Function to handle Enter key press
+  const handleEnterKey = (e, nextRef) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (nextRef && nextRef.current) {
+        nextRef.current.focus();
+      }
+    }
+  };
+
+  // Function to handle select change and move focus
+  const handleSelectChange = (e, nextRef) => {
+    handleMetalChange(e);
+    if (nextRef && nextRef.current) {
+      setTimeout(() => nextRef.current.focus(), 0);
+    }
+  };
+
   useEffect(() => {
     setMetalFormState(metalFormState);
     onMetalValueChange(totalMetalValue);
@@ -344,14 +379,38 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         value={metalFormState.weight}
         onChange={handleMetalChange}
         sx={{ mb: 2 }}
+        inputRef={weightRef}
+        onKeyDown={(e) => handleEnterKey(e, preciousMetalTypeRef)}
       />
       <FormControl fullWidth sx={{ mb: 2 }}>
         <InputLabel>Select Precious Metal Type *</InputLabel>
         <Select
           name="preciousMetalType"
           value={metalFormState.preciousMetalType}
-          onChange={handleMetalChange}
+          onChange={(e) => handleSelectChange(e, nonPreciousMetalTypeRef)}
           required
+          inputRef={preciousMetalTypeRef}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              const select = e.target.closest('.MuiSelect-select');
+              const expanded = select?.getAttribute('aria-expanded') === 'true';
+              
+              // If dropdown is not open, move to next field
+              if (!expanded) {
+                e.preventDefault();
+                e.stopPropagation();
+                nonPreciousMetalTypeRef.current?.focus();
+              }
+            }
+          }}
+          onClose={() => {
+            // When dropdown closes and value is Gold, move to next field
+            if (metalFormState.preciousMetalType === 'Gold') {
+              setTimeout(() => {
+                nonPreciousMetalTypeRef.current?.focus();
+              }, 0);
+            }
+          }}
         >
           {preciousMetalTypes.map(type => (
             <MenuItem key={type.id} value={type.type}>{type.type}</MenuItem>
@@ -364,8 +423,35 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         <Select
           name="nonPreciousMetalType"
           value={metalFormState.nonPreciousMetalType}
-          onChange={handleMetalChange}
+          onChange={(e) => handleSelectChange(e, metalFormState.preciousMetalType === 'Gold' ? jewelryColorRef : purityRef)}
           required
+          inputRef={nonPreciousMetalTypeRef}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              const select = e.target.closest('.MuiSelect-select');
+              const expanded = select?.getAttribute('aria-expanded') === 'true';
+              if (!expanded) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (metalFormState.preciousMetalType === 'Gold') {
+                  jewelryColorRef.current?.focus();
+                } else {
+                  purityRef.current?.focus();
+                }
+              }
+            }
+          }}
+          onClose={() => {
+            if (metalFormState.nonPreciousMetalType === '') {
+              setTimeout(() => {
+                if (metalFormState.preciousMetalType === 'Gold') {
+                  jewelryColorRef.current?.focus();
+                } else {
+                  purityRef.current?.focus();
+                }
+              }, 0);
+            }
+          }}
         >
           {nonPreciousMetalTypes.map(type => (
             <MenuItem key={type.id} value={type.type}>{type.type}</MenuItem>
@@ -379,8 +465,27 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
           <Select
             name="jewelryColor"
             value={metalFormState.jewelryColor}
-            onChange={handleMetalChange}
+            onChange={(e) => handleSelectChange(e, purityRef)}
             required
+            inputRef={jewelryColorRef}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const select = e.target.closest('.MuiSelect-select');
+                const expanded = select?.getAttribute('aria-expanded') === 'true';
+                if (!expanded) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  purityRef.current?.focus();
+                }
+              }
+            }}
+            onClose={() => {
+              if (metalFormState.jewelryColor === 'Yellow') {
+                setTimeout(() => {
+                  purityRef.current?.focus();
+                }, 0);
+              }
+            }}
           >
             {metalColors.map(color => (
               <MenuItem key={color.id} value={color.color}>{color.color}</MenuItem>
@@ -402,8 +507,45 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
                 ...prev,
                 value: selectedPurityObj ? selectedPurityObj.value : ''
               }));
+              setTimeout(() => {
+                const valueField = document.querySelector('input[name="value"]');
+                if (valueField && metalFormState.preciousMetalType !== 'Platinum' && metalFormState.preciousMetalType !== 'Palladium') {
+                  valueField.focus();
+                } else {
+                  metalCategoryRef.current?.focus();
+                }
+              }, 0);
             }}
             required
+            inputRef={purityRef}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const select = e.target.closest('.MuiSelect-select');
+                const expanded = select?.getAttribute('aria-expanded') === 'true';
+                if (!expanded) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (metalFormState.preciousMetalType !== 'Platinum' && metalFormState.preciousMetalType !== 'Palladium') {
+                    const valueField = document.querySelector('input[name="value"]');
+                    if (valueField) valueField.focus();
+                  } else {
+                    metalCategoryRef.current?.focus();
+                  }
+                }
+              }
+            }}
+            onClose={() => {
+              if (metalFormState.purity?.id === '') {
+                setTimeout(() => {
+                  if (metalFormState.preciousMetalType !== 'Platinum' && metalFormState.preciousMetalType !== 'Palladium') {
+                    const valueField = document.querySelector('input[name="value"]');
+                    if (valueField) valueField.focus();
+                  } else {
+                    metalCategoryRef.current?.focus();
+                  }
+                }, 0);
+              }
+            }}
           >
             {metalPurities.map(purity => (
               <MenuItem key={purity.id} value={purity.id}>
@@ -429,6 +571,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
               inputMode: 'decimal',
               pattern: '[0-9]*\\.?[0-9]*'
             }}
+            onKeyDown={(e) => handleEnterKey(e, metalCategoryRef)}
           />
         )}
       </Grid>
@@ -439,8 +582,27 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       <Select
         name="metalCategory"
         value={metalFormState.metalCategory}
-        onChange={handleMetalChange}
+        onChange={(e) => handleSelectChange(e, spotPriceRef)}
         required
+        inputRef={metalCategoryRef}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            const select = e.target.closest('.MuiSelect-select');
+            const expanded = select?.getAttribute('aria-expanded') === 'true';
+            if (!expanded) {
+              e.preventDefault();
+              e.stopPropagation();
+              spotPriceRef.current?.focus();
+            }
+          }
+        }}
+        onClose={() => {
+          if (metalFormState.metalCategory === '') {
+            setTimeout(() => {
+              spotPriceRef.current?.focus();
+            }, 0);
+          }
+        }}
       >
         {metalCategories.map(category => (
           <MenuItem key={category.id} value={category.category}>{category.category}</MenuItem>
@@ -456,6 +618,8 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         value={metalFormState.spotPrice}
         onChange={handleMetalChange}
         sx={{ mb: 2 }}
+        inputRef={spotPriceRef}
+        onKeyDown={(e) => handleEnterKey(e, addButtonRef)}
       />
     <Button
         variant="contained"
@@ -471,6 +635,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         onClick={addMetal}
         fullWidth
         sx={{ mt: 2 }}
+        ref={addButtonRef}
         disabled={!metalFormState.preciousMetalType ||!metalFormState.purity || !metalFormState.metalCategory || !metalFormState.weight || (metalFormState.type === 'Gold' && !metalFormState.jewelryColor)}
       >
         Add Metal
