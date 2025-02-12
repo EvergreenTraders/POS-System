@@ -43,6 +43,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useNavigate } from 'react-router-dom';
+import { styled } from '@mui/material/styles';
 
 function GemEstimator() {
   const navigate = useNavigate();
@@ -388,6 +389,8 @@ function GemEstimator() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [popupImageIndex, setPopupImageIndex] = useState(0);
+  const sliderRef = React.useRef(null);
+  const exactColorRef = React.useRef(null);
 
   const openPopup = (index) => {
     setPopupImageIndex(index);
@@ -607,12 +610,41 @@ function GemEstimator() {
 
   const handleExactColorChange = (event, newValue) => {
     setExactColor(colorScale[newValue]);
-    
-    // Update the current form with the exact color
     setCurrentForm(prev => ({
       ...prev,
-      exactColor: colorScale[newValue]
+      exactColor: colorScale[newValue],
+      color: getColorCategory(colorScale[newValue])
     }));
+  };
+
+  const shapeRef = React.useRef(null);
+  const quantityRef = React.useRef(null);
+  const weightRef = React.useRef(null);
+  const clarityRef = React.useRef(null);
+  const colorRef = React.useRef(null);
+  const cutRef = React.useRef(null);
+  const labGrownRef = React.useRef(null);
+  const addButtonRef = React.useRef(null);
+  const sizeRef = React.useRef(null);
+
+  const handleSelectChange = (event, nextRef, handleChange) => {
+    handleChange(event);
+    if (nextRef?.current) {
+      setTimeout(() => {
+        nextRef.current.focus();
+      }, 0);
+    }
+  };
+
+  const handleEnterKey = (event, nextRef) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (nextRef?.current) {
+        setTimeout(() => {
+          nextRef.current.focus();
+        }, 0);
+      }
+    }
   };
 
   const handleDiamondChange = (event) => {
@@ -1354,6 +1386,15 @@ function GemEstimator() {
     navigate('/checkout', { state: { items: estimatedItems } });
   };
 
+  useEffect(() => {
+    // Focus on shape input when component mounts
+    if (shapeRef.current) {
+      shapeRef.current.focus();
+    }
+  }, []);
+
+  const SliderStyled = styled(Slider)({});
+
   return (
     <Container maxWidth="lg">
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -1437,11 +1478,13 @@ function GemEstimator() {
                     </Grid>
                   <Grid item xs={8} >
                   <FormControl fullWidth variant="outlined" sx={{ width: '90%', ml:2, mt: 1, mb: 2 }}>
-                    <InputLabel>Select Shape</InputLabel>
+                    <InputLabel ref={shapeRef}>Select Shape</InputLabel>
                     <Select
                       value={getCurrentForm().shape || 'Round'} // Default to 'Round'
-                      onChange={handleDiamondChange}
+                      onChange={(e) => handleSelectChange(e, quantityRef, handleDiamondChange)}
                       name="shape"
+                      inputRef={shapeRef}
+                      onKeyDown={(e) => handleEnterKey(e, quantityRef)}
                     >
                       {diamondShapes.map((shape) => (
                         <MenuItem key={shape.name} value={shape.name}>
@@ -1459,7 +1502,11 @@ function GemEstimator() {
                       type="number"
                       value={getCurrentForm().quantity}
                       onChange={handleDiamondChange}
-                      inputProps={{ min: "1" }}
+                      inputRef={quantityRef}
+                      onKeyDown={(e) => handleEnterKey(e, sizeRef)}
+                      InputProps={{
+                        inputProps: { min: "1" }
+                      }}
                       sx={{ width: '90%', ml: 2 }}
                     />
                   </Grid>
@@ -1502,12 +1549,13 @@ function GemEstimator() {
                     <Grid container spacing={2} sx={{ mb: 2 }}>
                       <Grid item xs={12} sm={12}>
                       <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
-                          <InputLabel>Diamond Size</InputLabel>
+                          <InputLabel>Size</InputLabel>
                           <Select
                             fullWidth
                             displayEmpty
                             value={getCurrentForm().size || ''}
                             name="size"
+                            inputRef={sizeRef}
                             onChange={(e) => {
                               const selectedSize = e.target.value;
                               const selectedSizeObj = diamondSizes.find(sizeObj => sizeObj.size === selectedSize);
@@ -1516,7 +1564,13 @@ function GemEstimator() {
                                 size: selectedSize,
                                 weight: selectedSizeObj ? selectedSizeObj.weight : 0
                               }));
+                              if (weightRef?.current) {
+                                setTimeout(() => {
+                                  weightRef.current.focus();
+                                }, 0);
+                              }
                             }}
+                            onKeyDown={(e) => handleEnterKey(e, weightRef)}
                             sx={{ width: '100%' }}
                           >
                             {diamondSizes.map((sizeObj) => (
@@ -1533,8 +1587,21 @@ function GemEstimator() {
                           type="number"
                           value={getCurrentForm().weight}
                           onChange={handleDiamondChange}
-                          inputProps={{ step: "0.01", min: "0" }}
-                          sx={{ width: '100%', mb: 2 }} // Added margin bottom for spacing
+                          inputRef={weightRef}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (exactColorRef?.current) {
+                                setTimeout(() => {
+                                  exactColorRef.current.focus();
+                                }, 0);
+                              }
+                            }
+                          }}
+                          InputProps={{
+                            inputProps: { step: "0.01", min: "0" }
+                          }}
+                          sx={{ width: '100%', mb: 2 }}
                         />
                        
                       </Grid>
@@ -1600,6 +1667,8 @@ function GemEstimator() {
                     marks
                     min={0}
                     max={colorScale.length - 1}
+                    tabIndex={0}
+                    onKeyDown={(e) => handleEnterKey(e, clarityRef)}
                   />
                 </Box>
 
