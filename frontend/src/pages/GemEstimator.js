@@ -137,7 +137,7 @@ function GemEstimator() {
   // Primary gem form
   const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
     shape: 'Round',
-    clarity: '',
+    clarity: 'Flawless',
     color: 'Colorless',
     quantity: 1,
     weight: 0,
@@ -150,7 +150,7 @@ function GemEstimator() {
   // Secondary gem form
   const [secondaryDiamondForm, setSecondaryDiamondForm] = useState({
     shape: 'Round',
-    clarity: '',
+    clarity: 'Flawless',
     color: 'Colorless',
     quantity: 1,
     weight: 0,
@@ -197,6 +197,7 @@ function GemEstimator() {
   const [diamondShapes, setDiamondShapes] = useState([]);
 
   const [diamondClarity, setDiamondClarity] = useState([]);
+  const [selectedClarityIndex, setSelectedClarityIndex] = useState(0);
 
   const [diamondSizes, setDiamondSizes] = useState([]);
 
@@ -292,7 +293,7 @@ function GemEstimator() {
         // Fetch Diamond Colors
         const diamondColorResponse = await axios.get('http://localhost:5000/api/diamond_color');
         setDiamondColors(diamondColorResponse.data);
-        
+                
       } catch (error) {
         console.error('Error fetching initial data:', error);
       }
@@ -390,7 +391,8 @@ function GemEstimator() {
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [popupImageIndex, setPopupImageIndex] = useState(0);
   const sliderRef = React.useRef(null);
-  const exactColorRef = React.useRef(null);
+  const colorSliderRef = React.useRef(null);
+  const cutRef = React.useRef(null);
 
   const openPopup = (index) => {
     setPopupImageIndex(index);
@@ -622,7 +624,6 @@ function GemEstimator() {
   const weightRef = React.useRef(null);
   const clarityRef = React.useRef(null);
   const colorRef = React.useRef(null);
-  const cutRef = React.useRef(null);
   const labGrownRef = React.useRef(null);
   const addButtonRef = React.useRef(null);
   const sizeRef = React.useRef(null);
@@ -717,7 +718,7 @@ function GemEstimator() {
     // Reset the current form after adding
     const resetForm = {
       shape: 'Round',
-      clarity: '',
+      clarity: 'Flawless',
       color: 'Colorless',
       quantity: 1,
       weight: 0,
@@ -959,7 +960,7 @@ function GemEstimator() {
       </Box>
 
       {/* Size Section */}
-      <Grid container spacing={1} sx={{ mt: 0, mb: 0, alignItems: 'center' }}>
+      <Grid container spacing={1} sx={{ mt: 0 }}>
         <Grid item>
           <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
         </Grid>
@@ -1115,14 +1116,21 @@ function GemEstimator() {
       <Grid container spacing={2} alignItems="center">
         <Grid item xs={4}>
           <FormControl fullWidth variant="outlined">
-            <InputLabel>Cut *</InputLabel>
+            <InputLabel ref={cutRef}>Cut *</InputLabel>
             <Select
+              
               value={getCurrentForm().cut}
               label="Cut"
               onChange={(e) => setCurrentForm(prev => ({
                 ...prev, 
                 cut: e.target.value
               }))}
+              inputRef={cutRef}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                }
+              }}
             >
               {diamondCuts.map((cut) => (
                 <MenuItem key={cut.name} value={cut.name}>{cut.name}</MenuItem>
@@ -1278,17 +1286,11 @@ function GemEstimator() {
 
   // Function to determine color category based on exact color
   const getColorCategory = (exactColor) => {
-    const colorCategories = [
-      { name: 'Colorless', range: 'D-F', start: 'D', end: 'F' },
-      { name: 'Near Colorless', range: 'G-J', start: 'G', end: 'J' },
-      { name: 'Faint Color', range: 'K-M', start: 'K', end: 'M' },
-      { name: 'Very Light Color', range: 'N-R', start: 'N', end: 'R' },
-      { name: 'Light Color', range: 'S-Z', start: 'S', end: 'Z' }
-    ];
-
-    return colorCategories.find(
-      category => exactColor >= category.start && exactColor <= category.end
-    )?.name || 'Colorless';
+    const category = diamondColors.find(category => {
+      const [start, end] = category.range.split('-');
+      return exactColor >= start && exactColor <= end;
+    });
+    return category?.name || 'Colorless';
   };
 
   const [itemTransactionTypes, setItemTransactionTypes] = useState({});
@@ -1591,9 +1593,12 @@ function GemEstimator() {
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
-                              if (exactColorRef?.current) {
+                              if (colorSliderRef?.current) {
                                 setTimeout(() => {
-                                  exactColorRef.current.focus();
+                                  const sliderInput = colorSliderRef.current.querySelector('input');
+                                  if (sliderInput) {
+                                    sliderInput.focus();
+                                  }
                                 }, 0);
                               }
                             }
@@ -1658,7 +1663,8 @@ function GemEstimator() {
                   <Typography gutterBottom>
                     Exact Color: {exactColor}
                   </Typography>
-                  <Slider
+                  <SliderStyled
+                    ref={colorSliderRef}
                     value={colorScale.indexOf(exactColor)}
                     onChange={handleExactColorChange}
                     valueLabelDisplay="auto"
@@ -1668,17 +1674,61 @@ function GemEstimator() {
                     min={0}
                     max={colorScale.length - 1}
                     tabIndex={0}
-                    onKeyDown={(e) => handleEnterKey(e, clarityRef)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        setTimeout(() => { 
+                          const clarityContainer = document.querySelector('[data-clarity-container]');
+                          if (clarityContainer) { clarityContainer.focus(); } }, 0); }
+                      }
+                    }
+                    sx={{
+                      '& .MuiSlider-thumb': {
+                        '&:focus': {
+                          outline: '2px solid #1976d2',
+                          outlineOffset: '2px'
+                        }
+                      }
+                    }}
                   />
                 </Box>
 
                 {/* Clarity Selection */}
                 <Typography variant="subtitle1" sx={{ mb: 1 }}>Clarity *</Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-                  {diamondClarity.map((clarity) => (
+                <Box 
+                  data-clarity-container 
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                      e.preventDefault();
+                      const clarityPapers = Array.from(document.querySelectorAll('[data-clarity-paper]'));
+                      let newIndex = selectedClarityIndex;
+                      
+                      if (e.key === 'ArrowLeft') {
+                        newIndex = Math.max(0, selectedClarityIndex - 1);
+                      } else if (e.key === 'ArrowRight') {
+                        newIndex = Math.min(clarityPapers.length - 1, selectedClarityIndex + 1);
+                      }
+
+                      if (diamondClarity[newIndex]) {
+                        setSelectedClarityIndex(newIndex);
+                        setCurrentForm(prev => ({ ...prev, clarity: diamondClarity[newIndex].name }));
+                        clarityPapers[newIndex]?.focus();
+                      }
+                    } else if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (cutRef?.current) {
+                          cutRef.current.focus();
+                    }}
+                  }}
+                  sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}
+                >
+                  {diamondClarity.map((clarity, index) => (
                     <Paper
                       key={clarity.name}
-                      elevation={getCurrentForm().clarity === clarity.name ? 8 : 1}
+                      data-clarity-paper
+                      tabIndex={0}
+                      elevation={selectedClarityIndex === index ? 8 : 1}
                       sx={{
                         p: 1,
                         cursor: 'pointer',
@@ -1688,8 +1738,14 @@ function GemEstimator() {
                         flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        '&:focus': {
+                          outlineOffset: '2px'
+                        }
                       }}
-                      onClick={() => setCurrentForm(prev => ({ ...prev, clarity: clarity.name }))}
+                      onClick={() => {
+                        setSelectedClarityIndex(index);
+                        setCurrentForm(prev => ({ ...prev, clarity: clarity.name }));
+                      }}
                     >
                       <Box
                         component="img"
@@ -1781,7 +1837,7 @@ function GemEstimator() {
 
             <Box sx={{ mb: 3 }}>
               <Typography variant="h6" sx={{ mb: 0 }}>Price Estimates</Typography>
-　　             <Box sx={{ 
+              <Box sx={{ 
                 border: '1px solid',
                 borderColor: 'divider',
                 borderRadius: 1,
