@@ -393,6 +393,8 @@ function GemEstimator() {
   const sliderRef = React.useRef(null);
   const colorSliderRef = React.useRef(null);
   const cutRef = React.useRef(null);
+  const labGrownRef = React.useRef(null);
+  const addDiamondRef = React.useRef(null);
 
   const openPopup = (index) => {
     setPopupImageIndex(index);
@@ -624,8 +626,6 @@ function GemEstimator() {
   const weightRef = React.useRef(null);
   const clarityRef = React.useRef(null);
   const colorRef = React.useRef(null);
-  const labGrownRef = React.useRef(null);
-  const addButtonRef = React.useRef(null);
   const sizeRef = React.useRef(null);
 
   const handleSelectChange = (event, nextRef, handleChange) => {
@@ -1106,109 +1106,6 @@ function GemEstimator() {
           sx={{ ml: 2 }} 
         >
            {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
-        </Button>
-      </Grid>
-    </Grid>
-  );
-
-  const renderDiamondEstimationTab = () => (
-    <Grid container spacing={2} sx={{ p: 2 }}>
-      <Grid container spacing={2} alignItems="center">
-        <Grid item xs={4}>
-          <FormControl fullWidth variant="outlined">
-            <InputLabel ref={cutRef}>Cut *</InputLabel>
-            <Select
-              
-              value={getCurrentForm().cut}
-              label="Cut"
-              onChange={(e) => setCurrentForm(prev => ({
-                ...prev, 
-                cut: e.target.value
-              }))}
-              inputRef={cutRef}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                }
-              }}
-            >
-              {diamondCuts.map((cut) => (
-                <MenuItem key={cut.name} value={cut.name}>{cut.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Grid>
-        <Grid item xs={4}>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={getCurrentForm().labGrown}
-                onChange={(e) => setCurrentForm(prev => ({
-                  ...prev, 
-                  labGrown: e.target.checked
-                }))}
-                name="labGrown"
-              />
-            }
-            label="Lab Grown"
-          />
-        </Grid>
-        <Grid item xs={4}>
-          <Grid container spacing={2} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Grid item xs={12}>
-              <Button 
-                variant="contained" 
-                color="primary" 
-                fullWidth 
-                onClick={addDiamond}
-                disabled={!getCurrentForm().shape || !getCurrentForm().clarity || !getCurrentForm().cut}
-              >
-                ADD DIAMOND
-              </Button>
-            </Grid>
-          </Grid>
-        </Grid>
-      </Grid>
-      <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value $: 
-        </Typography>
-        <TextField
-          size="small"
-          type="decimal"
-          value={totalDiamondValue.toFixed(1)}
-          variant="standard"
-          onChange={(e) => {
-            const newValue = parseFloat(e.target.value);
-            setTotalDiamondValue(newValue);
-          }}
-          inputProps={{ 
-            min: 0,
-            inputMode: 'decimal',
-            pattern: '[0-9]*\\.?[0-9]*',
-            style: { width: '50px' }
-          }}
-          sx={{ 
-            ml: 1,
-            '& .MuiInputBase-root': {
-              ml: 0,
-              pl: 0
-            }
-          }}
-        />
-        <Button 
-          variant="contained" 
-          color="primary" 
-          onClick={() => {
-            if (activeTab.startsWith('primary')) {
-              setActiveTab('secondary_gem_diamond');
-            } else {
-              setActiveTab('primary_gem_diamond');
-            }
-          }}
-          sx={{ ml: 2 }}
-        >
-          {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
         </Button>
       </Grid>
     </Grid>
@@ -1760,7 +1657,109 @@ function GemEstimator() {
                   ))}
                 </Box>
 
-                {renderDiamondEstimationTab()}
+                <Grid container spacing={2} sx={{ p: 2 }}>
+                <Grid container spacing={2} alignItems="center">
+                  <Grid item xs={4}>
+                    <FormControl fullWidth variant="outlined">
+                      <InputLabel ref={cutRef}>Cut *</InputLabel>
+                      <Select
+                        value={getCurrentForm().cut}
+                        name="Cut"
+                        onChange={(e) => {
+                          if (labGrownRef?.current) {
+                            setTimeout(() => {
+                              labGrownRef.current.focus();
+                            }, 0);
+                          setCurrentForm(prev => ({
+                          ...prev, 
+                          cut: e.target.value
+                        }))}}}
+                        inputRef={cutRef}
+                        onKeyDown={(e) => handleEnterKey(e, labGrownRef)}
+                      >
+                        {diamondCuts.map((cut) => (
+                          <MenuItem key={cut.name} value={cut.name}>{cut.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox 
+                          checked={getCurrentForm().labGrown}
+                          onChange={(e) => setCurrentForm(prev => ({
+                            ...prev, 
+                            labGrown: e.target.checked
+                          }))}
+                          name="labGrown"
+                          inputRef={labGrownRef}
+                          onKeyDown={(e) => handleEnterKey(e, addDiamondRef)}
+                        />
+                      }
+                      label="Lab Grown"
+                    />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Grid container spacing={2} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Grid item xs={12}>
+                        <Button 
+                          ref={addDiamondRef}
+                          variant="contained" 
+                          color="primary" 
+                          fullWidth 
+                          onClick={addDiamond}
+                          disabled={!getCurrentForm().shape || !getCurrentForm().clarity || !getCurrentForm().cut}
+                        >
+                          ADD DIAMOND
+                        </Button>
+                      </Grid>
+                    </Grid>
+                  </Grid>
+                </Grid>
+                <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
+                    Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value $: 
+                  </Typography>
+                  <TextField
+                    size="small"
+                    type="decimal"
+                    value={totalDiamondValue.toFixed(1)}
+                    variant="standard"
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value);
+                      setTotalDiamondValue(newValue);
+                    }}
+                    inputProps={{ 
+                      min: 0,
+                      inputMode: 'decimal',
+                      pattern: '[0-9]*\\.?[0-9]*',
+                      style: { width: '50px' }
+                    }}
+                    sx={{ 
+                      ml: 1,
+                      '& .MuiInputBase-root': {
+                        ml: 0,
+                        pl: 0
+                      }
+                    }}
+                  />
+                  <Button 
+                    variant="contained" 
+                    color="primary" 
+                    onClick={() => {
+                      if (activeTab.startsWith('primary')) {
+                        setActiveTab('secondary_gem_diamond');
+                      } else {
+                        setActiveTab('primary_gem_diamond');
+                      }
+                    }}
+                    sx={{ ml: 2 }}
+                  >
+                    {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
+                  </Button>
+                </Grid>
+              </Grid>
               </Box>
             )}
 
