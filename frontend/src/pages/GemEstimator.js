@@ -2187,7 +2187,7 @@ function GemEstimator() {
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <TextField 
                           type="number"
-                          value={item.itemPriceEstimates[itemTransactionTypes[index]]}
+                          value={item.itemPriceEstimates[itemTransactionTypes[index]].toFixed(2)}
                           //onChange={(e) => handlePriceChange(index, e.target.value)}
                           InputProps={{
                             startAdornment: <InputAdornment position="start">$</InputAdornment>,

@@ -770,7 +770,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
         </Typography>
         <TextField
           size="small"
-          type="decimal"
+          type="number"
           value={totalValue.toFixed(1)}
           variant="standard"
           onChange={(e) => {
@@ -780,8 +780,6 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
           }}
           inputProps={{
             min: 0,
-            inputMode: 'decimal',
-            pattern: '[0-9]*\\.?[0-9]*',
             style: { width: '100px' }
           }}
           sx={{
