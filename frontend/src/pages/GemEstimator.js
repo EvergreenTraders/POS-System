@@ -42,14 +42,19 @@ import ImageListItem from '@mui/material/ImageListItem';
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
 
 function GemEstimator() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [metalFormState, setMetalFormState] = useState({});
   const [totalMetalValue, setTotalMetalValue] = useState(0);
-  const [addMetal, setAddMetal] = useState([]);
+  const [addMetal, setAddMetal] = useState(() => {
+    // Initialize from location state if available
+    const lastItem = location.state?.items?.[location.state.items.length - 1];
+    return lastItem ? [lastItem] : [];
+  });
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
 
@@ -175,7 +180,11 @@ function GemEstimator() {
   const [primaryStoneForm, setPrimaryStoneForm] = useState(initialStoneForm);
   const [secondaryStoneForm, setSecondaryStoneForm] = useState(initialStoneForm);
 
-  const [estimatedItems, setEstimatedItems] = useState([]);
+  const [estimatedItems, setEstimatedItems] = useState(() => {
+    // Initialize from location state if available (coming back from checkout)
+    return location.state?.items || [];
+  });
+
   const [totalDiamondValue, setTotalDiamondValue] = useState(0);
   const [totalStoneValue, setTotalStoneValue] = useState(0);
   const [priceEstimates, setPriceEstimates] = useState({
@@ -1282,8 +1291,39 @@ function GemEstimator() {
   };
 
   const handleCheckout = () => {
-    navigate('/checkout', { state: { items: estimatedItems } });
+    // Save the current state in session storage as backup
+    sessionStorage.setItem('estimationState', JSON.stringify({
+      estimatedItems,
+      addMetal: addMetal[0],
+      diamondSummary,
+      stoneSummary,
+      priceEstimates
+    }));
+    navigate('/checkout', { 
+      state: { 
+        items: estimatedItems
+      }
+    });
   };
+
+  useEffect(() => {
+    // Try to restore state from location or session storage
+    if (!estimatedItems.length) {
+      const savedState = sessionStorage.getItem('estimationState');
+      if (savedState) {
+        const parsedState = JSON.parse(savedState);
+        setEstimatedItems(parsedState.estimatedItems);
+        setAddMetal(parsedState.addMetal ? [parsedState.addMetal] : []);
+        setDiamondSummary(parsedState.diamondSummary || []);
+        setStoneSummary(parsedState.stoneSummary || []);
+        setPriceEstimates(parsedState.priceEstimates || {
+          pawn: 0,
+          buy: 0,
+          retail: 0
+        });
+      }
+    }
+  }, []);
 
   useEffect(() => {
     // Focus on shape input when component mounts
