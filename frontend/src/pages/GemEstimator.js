@@ -185,8 +185,14 @@ function GemEstimator() {
     return location.state?.items || [];
   });
 
+  const [estimatedValues, setEstimatedValues] = useState({
+    primaryDiamond: 0,
+    primaryGemstone: 0,
+    secondaryDiamond: 0,
+    secondaryGemstone: 0
+  });
+
   const [totalDiamondValue, setTotalDiamondValue] = useState(0);
-  const [totalStoneValue, setTotalStoneValue] = useState(0);
   const [priceEstimates, setPriceEstimates] = useState({
     pawn: 0,
     buy: 0,
@@ -350,7 +356,7 @@ function GemEstimator() {
   
   useEffect(() => {
     // Calculate estimates whenever total values change
-    const totalValue = totalMetalValue + totalDiamondValue;
+    const totalValue = totalMetalValue + Object.values(estimatedValues).reduce((sum, value) => sum + value, 0);
     const estimates = priceEstimatePercentages[metalFormState.preciousMetalTypeId] || [];
     const pawnEstimate = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
     const buyEstimate = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
@@ -362,7 +368,7 @@ function GemEstimator() {
       retail: totalValue * (retailEstimate / 100)
     });
 
-  }, [totalMetalValue, totalDiamondValue, priceEstimatePercentages]);
+  }, [totalMetalValue, estimatedValues, priceEstimatePercentages]);
 
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
 
@@ -1084,11 +1090,24 @@ function GemEstimator() {
         <TextField
           size="small"
           type="number"
-          value={totalStoneValue.toFixed(1)}
+          value={activeTab === 'primary_gem_diamond' ? estimatedValues.primaryDiamond.toFixed(1) : 
+            activeTab === 'primary_gem_stone' ? estimatedValues.primaryGemstone.toFixed(1) : 
+            activeTab === 'secondary_gem_diamond' ? estimatedValues.secondaryDiamond.toFixed(1) : 
+            estimatedValues.secondaryGemstone.toFixed(1)}
           variant="standard"
           onChange={(e) => {
             const newValue = parseFloat(e.target.value);
-            setTotalStoneValue(newValue);
+            if (!isNaN(newValue)) {
+              if (activeTab === 'primary_gem_diamond') {
+                setEstimatedValues(prev => ({ ...prev, primaryDiamond: newValue }));
+              } else if (activeTab === 'primary_gem_stone') {
+                setEstimatedValues(prev => ({ ...prev, primaryGemstone: newValue }));
+              } else if (activeTab === 'secondary_gem_diamond') {
+                setEstimatedValues(prev => ({ ...prev, secondaryDiamond: newValue }));
+              } else {
+                setEstimatedValues(prev => ({ ...prev, secondaryGemstone: newValue }));
+              }
+            }
           }}
           inputProps={{ 
             min: 0,
@@ -1764,11 +1783,24 @@ function GemEstimator() {
                   <TextField
                     size="small"
                     type="decimal"
-                    value={totalDiamondValue.toFixed(1)}
+                    value={activeTab === 'primary_gem_diamond' ? estimatedValues.primaryDiamond.toFixed(1) : 
+                      activeTab === 'primary_gem_stone' ? estimatedValues.primaryGemstone.toFixed(1) : 
+                      activeTab === 'secondary_gem_diamond' ? estimatedValues.secondaryDiamond.toFixed(1) : 
+                      estimatedValues.secondaryGemstone.toFixed(1)}
                     variant="standard"
                     onChange={(e) => {
                       const newValue = parseFloat(e.target.value);
-                      setTotalDiamondValue(newValue);
+                      if (!isNaN(newValue)) {
+                        if (activeTab === 'primary_gem_diamond') {
+                          setEstimatedValues(prev => ({ ...prev, primaryDiamond: newValue }));
+                        } else if (activeTab === 'primary_gem_stone') {
+                          setEstimatedValues(prev => ({ ...prev, primaryGemstone: newValue }));
+                        } else if (activeTab === 'secondary_gem_diamond') {
+                          setEstimatedValues(prev => ({ ...prev, secondaryDiamond: newValue }));
+                        } else {
+                          setEstimatedValues(prev => ({ ...prev, secondaryGemstone: newValue }));
+                        }
+                      }
                     }}
                     inputProps={{ 
                       min: 0,
@@ -2187,7 +2219,7 @@ function GemEstimator() {
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <TextField 
                           type="number"
-                          value={item.itemPriceEstimates[itemTransactionTypes[index]].toFixed(2)}
+                          value={(item.itemPriceEstimates[itemTransactionTypes[index]] || 0).toFixed(2)}
                           //onChange={(e) => handlePriceChange(index, e.target.value)}
                           InputProps={{
                             startAdornment: <InputAdornment position="start">$</InputAdornment>,

@@ -112,6 +112,7 @@ const useMetalForm = ({
 }) => {
   const [form, setForm] = useState(initialState);
   const [totalValue, setTotalValue] = useState(0);
+  const [isManualOverride, setIsManualOverride] = useState(false);
 
   const handleChange = useCallback((event) => {
     const { name, value } = event.target;
@@ -133,6 +134,7 @@ const useMetalForm = ({
           selectedPreciousMetalType.type === 'Platinum' ? metalSpotPrice.CADXPT : 
           selectedPreciousMetalType.type === 'Palladium' ? metalSpotPrice.CADXPD : 0 
       }));
+      setIsManualOverride(false);
       return;
     }
 
@@ -142,6 +144,7 @@ const useMetalForm = ({
         nonPreciousMetalType: value,
         purity: { purity: '', value: 0 }
       }));
+      setIsManualOverride(false);
       return;
     }
 
@@ -151,6 +154,7 @@ const useMetalForm = ({
         ...prev,
         purity: selectedPurity || { purity: '', value: 0 }
       }));
+      setIsManualOverride(false);
       return;
     }
 
@@ -162,6 +166,16 @@ const useMetalForm = ({
           value: value
         }
       }));
+      setIsManualOverride(false);
+      return;
+    }
+
+    if (name === 'weight') {
+      setForm(prev => ({
+        ...prev,
+        weight: value
+      }));
+      setIsManualOverride(false);
       return;
     }
 
@@ -172,16 +186,13 @@ const useMetalForm = ({
   }, [metalSpotPrice, preciousMetalTypes, metalPurities, fetchPurities]);
 
   const calculateValue = useCallback(() => {
-    if (form.weight && form.spotPrice && form.purity) {
+    if (!isManualOverride && form.weight && form.spotPrice && form.purity) {
       const percentageFactor = 0.7;
       const newValue = form.spotPrice * form.purity.value * form.weight * percentageFactor;
       setTotalValue(newValue);
       onMetalValueChange(newValue);
-    } else {
-      setTotalValue(0);
-      onMetalValueChange(0);
     }
-  }, [form.weight, form.spotPrice, form.purity, onMetalValueChange]);
+  }, [form.weight, form.spotPrice, form.purity, onMetalValueChange, isManualOverride]);
 
   useEffect(() => {
     calculateValue();
@@ -193,13 +204,23 @@ const useMetalForm = ({
       spotPrice: metalSpotPrice.CADXAU
     });
     setTotalValue(0);
+    setIsManualOverride(false);
   }, [initialState, metalSpotPrice]);
+
+  const handleManualValueChange = useCallback((value) => {
+    const newValue = parseFloat(value);
+    if (!isNaN(newValue)) {
+      setIsManualOverride(true);
+      setTotalValue(newValue);
+      onMetalValueChange(newValue);
+    }
+  }, [onMetalValueChange]);
 
   return {
     form,
     setForm,
     totalValue,
-    setTotalValue,
+    setTotalValue: handleManualValueChange,
     handleChange,
     resetForm
   };
