@@ -17,6 +17,7 @@ import SystemConfig from './pages/SystemConfig';
 import Employees from './pages/Employees';
 import GemEstimator from './pages/GemEstimator';
 import Pawns from './pages/Pawns';
+import Checkout from './pages/Checkout';
 
 const theme = createTheme({
   palette: {
@@ -192,6 +193,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <Pawns />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/checkout"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <Checkout />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

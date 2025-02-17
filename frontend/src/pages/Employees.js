@@ -32,8 +32,11 @@ import {
   Delete as DeleteIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
+import config from '../config';
 
 function Employees() {
+  const API_BASE_URL = config.apiUrl;
+  
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -65,7 +68,7 @@ function Employees() {
   const fetchEmployees = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('http://localhost:5000/api/employees');
+      const response = await axios.get(`${API_BASE_URL}/employees`);
       setEmployees(response.data);
       setError(null);
     } catch (err) {
@@ -124,7 +127,7 @@ function Employees() {
   const handleSubmit = async () => {
     try {
       if (dialogMode === 'add') {
-        const response = await axios.post('http://localhost:5000/api/employees', {
+        const response = await axios.post(`${API_BASE_URL}/employees`, {
           username: formData.username,
           firstName: formData.firstName,
           lastName: formData.lastName,

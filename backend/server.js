@@ -462,6 +462,44 @@ app.get('/api/stone_color', async (req, res) => {
   }
 });
 
+// Stone types route
+app.get('/api/stone_types', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM stone_types ORDER BY id ASC';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching stone types:', err);
+    res.status(500).json({ error: 'Failed to fetch stone types' });
+  }
+});
+
+// Diamond Estimates API Endpoint
+app.get('/api/diamond_estimates', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM diamond_estimates');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching diamond estimates:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PUT route for updating diamond estimates
+app.put('/api/diamond_estimates', async (req, res) => {
+  try {
+    const { transaction_type, estimate } = req.body;
+    const result = await pool.query(
+      'UPDATE diamond_estimates SET estimate = $2, updated_at = CURRENT_TIMESTAMP WHERE transaction_type = $1 RETURNING *',
+      [transaction_type, estimate]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error updating diamond estimates:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // User preferences API Endpoint
 app.get('/api/user_preferences', async (req, res) => {
   try {
@@ -487,6 +525,7 @@ app.put('/api/user_preferences', async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 })
+
 // Live Pricing API Endpoint
 app.get('/api/live_pricing', async (req, res) => {
   try {
@@ -590,6 +629,36 @@ app.put('/api/price_estimates', async (req, res) => {
   } catch (error) {
     console.error('Error updating price estimates:', error);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Carat to Gram Conversion API Endpoints
+app.get('/api/carat-conversion', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM carat_to_gram_conversion';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching carat conversion:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/api/carat-conversion', async (req, res) => {
+  try {
+    const { grams } = req.body;
+    
+    const query = 'UPDATE carat_to_gram_conversion SET grams = $1, updated_at = CURRENT_TIMESTAMP RETURNING *';
+    const result = await pool.query(query, [grams]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Conversion record not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating carat conversion:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

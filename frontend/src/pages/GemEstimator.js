@@ -31,6 +31,7 @@ import {
   DialogActions,
   Divider
 } from '@mui/material';
+import config from '../config';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 import MetalEstimator from './MetalEstimator';
@@ -42,12 +43,23 @@ import ImageListItem from '@mui/material/ImageListItem';
 import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { styled } from '@mui/material/styles';
 
 function GemEstimator() {
+  const API_BASE_URL = config.apiUrl;
+
+  const navigate = useNavigate();
+  const location = useLocation();
   const [metalFormState, setMetalFormState] = useState({});
   const [totalMetalValue, setTotalMetalValue] = useState(0);
-  const [addMetal, setAddMetal] = useState([]);
+  const [addMetal, setAddMetal] = useState(() => {
+    // Initialize from location state if available
+    const lastItem = location.state?.items?.[location.state.items.length - 1];
+    return lastItem ? [lastItem] : [];
+  });
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
+  const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
 
   const handleMetalFormChange = (formState) => {
       setMetalFormState(formState);
@@ -67,7 +79,6 @@ function GemEstimator() {
 
   const handleDeleteGem = (index, type, isPrimary) => {
     const gemPosition = isPrimary ? 'primary' : 'secondary';
-    console.log("gem", gemPosition, isPrimary,type);
   
     if (type === 'diamond') {
       setDiamondSummary(prev => prev.filter((_, i) => i !== index));
@@ -87,9 +98,14 @@ function GemEstimator() {
   };
 
   const handleFinishEstimation = () => {
+    const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
+    const totalWeight = parseFloat(addMetal[0].weight || 0) + gemWeightInGrams;
+
     const newItem = {
-      weight: addMetal[0].weight,
-      metal: getInitials(addMetal[0].jewelryColor) + getInitials(addMetal[0].preciousMetalType),
+      weight: totalWeight.toFixed(2),
+      metal: addMetal[0].preciousMetalType === 'Gold' ? 
+        getInitials(addMetal[0].jewelryColor) + getInitials(addMetal[0].preciousMetalType) :
+        getInitials(addMetal[0].preciousMetalType),
       purity: addMetal[0].purity?.purity || addMetal[0].purity.value,
       gems: (addedGemTypes.primary ? (addedGemTypes.primary === 'diamond' ? 
             `${diamondSummary[0].shape}` : `${stoneSummary[0].name}`) : ''), 
@@ -99,7 +115,7 @@ function GemEstimator() {
         buy: priceEstimates.buy,
         retail: priceEstimates.retail
       },
-      image: images[0]
+      image: images.find(img => img.isPrimary) || images[0]
     };
 
     setEstimatedItems(prev => [...prev, newItem]);
@@ -129,7 +145,7 @@ function GemEstimator() {
   // Primary gem form
   const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
     shape: 'Round',
-    clarity: '',
+    clarity: 'Flawless',
     color: 'Colorless',
     quantity: 1,
     weight: 0,
@@ -142,7 +158,7 @@ function GemEstimator() {
   // Secondary gem form
   const [secondaryDiamondForm, setSecondaryDiamondForm] = useState({
     shape: 'Round',
-    clarity: '',
+    clarity: 'Flawless',
     color: 'Colorless',
     quantity: 1,
     weight: 0,
@@ -155,7 +171,7 @@ function GemEstimator() {
   const initialStoneForm = {
     name: '',
     shape: '',
-    color: '#000000',
+    color: 'Red',
     weight: '',
     width: '',
     depth: '',
@@ -167,9 +183,19 @@ function GemEstimator() {
   const [primaryStoneForm, setPrimaryStoneForm] = useState(initialStoneForm);
   const [secondaryStoneForm, setSecondaryStoneForm] = useState(initialStoneForm);
 
-  const [estimatedItems, setEstimatedItems] = useState([]);
+  const [estimatedItems, setEstimatedItems] = useState(() => {
+    // Initialize from location state if available (coming back from checkout)
+    return location.state?.items || [];
+  });
+
+  const [estimatedValues, setEstimatedValues] = useState({
+    primaryDiamond: 0,
+    primaryGemstone: 0,
+    secondaryDiamond: 0,
+    secondaryGemstone: 0
+  });
+
   const [totalDiamondValue, setTotalDiamondValue] = useState(0);
-  const [totalStoneValue, setTotalStoneValue] = useState(0);
   const [priceEstimates, setPriceEstimates] = useState({
     pawn: 0,
     buy: 0,
@@ -189,6 +215,7 @@ function GemEstimator() {
   const [diamondShapes, setDiamondShapes] = useState([]);
 
   const [diamondClarity, setDiamondClarity] = useState([]);
+  const [selectedClarityIndex, setSelectedClarityIndex] = useState(0);
 
   const [diamondSizes, setDiamondSizes] = useState([]);
 
@@ -197,16 +224,19 @@ function GemEstimator() {
   const [diamondColors, setDiamondColors] = useState([]);
 
   const [stoneTypes, setStoneTypes] = useState([]);
+  const [colorSpecificStoneTypes, setColorSpecificStoneTypes] = useState([]);
 
   const [stoneShapes, setStoneShapes] = useState([]);
 
   const [stoneColors, setStoneColors] = useState([]);
 
+  const [caratConversion, setCaratConversion] = useState(null);
+
   useEffect(() => {
     const fetchAllData = async () => {
       try {
         //Fetch Price Estimate Percentages
-        const priceEstimatePercentagesResponse = await axios.get('http://localhost:5000/api/price_estimates');
+        const priceEstimatePercentagesResponse = await axios.get(`${API_BASE_URL}/price_estimates`);
         const data = priceEstimatePercentagesResponse.data;
         const estimates = {};
         data.forEach((estimate) => {
@@ -218,28 +248,48 @@ function GemEstimator() {
         });
         setPriceEstimatePercentages(estimates);
         
+        // Fetch Stone Types
+        const stoneTypesResponse = await axios.get(`${API_BASE_URL}/stone_types`);
+        const stoneTypesData = stoneTypesResponse.data;
+        setColorSpecificStoneTypes(stoneTypesData);
+        
+        // Group stone types by color for the dropdown
+        const uniqueTypes = [...new Set(stoneTypesData.map(type => type.type))];
+        const typesWithImages = uniqueTypes.map(type => {
+          const stoneData = stoneTypesData.find(s => s.type === type);
+          return {
+            name: type,
+            image: stoneData.image_path.replace('.jpg', '.png')
+          };
+        });
+        setStoneTypes(typesWithImages);
+
+        // Update the initial stone form with the first color from the data
+        if (stoneTypesData.length > 0) {
+          setPrimaryStoneForm(prev => ({
+            ...prev,
+            color: 'Red'
+          }));
+          setSecondaryStoneForm(prev => ({
+            ...prev,
+            color: 'Red'
+          }));
+        }
+
         // Fetch Stone Shapes
-        const stoneShapesResponse = await axios.get('http://localhost:5000/api/stone_shape');
+        const stoneShapesResponse = await axios.get(`${API_BASE_URL}/stone_shape`);
         const stoneShapesWithImages = stoneShapesResponse.data.map(shape => ({
           name: shape.shape,
           image: shape.image_path.replace('.jpg', '.png')
         }));
         setStoneShapes(stoneShapesWithImages);
 
-        // Fetch Stone Types
-        const stoneTypesResponse = await axios.get('http://localhost:5000/api/stone_type');
-        const typesWithImages = stoneTypesResponse.data.map(type => ({
-          name: type.type,
-          image: type.image_path.replace('.jpg', '.png')
-        }));
-        setStoneTypes(typesWithImages);
-
         // Fetch Stone Colors
-        const stoneColorsResponse = await axios.get('http://localhost:5000/api/stone_color');
+        const stoneColorsResponse = await axios.get(`${API_BASE_URL}/stone_color`);
         setStoneColors(stoneColorsResponse.data);
 
         // Fetch Diamond Shapes
-        const shapesResponse = await axios.get('http://localhost:5000/api/diamond_shape');
+        const shapesResponse = await axios.get(`${API_BASE_URL}/diamond_shape`);
         const shapesWithImages = shapesResponse.data.map(shape => ({
           name: shape.shape,
           image: shape.image_path.replace('.jpg', '.png')
@@ -247,7 +297,7 @@ function GemEstimator() {
         setDiamondShapes(shapesWithImages);
 
         // Fetch Diamond Clarity
-        const clarityResponse = await axios.get('http://localhost:5000/api/diamond_clarity');
+        const clarityResponse = await axios.get(`${API_BASE_URL}/diamond_clarity`);
         const clarityWithImages = clarityResponse.data.map(clarity => ({
           name: clarity.name,
           image: clarity.image_path
@@ -255,23 +305,36 @@ function GemEstimator() {
         setDiamondClarity(clarityWithImages);
 
         // Fetch Diamond Cuts
-        const cutsResponse = await axios.get('http://localhost:5000/api/diamond_cut');
+        const cutsResponse = await axios.get(`${API_BASE_URL}/diamond_cut`);
         setDiamondCuts(cutsResponse.data);
 
         // Fetch Diamond Colors
-        const diamondColorResponse = await axios.get('http://localhost:5000/api/diamond_color');
+        const diamondColorResponse = await axios.get(`${API_BASE_URL}/diamond_color`);
         setDiamondColors(diamondColorResponse.data);
-        
+                
       } catch (error) {
         console.error('Error fetching initial data:', error);
       }
     };
 
-    const fetchCameraPreference = async () => {
+    const fetchCaratConversion = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/user_preferences');
+        const response = await axios.get(`${API_BASE_URL}/carat-conversion`);
+        if (response.data && response.data.length > 0) {
+          setCaratConversion(response.data[0]);
+        }
+      } catch (error) {
+        console.error('Error fetching carat conversion:', error);
+      }
+    };
+
+    const fetchUserPreference = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/user_preferences`);
         const cameraPreference = response.data.find(pref => pref.preference_name === 'cameraEnabled');
         setIsCameraEnabled(cameraPreference ? cameraPreference.preference_value === 'true' : false);
+        const caratConversionPreference = response.data.find(pref => pref.preference_name === 'caratConversion');
+        setIsCaratConversionEnabled(caratConversionPreference ? caratConversionPreference.preference_value === 'true' : false);
       } catch (error) {
         console.error('Error fetching camera preference:', error);
       }
@@ -279,7 +342,9 @@ function GemEstimator() {
     
     fetchAllData();
     fetchDiamondSizes(1);
-    fetchCameraPreference();
+    fetchUserPreference();
+    if(isCaratConversionEnabled) 
+        fetchCaratConversion();
   }, []);
 
   const fetchDiamondSizes = async (diamondShapeId) => {
@@ -294,7 +359,7 @@ function GemEstimator() {
   
   useEffect(() => {
     // Calculate estimates whenever total values change
-    const totalValue = totalMetalValue + totalDiamondValue;
+    const totalValue = totalMetalValue + Object.values(estimatedValues).reduce((sum, value) => sum + value, 0);
     const estimates = priceEstimatePercentages[metalFormState.preciousMetalTypeId] || [];
     const pawnEstimate = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
     const buyEstimate = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
@@ -306,7 +371,7 @@ function GemEstimator() {
       retail: totalValue * (retailEstimate / 100)
     });
 
-  }, [totalMetalValue, totalDiamondValue, priceEstimatePercentages]);
+  }, [totalMetalValue, estimatedValues, priceEstimatePercentages]);
 
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
 
@@ -340,8 +405,26 @@ function GemEstimator() {
   const [stream, setStream] = useState(null);
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [currentShapeIndex, setCurrentShapeIndex] = useState(0);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [isPopupOpen, setIsPopupOpen] = useState(false);
+  const [popupImageIndex, setPopupImageIndex] = useState(0);
+  const sliderRef = React.useRef(null);
+  const colorSliderRef = React.useRef(null);
+  const cutRef = React.useRef(null);
+  const labGrownRef = React.useRef(null);
+  const addDiamondRef = React.useRef(null);
 
-  const handleNextImage = () => {
+  const openPopup = (index) => {
+    setPopupImageIndex(index);
+    setIsPopupOpen(true);
+  };
+
+  const closePopup = () => {
+    setIsPopupOpen(false);
+  };
+
+  // Diamond shape navigation
+  const handleNextShape = () => {
     setCurrentShapeIndex((prevIndex) => {
       const nextIndex = Math.min(prevIndex + 1, diamondShapes.length - 1);
       setCurrentForm(prev => ({ ...prev, shape: diamondShapes[nextIndex].name })); // Update dropdown
@@ -350,7 +433,7 @@ function GemEstimator() {
     });
   };
 
-  const handlePrevImage = () => {
+  const handlePrevShape = () => {
     setCurrentShapeIndex((prevIndex) => {
       const prevIndexValue = Math.max(prevIndex - 1, 0);
       setCurrentForm(prev => ({ ...prev, shape: diamondShapes[prevIndexValue].name })); // Update dropdown
@@ -359,67 +442,114 @@ function GemEstimator() {
     });
   };
 
-  const [isPopupOpen, setIsPopupOpen] = useState(false);
-const [popupImageIndex, setPopupImageIndex] = useState(0);
+  // Image gallery navigation
+  const handleNextImage = () => {
+    setCurrentImageIndex((prevIndex) => Math.min(prevIndex + 1, images.length - 1));
+  };
 
-const openPopup = (index) => {
-    setPopupImageIndex(index);
-    setIsPopupOpen(true);
-};
+  const handlePrevImage = () => {
+    setCurrentImageIndex((prevIndex) => Math.max(prevIndex - 1, 0));
+  };
 
-const closePopup = () => {
-    setIsPopupOpen(false);
-};
+  const handleNextPopupImage = () => {
+    setPopupImageIndex((prevIndex) => Math.min(prevIndex + 1, images.length - 1));
+  };
 
-const handleNextPopupImage = () => {
-    setPopupImageIndex((prevIndex) => (prevIndex + 1) % images.length);
-};
+  const handlePrevPopupImage = () => {
+    setPopupImageIndex((prevIndex) => Math.max(prevIndex - 1, 0));
+  };
 
-const handlePrevPopupImage = () => {
-    setPopupImageIndex((prevIndex) => (prevIndex - 1 + images.length) % images.length);
-};
+  // Popup Component
+  const ImagePopup = ({ images, index }) => {
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-// Popup Component
-const ImagePopup = ({ images, index }) => {
-    if (!images || images.length === 0) return null; // Check if images are defined and not empty
-    return (
-        <Dialog open={isPopupOpen} onClose={closePopup}>
-            <DialogContent sx={{ overflow: 'hidden' }}>
-                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                    <Button onClick={handlePrevPopupImage} disabled={index === 0}>◀</Button>
-                    <img src={images[index].url} alt="Popup Image" style={{ width: '500px', height: 'auto', transition: 'opacity 0.5s ease-in-out', opacity: isPopupOpen ? 1 : 0 }} />
-                    <Button onClick={handleNextPopupImage} disabled={index === images.length - 1}>▶</Button>
-                </Box>
-            </DialogContent>
-            <DialogActions>
-                <Button onClick={closePopup}>Close</Button>
-            </DialogActions>
-        </Dialog>
-    );
-};
-
-  // Clean up camera resources when component unmounts
-  useEffect(() => {
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
+    const handleDelete = () => {
+      setImages(prev => prev.filter((_, i) => i !== index));
+      setShowDeleteConfirm(false);
+      closePopup();
     };
-  }, [stream]);
 
-  // Handle video initialization when showCamera changes
-  useEffect(() => {
-    if (showCamera && videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-      videoRef.current.onloadedmetadata = () => {
-        videoRef.current.play().then(() => {
-          setIsVideoReady(true);
-        }).catch(err => {
-          console.error("Error playing video:", err);
-        });
-      };
-    }
-  }, [showCamera, stream]);
+    const handleMakePrimary = (event) => {
+      const newImages = [...images];
+      // Remove primary flag from all images
+      newImages.forEach(img => img.isPrimary = false);
+      // Set primary flag for current image
+      newImages[index].isPrimary = event.target.checked;
+      setImages(newImages);
+    };
+
+    if (!images || images.length === 0) return null;
+
+    return (
+      <>
+        <Dialog open={isPopupOpen} onClose={closePopup} maxWidth="md">
+          <DialogContent sx={{ overflow: 'hidden' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', gap: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                <Button onClick={handlePrevPopupImage} disabled={index === 0}>◀</Button>
+                <img 
+                  src={images[index].url} 
+                  alt="Popup Image" 
+                  style={{ 
+                    width: '500px', 
+                    height: 'auto', 
+                    transition: 'opacity 0.5s ease-in-out', 
+                    opacity: isPopupOpen ? 1 : 0 
+                  }} 
+                />
+                <Button onClick={handleNextPopupImage} disabled={index === images.length - 1}>▶</Button>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={images[index].isPrimary || false}
+                      onChange={handleMakePrimary}
+                    />
+                  }
+                  label="Make Primary"
+                />
+                <Button 
+                  variant="contained" 
+                  color="error" 
+                  startIcon={<DeleteIcon />}
+                  onClick={() => setShowDeleteConfirm(true)}
+                >
+                  Delete
+                </Button>
+              </Box>
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={closePopup}>Close</Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog
+          open={showDeleteConfirm}
+          onClose={() => setShowDeleteConfirm(false)}
+          aria-labelledby="delete-dialog-title"
+          aria-describedby="delete-dialog-description"
+        >
+          <DialogTitle id="delete-dialog-title">
+            {"Delete Image"}
+          </DialogTitle>
+          <DialogContent>
+            <Typography>
+              Are you sure you want to delete this image? This action cannot be undone.
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+            <Button onClick={handleDelete} color="error" variant="contained" autoFocus>
+              Delete
+            </Button>
+          </DialogActions>
+        </Dialog>
+      </>
+    );
+  };
 
   const handleFileUpload = (event) => {
     const files = Array.from(event.target.files);
@@ -502,12 +632,38 @@ const ImagePopup = ({ images, index }) => {
 
   const handleExactColorChange = (event, newValue) => {
     setExactColor(colorScale[newValue]);
-    
-    // Update the current form with the exact color
     setCurrentForm(prev => ({
       ...prev,
-      exactColor: colorScale[newValue]
+      exactColor: colorScale[newValue],
+      color: getColorCategory(colorScale[newValue])
     }));
+  };
+
+  const shapeRef = React.useRef(null);
+  const quantityRef = React.useRef(null);
+  const weightRef = React.useRef(null);
+  const clarityRef = React.useRef(null);
+  const colorRef = React.useRef(null);
+  const sizeRef = React.useRef(null);
+
+  const handleSelectChange = (event, nextRef, handleChange) => {
+    handleChange(event);
+    if (nextRef?.current) {
+      setTimeout(() => {
+        nextRef.current.focus();
+      }, 0);
+    }
+  };
+
+  const handleEnterKey = (event, nextRef) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (nextRef?.current) {
+        setTimeout(() => {
+          nextRef.current.focus();
+        }, 0);
+      }
+    }
   };
 
   const handleDiamondChange = (event) => {
@@ -544,12 +700,19 @@ const ImagePopup = ({ images, index }) => {
     const currentForm = getCurrentForm();
     const isPrimary = activeTab.startsWith('primary');
   
-  // Check if we can add this type of gem
+    // Check if we can add this type of gem
     const gemPosition = isPrimary ? 'primary' : 'secondary';
     if (addedGemTypes[gemPosition] === 'stone') {
       alert(`Please delete the existing ${gemPosition} stone before adding a diamond`);
       return;
     }
+
+    // For primary gems, check if there's already one in the array
+    if (isPrimary && (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary))) {
+      alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
+      return;
+    }
+
     const newItem = {
       shape: currentForm.shape,
       clarity: currentForm.clarity,
@@ -560,7 +723,7 @@ const ImagePopup = ({ images, index }) => {
       weight: currentForm.weight,
       quantity: currentForm.quantity,
       labGrown: currentForm.labGrown,
-      isPrimary: activeTab.startsWith('primary'),
+      isPrimary: isPrimary,
       type: 'diamond'
     };
 
@@ -573,7 +736,7 @@ const ImagePopup = ({ images, index }) => {
     // Reset the current form after adding
     const resetForm = {
       shape: 'Round',
-      clarity: '',
+      clarity: 'Flawless',
       color: 'Colorless',
       quantity: 1,
       weight: 0,
@@ -601,10 +764,12 @@ const ImagePopup = ({ images, index }) => {
   };
 
   const handleStoneTypeChange = (event) => {
-    const selectedStone = stoneTypes.find(stone => stone.name === event.target.value);
+    const selectedStoneType = event.target.value;
+    const selectedStone = colorSpecificStoneTypes.find(stone => stone.type === selectedStoneType);
     setCurrentStoneForm(prev => ({
       ...prev,
-      name: selectedStone ? selectedStone.name : '',
+      name: selectedStone ? selectedStone.type : '',
+      color: selectedStone ? selectedStone.color : prev.color
     }));
   };
 
@@ -622,14 +787,21 @@ const ImagePopup = ({ images, index }) => {
       alert(`Please delete the existing ${gemPosition} diamond before adding a stone`);
       return;
     }
+
+    // For primary gems, check if there's already one in the array
+    if (isPrimary && (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary))) {
+      alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
+      return;
+    }
+
     const newStone = {
-      name:  currentForm.name,
+      name: currentForm.name,
       shape: currentForm.shape,
       weight: currentForm.weight+' ct',
       color: currentForm.color,
       quantity: currentForm.quantity,
       authentic: currentForm.authentic,
-      isPrimary: activeTab.startsWith('primary'),
+      isPrimary: isPrimary,
       type: 'stone'
     };
 
@@ -700,71 +872,72 @@ const ImagePopup = ({ images, index }) => {
         <Grid item xs={12} md={8}>
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Type *</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-            {stoneTypes.map((stone) => (
-              <Paper
-                key={stone.name}
-                elevation={getCurrentStoneForm().name === stone.name ? 8 : 1}
-                sx={{
-                  p: 1,
-                  cursor: 'pointer',
-                  width: 80,
-                  height: 80,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-                onClick={() => handleStoneTypeChange({ target: { value: stone.name } })}
-              >
-                <Box
-                  component="img"
-                  src={stone.image}
-                  alt={stone.name}
-                  sx={{ width: 40, height: 40 }}
-                />
-                <Typography variant="caption" align="center">
-                  {stone.name}
-                </Typography>
-              </Paper>
-            ))}
+            {colorSpecificStoneTypes
+              .filter(stone => stone.color === getCurrentStoneForm().color)
+              .map((stone) => (
+                <Paper
+                  key={stone.type}
+                  elevation={getCurrentStoneForm().name === stone.type ? 8 : 1}
+                  sx={{
+                    p: 1,
+                    cursor: 'pointer',
+                    width: 80,
+                    height: 80,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  onClick={() => handleStoneTypeChange({ target: { value: stone.type } })}
+                >
+                  <Box
+                    component="img"
+                    src={stone.image_path}
+                    alt={stone.type}
+                    sx={{ width: 40, height: 40 }}
+                  />
+                  <Typography variant="caption" align="center">
+                    {stone.type}
+                  </Typography>
+                </Paper>
+              ))}
           </Box>
         </Grid>
 
+        {/* Stone Color Picker */}
+        <Grid item xs={12} md={4}>
+          <FormControl fullWidth>
+            <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
+            <Grid container sx={{ border: '1px solid black', boxSizing: 'border-box'}}>
+              {stoneColors.map((color, index) => (
+                <Grid item xs={6} key={color.id}>
+                  <Paper
+                    onClick={() => {
+                      setCurrentStoneForm(prev => ({
+                        ...prev,
+                        color: color.color
+                      }));
+                    }}
 
-          {/* Stone Color Picker */}
-          <Grid item xs={12} md={4}>
-              <FormControl fullWidth>
-                  <Typography variant="subtitle1"  sx={{ mb: 1}}>Color *</Typography>
-                  <Grid container sx={{  border: '1px solid black',   boxSizing: 'border-box'}}>
-                      {stoneColors.map((color, index) => (
-                          <Grid item xs={6} key={color.id}>
-                              <Paper
-                                  onClick={() => {
-                                      setCurrentStoneForm(prev => ({
-                                          ...prev,
-                                          color: color.color
-                                      }));
-                                  }}
-
-                                  sx={{
-                                      p: 1.5,
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      textAlign: 'center',
-                                      border: '1px solid black',
-                                      borderRadius: 0,
-                                      backgroundColor: getCurrentStoneForm().color === color.color ? 'mediumseagreen':'none'
-                                    }}
-                              >
-                                  {color.color}
-                              </Paper>
-                          </Grid>
-                      ))}
-                  </Grid>
-              </FormControl>
-          </Grid>
+                    sx={{
+                      p: 1.5,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      textAlign: 'center',
+                      border: '1px solid black',
+                      borderRadius: 0,
+                      backgroundColor: getCurrentStoneForm().color === color.color ? 'mediumseagreen':'none'
+                    }}
+                  >
+                    {color.color}
+                  </Paper>
+                </Grid>
+              ))}
+            </Grid>
+          </FormControl>
+        </Grid>
       </Grid>
 
       {/* Stone Shape */}
@@ -805,7 +978,7 @@ const ImagePopup = ({ images, index }) => {
       </Box>
 
       {/* Size Section */}
-      <Grid container spacing={1} sx={{ mt: 0, mb: 0, alignItems: 'center' }}>
+      <Grid container spacing={1} sx={{ mt: 0 }}>
         <Grid item>
           <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
         </Grid>
@@ -920,11 +1093,24 @@ const ImagePopup = ({ images, index }) => {
         <TextField
           size="small"
           type="number"
-          value={totalStoneValue.toFixed(1)}
+          value={activeTab === 'primary_gem_diamond' ? estimatedValues.primaryDiamond.toFixed(1) : 
+            activeTab === 'primary_gem_stone' ? estimatedValues.primaryGemstone.toFixed(1) : 
+            activeTab === 'secondary_gem_diamond' ? estimatedValues.secondaryDiamond.toFixed(1) : 
+            estimatedValues.secondaryGemstone.toFixed(1)}
           variant="standard"
           onChange={(e) => {
             const newValue = parseFloat(e.target.value);
-            setTotalStoneValue(newValue);
+            if (!isNaN(newValue)) {
+              if (activeTab === 'primary_gem_diamond') {
+                setEstimatedValues(prev => ({ ...prev, primaryDiamond: newValue }));
+              } else if (activeTab === 'primary_gem_stone') {
+                setEstimatedValues(prev => ({ ...prev, primaryGemstone: newValue }));
+              } else if (activeTab === 'secondary_gem_diamond') {
+                setEstimatedValues(prev => ({ ...prev, secondaryDiamond: newValue }));
+              } else {
+                setEstimatedValues(prev => ({ ...prev, secondaryGemstone: newValue }));
+              }
+            }
           }}
           inputProps={{ 
             min: 0,
@@ -951,102 +1137,6 @@ const ImagePopup = ({ images, index }) => {
           sx={{ ml: 2 }} 
         >
            {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
-        </Button>
-      </Grid>
-    </Grid>
-  );
-
-  const renderDiamondEstimationTab = () => (
-    <Grid container spacing={2} sx={{ p: 2 }}>
-      <Grid container spacing={2} alignItems="center">
-        <Grid item xs={4}>
-          <FormControl fullWidth variant="outlined">
-            <InputLabel>Cut *</InputLabel>
-            <Select
-              value={getCurrentForm().cut}
-              label="Cut"
-              onChange={(e) => setCurrentForm(prev => ({
-                ...prev, 
-                cut: e.target.value
-              }))}
-            >
-              {diamondCuts.map((cut) => (
-                <MenuItem key={cut.name} value={cut.name}>{cut.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Grid>
-        <Grid item xs={4}>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={getCurrentForm().labGrown}
-                onChange={(e) => setCurrentForm(prev => ({
-                  ...prev, 
-                  labGrown: e.target.checked
-                }))}
-                name="labGrown"
-              />
-            }
-            label="Lab Grown"
-          />
-        </Grid>
-        <Grid item xs={4}>
-          <Grid container spacing={2} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Grid item xs={12}>
-              <Button 
-                variant="contained" 
-                color="primary" 
-                fullWidth 
-                onClick={addDiamond}
-                disabled={!getCurrentForm().shape || !getCurrentForm().clarity || !getCurrentForm().cut}
-              >
-                ADD DIAMOND
-              </Button>
-            </Grid>
-          </Grid>
-        </Grid>
-      </Grid>
-      <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value $: 
-        </Typography>
-        <TextField
-          size="small"
-          type="decimal"
-          value={totalDiamondValue.toFixed(1)}
-          variant="standard"
-          onChange={(e) => {
-            const newValue = parseFloat(e.target.value);
-            setTotalDiamondValue(newValue);
-          }}
-          inputProps={{ 
-            min: 0,
-            inputMode: 'decimal',
-            pattern: '[0-9]*\\.?[0-9]*',
-            style: { width: '50px' }
-          }}
-          sx={{ 
-            ml: 1,
-            '& .MuiInputBase-root': {
-              ml: 0,
-              pl: 0
-            }
-          }}
-        />
-        <Button 
-          variant="contained" 
-          color="primary" 
-          onClick={() => {
-            if (activeTab.startsWith('primary')) {
-              setActiveTab('secondary_gem_diamond');
-            } else {
-              setActiveTab('primary_gem_diamond');
-            }
-          }}
-          sx={{ ml: 2 }}
-        >
-          {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
         </Button>
       </Grid>
     </Grid>
@@ -1124,17 +1214,11 @@ const ImagePopup = ({ images, index }) => {
 
   // Function to determine color category based on exact color
   const getColorCategory = (exactColor) => {
-    const colorCategories = [
-      { name: 'Colorless', range: 'D-F', start: 'D', end: 'F' },
-      { name: 'Near Colorless', range: 'G-J', start: 'G', end: 'J' },
-      { name: 'Faint Color', range: 'K-M', start: 'K', end: 'M' },
-      { name: 'Very Light Color', range: 'N-R', start: 'N', end: 'R' },
-      { name: 'Light Color', range: 'S-Z', start: 'S', end: 'Z' }
-    ];
-
-    return colorCategories.find(
-      category => exactColor >= category.start && exactColor <= category.end
-    )?.name || 'Colorless';
+    const category = diamondColors.find(category => {
+      const [start, end] = category.range.split('-');
+      return exactColor >= start && exactColor <= end;
+    });
+    return category?.name || 'Colorless';
   };
 
   const [itemTransactionTypes, setItemTransactionTypes] = useState({});
@@ -1198,6 +1282,79 @@ const ImagePopup = ({ images, index }) => {
     }));
   };
 
+  const calculateTotalGemWeight = () => {
+    if (!caratConversion) return 0;
+
+    let totalCarats = 0;
+
+    // Add primary diamond weight if exists
+    if (addedGemTypes.primary === 'diamond' && diamondSummary.length > 0) {
+      totalCarats += parseFloat(diamondSummary[0].weight || 0) * parseFloat(diamondSummary[0].quantity || 1);
+    }
+
+    // Add primary stone weight if exists
+    if (addedGemTypes.primary === 'stone' && stoneSummary.length > 0) {
+      totalCarats += parseFloat(stoneSummary[0].weight || 0) * parseFloat(stoneSummary[0].quantity || 1);
+    }
+
+    // Add secondary diamond weight if exists
+    if (addedGemTypes.secondary === 'diamond' && diamondSummary.length > 1) {
+      totalCarats += parseFloat(diamondSummary[1].weight || 0) * parseFloat(diamondSummary[1].quantity || 1);
+    }
+
+    // Add secondary stone weight if exists
+    if (addedGemTypes.secondary === 'stone' && stoneSummary.length > 1) {
+      totalCarats += parseFloat(stoneSummary[1].weight || 0) * parseFloat(stoneSummary[1].quantity || 1);
+    }
+
+    // Convert total carats to grams
+    return totalCarats * parseFloat(caratConversion.grams);
+    
+  };
+
+  const handleCheckout = () => {
+    // Save the current state in session storage as backup
+    sessionStorage.setItem('estimationState', JSON.stringify({
+      estimatedItems,
+      addMetal: addMetal[0],
+      diamondSummary,
+      stoneSummary,
+      priceEstimates
+    }));
+    navigate('/checkout', { 
+      state: { 
+        items: estimatedItems
+      }
+    });
+  };
+
+  useEffect(() => {
+    // Try to restore state from location or session storage
+    if (!estimatedItems.length) {
+      const savedState = sessionStorage.getItem('estimationState');
+      if (savedState) {
+        const parsedState = JSON.parse(savedState);
+        setEstimatedItems(parsedState.estimatedItems);
+        setAddMetal(parsedState.addMetal ? [parsedState.addMetal] : []);
+        setDiamondSummary(parsedState.diamondSummary || []);
+        setStoneSummary(parsedState.stoneSummary || []);
+        setPriceEstimates(parsedState.priceEstimates || {
+          pawn: 0,
+          buy: 0,
+          retail: 0
+        });
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    // Focus on shape input when component mounts
+    if (shapeRef.current) {
+      shapeRef.current.focus();
+    }
+  }, []);
+
+  const SliderStyled = styled(Slider)({});
 
   return (
     <Container maxWidth="lg">
@@ -1269,10 +1426,10 @@ const ImagePopup = ({ images, index }) => {
                           <>
                             <img src={diamondShapes[currentShapeIndex]?.image} alt={diamondShapes[currentShapeIndex]?.name} style={{ width: '100px', height: '100px' }} />
                             <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
-                              <IconButton onClick={handlePrevImage} disabled={currentShapeIndex === 0}>
+                              <IconButton onClick={handlePrevShape} disabled={currentShapeIndex === 0}>
                                 <ArrowBackIcon />
                               </IconButton>
-                              <IconButton onClick={handleNextImage} disabled={currentShapeIndex === diamondShapes.length - 1}>
+                              <IconButton onClick={handleNextShape} disabled={currentShapeIndex === diamondShapes.length - 1}>
                                 <ArrowForwardIcon />
                               </IconButton>
                             </Box>
@@ -1282,11 +1439,13 @@ const ImagePopup = ({ images, index }) => {
                     </Grid>
                   <Grid item xs={8} >
                   <FormControl fullWidth variant="outlined" sx={{ width: '90%', ml:2, mt: 1, mb: 2 }}>
-                    <InputLabel>Select Shape</InputLabel>
+                    <InputLabel ref={shapeRef}>Select Shape</InputLabel>
                     <Select
                       value={getCurrentForm().shape || 'Round'} // Default to 'Round'
-                      onChange={handleDiamondChange}
+                      onChange={(e) => handleSelectChange(e, quantityRef, handleDiamondChange)}
                       name="shape"
+                      inputRef={shapeRef}
+                      onKeyDown={(e) => handleEnterKey(e, quantityRef)}
                     >
                       {diamondShapes.map((shape) => (
                         <MenuItem key={shape.name} value={shape.name}>
@@ -1304,7 +1463,11 @@ const ImagePopup = ({ images, index }) => {
                       type="number"
                       value={getCurrentForm().quantity}
                       onChange={handleDiamondChange}
-                      inputProps={{ min: "1" }}
+                      inputRef={quantityRef}
+                      onKeyDown={(e) => handleEnterKey(e, sizeRef)}
+                      InputProps={{
+                        inputProps: { min: "1" }
+                      }}
                       sx={{ width: '90%', ml: 2 }}
                     />
                   </Grid>
@@ -1347,12 +1510,13 @@ const ImagePopup = ({ images, index }) => {
                     <Grid container spacing={2} sx={{ mb: 2 }}>
                       <Grid item xs={12} sm={12}>
                       <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
-                          <InputLabel>Diamond Size</InputLabel>
+                          <InputLabel>Size</InputLabel>
                           <Select
                             fullWidth
                             displayEmpty
                             value={getCurrentForm().size || ''}
                             name="size"
+                            inputRef={sizeRef}
                             onChange={(e) => {
                               const selectedSize = e.target.value;
                               const selectedSizeObj = diamondSizes.find(sizeObj => sizeObj.size === selectedSize);
@@ -1361,7 +1525,13 @@ const ImagePopup = ({ images, index }) => {
                                 size: selectedSize,
                                 weight: selectedSizeObj ? selectedSizeObj.weight : 0
                               }));
+                              if (weightRef?.current) {
+                                setTimeout(() => {
+                                  weightRef.current.focus();
+                                }, 0);
+                              }
                             }}
+                            onKeyDown={(e) => handleEnterKey(e, weightRef)}
                             sx={{ width: '100%' }}
                           >
                             {diamondSizes.map((sizeObj) => (
@@ -1378,8 +1548,24 @@ const ImagePopup = ({ images, index }) => {
                           type="number"
                           value={getCurrentForm().weight}
                           onChange={handleDiamondChange}
-                          inputProps={{ step: "0.01", min: "0" }}
-                          sx={{ width: '100%', mb: 2 }} // Added margin bottom for spacing
+                          inputRef={weightRef}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (colorSliderRef?.current) {
+                                setTimeout(() => {
+                                  const sliderInput = colorSliderRef.current.querySelector('input');
+                                  if (sliderInput) {
+                                    sliderInput.focus();
+                                  }
+                                }, 0);
+                              }
+                            }
+                          }}
+                          InputProps={{
+                            inputProps: { step: "0.01", min: "0" }
+                          }}
+                          sx={{ width: '100%', mb: 2 }}
                         />
                        
                       </Grid>
@@ -1436,7 +1622,8 @@ const ImagePopup = ({ images, index }) => {
                   <Typography gutterBottom>
                     Exact Color: {exactColor}
                   </Typography>
-                  <Slider
+                  <SliderStyled
+                    ref={colorSliderRef}
                     value={colorScale.indexOf(exactColor)}
                     onChange={handleExactColorChange}
                     valueLabelDisplay="auto"
@@ -1445,16 +1632,62 @@ const ImagePopup = ({ images, index }) => {
                     marks
                     min={0}
                     max={colorScale.length - 1}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        setTimeout(() => { 
+                          const clarityContainer = document.querySelector('[data-clarity-container]');
+                          if (clarityContainer) { clarityContainer.focus(); } }, 0); }
+                      }
+                    }
+                    sx={{
+                      '& .MuiSlider-thumb': {
+                        '&:focus': {
+                          outline: '2px solid #1976d2',
+                          outlineOffset: '2px'
+                        }
+                      }
+                    }}
                   />
                 </Box>
 
                 {/* Clarity Selection */}
                 <Typography variant="subtitle1" sx={{ mb: 1 }}>Clarity *</Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-                  {diamondClarity.map((clarity) => (
+                <Box 
+                  data-clarity-container 
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                      e.preventDefault();
+                      const clarityPapers = Array.from(document.querySelectorAll('[data-clarity-paper]'));
+                      let newIndex = selectedClarityIndex;
+                      
+                      if (e.key === 'ArrowLeft') {
+                        newIndex = Math.max(0, selectedClarityIndex - 1);
+                      } else if (e.key === 'ArrowRight') {
+                        newIndex = Math.min(clarityPapers.length - 1, selectedClarityIndex + 1);
+                      }
+
+                      if (diamondClarity[newIndex]) {
+                        setSelectedClarityIndex(newIndex);
+                        setCurrentForm(prev => ({ ...prev, clarity: diamondClarity[newIndex].name }));
+                        clarityPapers[newIndex]?.focus();
+                      }
+                    } else if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (cutRef?.current) {
+                          cutRef.current.focus();
+                    }}
+                  }}
+                  sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}
+                >
+                  {diamondClarity.map((clarity, index) => (
                     <Paper
                       key={clarity.name}
-                      elevation={getCurrentForm().clarity === clarity.name ? 8 : 1}
+                      data-clarity-paper
+                      tabIndex={0}
+                      elevation={selectedClarityIndex === index ? 8 : 1}
                       sx={{
                         p: 1,
                         cursor: 'pointer',
@@ -1464,8 +1697,14 @@ const ImagePopup = ({ images, index }) => {
                         flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        '&:focus': {
+                          outlineOffset: '2px'
+                        }
                       }}
-                      onClick={() => setCurrentForm(prev => ({ ...prev, clarity: clarity.name }))}
+                      onClick={() => {
+                        setSelectedClarityIndex(index);
+                        setCurrentForm(prev => ({ ...prev, clarity: clarity.name }));
+                      }}
                     >
                       <Box
                         component="img"
@@ -1480,7 +1719,122 @@ const ImagePopup = ({ images, index }) => {
                   ))}
                 </Box>
 
-                {renderDiamondEstimationTab()}
+                <Grid container spacing={2} sx={{ p: 2 }}>
+                <Grid container spacing={2} alignItems="center">
+                  <Grid item xs={4}>
+                    <FormControl fullWidth variant="outlined">
+                      <InputLabel ref={cutRef}>Cut *</InputLabel>
+                      <Select
+                        value={getCurrentForm().cut}
+                        name="Cut"
+                        onChange={(e) => {
+                          if (labGrownRef?.current) {
+                            setTimeout(() => {
+                              labGrownRef.current.focus();
+                            }, 0);
+                          setCurrentForm(prev => ({
+                          ...prev, 
+                          cut: e.target.value
+                        }))}}}
+                        inputRef={cutRef}
+                        onKeyDown={(e) => handleEnterKey(e, labGrownRef)}
+                      >
+                        {diamondCuts.map((cut) => (
+                          <MenuItem key={cut.name} value={cut.name}>{cut.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox 
+                          checked={getCurrentForm().labGrown}
+                          onChange={(e) => setCurrentForm(prev => ({
+                            ...prev, 
+                            labGrown: e.target.checked
+                          }))}
+                          name="labGrown"
+                          inputRef={labGrownRef}
+                          onKeyDown={(e) => handleEnterKey(e, addDiamondRef)}
+                        />
+                      }
+                      label="Lab Grown"
+                    />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Grid container spacing={2} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Grid item xs={12}>
+                        <Button 
+                          ref={addDiamondRef}
+                          variant="contained" 
+                          color="primary" 
+                          fullWidth 
+                          onClick={addDiamond}
+                          disabled={!getCurrentForm().shape || !getCurrentForm().clarity || !getCurrentForm().cut}
+                        >
+                          ADD DIAMOND
+                        </Button>
+                      </Grid>
+                    </Grid>
+                  </Grid>
+                </Grid>
+                <Grid item xs={12} sx={{ mt: 2, display: 'flex', alignItems: 'center' }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
+                    Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value $: 
+                  </Typography>
+                  <TextField
+                    size="small"
+                    type="decimal"
+                    value={activeTab === 'primary_gem_diamond' ? estimatedValues.primaryDiamond.toFixed(1) : 
+                      activeTab === 'primary_gem_stone' ? estimatedValues.primaryGemstone.toFixed(1) : 
+                      activeTab === 'secondary_gem_diamond' ? estimatedValues.secondaryDiamond.toFixed(1) : 
+                      estimatedValues.secondaryGemstone.toFixed(1)}
+                    variant="standard"
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value);
+                      if (!isNaN(newValue)) {
+                        if (activeTab === 'primary_gem_diamond') {
+                          setEstimatedValues(prev => ({ ...prev, primaryDiamond: newValue }));
+                        } else if (activeTab === 'primary_gem_stone') {
+                          setEstimatedValues(prev => ({ ...prev, primaryGemstone: newValue }));
+                        } else if (activeTab === 'secondary_gem_diamond') {
+                          setEstimatedValues(prev => ({ ...prev, secondaryDiamond: newValue }));
+                        } else {
+                          setEstimatedValues(prev => ({ ...prev, secondaryGemstone: newValue }));
+                        }
+                      }
+                    }}
+                    inputProps={{ 
+                      min: 0,
+                      inputMode: 'decimal',
+                      pattern: '[0-9]*\\.?[0-9]*',
+                      style: { width: '50px' }
+                    }}
+                    sx={{ 
+                      ml: 1,
+                      '& .MuiInputBase-root': {
+                        ml: 0,
+                        pl: 0
+                      }
+                    }}
+                  />
+                  <Button 
+                    variant="contained" 
+                    color="primary" 
+                    onClick={() => {
+                      if (activeTab.startsWith('primary')) {
+                        setActiveTab('secondary_gem_diamond');
+                      } else {
+                        setActiveTab('primary_gem_diamond');
+                      }
+                    }}
+                    sx={{ ml: 2 }}
+                  >
+                    {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
+                  </Button>
+                </Grid>
+              </Grid>
               </Box>
             )}
 
@@ -1547,9 +1901,9 @@ const ImagePopup = ({ images, index }) => {
             {/* Image Gallery */}
             {images.length > 0 && (
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-              <Button onClick={handlePrevImage} disabled={currentShapeIndex === 0} >◀</Button>
-              <img src={images[currentShapeIndex].url} alt="image" style={{ width: '50%', height: '100px', cursor: 'pointer', objectFit: 'cover' }} onClick={() => openPopup(currentShapeIndex)}/>
-              <Button onClick={handleNextImage} disabled={currentShapeIndex === images.length - 1}>▶</Button>
+              <Button onClick={handlePrevImage} disabled={currentImageIndex === 0} >◀</Button>
+              <img src={images[currentImageIndex].url} alt="image" style={{ width: '50%', height: '100px', cursor: 'pointer', objectFit: 'cover' }} onClick={() => openPopup(currentImageIndex)}/>
+              <Button onClick={handleNextImage} disabled={currentImageIndex === images.length - 1}>▶</Button>
             </Box>
             )}
 
@@ -1557,7 +1911,7 @@ const ImagePopup = ({ images, index }) => {
 
             <Box sx={{ mb: 3 }}>
               <Typography variant="h6" sx={{ mb: 0 }}>Price Estimates</Typography>
-　　             <Box sx={{ 
+              <Box sx={{ 
                 border: '1px solid',
                 borderColor: 'divider',
                 borderRadius: 1,
@@ -1777,169 +2131,158 @@ const ImagePopup = ({ images, index }) => {
       <Grid container spacing={0} sx={{ mt: 0 }}>
         {/* Estimated Items Section */}
         <Grid item xs={12}>
-          <Paper sx={{ p: 3, mt: 3, mb: 3, borderRadius: 2 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>Estimated Items</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {estimatedItems.length} {estimatedItems.length === 1 ? 'item' : 'items'}
-              </Typography>
-            </Box>
-            
-            {estimatedItems.length === 0 ? (
-              <Box sx={{ 
-                py: 6, 
-                display: 'flex', 
-                flexDirection: 'column', 
-                alignItems: 'center',
-                bgcolor: 'grey.50',
-                borderRadius: 1
-              }}>
-                <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
-                  No items estimated yet
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Complete your estimation above to see items here
-                </Typography>
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Image</TableCell>
-                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Description</TableCell>
-                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Transaction Type</TableCell>
-                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Price</TableCell>
-                      <TableCell sx={{ fontWeight: 600, py: 2 }}>Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {estimatedItems.map((item, index) => (
-                      <TableRow 
-                        key={index}
-                        onClick={() => handleOpenDialog(index)}
-                        sx={{ 
-                          cursor: 'pointer',
-                          transition: 'all 0.2s',
-                          '&:hover': {
-                            bgcolor: 'action.hover',
-                            '& .action-buttons': {
-                              opacity: 1
-                            }
+          <Paper elevation={3} sx={{ p: 2, mt: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Estimated Items
+            </Typography>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Image</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Description</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Transaction Type</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Price</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {estimatedItems.map((item, index) => (
+                    <TableRow 
+                      key={index}
+                      onClick={() => handleOpenDialog(index)}
+                      sx={{ 
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        '&:hover': {
+                          bgcolor: 'action.hover',
+                          '& .action-buttons': {
+                            opacity: 1
                           }
-                        }}
-                      >
-                        <TableCell>
-                            <img 
-                              src={item.image?.url || ''} 
-                              alt="No image" 
-                              style={{ width: '50px', height: '50px', objectFit: 'cover' }} 
-                            />
-                        </TableCell>
-                        <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        }
+                      }}
+                    >
+                      <TableCell>
+                          <img 
+                            src={item.image?.url || ''} 
+                            alt="No image" 
+                            style={{ width: '50px', height: '50px', objectFit: 'cover' }} 
+                          />
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Box>
+                            <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
+                              {item.weight}g {item.purity} {item.metal} {item.gems}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {item.category}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Select
+                          value={itemTransactionTypes[index] || 'pawn'}
+                          onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
+                          size="small"
+                          sx={{ 
+                            minWidth: 150,
+                            '& .MuiSelect-select': {
+                              py: 1
+                            }
+                          }}
+                        >
+                          <MenuItem value="pawn">
                             <Box>
-                              <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
-                                {item.weight}g {item.purity} {item.metal} {item.gems}
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                {item.category}
+                              <Typography variant="body2">Pawn</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                ${item.itemPriceEstimates.pawn.toFixed(2)}
                               </Typography>
                             </Box>
-                          </Box>
-                        </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <Select
-                            value={itemTransactionTypes[index] || 'pawn'}
-                            onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
-                            size="small"
-                            sx={{ 
-                              minWidth: 150,
-                              '& .MuiSelect-select': {
+                          </MenuItem>
+                          <MenuItem value="buy">
+                            <Box>
+                              <Typography variant="body2">Buy</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                ${item.itemPriceEstimates.buy.toFixed(2)}
+                              </Typography>
+                            </Box>
+                          </MenuItem>
+                          <MenuItem value="retail">
+                            <Box>
+                              <Typography variant="body2">Retail</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                ${item.itemPriceEstimates.retail.toFixed(2)}
+                              </Typography>
+                            </Box>
+                          </MenuItem>
+                        </Select>
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <TextField 
+                          type="number"
+                          value={(item.itemPriceEstimates[itemTransactionTypes[index]] || 0).toFixed(2)}
+                          //onChange={(e) => handlePriceChange(index, e.target.value)}
+                          InputProps={{
+                            startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                            sx: {
+                              '& input': {
                                 py: 1
                               }
-                            }}
-                          >
-                            <MenuItem value="pawn">
-                              <Box>
-                                <Typography variant="body2">Pawn</Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  ${item.itemPriceEstimates.pawn.toFixed(2)}
-                                </Typography>
-                              </Box>
-                            </MenuItem>
-                            <MenuItem value="buy">
-                              <Box>
-                                <Typography variant="body2">Buy</Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  ${item.itemPriceEstimates.buy.toFixed(2)}
-                                </Typography>
-                              </Box>
-                            </MenuItem>
-                            <MenuItem value="retail">
-                              <Box>
-                                <Typography variant="body2">Retail</Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  ${item.itemPriceEstimates.retail.toFixed(2)}
-                                </Typography>
-                              </Box>
-                            </MenuItem>
-                          </Select>
-                        </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <TextField 
-                            type="number"
-                            value={item.itemPriceEstimates[itemTransactionTypes[index]]}
-                            //onChange={(e) => handlePriceChange(index, e.target.value)}
-                            InputProps={{
-                              startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                              sx: {
-                                '& input': {
-                                  py: 1
-                                }
-                              }
+                            }
+                          }}
+                          size="small"
+                          sx={{ width: 150 }}
+                        />
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Box className="action-buttons" sx={{ 
+                          opacity: 0.7,
+                          transition: 'opacity 0.2s',
+                          display: 'flex',
+                          gap: 1 
+                        }}>
+                          <IconButton
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenDialog(index);
                             }}
                             size="small"
-                            sx={{ width: 150 }}
-                          />
-                        </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <Box className="action-buttons" sx={{ 
-                            opacity: 0.7,
-                            transition: 'opacity 0.2s',
-                            display: 'flex',
-                            gap: 1 
-                          }}>
-                            <IconButton
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenDialog(index);
-                              }}
-                              size="small"
-                              sx={{ color: 'primary.main' }}
-                            >
-                              <EditIcon />
-                            </IconButton>
-                            <IconButton
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const newItems = [...estimatedItems];
-                                newItems.splice(index, 1);
-                                setEstimatedItems(newItems);
-                              }}
-                              size="small"
-                              sx={{ color: 'error.main' }}
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </Box>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
+                            sx={{ color: 'primary.main' }}
+                          >
+                            <EditIcon />
+                          </IconButton>
+                          <IconButton
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const newItems = [...estimatedItems];
+                              newItems.splice(index, 1);
+                              setEstimatedItems(newItems);
+                            }}
+                            size="small"
+                            sx={{ color: 'error.main' }}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleCheckout}
+                disabled={estimatedItems.length === 0}
+                startIcon={<ArrowForwardIcon />}
+              >
+                Proceed to Checkout
+              </Button>
+            </Box>
           </Paper>
         </Grid>
       </Grid>

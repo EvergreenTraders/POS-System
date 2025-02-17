@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import config from '../config';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -19,6 +20,9 @@ import {
     Visibility as VisibilityIcon,
     VisibilityOff as VisibilityOffIcon,
 } from '@mui/icons-material';
+
+const API_BASE_URL = config.apiUrl;
+console.log("url",API_BASE_URL);
 
 const LoginContainer = styled(Box)(({ theme }) => ({
     minHeight: '100vh',
@@ -72,7 +76,7 @@ const Login = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            const response = await axios.post('http://localhost:5000/api/auth/login', {
+            const response = await axios.post(`${API_BASE_URL}/auth/login`, {
                 identifier,
                 password
             });

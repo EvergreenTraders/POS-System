@@ -22,6 +22,9 @@ import {
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
+import config from '../config';
+
+const API_BASE_URL = config.apiUrl;
 
 const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
@@ -82,11 +85,15 @@ function SystemConfig() {
   const [isPerTransaction, setIsPerTransaction] = useState(false);
   const [updateMethod, setUpdateMethod] = useState(null);
   const [spotPrices, setSpotPrices] = useState({});
+  const [caratConversion, setCaratConversion] = useState(null);
+  const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
+  const [gramsInput, setGramsInput] = useState('');
+  const [diamondEstimates, setDiamondEstimates] = useState([]);
 
   useEffect(() => {
     const fetchPreciousMetalNames = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/precious_metal_type');
+        const response = await axios.get(`${API_BASE_URL}/precious_metal_type`);
         const data = response.data;
         const names = {};
         data.forEach(metal => {
@@ -100,7 +107,7 @@ function SystemConfig() {
 
     const fetchLivePricing = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/live_pricing');
+        const response = await axios.get(`${API_BASE_URL}/live_pricing`);
         const data = response.data;
         setIsLivePricing(data[0].islivepricing);
         setIsPerDay(data[0].per_day);
@@ -111,7 +118,7 @@ function SystemConfig() {
     }
     const fetchSpotPrices = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/spot_prices');
+        const response = await axios.get(`${API_BASE_URL}/spot_prices`);
         const prices = {};
         response.data.forEach(item => {
           prices[item.precious_metal_type_id] = item.spot_price;
@@ -124,7 +131,7 @@ function SystemConfig() {
 
     const fetchPriceEstimates = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/price_estimates');
+        const response = await axios.get(`${API_BASE_URL}/price_estimates`);
         const data = response.data;
         const estimates = {};
         data.forEach((estimate) => {
@@ -140,13 +147,46 @@ function SystemConfig() {
       }
     };
 
-    const fetchCameraPreference = async () => {
+    const fetchDiamondEstimates = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/user_preferences');
+        const response = await axios.get(`${API_BASE_URL}/diamond_estimates`);
+        setDiamondEstimates(response.data);
+      } catch (error) {
+        console.error('Error fetching diamond estimates:', error);
+        setSnackbar({
+          open: true,
+          message: 'Failed to fetch diamond estimates',
+          severity: 'error',
+        });
+      }
+    };
+
+    const fetchUserPreference = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/user_preferences`);
         const cameraPreference = response.data.find(pref => pref.preference_name === 'cameraEnabled');
         setIsCameraEnabled(cameraPreference ? cameraPreference.preference_value === 'true' : false);
+        const caratConversionPreference = response.data.find(pref => pref.preference_name === 'caratConversion');
+        setIsCaratConversionEnabled(caratConversionPreference ? caratConversionPreference.preference_value === 'true' : false);
       } catch (error) {
         console.error('Error fetching camera preference:', error);
+      }
+    };
+
+    const fetchCaratConversion = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/carat-conversion`);
+        if (response.data && response.data.length > 0) {
+          setCaratConversion(response.data[0]);
+          setGramsInput(response.data[0].grams.toString());
+        }
+      } catch (error) {
+        console.error('Error fetching carat conversion:', error);
+        setSnackbar({
+          open: true,
+          message: 'Failed to fetch carat conversion data',
+          severity: 'error',
+        });
       }
     };
 
@@ -154,7 +194,9 @@ function SystemConfig() {
     fetchLivePricing();
     fetchSpotPrices();
     fetchPriceEstimates();
-    fetchCameraPreference();
+    fetchDiamondEstimates();
+    fetchUserPreference();
+    fetchCaratConversion();
   }, []);
 
   const handleTabChange = (event, newValue) => {
@@ -207,12 +249,49 @@ function SystemConfig() {
     });
   };
 
+  const handleDiamondEstimatesChange = async (event, transactionType) => {
+    const { value } = event.target;
+    const newValue = Number(value);
+
+    // Update local state first for immediate feedback
+    setDiamondEstimates(prevEstimates => 
+      prevEstimates.map(estimate => 
+        estimate.transaction_type === transactionType 
+          ? { ...estimate, estimate: newValue }
+          : estimate
+      )
+    );
+
+    try {
+      // Then update the server
+      await axios.put(`${API_BASE_URL}/diamond_estimates`, {
+        transaction_type: transactionType,
+        estimate: newValue
+      });
+    } catch (error) {
+      console.error('Error updating diamond estimates:', error);
+      // Revert the local state on error
+      setDiamondEstimates(prevEstimates => 
+        prevEstimates.map(estimate => 
+          estimate.transaction_type === transactionType 
+            ? { ...estimate, estimate: estimate.estimate }
+            : estimate
+        )
+      );
+      setSnackbar({
+        open: true,
+        message: 'Failed to update diamond estimate',
+        severity: 'error',
+      });
+    }
+  };
+
   const handleSaveSettings = async () => {
 
     try {
       // Make a PUT request to update spot prices
       const updateSpotPrices = Object.keys(spotPrices).map(metalType => {
-        return axios.put('http://localhost:5000/api/spot_prices', {
+        return axios.put(`${API_BASE_URL}/spot_prices`, {
           precious_metal_type_id: metalType,
           spot_price: spotPrices[metalType],
         });
@@ -223,7 +302,7 @@ function SystemConfig() {
 
       // Make a PUT request to update price estimates
       const updatePriceEstimates = Object.keys(priceEstimates).map(metalType => {
-        return axios.put('http://localhost:5000/api/price_estimates', {
+        return axios.put(`${API_BASE_URL}/price_estimates`, {
           precious_metal_type_id: metalType,
           estimates: priceEstimates[metalType],
         });
@@ -259,7 +338,7 @@ function SystemConfig() {
     setIsPerTransaction(newPerTransaction);
 
     try {
-      const response = await axios.put('http://localhost:5000/api/live_pricing', {
+      const response = await axios.put(`${API_BASE_URL}/live_pricing`, {
         isLivePricing: newLivePricing,
         per_day: newPerDay,
         per_transaction: newPerTransaction
@@ -273,7 +352,7 @@ function SystemConfig() {
     const newValue = event.target.checked;
     setIsCameraEnabled(newValue);
     try {
-      await axios.put('http://localhost:5000/api/user_preferences', {
+      await axios.put(`${API_BASE_URL}/user_preferences`, {
         name: 'cameraEnabled',
         value: newValue.toString()
       });
@@ -287,6 +366,48 @@ function SystemConfig() {
       });
     }
   };
+
+  const handleCaratConversionUpdate = async (newGrams) => {
+    try {
+      const response = await axios.put(`${API_BASE_URL}/carat-conversion`, {
+        grams: parseFloat(newGrams)
+      });
+      setCaratConversion(response.data);
+      setGramsInput(response.data.grams.toString());
+      setSnackbar({
+        open: true,
+        message: 'Carat conversion updated successfully',
+        severity: 'success',
+      });
+    } catch (error) {
+      console.error('Error updating carat conversion:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update carat conversion',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleCaratConversionToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsCaratConversionEnabled(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/user_preferences`, {
+        name: 'caratConversion',
+        value: newValue.toString()
+      });
+    } catch (error) {
+      console.error('Error updating carat conversion:', error);
+      setIsCaratConversionEnabled(!newValue); 
+      setSnackbar({
+        open: true,
+        message: 'Failed to update carat conversion',
+        severity: 'error',
+      });
+    }
+  };
+
 
   return (
     <Container>
@@ -379,15 +500,54 @@ function SystemConfig() {
           </ConfigSection>
 
           <ConfigSection>
-          <Box display="flex" alignItems="center">
-            <Typography variant="h6" gutterBottom>
-              Live Pricing
-            </Typography>
-            <Switch
-              checked={isLivePricing}
-              onChange={handleLivePricingChange}
-              color="primary"
-            />
+            <Box display="flex" alignItems="center">
+              <Typography variant="h6" gutterBottom>
+                Carat to Gram Conversion
+              </Typography>
+              <Switch
+                checked={isCaratConversionEnabled}
+                onChange={handleCaratConversionToggle}
+                color="primary"
+              />
+            </Box>
+            <Box sx={{ mt: 1 }}>
+              <TextField
+                label="Grams per Carat"
+                type="number"
+                value={gramsInput}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setGramsInput(value);
+                }}
+                onBlur={() => {
+                  if (gramsInput && !isNaN(gramsInput)) {
+                    handleCaratConversionUpdate(gramsInput);
+                  }
+                }}
+                inputProps={{
+                  step: "0.01",
+                  min: "0",
+                }}
+                size="small"
+                sx={{ width: '200px' }}
+                disabled={!isCaratConversionEnabled}
+              />
+              <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                Standard conversion: 1 carat = 0.2 grams
+              </Typography>
+            </Box>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Box display="flex" alignItems="center">
+              <Typography variant="h6" gutterBottom>
+                Live Pricing
+              </Typography>
+              <Switch
+                checked={isLivePricing}
+                onChange={handleLivePricingChange}
+                color="primary"
+              />
             </Box>
             {isLivePricing ? (
               <div>
@@ -435,6 +595,22 @@ function SystemConfig() {
                 Price Estimates
               </Typography>
               <Grid container spacing={3}>
+                {Array.isArray(diamondEstimates) && 
+                  [...diamondEstimates]
+                    .sort((a, b) => a.id - b.id)
+                    .map((estimate) => (
+                      <Grid item xs={12} sm={4} key={estimate.transaction_type}>
+                        <TextField
+                          fullWidth
+                          label={`Diamond ${estimate.transaction_type} Percentage`}
+                          type="number"
+                          value={estimate.estimate}
+                          onChange={(event) => handleDiamondEstimatesChange(event, estimate.transaction_type)}
+                          inputProps={{ min: 0, max: 100 }}
+                        />
+                      </Grid>
+                    ))
+                }
                 {Object.entries(priceEstimates).map(([key, estimates]) => (
                   estimates.map((estimate) => (
                     <Grid item xs={12} sm={4} key={estimate.transaction_type}>

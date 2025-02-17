@@ -43,6 +43,33 @@ BEGIN
         ('Asscher', '/images/stone_shapes/asscher.png');
     END IF;
 
+    -- Stone Types Table
+    drop table if exists stone_types;
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_types') THEN
+        CREATE TABLE stone_types (
+            id SERIAL PRIMARY KEY,
+            color VARCHAR(50) NOT NULL,
+            type VARCHAR(50) NOT NULL,
+            image_path VARCHAR(255)
+        );
+        
+        INSERT INTO stone_types (color, type, image_path) VALUES
+        ('Red', 'Red 1', '/images/stones/red/red 1.png'),
+        ('Red', 'Red 2', '/images/stones/red/red 2.png'),
+        ('Red', 'Red 3', '/images/stones/red/red 3.png'),
+        ('Red', 'Red 4', '/images/stones/red/red 4.png'),
+        ('Red', 'Red 5', '/images/stones/red/red 5.png'),
+        ('Red', 'Red 6', '/images/stones/red/red 6.png'),
+        ('Red', 'Red 7', '/images/stones/red/red 7.png'),
+        ('Red', 'Red 8', '/images/stones/red/red 8.png'),
+        ('Red', 'Red 9', '/images/stones/red/red 9.png'),
+        ('Teal', 'Teal 1', '/images/stones/teal/teal 1.png'),
+        ('Teal', 'Teal 2', '/images/stones/teal/teal 2.png'),
+        ('Teal', 'Teal 3', '/images/stones/teal/teal 3.jpg'),
+        ('Teal', 'Teal 4', '/images/stones/teal/teal 4.png'),
+        ('Teal', 'Teal 5', '/images/stones/teal/teal 5.png');
+    END IF;
+
     -- Stone Type Table
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_type') THEN
         CREATE TABLE stone_type (

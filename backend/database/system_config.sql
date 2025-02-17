@@ -1,5 +1,6 @@
 DO $$
 BEGIN
+
     -- user preferences
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'user_preferences') THEN    
         CREATE TABLE user_preferences (
@@ -11,7 +12,8 @@ BEGIN
             UNIQUE (preference_name) 
         );
         INSERT INTO user_preferences (preference_name, preference_value) VALUES 
-            ('cameraEnabled', TRUE);
+            ('cameraEnabled', TRUE),
+            ('caratConversion', TRUE);
     END IF;
 
     -- live pricing
@@ -52,6 +54,21 @@ BEGIN
         (4, 2500.00);
     END IF;
 
+    -- diamond estimates
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'diamond_estimates') THEN    
+        CREATE TABLE diamond_estimates (
+            id SERIAL PRIMARY KEY,
+            transaction_type VARCHAR(20),
+            estimate DECIMAL(5, 2),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO diamond_estimates (transaction_type, estimate) VALUES
+    ('pawn', 60.00),
+    ('buy', 70.00),
+    ('retail', 80.00);
+    END IF;
+
     -- Drop the price_estimates table if it exists
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'price_estimates') THEN    
     CREATE TABLE price_estimates (
@@ -76,4 +93,19 @@ BEGIN
     (4, 'buy', 40.00),
     (4, 'retail', 50.00);
     END IF;
+
+    -- carat to gram conversion
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'carat_to_gram_conversion') THEN    
+        CREATE TABLE carat_to_gram_conversion (
+            id SERIAL PRIMARY KEY,
+            carats INT NOT NULL DEFAULT 1,
+            grams DECIMAL(10, 2) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        
+        -- Insert default conversion value
+        INSERT INTO carat_to_gram_conversion (carats, grams) VALUES (1, 0.20);
+    END IF;
+
 END $$;
