@@ -12,17 +12,19 @@ import {
   Box
 } from '@mui/material';
 import axios from 'axios';
+import config from '../config';
 
+const API_BASE_URL = config.apiUrl;
 // Constants
 const API_ENDPOINTS = {
-  LIVE_PRICING: 'http://localhost:5000/api/live_pricing',
-  LIVE_SPOT_PRICES: 'http://localhost:5000/api/live_spot_prices',
-  SPOT_PRICES: 'http://localhost:5000/api/spot_prices',
-  PRECIOUS_METAL_TYPE: 'http://localhost:5000/api/precious_metal_type',
-  NON_PRECIOUS_METAL_TYPE: 'http://localhost:5000/api/non_precious_metal_type',
-  METAL_CATEGORY: 'http://localhost:5000/api/metal_category',
-  METAL_COLOR: 'http://localhost:5000/api/metal_color',
-  METAL_PURITY: 'http://localhost:5000/api/metal_purity'
+  LIVE_PRICING: `${API_BASE_URL}/live_pricing`,
+  LIVE_SPOT_PRICES: `${API_BASE_URL}/live_spot_prices`,
+  SPOT_PRICES: `${API_BASE_URL}/spot_prices`,
+  PRECIOUS_METAL_TYPE: `${API_BASE_URL}/precious_metal_type`,
+  NON_PRECIOUS_METAL_TYPE: `${API_BASE_URL}/non_precious_metal_type`,
+  METAL_CATEGORY: `${API_BASE_URL}/metal_category`,
+  METAL_COLOR: `${API_BASE_URL}/metal_color`,
+  METAL_PURITY: `${API_BASE_URL}/metal_purity`
 };
 
 const INITIAL_FORM_STATE = {

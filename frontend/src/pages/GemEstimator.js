@@ -31,6 +31,7 @@ import {
   DialogActions,
   Divider
 } from '@mui/material';
+import config from '../config';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 import MetalEstimator from './MetalEstimator';
@@ -46,6 +47,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
 
 function GemEstimator() {
+  const API_BASE_URL = config.apiUrl;
+
   const navigate = useNavigate();
   const location = useLocation();
   const [metalFormState, setMetalFormState] = useState({});
@@ -233,7 +236,7 @@ function GemEstimator() {
     const fetchAllData = async () => {
       try {
         //Fetch Price Estimate Percentages
-        const priceEstimatePercentagesResponse = await axios.get('http://localhost:5000/api/price_estimates');
+        const priceEstimatePercentagesResponse = await axios.get(`${API_BASE_URL}/price_estimates`);
         const data = priceEstimatePercentagesResponse.data;
         const estimates = {};
         data.forEach((estimate) => {
@@ -246,7 +249,7 @@ function GemEstimator() {
         setPriceEstimatePercentages(estimates);
         
         // Fetch Stone Types
-        const stoneTypesResponse = await axios.get('http://localhost:5000/api/stone_types');
+        const stoneTypesResponse = await axios.get(`${API_BASE_URL}/stone_types`);
         const stoneTypesData = stoneTypesResponse.data;
         setColorSpecificStoneTypes(stoneTypesData);
         
@@ -274,7 +277,7 @@ function GemEstimator() {
         }
 
         // Fetch Stone Shapes
-        const stoneShapesResponse = await axios.get('http://localhost:5000/api/stone_shape');
+        const stoneShapesResponse = await axios.get(`${API_BASE_URL}/stone_shape`);
         const stoneShapesWithImages = stoneShapesResponse.data.map(shape => ({
           name: shape.shape,
           image: shape.image_path.replace('.jpg', '.png')
@@ -282,11 +285,11 @@ function GemEstimator() {
         setStoneShapes(stoneShapesWithImages);
 
         // Fetch Stone Colors
-        const stoneColorsResponse = await axios.get('http://localhost:5000/api/stone_color');
+        const stoneColorsResponse = await axios.get(`${API_BASE_URL}/stone_color`);
         setStoneColors(stoneColorsResponse.data);
 
         // Fetch Diamond Shapes
-        const shapesResponse = await axios.get('http://localhost:5000/api/diamond_shape');
+        const shapesResponse = await axios.get(`${API_BASE_URL}/diamond_shape`);
         const shapesWithImages = shapesResponse.data.map(shape => ({
           name: shape.shape,
           image: shape.image_path.replace('.jpg', '.png')
@@ -294,7 +297,7 @@ function GemEstimator() {
         setDiamondShapes(shapesWithImages);
 
         // Fetch Diamond Clarity
-        const clarityResponse = await axios.get('http://localhost:5000/api/diamond_clarity');
+        const clarityResponse = await axios.get(`${API_BASE_URL}/diamond_clarity`);
         const clarityWithImages = clarityResponse.data.map(clarity => ({
           name: clarity.name,
           image: clarity.image_path
@@ -302,11 +305,11 @@ function GemEstimator() {
         setDiamondClarity(clarityWithImages);
 
         // Fetch Diamond Cuts
-        const cutsResponse = await axios.get('http://localhost:5000/api/diamond_cut');
+        const cutsResponse = await axios.get(`${API_BASE_URL}/diamond_cut`);
         setDiamondCuts(cutsResponse.data);
 
         // Fetch Diamond Colors
-        const diamondColorResponse = await axios.get('http://localhost:5000/api/diamond_color');
+        const diamondColorResponse = await axios.get(`${API_BASE_URL}/diamond_color`);
         setDiamondColors(diamondColorResponse.data);
                 
       } catch (error) {
@@ -316,7 +319,7 @@ function GemEstimator() {
 
     const fetchCaratConversion = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/carat-conversion');
+        const response = await axios.get(`${API_BASE_URL}/carat-conversion`);
         if (response.data && response.data.length > 0) {
           setCaratConversion(response.data[0]);
         }
@@ -327,7 +330,7 @@ function GemEstimator() {
 
     const fetchUserPreference = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/user_preferences');
+        const response = await axios.get(`${API_BASE_URL}/user_preferences`);
         const cameraPreference = response.data.find(pref => pref.preference_name === 'cameraEnabled');
         setIsCameraEnabled(cameraPreference ? cameraPreference.preference_value === 'true' : false);
         const caratConversionPreference = response.data.find(pref => pref.preference_name === 'caratConversion');

@@ -22,6 +22,9 @@ import {
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
+import config from '../config';
+
+const API_BASE_URL = config.apiUrl;
 
 const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
@@ -90,7 +93,7 @@ function SystemConfig() {
   useEffect(() => {
     const fetchPreciousMetalNames = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/precious_metal_type');
+        const response = await axios.get(`${API_BASE_URL}/precious_metal_type`);
         const data = response.data;
         const names = {};
         data.forEach(metal => {
@@ -104,7 +107,7 @@ function SystemConfig() {
 
     const fetchLivePricing = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/live_pricing');
+        const response = await axios.get(`${API_BASE_URL}/live_pricing`);
         const data = response.data;
         setIsLivePricing(data[0].islivepricing);
         setIsPerDay(data[0].per_day);
@@ -115,7 +118,7 @@ function SystemConfig() {
     }
     const fetchSpotPrices = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/spot_prices');
+        const response = await axios.get(`${API_BASE_URL}/spot_prices`);
         const prices = {};
         response.data.forEach(item => {
           prices[item.precious_metal_type_id] = item.spot_price;
@@ -128,7 +131,7 @@ function SystemConfig() {
 
     const fetchPriceEstimates = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/price_estimates');
+        const response = await axios.get(`${API_BASE_URL}/price_estimates`);
         const data = response.data;
         const estimates = {};
         data.forEach((estimate) => {
@@ -146,7 +149,7 @@ function SystemConfig() {
 
     const fetchDiamondEstimates = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/diamond_estimates');
+        const response = await axios.get(`${API_BASE_URL}/diamond_estimates`);
         setDiamondEstimates(response.data);
       } catch (error) {
         console.error('Error fetching diamond estimates:', error);
@@ -160,7 +163,7 @@ function SystemConfig() {
 
     const fetchUserPreference = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/user_preferences');
+        const response = await axios.get(`${API_BASE_URL}/user_preferences`);
         const cameraPreference = response.data.find(pref => pref.preference_name === 'cameraEnabled');
         setIsCameraEnabled(cameraPreference ? cameraPreference.preference_value === 'true' : false);
         const caratConversionPreference = response.data.find(pref => pref.preference_name === 'caratConversion');
@@ -172,7 +175,7 @@ function SystemConfig() {
 
     const fetchCaratConversion = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/carat-conversion');
+        const response = await axios.get(`${API_BASE_URL}/carat-conversion`);
         if (response.data && response.data.length > 0) {
           setCaratConversion(response.data[0]);
           setGramsInput(response.data[0].grams.toString());
@@ -261,7 +264,7 @@ function SystemConfig() {
 
     try {
       // Then update the server
-      await axios.put('http://localhost:5000/api/diamond_estimates', {
+      await axios.put(`${API_BASE_URL}/diamond_estimates`, {
         transaction_type: transactionType,
         estimate: newValue
       });
@@ -288,7 +291,7 @@ function SystemConfig() {
     try {
       // Make a PUT request to update spot prices
       const updateSpotPrices = Object.keys(spotPrices).map(metalType => {
-        return axios.put('http://localhost:5000/api/spot_prices', {
+        return axios.put(`${API_BASE_URL}/spot_prices`, {
           precious_metal_type_id: metalType,
           spot_price: spotPrices[metalType],
         });
@@ -299,7 +302,7 @@ function SystemConfig() {
 
       // Make a PUT request to update price estimates
       const updatePriceEstimates = Object.keys(priceEstimates).map(metalType => {
-        return axios.put('http://localhost:5000/api/price_estimates', {
+        return axios.put(`${API_BASE_URL}/price_estimates`, {
           precious_metal_type_id: metalType,
           estimates: priceEstimates[metalType],
         });
@@ -335,7 +338,7 @@ function SystemConfig() {
     setIsPerTransaction(newPerTransaction);
 
     try {
-      const response = await axios.put('http://localhost:5000/api/live_pricing', {
+      const response = await axios.put(`${API_BASE_URL}/live_pricing`, {
         isLivePricing: newLivePricing,
         per_day: newPerDay,
         per_transaction: newPerTransaction
@@ -349,7 +352,7 @@ function SystemConfig() {
     const newValue = event.target.checked;
     setIsCameraEnabled(newValue);
     try {
-      await axios.put('http://localhost:5000/api/user_preferences', {
+      await axios.put(`${API_BASE_URL}/user_preferences`, {
         name: 'cameraEnabled',
         value: newValue.toString()
       });
@@ -366,7 +369,7 @@ function SystemConfig() {
 
   const handleCaratConversionUpdate = async (newGrams) => {
     try {
-      const response = await axios.put('http://localhost:5000/api/carat-conversion', {
+      const response = await axios.put(`${API_BASE_URL}/carat-conversion`, {
         grams: parseFloat(newGrams)
       });
       setCaratConversion(response.data);
@@ -390,7 +393,7 @@ function SystemConfig() {
     const newValue = event.target.checked;
     setIsCaratConversionEnabled(newValue);
     try {
-      await axios.put('http://localhost:5000/api/user_preferences', {
+      await axios.put(`${API_BASE_URL}/user_preferences`, {
         name: 'caratConversion',
         value: newValue.toString()
       });
