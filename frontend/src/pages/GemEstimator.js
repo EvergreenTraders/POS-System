@@ -70,7 +70,22 @@ function GemEstimator() {
   };
 
   const handleAddMetal = (newItem) => {
-    setAddMetal(prev => [...prev, newItem]); 
+    // Calculate price estimates when metal is added
+    const estimates = calculatePriceEstimates(newItem.estimatedValue);
+    
+    // Add new estimates to existing ones
+    setPriceEstimates(prev => ({
+      pawn: prev.pawn + estimates.pawn,
+      buy: prev.buy + estimates.buy,
+      retail: prev.retail + estimates.retail
+    }));
+    
+    // Add the metal with its price estimates
+    const metalWithEstimates = {
+      ...newItem,
+      priceEstimates: estimates
+    };
+    setAddMetal(prev => [...prev, metalWithEstimates]);
   };
 
   const handleDeleteMetal = (index) => {
@@ -371,7 +386,7 @@ function GemEstimator() {
       retail: totalValue * (retailEstimate / 100)
     });
 
-  }, [totalMetalValue, estimatedValues, priceEstimatePercentages]);
+  }, [priceEstimatePercentages]);
 
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
 
@@ -696,6 +711,19 @@ function GemEstimator() {
     }));
   };
 
+  const calculatePriceEstimates = (metalValue) => {
+    // Calculate different price estimates based on the metal value
+    const pawnEstimate = metalValue * 0.7; // 70% of metal value for pawn
+    const buyEstimate = metalValue * 0.8; // 80% of metal value for buy
+    const retailEstimate = metalValue * 1.5; // 150% of metal value for retail
+
+    return {
+      pawn: pawnEstimate,
+      buy: buyEstimate,
+      retail: retailEstimate
+    };
+  };
+
   const addDiamond = () => {
     const currentForm = getCurrentForm();
     const isPrimary = activeTab.startsWith('primary');
@@ -713,6 +741,16 @@ function GemEstimator() {
       return;
     }
 
+    const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
+    const estimates = calculatePriceEstimates(diamondValue);
+    
+    // Add new estimates to existing ones
+    setPriceEstimates(prev => ({
+      pawn: prev.pawn + estimates.pawn,
+      buy: prev.buy + estimates.buy,
+      retail: prev.retail + estimates.retail
+    }));
+
     const newItem = {
       shape: currentForm.shape,
       clarity: currentForm.clarity,
@@ -724,7 +762,8 @@ function GemEstimator() {
       quantity: currentForm.quantity,
       labGrown: currentForm.labGrown,
       isPrimary: isPrimary,
-      type: 'diamond'
+      type: 'diamond',
+      priceEstimates: estimates
     };
 
     setDiamondSummary(prev => [...prev, newItem]);
@@ -794,6 +833,16 @@ function GemEstimator() {
       return;
     }
 
+    const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
+    const estimates = calculatePriceEstimates(stoneValue);
+    
+    // Add new estimates to existing ones
+    setPriceEstimates(prev => ({
+      pawn: prev.pawn + estimates.pawn,
+      buy: prev.buy + estimates.buy,
+      retail: prev.retail  + estimates.retail
+    }));
+
     const newStone = {
       name: currentForm.name,
       shape: currentForm.shape,
@@ -802,7 +851,8 @@ function GemEstimator() {
       quantity: currentForm.quantity,
       authentic: currentForm.authentic,
       isPrimary: isPrimary,
-      type: 'stone'
+      type: 'stone',
+      priceEstimates: estimates
     };
 
     setStoneSummary(prev => [...prev, newStone]);
