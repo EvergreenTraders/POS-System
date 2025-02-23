@@ -130,9 +130,9 @@ function GemEstimator() {
         buy: priceEstimates.buy,
         retail: priceEstimates.retail
       },
+      transactionType: itemTransactionTypes[estimatedItems.length] || 'pawn',
       image: images.find(img => img.isPrimary) || images[0]
     };
-
     setEstimatedItems(prev => [...prev, newItem]);
 
     // Clear all summaries
@@ -1273,7 +1273,40 @@ function GemEstimator() {
 
   const [itemTransactionTypes, setItemTransactionTypes] = useState({});
 
-  // Add handler for transaction type change
+  useEffect(() => {
+    // Initialize transaction types from existing items or session storage
+    setItemTransactionTypes(prev => {
+      const newTypes = { ...prev };
+      estimatedItems.forEach((item, index) => {
+        // Use the item's transaction type if it exists, otherwise use the previous value or default to 'pawn'
+        newTypes[index] = item.transactionType || prev[index] || 'pawn';
+      });
+      return newTypes;
+    });
+  }, [estimatedItems]);
+
+  useEffect(() => {
+    // Initialize estimated items from location state or session storage
+    if (location.state?.items?.length > 0) {
+      setEstimatedItems(location.state.items);
+    } else {
+      const savedState = sessionStorage.getItem('estimationState');
+      if (savedState) {
+        const parsedState = JSON.parse(savedState);
+        setEstimatedItems(parsedState.estimatedItems || []);
+      }
+    }
+  }, [location.state?.items]);
+
+  useEffect(() => {
+    // Focus on shape input when component mounts
+    if (shapeRef.current) {
+      shapeRef.current.focus();
+    }
+  }, []);
+
+  const SliderStyled = styled(Slider)({});
+
   const handleTransactionTypeChange = (index, value) => {
     setItemTransactionTypes(prev => ({
       ...prev,
@@ -1281,25 +1314,10 @@ function GemEstimator() {
     }));
   };
 
-  useEffect(() => {
-    // Set default transaction type to 'pawn' for new items
-    setItemTransactionTypes(prev => {
-      const newTypes = { ...prev };
-      estimatedItems.forEach((_, index) => {
-        if (!newTypes[index]) {
-          newTypes[index] = 'pawn';
-        }
-      });
-      return newTypes;
-    });
-  }, [estimatedItems]);
-
-  // Add states for dialog
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedItemIndex, setSelectedItemIndex] = useState(null);
   const [itemDetails, setItemDetails] = useState({});
 
-  // Add handlers for dialog
   const handleOpenDialog = (index) => {
     setSelectedItemIndex(index);
     setItemDetails(prev => ({
@@ -1359,21 +1377,27 @@ function GemEstimator() {
 
     // Convert total carats to grams
     return totalCarats * parseFloat(caratConversion.grams);
-    
   };
 
   const handleCheckout = () => {
+    // Update the transaction types for all items
+    const updatedItems = estimatedItems.map((item, index) => ({
+      ...item,
+      transactionType: itemTransactionTypes[index] || item.transactionType || 'pawn'
+    }));
+
     // Save the current state in session storage as backup
     sessionStorage.setItem('estimationState', JSON.stringify({
-      estimatedItems,
+      estimatedItems: updatedItems,
       addMetal: addMetal[0],
       diamondSummary,
       stoneSummary,
       priceEstimates
     }));
+
     navigate('/checkout', { 
       state: { 
-        items: estimatedItems
+        items: updatedItems
       }
     });
   };
@@ -1384,7 +1408,6 @@ function GemEstimator() {
       const savedState = sessionStorage.getItem('estimationState');
       if (savedState) {
         const parsedState = JSON.parse(savedState);
-        setEstimatedItems(parsedState.estimatedItems);
         setAddMetal(parsedState.addMetal ? [parsedState.addMetal] : []);
         setDiamondSummary(parsedState.diamondSummary || []);
         setStoneSummary(parsedState.stoneSummary || []);
@@ -1396,15 +1419,6 @@ function GemEstimator() {
       }
     }
   }, []);
-
-  useEffect(() => {
-    // Focus on shape input when component mounts
-    if (shapeRef.current) {
-      shapeRef.current.focus();
-    }
-  }, []);
-
-  const SliderStyled = styled(Slider)({});
 
   return (
     <Container maxWidth="lg">
