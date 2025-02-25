@@ -662,6 +662,101 @@ app.put('/api/carat-conversion', async (req, res) => {
   }
 });
 
+// Quote Management API Endpoints
+app.post('/api/quotes', async (req, res) => {
+  try {
+    const { items, totalAmount, customerName, customerEmail, customerPhone } = req.body;
+    
+    const result = await pool.query(
+      `INSERT INTO quotes 
+       (items, total_amount, customer_name, customer_email, customer_phone, created_at, status)
+       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, 'pending')
+       RETURNING *`,
+      [JSON.stringify(items), totalAmount, customerName, customerEmail, customerPhone]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error creating quote:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+app.get('/api/quotes', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM quotes 
+       ORDER BY created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching quotes:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+app.get('/api/quotes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM quotes WHERE id = $1',
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Quote not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching quote:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+app.put('/api/quotes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    const result = await pool.query(
+      `UPDATE quotes 
+       SET status = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING *`,
+      [status, id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Quote not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating quote:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+app.delete('/api/quotes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'DELETE FROM quotes WHERE id = $1 RETURNING *',
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Quote not found' });
+    }
+    
+    res.json({ message: 'Quote deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting quote:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);

@@ -18,6 +18,7 @@ import Employees from './pages/Employees';
 import GemEstimator from './pages/GemEstimator';
 import Pawns from './pages/Pawns';
 import Checkout from './pages/Checkout';
+import QuoteManager from './pages/QuoteManager';
 
 const theme = createTheme({
   palette: {
@@ -203,6 +204,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <Checkout />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/quotes"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <QuoteManager />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
