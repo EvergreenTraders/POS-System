@@ -38,9 +38,6 @@ import MetalEstimator from './MetalEstimator';
 import EditIcon from '@mui/icons-material/Edit';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import CloudUpload from '@mui/icons-material/CloudUpload';
-import ImageList from '@mui/material/ImageList';
-import ImageListItem from '@mui/material/ImageListItem';
-import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -71,7 +68,7 @@ function GemEstimator() {
 
   const handleAddMetal = (newItem) => {
     // Calculate price estimates when metal is added
-    const estimates = calculatePriceEstimates(newItem.estimatedValue);
+    const estimates = calculatePriceEstimates(newItem.estimatedValue, newItem.preciousMetalTypeId);
     
     // Add new estimates to existing ones
     setPriceEstimates(prev => ({
@@ -247,6 +244,8 @@ function GemEstimator() {
 
   const [caratConversion, setCaratConversion] = useState(null);
 
+  const [diamondEstimates, setDiamondEstimates] = useState([]);
+
   useEffect(() => {
     const fetchAllData = async () => {
       try {
@@ -355,11 +354,21 @@ function GemEstimator() {
       }
     };
     
+    const fetchDiamondEstimates = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/diamond_estimates`);
+        setDiamondEstimates(response.data);
+      } catch (error) {
+        console.error('Error fetching diamond estimates:', error);
+      }
+    };
+
     fetchAllData();
     fetchDiamondSizes(1);
     fetchUserPreference();
     if(isCaratConversionEnabled) 
         fetchCaratConversion();
+    fetchDiamondEstimates();
   }, []);
 
   const fetchDiamondSizes = async (diamondShapeId) => {
@@ -372,21 +381,20 @@ function GemEstimator() {
     }
   };
   
-  useEffect(() => {
-    // Calculate estimates whenever total values change
-    const totalValue = totalMetalValue + Object.values(estimatedValues).reduce((sum, value) => sum + value, 0);
-    const estimates = priceEstimatePercentages[metalFormState.preciousMetalTypeId] || [];
-    const pawnEstimate = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
-    const buyEstimate = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
-    const retailEstimate = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
+  // useEffect(() => {
+  //   // Calculate estimates whenever total values change
+  //   const totalValue = totalMetalValue + Object.values(estimatedValues).reduce((sum, value) => sum + value, 0);
+  //   const estimates = priceEstimatePercentages[metalFormState.preciousMetalTypeId] || [];
+  //   const pawnEstimate = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
+  //   const buyEstimate = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
+  //   const retailEstimate = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
+  //   setPriceEstimates({
+  //     pawn: totalValue * (pawnEstimate / 100),
+  //     buy: totalValue * (buyEstimate / 100),
+  //     retail: totalValue * (retailEstimate / 100)
+  //   });
 
-    setPriceEstimates({
-      pawn: totalValue * (pawnEstimate / 100),
-      buy: totalValue * (buyEstimate / 100),
-      retail: totalValue * (retailEstimate / 100)
-    });
-
-  }, [priceEstimatePercentages]);
+  // }, [priceEstimatePercentages]);
 
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
 
@@ -711,16 +719,32 @@ function GemEstimator() {
     }));
   };
 
-  const calculatePriceEstimates = (metalValue) => {
-    // Calculate different price estimates based on the metal value
-    const pawnEstimate = metalValue * 0.7; // 70% of metal value for pawn
-    const buyEstimate = metalValue * 0.8; // 80% of metal value for buy
-    const retailEstimate = metalValue * 1.5; // 150% of metal value for retail
+  const calculatePriceEstimates = (value, metalTypeId) => {
+    // Get the estimates for this metal type from priceEstimatePercentages
+    const estimates = priceEstimatePercentages[metalTypeId] || [];
+    
+    // Get percentages for each transaction type, default to 0 if not found
+    const pawnPercent = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
+    const buyPercent = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
+    const retailPercent = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
 
     return {
-      pawn: pawnEstimate,
-      buy: buyEstimate,
-      retail: retailEstimate
+      pawn: value * (pawnPercent / 100),
+      buy: value * (buyPercent / 100),
+      retail: value * (retailPercent / 100)
+    };
+  };
+
+  const calculateDiamondPriceEstimates = (value) => {
+    // Get the estimates for diamonds
+    const pawnPercent = diamondEstimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
+    const buyPercent = diamondEstimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
+    const retailPercent = diamondEstimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
+    console.log("estimate",pawnPercent, buyPercent, retailPercent);
+    return {
+      pawn: value * (pawnPercent / 100),
+      buy: value * (buyPercent / 100),
+      retail: value * (retailPercent / 100)
     };
   };
 
@@ -742,8 +766,7 @@ function GemEstimator() {
     }
 
     const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
-    const estimates = calculatePriceEstimates(diamondValue);
-    
+    const estimates = calculateDiamondPriceEstimates(diamondValue);
     // Add new estimates to existing ones
     setPriceEstimates(prev => ({
       pawn: prev.pawn + estimates.pawn,
@@ -834,13 +857,13 @@ function GemEstimator() {
     }
 
     const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
-    const estimates = calculatePriceEstimates(stoneValue);
+    const estimates = calculateDiamondPriceEstimates(stoneValue);
     
     // Add new estimates to existing ones
     setPriceEstimates(prev => ({
       pawn: prev.pawn + estimates.pawn,
       buy: prev.buy + estimates.buy,
-      retail: prev.retail  + estimates.retail
+      retail: prev.retail + estimates.retail
     }));
 
     const newStone = {
