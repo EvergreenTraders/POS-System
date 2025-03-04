@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import config from '../config';
 import {
   Container,
   Paper,
@@ -31,8 +32,15 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PaymentIcon from '@mui/icons-material/Payment';
 import SaveIcon from '@mui/icons-material/Save';
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000/api';
+const API_BASE_URL = config.apiUrl;
 
+/**
+ * Checkout component manages the checkout process, which includes displaying
+ * an order summary, handling payment details, and allowing users to save
+ * transactions as quotes. It provides functionality for both cash and card
+ * payment methods and validates user input for customer details. The component
+ * also manages the state for loading and displaying notifications.
+ */
 function Checkout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -54,6 +62,7 @@ function Checkout() {
     customerEmail: '',
     customerPhone: '',
   });
+  const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
@@ -79,9 +88,28 @@ function Checkout() {
   };
 
   const handleQuoteInputChange = (field) => (event) => {
+    const value = event.target.value;
+    
+    // Basic validation
+    if (field === 'customerPhone') {
+      // Allow only numbers and basic phone formatting characters
+      if (!/^[0-9+\-() ]*$/.test(value)) {
+        return;
+      }
+    } else if (field === 'customerEmail') {
+      // Basic email format validation
+      if (value && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
+        setSnackbar({
+          open: true,
+          message: 'Please enter a valid email address',
+          severity: 'warning'
+        });
+      }
+    }
+
     setQuoteDetails({
       ...quoteDetails,
-      [field]: event.target.value,
+      [field]: value,
     });
   };
 
@@ -96,27 +124,71 @@ function Checkout() {
     // Navigate to success page or show confirmation
   };
 
+  // Handle saving quote
   const handleSaveQuote = async () => {
-    try {
-      const response = await axios.post(`${API_BASE_URL}/quotes`, {
-        items,
-        totalAmount: calculateTotal(),
-        ...quoteDetails
+    // Validate required fields
+    if (!quoteDetails.customerName || !quoteDetails.customerEmail || !quoteDetails.customerPhone) {
+      setSnackbar({
+        open: true,
+        message: 'Please fill in all required fields',
+        severity: 'error'
       });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const formattedItems = items.map(item => ({
+        transactionType: item.transactionType || 'pawn',
+        estimatedValue: item.estimatedValue,
+        metalPurity: item.purity,
+        weight: item.weight,
+        itemPriceEstimates: item.itemPriceEstimates,
+        category: item.category,
+        metalType: item.metal,
+        primaryGem: item.primaryGem,
+        secondaryGem: item.secondaryGem,
+      }));
+
+      const quoteData = {
+        customerName: quoteDetails.customerName,
+        customerEmail: quoteDetails.customerEmail,
+        customerPhone: quoteDetails.customerPhone,
+        items: formattedItems,
+        totalAmount: calculateTotal()
+      };
+      
+      console.log('Sending quote data:', quoteData);
+      
+      const response = await axios.post(`${config.apiUrl}/quotes`, quoteData);
+      console.log('Quote save response:', response.data);
 
       setSnackbar({
         open: true,
-        message: 'Quote saved successfully! Quote ID: ' + response.data.id,
+        message: 'Quote saved successfully!',
         severity: 'success'
       });
       setQuoteDialogOpen(false);
+      
+      // Clear quote details
+      setQuoteDetails({
+        customerName: '',
+        customerEmail: '',
+        customerPhone: ''
+      });
+      
+      // Navigate back to the previous page after a short delay
+      setTimeout(() => {
+        navigate(-1);
+      }, 2000);
     } catch (error) {
-      console.error('Error saving quote:', error);
       setSnackbar({
         open: true,
-        message: 'Error saving quote. Please try again.',
+        message: error.response?.data?.error || 'Failed to save quote',
         severity: 'error'
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -268,35 +340,43 @@ function Checkout() {
       <Dialog open={quoteDialogOpen} onClose={() => setQuoteDialogOpen(false)}>
         <DialogTitle>Save as Quote</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            Enter customer details to save this transaction as a quote. The customer can complete the transaction later at the same price.
-          </Typography>
-          <TextField
-            fullWidth
-            label="Customer Name"
-            value={quoteDetails.customerName}
-            onChange={handleQuoteInputChange('customerName')}
-            sx={{ mb: 2 }}
-          />
-          <TextField
-            fullWidth
-            label="Customer Email"
-            type="email"
-            value={quoteDetails.customerEmail}
-            onChange={handleQuoteInputChange('customerEmail')}
-            sx={{ mb: 2 }}
-          />
-          <TextField
-            fullWidth
-            label="Customer Phone"
-            value={quoteDetails.customerPhone}
-            onChange={handleQuoteInputChange('customerPhone')}
-          />
+          <Box sx={{ pt: 2 }}>
+            <TextField
+              fullWidth
+              required
+              label="Customer Name"
+              value={quoteDetails.customerName}
+              onChange={handleQuoteInputChange('customerName')}
+              margin="normal"
+            />
+            <TextField
+              fullWidth
+              required
+              label="Customer Email"
+              type="email"
+              value={quoteDetails.customerEmail}
+              onChange={handleQuoteInputChange('customerEmail')}
+              margin="normal"
+            />
+            <TextField
+              fullWidth
+              required
+              label="Customer Phone"
+              value={quoteDetails.customerPhone}
+              onChange={handleQuoteInputChange('customerPhone')}
+              margin="normal"
+            />
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setQuoteDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleSaveQuote} variant="contained" color="primary">
-            Save Quote
+          <Button 
+            onClick={handleSaveQuote}
+            variant="contained" 
+            startIcon={<SaveIcon />}
+            disabled={loading}
+          >
+            {loading ? 'Saving...' : 'Save Quote'}
           </Button>
         </DialogActions>
       </Dialog>

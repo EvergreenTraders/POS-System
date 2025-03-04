@@ -665,20 +665,60 @@ app.put('/api/carat-conversion', async (req, res) => {
 // Quote Management API Endpoints
 app.post('/api/quotes', async (req, res) => {
   try {
-    const { items, totalAmount, customerName, customerEmail, customerPhone } = req.body;
+    const { customerName, customerEmail, customerPhone, items, totalAmount } = req.body;
     
-    const result = await pool.query(
-      `INSERT INTO quotes 
-       (items, total_amount, customer_name, customer_email, customer_phone, created_at, status)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, 'pending')
-       RETURNING *`,
-      [JSON.stringify(items), totalAmount, customerName, customerEmail, customerPhone]
-    );
+    // Validate required fields
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Items array is required and must not be empty' });
+    }
 
-    res.status(201).json(result.rows[0]);
+    // Start a transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Insert into quotes table
+      const quoteQuery = `
+        INSERT INTO quotes (
+          items,
+          total_amount, 
+          customer_name, 
+          customer_email, 
+          customer_phone, 
+          created_at,
+          status
+        )
+        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, 'pending')
+        RETURNING id, items, total_amount, customer_name, customer_email, customer_phone, created_at, status`;
+
+      const quoteResult = await client.query(quoteQuery, [
+        JSON.stringify(items),
+        totalAmount,
+        customerName,
+        customerEmail || null,
+        customerPhone || null
+      ]);
+      
+      
+      await client.query('COMMIT');
+      res.status(201).json({ 
+        message: 'Quote saved successfully',
+        quote: quoteResult.rows[0]
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Database error:', err);
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
-    console.error('Error creating quote:', err);
-    res.status(500).json({ error: 'Internal server error', details: err.message });
+    console.error('Error saving quote:', err);
+    res.status(500).json({ 
+      error: 'Failed to save quote', 
+      details: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 });
 
