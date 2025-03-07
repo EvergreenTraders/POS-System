@@ -19,6 +19,27 @@ const pool = new Pool({
   port: process.env.DB_PORT || 5432,
 });
 
+// Function to update quote days remaining
+const updateQuoteDaysRemaining = async () => {
+  try {
+    await pool.query('SELECT update_quotes_days_remaining()');
+    console.log('Updated quote days remaining successfully');
+  } catch (error) {
+    console.error('Error updating quote days remaining:', error);
+  }
+};
+
+// Schedule daily update of quote days remaining (runs at midnight)
+setInterval(() => {
+  const now = new Date();
+  if (now.getHours() === 0 && now.getMinutes() === 0) {
+    updateQuoteDaysRemaining();
+  }
+}, 60000); // Check every minute
+
+// Run initial update when server starts
+updateQuoteDaysRemaining();
+
 // Test database connection
 pool.connect()
   .then(() => console.log('Database connected successfully'))
@@ -665,7 +686,7 @@ app.put('/api/carat-conversion', async (req, res) => {
 // Quote Management API Endpoints
 app.post('/api/quotes', async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, items, totalAmount } = req.body;
+    const { customerName, customerEmail, customerPhone, items, totalAmount, expiresIn = 30 } = req.body;
     
     // Validate required fields
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -686,25 +707,25 @@ app.post('/api/quotes', async (req, res) => {
           customer_email, 
           customer_phone, 
           created_at,
-          status
+          status,
+          expires_in
         )
-        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, 'pending')
-        RETURNING id, items, total_amount, customer_name, customer_email, customer_phone, created_at, status`;
+        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, 'pending', $6)
+        RETURNING id, items, total_amount, customer_name, customer_email, customer_phone, 
+                  created_at, status, expires_in, days_remaining`;
 
       const quoteResult = await client.query(quoteQuery, [
         JSON.stringify(items),
         totalAmount,
         customerName,
         customerEmail || null,
-        customerPhone || null
+        customerPhone || null,
+        expiresIn
       ]);
       
       
       await client.query('COMMIT');
-      res.status(201).json({ 
-        message: 'Quote saved successfully',
-        quote: quoteResult.rows[0]
-      });
+      res.status(201).json(quoteResult.rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
       console.error('Database error:', err);
@@ -725,7 +746,9 @@ app.post('/api/quotes', async (req, res) => {
 app.get('/api/quotes', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT * FROM quotes 
+      `SELECT id, items, total_amount, customer_name, customer_email, customer_phone, 
+              created_at, updated_at, status, expires_in, days_remaining 
+       FROM quotes 
        ORDER BY created_at DESC`
     );
     res.json(result.rows);
@@ -757,14 +780,33 @@ app.get('/api/quotes/:id', async (req, res) => {
 app.put('/api/quotes/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, expiresIn } = req.body;
     
+    const updateFields = [];
+    const queryParams = [];
+    let paramCounter = 1;
+
+    if (status) {
+      updateFields.push(`status = $${paramCounter}`);
+      queryParams.push(status);
+      paramCounter++;
+    }
+
+    if (expiresIn !== undefined) {
+      updateFields.push(`expires_in = $${paramCounter}`);
+      queryParams.push(expiresIn);
+      paramCounter++;
+    }
+
+    updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
+    queryParams.push(id);
+
     const result = await pool.query(
       `UPDATE quotes 
-       SET status = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2
+       SET ${updateFields.join(', ')}
+       WHERE id = $${paramCounter}
        RETURNING *`,
-      [status, id]
+      queryParams
     );
     
     if (result.rows.length === 0) {
@@ -781,10 +823,9 @@ app.put('/api/quotes/:id', async (req, res) => {
 app.delete('/api/quotes/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query(
-      'DELETE FROM quotes WHERE id = $1 RETURNING *',
-      [id]
-    );
+    
+    const query = 'DELETE FROM quotes WHERE id = $1 RETURNING *';
+    const result = await pool.query(query, [id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Quote not found' });

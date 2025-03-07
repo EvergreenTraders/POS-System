@@ -60,7 +60,7 @@ function Checkout() {
   const [quoteDetails, setQuoteDetails] = useState({
     customerName: '',
     customerEmail: '',
-    customerPhone: '',
+    customerPhone: ''
   });
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({
@@ -161,11 +161,12 @@ function Checkout() {
       console.log('Sending quote data:', quoteData);
       
       const response = await axios.post(`${config.apiUrl}/quotes`, quoteData);
-      console.log('Quote save response:', response.data);
+      const quote = response.data;
+      console.log('Quote save response:', quote);
 
       setSnackbar({
         open: true,
-        message: 'Quote saved successfully!',
+        message: `Quote saved successfully! `,
         severity: 'success'
       });
       setQuoteDialogOpen(false);
@@ -366,6 +367,9 @@ function Checkout() {
               onChange={handleQuoteInputChange('customerPhone')}
               margin="normal"
             />
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+              Quote expiration period is set in the Quote Manager settings
+            </Typography>
           </Box>
         </DialogContent>
         <DialogActions>
