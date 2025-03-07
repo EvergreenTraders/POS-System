@@ -22,7 +22,6 @@ import {
 } from '@mui/icons-material';
 
 const API_BASE_URL = config.apiUrl;
-console.log("url",API_BASE_URL);
 
 const LoginContainer = styled(Box)(({ theme }) => ({
     minHeight: '100vh',

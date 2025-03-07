@@ -270,7 +270,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
   const [isLivePricing, setIsLivePricing] = useState(false);
   const [isPerDay, setIsPerDay] = useState(false);
   const [isPerTransaction, setIsPerTransaction] = useState(false);
-
+  
   const { handleEnterKey, handleSelectChange } = useKeyboardNavigation();
   const { fetchData, fetchAllMetalData } = useMetalAPI();
 

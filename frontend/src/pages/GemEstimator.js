@@ -38,9 +38,6 @@ import MetalEstimator from './MetalEstimator';
 import EditIcon from '@mui/icons-material/Edit';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import CloudUpload from '@mui/icons-material/CloudUpload';
-import ImageList from '@mui/material/ImageList';
-import ImageListItem from '@mui/material/ImageListItem';
-import CloseIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -70,7 +67,22 @@ function GemEstimator() {
   };
 
   const handleAddMetal = (newItem) => {
-    setAddMetal(prev => [...prev, newItem]); 
+    // Calculate price estimates when metal is added
+    const estimates = calculatePriceEstimates(newItem.estimatedValue, newItem.preciousMetalTypeId);
+    
+    // Add new estimates to existing ones
+    setPriceEstimates(prev => ({
+      pawn: prev.pawn + estimates.pawn,
+      buy: prev.buy + estimates.buy,
+      retail: prev.retail + estimates.retail
+    }));
+    
+    // Add the metal with its price estimates
+    const metalWithEstimates = {
+      ...newItem,
+      priceEstimates: estimates
+    };
+    setAddMetal(prev => [...prev, metalWithEstimates]);
   };
 
   const handleDeleteMetal = (index) => {
@@ -101,23 +113,46 @@ function GemEstimator() {
     const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
     const totalWeight = parseFloat(addMetal[0].weight || 0) + gemWeightInGrams;
 
+
+    // Get primary and secondary gem details based on their types
+    let primaryGemDetails = '';
+    let secondaryGemDetails = '';
+
+    if (addedGemTypes.primary === 'diamond' && addedGemTypes.secondary === 'diamond') {
+      // Both are diamonds
+      primaryGemDetails = `${diamondSummary[0].shape} ${diamondSummary[0].clarity} ${diamondSummary[0].color} ${diamondSummary[0].cut}`;
+      secondaryGemDetails = `${diamondSummary[1].shape} ${diamondSummary[1].clarity} ${diamondSummary[1].color} ${diamondSummary[1].cut}`;
+    } else if (addedGemTypes.primary === 'stone' && addedGemTypes.secondary === 'diamond') {
+      // Primary is stone, secondary is diamond
+      primaryGemDetails = `${stoneSummary[0].name} ${stoneSummary[0].shape}`;
+      secondaryGemDetails = `${diamondSummary[0].shape} ${diamondSummary[0].clarity} ${diamondSummary[0].color} ${diamondSummary[0].cut}`;
+    } else if (addedGemTypes.primary === 'diamond' && addedGemTypes.secondary === 'stone') {
+      // Primary is diamond, secondary is stone
+      primaryGemDetails = `${diamondSummary[0].shape} ${diamondSummary[0].clarity} ${diamondSummary[0].color} ${diamondSummary[0].cut}`;
+      secondaryGemDetails = `${stoneSummary[0].name} ${stoneSummary[0].shape}`;
+    } else if (addedGemTypes.primary === 'stone' && addedGemTypes.secondary === 'stone') {
+      // Both are stones
+      primaryGemDetails = `${stoneSummary[0].name} ${stoneSummary[0].shape}`;
+      secondaryGemDetails = `${stoneSummary[1].name} ${stoneSummary[1].shape}`;
+    }
+
     const newItem = {
       weight: totalWeight.toFixed(2),
       metal: addMetal[0].preciousMetalType === 'Gold' ? 
         getInitials(addMetal[0].jewelryColor) + getInitials(addMetal[0].preciousMetalType) :
         getInitials(addMetal[0].preciousMetalType),
       purity: addMetal[0].purity?.purity || addMetal[0].purity.value,
-      gems: (addedGemTypes.primary ? (addedGemTypes.primary === 'diamond' ? 
-            `${diamondSummary[0].shape}` : `${stoneSummary[0].name}`) : ''), 
+      primaryGem: primaryGemDetails,
+      secondaryGem: secondaryGemDetails,
       category: addMetal[0].metalCategory,
       itemPriceEstimates: {
         pawn: priceEstimates.pawn,
         buy: priceEstimates.buy,
         retail: priceEstimates.retail
       },
+      transactionType: itemTransactionTypes[estimatedItems.length] || 'pawn',
       image: images.find(img => img.isPrimary) || images[0]
     };
-
     setEstimatedItems(prev => [...prev, newItem]);
 
     // Clear all summaries
@@ -232,6 +267,8 @@ function GemEstimator() {
 
   const [caratConversion, setCaratConversion] = useState(null);
 
+  const [diamondEstimates, setDiamondEstimates] = useState([]);
+
   useEffect(() => {
     const fetchAllData = async () => {
       try {
@@ -340,11 +377,21 @@ function GemEstimator() {
       }
     };
     
+    const fetchDiamondEstimates = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/diamond_estimates`);
+        setDiamondEstimates(response.data);
+      } catch (error) {
+        console.error('Error fetching diamond estimates:', error);
+      }
+    };
+
     fetchAllData();
     fetchDiamondSizes(1);
     fetchUserPreference();
     if(isCaratConversionEnabled) 
         fetchCaratConversion();
+    fetchDiamondEstimates();
   }, []);
 
   const fetchDiamondSizes = async (diamondShapeId) => {
@@ -357,21 +404,20 @@ function GemEstimator() {
     }
   };
   
-  useEffect(() => {
-    // Calculate estimates whenever total values change
-    const totalValue = totalMetalValue + Object.values(estimatedValues).reduce((sum, value) => sum + value, 0);
-    const estimates = priceEstimatePercentages[metalFormState.preciousMetalTypeId] || [];
-    const pawnEstimate = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
-    const buyEstimate = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
-    const retailEstimate = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
+  // useEffect(() => {
+  //   // Calculate estimates whenever total values change
+  //   const totalValue = totalMetalValue + Object.values(estimatedValues).reduce((sum, value) => sum + value, 0);
+  //   const estimates = priceEstimatePercentages[metalFormState.preciousMetalTypeId] || [];
+  //   const pawnEstimate = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
+  //   const buyEstimate = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
+  //   const retailEstimate = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
+  //   setPriceEstimates({
+  //     pawn: totalValue * (pawnEstimate / 100),
+  //     buy: totalValue * (buyEstimate / 100),
+  //     retail: totalValue * (retailEstimate / 100)
+  //   });
 
-    setPriceEstimates({
-      pawn: totalValue * (pawnEstimate / 100),
-      buy: totalValue * (buyEstimate / 100),
-      retail: totalValue * (retailEstimate / 100)
-    });
-
-  }, [totalMetalValue, estimatedValues, priceEstimatePercentages]);
+  // }, [priceEstimatePercentages]);
 
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
 
@@ -696,6 +742,34 @@ function GemEstimator() {
     }));
   };
 
+  const calculatePriceEstimates = (value, metalTypeId) => {
+    // Get the estimates for this metal type from priceEstimatePercentages
+    const estimates = priceEstimatePercentages[metalTypeId] || [];
+    
+    // Get percentages for each transaction type, default to 0 if not found
+    const pawnPercent = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
+    const buyPercent = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
+    const retailPercent = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
+
+    return {
+      pawn: value * (pawnPercent / 100),
+      buy: value * (buyPercent / 100),
+      retail: value * (retailPercent / 100)
+    };
+  };
+
+  const calculateDiamondPriceEstimates = (value) => {
+    // Get the estimates for diamonds
+    const pawnPercent = diamondEstimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
+    const buyPercent = diamondEstimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
+    const retailPercent = diamondEstimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
+    return {
+      pawn: value * (pawnPercent / 100),
+      buy: value * (buyPercent / 100),
+      retail: value * (retailPercent / 100)
+    };
+  };
+
   const addDiamond = () => {
     const currentForm = getCurrentForm();
     const isPrimary = activeTab.startsWith('primary');
@@ -713,6 +787,15 @@ function GemEstimator() {
       return;
     }
 
+    const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
+    const estimates = calculateDiamondPriceEstimates(diamondValue);
+    // Add new estimates to existing ones
+    setPriceEstimates(prev => ({
+      pawn: prev.pawn + estimates.pawn,
+      buy: prev.buy + estimates.buy,
+      retail: prev.retail + estimates.retail
+    }));
+    
     const newItem = {
       shape: currentForm.shape,
       clarity: currentForm.clarity,
@@ -724,14 +807,11 @@ function GemEstimator() {
       quantity: currentForm.quantity,
       labGrown: currentForm.labGrown,
       isPrimary: isPrimary,
-      type: 'diamond'
+      type: 'diamond',
+      priceEstimates: estimates
     };
 
-    setDiamondSummary(prev => [...prev, newItem]);
-    setAddedGemTypes(prev => ({
-      ...prev,
-      [gemPosition]: 'diamond'
-    }));
+    handleAddDiamond(newItem, isPrimary);
     
     // Reset the current form after adding
     const resetForm = {
@@ -794,6 +874,16 @@ function GemEstimator() {
       return;
     }
 
+    const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
+    const estimates = calculateDiamondPriceEstimates(stoneValue);
+    
+    // Add new estimates to existing ones
+    setPriceEstimates(prev => ({
+      pawn: prev.pawn + estimates.pawn,
+      buy: prev.buy + estimates.buy,
+      retail: prev.retail + estimates.retail
+    }));
+
     const newStone = {
       name: currentForm.name,
       shape: currentForm.shape,
@@ -802,14 +892,11 @@ function GemEstimator() {
       quantity: currentForm.quantity,
       authentic: currentForm.authentic,
       isPrimary: isPrimary,
-      type: 'stone'
+      type: 'stone',
+      priceEstimates: estimates
     };
 
-    setStoneSummary(prev => [...prev, newStone]);
-    setAddedGemTypes(prev => ({
-      ...prev,
-      [gemPosition]: 'stone'
-    }));
+    handleAddStone(newStone, isPrimary);
 
     // Reset the form after adding
     if (activeTab.startsWith('primary')) {
@@ -1223,7 +1310,40 @@ function GemEstimator() {
 
   const [itemTransactionTypes, setItemTransactionTypes] = useState({});
 
-  // Add handler for transaction type change
+  useEffect(() => {
+    // Initialize transaction types from existing items or session storage
+    setItemTransactionTypes(prev => {
+      const newTypes = { ...prev };
+      estimatedItems.forEach((item, index) => {
+        // Use the item's transaction type if it exists, otherwise use the previous value or default to 'pawn'
+        newTypes[index] = item.transactionType || prev[index] || 'pawn';
+      });
+      return newTypes;
+    });
+  }, [estimatedItems]);
+
+  useEffect(() => {
+    // Initialize estimated items from location state or session storage
+    if (location.state?.items?.length > 0) {
+      setEstimatedItems(location.state.items);
+    } else {
+      const savedState = sessionStorage.getItem('estimationState');
+      if (savedState) {
+        const parsedState = JSON.parse(savedState);
+        setEstimatedItems(parsedState.estimatedItems || []);
+      }
+    }
+  }, [location.state?.items]);
+
+  useEffect(() => {
+    // Focus on shape input when component mounts
+    if (shapeRef.current) {
+      shapeRef.current.focus();
+    }
+  }, []);
+
+  const SliderStyled = styled(Slider)({});
+
   const handleTransactionTypeChange = (index, value) => {
     setItemTransactionTypes(prev => ({
       ...prev,
@@ -1231,25 +1351,10 @@ function GemEstimator() {
     }));
   };
 
-  useEffect(() => {
-    // Set default transaction type to 'pawn' for new items
-    setItemTransactionTypes(prev => {
-      const newTypes = { ...prev };
-      estimatedItems.forEach((_, index) => {
-        if (!newTypes[index]) {
-          newTypes[index] = 'pawn';
-        }
-      });
-      return newTypes;
-    });
-  }, [estimatedItems]);
-
-  // Add states for dialog
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedItemIndex, setSelectedItemIndex] = useState(null);
   const [itemDetails, setItemDetails] = useState({});
 
-  // Add handlers for dialog
   const handleOpenDialog = (index) => {
     setSelectedItemIndex(index);
     setItemDetails(prev => ({
@@ -1309,21 +1414,27 @@ function GemEstimator() {
 
     // Convert total carats to grams
     return totalCarats * parseFloat(caratConversion.grams);
-    
   };
 
   const handleCheckout = () => {
+    // Update the transaction types for all items
+    const updatedItems = estimatedItems.map((item, index) => ({
+      ...item,
+      transactionType: itemTransactionTypes[index] || item.transactionType || 'pawn'
+    }));
+
     // Save the current state in session storage as backup
     sessionStorage.setItem('estimationState', JSON.stringify({
-      estimatedItems,
+      estimatedItems: updatedItems,
       addMetal: addMetal[0],
       diamondSummary,
       stoneSummary,
       priceEstimates
     }));
+
     navigate('/checkout', { 
       state: { 
-        items: estimatedItems
+        items: updatedItems
       }
     });
   };
@@ -1334,7 +1445,6 @@ function GemEstimator() {
       const savedState = sessionStorage.getItem('estimationState');
       if (savedState) {
         const parsedState = JSON.parse(savedState);
-        setEstimatedItems(parsedState.estimatedItems);
         setAddMetal(parsedState.addMetal ? [parsedState.addMetal] : []);
         setDiamondSummary(parsedState.diamondSummary || []);
         setStoneSummary(parsedState.stoneSummary || []);
@@ -1347,14 +1457,41 @@ function GemEstimator() {
     }
   }, []);
 
-  useEffect(() => {
-    // Focus on shape input when component mounts
-    if (shapeRef.current) {
-      shapeRef.current.focus();
-    }
-  }, []);
+  const handleAddDiamond = (newDiamond, isPrimary = true) => {
+    // Calculate price estimates for the diamond
+    const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
+    
+    // Add the diamond with its value
+    const diamondWithValue = {
+      ...newDiamond,
+      estimatedValue: diamondValue
+    };
+    setDiamondSummary(prev => [...prev, diamondWithValue]);
+    
+    // Update the added gem types
+    setAddedGemTypes(prev => ({
+      ...prev,
+      [isPrimary ? 'primary' : 'secondary']: 'diamond'
+    }));
+  };
 
-  const SliderStyled = styled(Slider)({});
+  const handleAddStone = (newStone, isPrimary = true) => {
+    // Calculate price estimates for the stone
+    const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
+    
+    // Add the stone with its value
+    const stoneWithValue = {
+      ...newStone,
+      estimatedValue: stoneValue
+    };
+    setStoneSummary(prev => [...prev, stoneWithValue]);
+    
+    // Update the added gem types
+    setAddedGemTypes(prev => ({
+      ...prev,
+      [isPrimary ? 'primary' : 'secondary']: 'stone'
+    }));
+  };
 
   return (
     <Container maxWidth="lg">

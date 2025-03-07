@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import config from '../config';
 import {
   Container,
   Paper,
@@ -19,10 +21,26 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PaymentIcon from '@mui/icons-material/Payment';
+import SaveIcon from '@mui/icons-material/Save';
 
+const API_BASE_URL = config.apiUrl;
+
+/**
+ * Checkout component manages the checkout process, which includes displaying
+ * an order summary, handling payment details, and allowing users to save
+ * transactions as quotes. It provides functionality for both cash and card
+ * payment methods and validates user input for customer details. The component
+ * also manages the state for loading and displaying notifications.
+ */
 function Checkout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -35,6 +53,20 @@ function Checkout() {
     expiryDate: '',
     cvv: '',
     cardholderName: '',
+  });
+
+  // Quote related states
+  const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
+  const [quoteDetails, setQuoteDetails] = useState({
+    customerName: '',
+    customerEmail: '',
+    customerPhone: ''
+  });
+  const [loading, setLoading] = useState(false);
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'success'
   });
 
   const calculateTotal = () => {
@@ -55,6 +87,32 @@ function Checkout() {
     });
   };
 
+  const handleQuoteInputChange = (field) => (event) => {
+    const value = event.target.value;
+    
+    // Basic validation
+    if (field === 'customerPhone') {
+      // Allow only numbers and basic phone formatting characters
+      if (!/^[0-9+\-() ]*$/.test(value)) {
+        return;
+      }
+    } else if (field === 'customerEmail') {
+      // Basic email format validation
+      if (value && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
+        setSnackbar({
+          open: true,
+          message: 'Please enter a valid email address',
+          severity: 'warning'
+        });
+      }
+    }
+
+    setQuoteDetails({
+      ...quoteDetails,
+      [field]: value,
+    });
+  };
+
   const handleSubmit = () => {
     // Here you would typically process the payment
     console.log('Processing payment:', {
@@ -64,6 +122,71 @@ function Checkout() {
       items,
     });
     // Navigate to success page or show confirmation
+  };
+
+  // Handle saving quote
+  const handleSaveQuote = async () => {
+    // Validate required fields
+    if (!quoteDetails.customerName || !quoteDetails.customerEmail || !quoteDetails.customerPhone) {
+      setSnackbar({
+        open: true,
+        message: 'Please fill in all required fields',
+        severity: 'error'
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const formattedItems = items.map(item => ({
+        transactionType: item.transactionType || 'pawn',
+        estimatedValue: item.estimatedValue,
+        metalPurity: item.purity,
+        weight: item.weight,
+        itemPriceEstimates: item.itemPriceEstimates,
+        category: item.category,
+        metalType: item.metal,
+        primaryGem: item.primaryGem,
+        secondaryGem: item.secondaryGem,
+      }));
+
+      const quoteData = {
+        customerName: quoteDetails.customerName,
+        customerEmail: quoteDetails.customerEmail,
+        customerPhone: quoteDetails.customerPhone,
+        items: formattedItems,
+        totalAmount: calculateTotal()
+      };
+            
+      const response = await axios.post(`${config.apiUrl}/quotes`, quoteData);
+
+      setSnackbar({
+        open: true,
+        message: `Quote saved successfully! `,
+        severity: 'success'
+      });
+      setQuoteDialogOpen(false);
+      
+      // Clear quote details
+      setQuoteDetails({
+        customerName: '',
+        customerEmail: '',
+        customerPhone: ''
+      });
+      
+      // Navigate back to the previous page after a short delay
+      setTimeout(() => {
+        navigate(-1);
+      }, 2000);
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to save quote',
+        severity: 'error'
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -97,32 +220,22 @@ function Checkout() {
                     {items.map((item, index) => (
                       <TableRow key={index}>
                         <TableCell>
-                          <Typography variant="body2">
-                            {item.weight}g {item.purity} {item.metal} {item.gems}
-                          </Typography>
-                          <Typography variant="caption" color="textSecondary">
-                            {item.category}
-                          </Typography>
+                          {item.weight}g {item.metal} {item.type === 'diamond' ? '(Diamond)' : item.type === 'stone' ? '(Stone)' : ''}
                         </TableCell>
-                        <TableCell>{item.transactionType || 'pawn'}</TableCell>
+                        <TableCell>{item.transactionType}</TableCell>
                         <TableCell align="right">
-                          ${item.itemPriceEstimates[item.transactionType || 'pawn'].toFixed(2)}
+                          ${item.itemPriceEstimates[item.transactionType]?.toFixed(2)}
                         </TableCell>
                       </TableRow>
                     ))}
-                    <TableRow>
-                      <TableCell colSpan={2}>
-                        <Typography variant="subtitle1">Total</Typography>
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography variant="subtitle1">
-                          ${calculateTotal().toFixed(2)}
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
                   </TableBody>
                 </Table>
               </TableContainer>
+              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+                <Typography variant="h6">
+                  Total: ${calculateTotal().toFixed(2)}
+                </Typography>
+              </Box>
             </Paper>
           </Grid>
 
@@ -130,9 +243,9 @@ function Checkout() {
           <Grid item xs={12} md={4}>
             <Paper elevation={3} sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>
-                Payment Method
+                Payment Details
               </Typography>
-              <FormControl component="fieldset">
+              <FormControl component="fieldset" sx={{ mb: 2 }}>
                 <RadioGroup
                   value={paymentMethod}
                   onChange={handlePaymentMethodChange}
@@ -150,74 +263,134 @@ function Checkout() {
                 </RadioGroup>
               </FormControl>
 
-              <Box sx={{ mt: 3 }}>
-                {paymentMethod === 'cash' ? (
+              {paymentMethod === 'cash' ? (
+                <TextField
+                  fullWidth
+                  label="Cash Amount"
+                  type="number"
+                  value={paymentDetails.cashAmount}
+                  onChange={handleInputChange('cashAmount')}
+                  sx={{ mb: 2 }}
+                />
+              ) : (
+                <>
                   <TextField
                     fullWidth
-                    label="Cash Amount"
-                    type="number"
-                    value={paymentDetails.cashAmount}
-                    onChange={handleInputChange('cashAmount')}
-                    InputProps={{
-                      startAdornment: '$',
-                    }}
+                    label="Card Number"
+                    value={paymentDetails.cardNumber}
+                    onChange={handleInputChange('cardNumber')}
                     sx={{ mb: 2 }}
                   />
-                ) : (
-                  <>
-                    <TextField
-                      fullWidth
-                      label="Card Number"
-                      value={paymentDetails.cardNumber}
-                      onChange={handleInputChange('cardNumber')}
-                      sx={{ mb: 2 }}
-                    />
-                    <Grid container spacing={2}>
-                      <Grid item xs={6}>
-                        <TextField
-                          fullWidth
-                          label="Expiry Date"
-                          placeholder="MM/YY"
-                          value={paymentDetails.expiryDate}
-                          onChange={handleInputChange('expiryDate')}
-                        />
-                      </Grid>
-                      <Grid item xs={6}>
-                        <TextField
-                          fullWidth
-                          label="CVV"
-                          type="password"
-                          value={paymentDetails.cvv}
-                          onChange={handleInputChange('cvv')}
-                        />
-                      </Grid>
+                  <Grid container spacing={2}>
+                    <Grid item xs={6}>
+                      <TextField
+                        fullWidth
+                        label="Expiry Date"
+                        placeholder="MM/YY"
+                        value={paymentDetails.expiryDate}
+                        onChange={handleInputChange('expiryDate')}
+                      />
                     </Grid>
-                    <TextField
-                      fullWidth
-                      label="Cardholder Name"
-                      value={paymentDetails.cardholderName}
-                      onChange={handleInputChange('cardholderName')}
-                      sx={{ mt: 2 }}
-                    />
-                  </>
-                )}
+                    <Grid item xs={6}>
+                      <TextField
+                        fullWidth
+                        label="CVV"
+                        type="password"
+                        value={paymentDetails.cvv}
+                        onChange={handleInputChange('cvv')}
+                      />
+                    </Grid>
+                  </Grid>
+                  <TextField
+                    fullWidth
+                    label="Cardholder Name"
+                    value={paymentDetails.cardholderName}
+                    onChange={handleInputChange('cardholderName')}
+                    sx={{ mt: 2 }}
+                  />
+                </>
+              )}
+              {/* Action Buttons */}
+              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
+                <Button
+                  variant="outlined"
+                  startIcon={<SaveIcon />}
+                  onClick={() => setQuoteDialogOpen(true)}
+                >
+                  Save as Quote
+                </Button>
+                <Button
+                  variant="contained"
+                  startIcon={<PaymentIcon />}
+                  onClick={handleSubmit}
+                  color="primary"
+                >
+                  Process Payment
+                </Button>
               </Box>
-
-              <Button
-                fullWidth
-                variant="contained"
-                color="primary"
-                size="large"
-                onClick={handleSubmit}
-                startIcon={<PaymentIcon />}
-                sx={{ mt: 3 }}
-              >
-                Pay ${calculateTotal().toFixed(2)}
-              </Button>
             </Paper>
           </Grid>
         </Grid>
       </Box>
+
+      {/* Quote Dialog */}
+      <Dialog open={quoteDialogOpen} onClose={() => setQuoteDialogOpen(false)}>
+        <DialogTitle>Save as Quote</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <TextField
+              fullWidth
+              required
+              label="Customer Name"
+              value={quoteDetails.customerName}
+              onChange={handleQuoteInputChange('customerName')}
+              margin="normal"
+            />
+            <TextField
+              fullWidth
+              required
+              label="Customer Email"
+              type="email"
+              value={quoteDetails.customerEmail}
+              onChange={handleQuoteInputChange('customerEmail')}
+              margin="normal"
+            />
+            <TextField
+              fullWidth
+              required
+              label="Customer Phone"
+              value={quoteDetails.customerPhone}
+              onChange={handleQuoteInputChange('customerPhone')}
+              margin="normal"
+            />
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+              Quote expiration period is set in the Quote Manager settings
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setQuoteDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={handleSaveQuote}
+            variant="contained" 
+            startIcon={<SaveIcon />}
+            disabled={loading}
+          >
+            {loading ? 'Saving...' : 'Save Quote'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+      >
+        <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }

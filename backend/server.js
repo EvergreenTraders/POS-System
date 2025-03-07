@@ -19,6 +19,27 @@ const pool = new Pool({
   port: process.env.DB_PORT || 5432,
 });
 
+// Function to update quote days remaining
+const updateQuoteDaysRemaining = async () => {
+  try {
+    await pool.query('SELECT update_quotes_days_remaining()');
+    console.log('Updated quote days remaining successfully');
+  } catch (error) {
+    console.error('Error updating quote days remaining:', error);
+  }
+};
+
+// Schedule daily update of quote days remaining (runs at midnight)
+setInterval(() => {
+  const now = new Date();
+  if (now.getHours() === 0 && now.getMinutes() === 0) {
+    updateQuoteDaysRemaining();
+  }
+}, 60000); // Check every minute
+
+// Run initial update when server starts
+updateQuoteDaysRemaining();
+
 // Test database connection
 pool.connect()
   .then(() => console.log('Database connected successfully'))
@@ -659,6 +680,300 @@ app.put('/api/carat-conversion', async (req, res) => {
   } catch (error) {
     console.error('Error updating carat conversion:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Quote Management API Endpoints
+app.post('/api/quotes', async (req, res) => {
+  try {
+    const { customerName, customerEmail, customerPhone, items, totalAmount, expiresIn = 30 } = req.body;
+    
+    // Validate required fields
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Items array is required and must not be empty' });
+    }
+
+    // Start a transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Insert into quotes table
+      const quoteQuery = `
+        INSERT INTO quotes (
+          items,
+          total_amount, 
+          customer_name, 
+          customer_email, 
+          customer_phone, 
+          created_at,
+          status,
+          expires_in
+        )
+        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, 'pending', $6)
+        RETURNING id, items, total_amount, customer_name, customer_email, customer_phone, 
+                  created_at, status, expires_in, days_remaining`;
+
+      const quoteResult = await client.query(quoteQuery, [
+        JSON.stringify(items),
+        totalAmount,
+        customerName,
+        customerEmail || null,
+        customerPhone || null,
+        expiresIn
+      ]);
+      
+      
+      await client.query('COMMIT');
+      res.status(201).json(quoteResult.rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Database error:', err);
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Error saving quote:', err);
+    res.status(500).json({ 
+      error: 'Failed to save quote', 
+      details: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  }
+});
+
+app.get('/api/quotes', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, items, total_amount, customer_name, customer_email, customer_phone, 
+              created_at, updated_at, status, expires_in, days_remaining 
+       FROM quotes 
+       ORDER BY created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching quotes:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+app.get('/api/quotes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM quotes WHERE id = $1',
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Quote not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching quote:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+app.put('/api/quotes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, expiresIn } = req.body;
+    
+    const updateFields = [];
+    const queryParams = [];
+    let paramCounter = 1;
+
+    if (status) {
+      updateFields.push(`status = $${paramCounter}`);
+      queryParams.push(status);
+      paramCounter++;
+    }
+
+    if (expiresIn !== undefined) {
+      updateFields.push(`expires_in = $${paramCounter}`);
+      queryParams.push(expiresIn);
+      paramCounter++;
+    }
+
+    updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
+    queryParams.push(id);
+
+    const result = await pool.query(
+      `UPDATE quotes 
+       SET ${updateFields.join(', ')}
+       WHERE id = $${paramCounter}
+       RETURNING *`,
+      queryParams
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Quote not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating quote:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+app.delete('/api/quotes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const query = 'DELETE FROM quotes WHERE id = $1 RETURNING *';
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Quote not found' });
+    }
+    
+    res.json({ message: 'Quote deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting quote:', err);
+    res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+// Quote Expiration Configuration API Endpoints
+app.get('/api/quote-expiration/config', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id,
+        days,
+        created_at,
+        updated_at,
+        created_by,
+        updated_by
+      FROM quote_expiration 
+      ORDER BY id DESC 
+      LIMIT 1
+    `);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No quote expiration configuration found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching quote expiration config:', error);
+    res.status(500).json({ error: 'Failed to fetch quote expiration configuration' });
+  }
+});
+
+app.post('/api/quote-expiration/config', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { days, created_by } = req.body;
+    
+    if (!days || days < 1) {
+      return res.status(400).json({ error: 'Days must be a positive number' });
+    }
+
+    await client.query('BEGIN');
+
+    // Insert new configuration
+    const insertResult = await client.query(`
+      INSERT INTO quote_expiration (days, created_by)
+      VALUES ($1, $2)
+      RETURNING id, days, created_at, created_by
+    `, [days, created_by || 'system']);
+
+    // Update expired quotes with new configuration
+    await client.query(`
+      UPDATE quotes 
+      SET status = 'expired' 
+      WHERE status = 'pending' 
+      AND created_at < NOW() - INTERVAL '1 day' * $1
+    `, [days]);
+
+    await client.query('COMMIT');
+    
+    res.status(201).json({
+      message: 'Quote expiration configuration created successfully',
+      config: insertResult.rows[0]
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating quote expiration config:', error);
+    res.status(500).json({ error: 'Failed to create quote expiration configuration' });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/api/quote-expiration/config/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { days, updated_by } = req.body;
+    
+    if (!days || days < 1) {
+      return res.status(400).json({ error: 'Days must be a positive number' });
+    }
+
+    await client.query('BEGIN');
+
+    // Update configuration
+    const updateResult = await client.query(`
+      UPDATE quote_expiration 
+      SET days = $1, 
+          updated_at = CURRENT_TIMESTAMP,
+          updated_by = $2
+      WHERE id = $3
+      RETURNING id, days, created_at, updated_at, created_by, updated_by
+    `, [days, updated_by || 'system', id]);
+
+    if (updateResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Quote expiration configuration not found' });
+    }
+
+    // Update expired quotes with new configuration
+    await client.query(`
+      UPDATE quotes 
+      SET status = 'expired' 
+      WHERE status = 'pending' 
+      AND created_at < NOW() - INTERVAL '1 day' * $1
+    `, [days]);
+
+    await client.query('COMMIT');
+    
+    res.json({
+      message: 'Quote expiration configuration updated successfully',
+      config: updateResult.rows[0]
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating quote expiration config:', error);
+    res.status(500).json({ error: 'Failed to update quote expiration configuration' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/quote-expiration/history', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id,
+        days,
+        created_at,
+        updated_at,
+        created_by,
+        updated_by
+      FROM quote_expiration 
+      ORDER BY created_at DESC
+    `);
+    
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching quote expiration history:', error);
+    res.status(500).json({ error: 'Failed to fetch quote expiration history' });
   }
 });
 

@@ -22,6 +22,7 @@ import {
   Savings as PiggyBankIcon,
   ChevronLeft as ChevronLeftIcon,
   LocalAtm as PawnsIcon,
+  Description as QuoteIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
@@ -119,6 +120,15 @@ function Sidebar() {
               <Receipt />
             </ListItemIcon>
             {isOpen && <ListItemText primary="Orders" />}
+          </StyledListItem>
+        </StyledLink>
+
+        <StyledLink to="/quotes">
+          <StyledListItem active={isActive('/quotes')}>
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+              <QuoteIcon />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Quotes" />}
           </StyledListItem>
         </StyledLink>
 
