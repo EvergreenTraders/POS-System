@@ -157,12 +157,8 @@ function Checkout() {
         items: formattedItems,
         totalAmount: calculateTotal()
       };
-      
-      console.log('Sending quote data:', quoteData);
-      
+            
       const response = await axios.post(`${config.apiUrl}/quotes`, quoteData);
-      const quote = response.data;
-      console.log('Quote save response:', quote);
 
       setSnackbar({
         open: true,
