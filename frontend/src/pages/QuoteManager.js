@@ -4,23 +4,24 @@ import axios from 'axios';
 import {
   Container,
   Paper,
-  Grid,
   Typography,
-  Button,
-  Box,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Chip,
+  IconButton,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  Chip,
-  IconButton,
+  Button,
+  Grid,
+  Box,
   TextField,
+  Tooltip
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
@@ -36,9 +37,13 @@ function QuoteManager() {
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [expirationDays, setExpirationDays] = useState(30);
+  const [editingExpiration, setEditingExpiration] = useState(false);
+  const [tempExpirationDays, setTempExpirationDays] = useState(30);
 
   useEffect(() => {
     fetchQuotes();
+    fetchExpirationDays();
   }, []);
 
   const fetchQuotes = async () => {
@@ -50,6 +55,53 @@ function QuoteManager() {
       console.error('Error fetching quotes:', error);
       setLoading(false);
     }
+  };
+
+  const fetchExpirationDays = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/quote-expiration/config`);
+      setExpirationDays(response.data.days);
+      setTempExpirationDays(response.data.days);
+    } catch (error) {
+      console.error('Error fetching expiration days:', error);
+    }
+  };
+
+  const handleUpdateExpirationDays = async () => {
+    try {
+      await axios.put(`${API_BASE_URL}/quote-expiration/config`, {
+        days: tempExpirationDays
+      });
+      setExpirationDays(tempExpirationDays);
+      setEditingExpiration(false);
+      // Refresh quotes as some might be expired with new setting
+      fetchQuotes();
+    } catch (error) {
+      console.error('Error updating expiration days:', error);
+    }
+  };
+
+  const getExpirationDate = (createdAt) => {
+    const date = new Date(createdAt);
+    date.setDate(date.getDate() + expirationDays);
+    return date;
+  };
+
+  const getRemainingDays = (createdAt) => {
+    const expirationDate = getExpirationDate(createdAt);
+    const now = new Date();
+    const diffTime = expirationDate - now;
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  const getStatusColor = (status, createdAt) => {
+    if (status === 'completed') return 'success';
+    if (status === 'cancelled') return 'error';
+    if (status === 'expired') return 'error';
+    
+    const remainingDays = getRemainingDays(createdAt);
+    if (remainingDays <= 3) return 'warning';
+    return 'primary';
   };
 
   const handleViewDetails = (quote) => {
@@ -78,21 +130,6 @@ function QuoteManager() {
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'pending':
-        return 'warning';
-      case 'completed':
-        return 'success';
-      case 'expired':
-        return 'error';
-      case 'cancelled':
-        return 'default';
-      default:
-        return 'default';
-    }
-  };
-
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
@@ -115,165 +152,206 @@ function QuoteManager() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ my: 4 }}>
-        <Typography variant="h4" gutterBottom>
+      <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography variant="h4" component="h1" gutterBottom>
           Quote Manager
         </Typography>
-
-        {/* Search Bar */}
-        <Paper sx={{ p: 2, mb: 3 }}>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {editingExpiration ? (
+            <>
               <TextField
-                fullWidth
-                placeholder="Search by customer name, email, phone, or quote ID"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                InputProps={{
-                  startAdornment: <SearchIcon sx={{ color: 'action.active', mr: 1 }} />,
-                }}
+                type="number"
+                size="small"
+                value={tempExpirationDays}
+                onChange={(e) => setTempExpirationDays(parseInt(e.target.value) || 0)}
+                sx={{ width: 100 }}
               />
-            </Grid>
-          </Grid>
-        </Paper>
-
-        {/* Quotes Table */}
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Quote ID</TableCell>
-                <TableCell>Customer</TableCell>
-                <TableCell>Date</TableCell>
-                <TableCell>Total Amount</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredQuotes.map((quote) => (
-                <TableRow key={quote.id}>
-                  <TableCell>{quote.id}</TableCell>
-                  <TableCell>
-                    <Typography variant="body2">{quote.customer_name}</Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      {quote.customer_email}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>{formatDate(quote.created_at)}</TableCell>
-                  <TableCell>${quote.total_amount.toFixed(2)}</TableCell>
-                  <TableCell>
-                    <Chip
-                      label={quote.status}
-                      color={getStatusColor(quote.status)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleViewDetails(quote)}
-                      title="View Details"
-                    >
-                      <VisibilityIcon />
-                    </IconButton>
-                    {quote.status === 'pending' && (
-                      <>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleCheckout(quote)}
-                          title="Proceed to Checkout"
-                          color="primary"
-                        >
-                          <ShoppingCartIcon />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleUpdateStatus(quote.id, 'cancelled')}
-                          title="Cancel Quote"
-                          color="error"
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-
-        {/* Quote Details Dialog */}
-        <Dialog
-          open={detailsDialogOpen}
-          onClose={() => setDetailsDialogOpen(false)}
-          maxWidth="md"
-          fullWidth
-        >
-          <DialogTitle>
-            Quote Details #{selectedQuote?.id}
-          </DialogTitle>
-          <DialogContent>
-            {selectedQuote && (
-              <>
-                <Grid container spacing={2} sx={{ mb: 2 }}>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="subtitle2">Customer Information</Typography>
-                    <Typography variant="body2">Name: {selectedQuote.customer_name}</Typography>
-                    <Typography variant="body2">Email: {selectedQuote.customer_email}</Typography>
-                    <Typography variant="body2">Phone: {selectedQuote.customer_phone}</Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="subtitle2">Quote Information</Typography>
-                    <Typography variant="body2">Created: {formatDate(selectedQuote.created_at)}</Typography>
-                    <Typography variant="body2">Status: {selectedQuote.status}</Typography>
-                    <Typography variant="body2">Total: ${selectedQuote.total_amount.toFixed(2)}</Typography>
-                  </Grid>
-                </Grid>
-
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>Items</Typography>
-                <TableContainer component={Paper} variant="outlined">
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Item</TableCell>
-                        <TableCell>Transaction Type</TableCell>
-                        <TableCell align="right">Price</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {selectedQuote.items.map((item, index) => (
-                        <TableRow key={index}>
-                          <TableCell>
-                            {item.weight}g {item.metal} {item.type === 'diamond' ? '(Diamond)' : item.type === 'stone' ? '(Stone)' : ''}
-                          </TableCell>
-                          <TableCell>{item.transactionType}</TableCell>
-                          <TableCell align="right">
-                            ${item.itemPriceEstimates[item.transactionType]?.toFixed(2)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </>
-            )}
-          </DialogContent>
-          <DialogActions>
-            {selectedQuote?.status === 'pending' && (
-              <Button
-                onClick={() => handleCheckout(selectedQuote)}
-                color="primary"
-                startIcon={<ShoppingCartIcon />}
-              >
-                Proceed to Checkout
+              <Button variant="contained" onClick={handleUpdateExpirationDays}>
+                Save
               </Button>
-            )}
-            <Button onClick={() => setDetailsDialogOpen(false)}>Close</Button>
-          </DialogActions>
-        </Dialog>
+              <Button onClick={() => setEditingExpiration(false)}>
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <Tooltip title="Click to edit expiration days">
+              <Button 
+                variant="outlined" 
+                onClick={() => setEditingExpiration(true)}
+              >
+                Quotes expire in {expirationDays} days
+              </Button>
+            </Tooltip>
+          )}
+        </Box>
       </Box>
+
+      {/* Search Bar */}
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs>
+            <TextField
+              fullWidth
+              placeholder="Search by customer name, email, phone, or quote ID"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              InputProps={{
+                startAdornment: <SearchIcon sx={{ color: 'action.active', mr: 1 }} />,
+              }}
+            />
+          </Grid>
+        </Grid>
+      </Paper>
+
+      {/* Quotes Table */}
+      <TableContainer component={Paper}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Quote ID</TableCell>
+              <TableCell>Customer</TableCell>
+              <TableCell>Date</TableCell>
+              <TableCell>Total Amount</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Expires In</TableCell>
+              <TableCell>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {filteredQuotes.map((quote) => (
+              <TableRow key={quote.id}>
+                <TableCell>{quote.id}</TableCell>
+                <TableCell>
+                  <Typography variant="body2">{quote.customer_name}</Typography>
+                  <Typography variant="caption" color="textSecondary">
+                    {quote.customer_email}
+                  </Typography>
+                </TableCell>
+                <TableCell>{formatDate(quote.created_at)}</TableCell>
+                <TableCell>${quote.total_amount}</TableCell>
+                <TableCell>
+                  <Chip
+                    label={quote.status}
+                    color={getStatusColor(quote.status, quote.created_at)}
+                    size="small"
+                  />
+                </TableCell>
+                <TableCell>
+                  {quote.status === 'pending' ? (
+                    `${getRemainingDays(quote.created_at)} days`
+                  ) : (
+                    '-'
+                  )}
+                </TableCell>
+                <TableCell>
+                  <IconButton
+                    size="small"
+                    onClick={() => handleViewDetails(quote)}
+                    title="View Details"
+                  >
+                    <VisibilityIcon />
+                  </IconButton>
+                  {quote.status === 'pending' && (
+                    <>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleCheckout(quote)}
+                        title="Proceed to Checkout"
+                        color="primary"
+                      >
+                        <ShoppingCartIcon />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleUpdateStatus(quote.id, 'cancelled')}
+                        title="Cancel Quote"
+                        color="error"
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      {/* Quote Details Dialog */}
+      <Dialog
+        open={detailsDialogOpen}
+        onClose={() => setDetailsDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        {selectedQuote && (
+          <>
+            <DialogTitle>
+              Quote Details #{selectedQuote?.id}
+            </DialogTitle>
+            <DialogContent>
+              <Grid container spacing={2} sx={{ mb: 2 }}>
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="subtitle2">Customer Information</Typography>
+                  <Typography variant="body2">Name: {selectedQuote.customer_name}</Typography>
+                  <Typography variant="body2">Email: {selectedQuote.customer_email}</Typography>
+                  <Typography variant="body2">Phone: {selectedQuote.customer_phone}</Typography>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="subtitle2">Quote Information</Typography>
+                  <Typography variant="body2">Created: {formatDate(selectedQuote.created_at)}</Typography>
+                  <Typography variant="body2">Status: {selectedQuote.status}</Typography>
+                  <Typography variant="body2">Total: ${selectedQuote.total_amount}</Typography>
+                  {selectedQuote.status === 'pending' && (
+                    <Typography variant="body2" color={getRemainingDays(selectedQuote.created_at) <= 3 ? 'error' : 'textPrimary'}>
+                      Expires in: {getRemainingDays(selectedQuote.created_at)} days
+                    </Typography>
+                  )}
+                </Grid>
+              </Grid>
+
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Items</Typography>
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Item</TableCell>
+                      <TableCell>Transaction Type</TableCell>
+                      <TableCell align="right">Price</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {selectedQuote.items.map((item, index) => (
+                      <TableRow key={index}>
+                        <TableCell>
+                          {item.weight}g {item.metal} {item.type === 'diamond' ? '(Diamond)' : item.type === 'stone' ? '(Stone)' : ''}
+                        </TableCell>
+                        <TableCell>{item.transactionType}</TableCell>
+                        <TableCell align="right">
+                          ${item.itemPriceEstimates[item.transactionType]?.toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </DialogContent>
+            <DialogActions>
+              {selectedQuote?.status === 'pending' && (
+                <Button
+                  onClick={() => handleCheckout(selectedQuote)}
+                  color="primary"
+                  startIcon={<ShoppingCartIcon />}
+                >
+                  Proceed to Checkout
+                </Button>
+              )}
+              <Button onClick={() => setDetailsDialogOpen(false)}>Close</Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
     </Container>
   );
 }

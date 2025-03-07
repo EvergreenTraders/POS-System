@@ -19,6 +19,7 @@ import {
   TableCell,
   TableHead,
   TableRow,
+  InputAdornment
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
@@ -89,6 +90,10 @@ function SystemConfig() {
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [gramsInput, setGramsInput] = useState('');
   const [diamondEstimates, setDiamondEstimates] = useState([]);
+  const [quoteExpirationDays, setQuoteExpirationDays] = useState(30);
+  const [originalDays, setOriginalDays] = useState(30);
+  const [configId, setConfigId] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const fetchPreciousMetalNames = async () => {
@@ -190,6 +195,25 @@ function SystemConfig() {
       }
     };
 
+    const fetchQuoteExpirationConfig = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/quote-expiration/config`);
+        const config = response.data;
+        setQuoteExpirationDays(config.days);
+        setOriginalDays(config.days);
+        setConfigId(config.id);
+      } catch (error) {
+        console.error('Error fetching quote expiration config:', error);
+        if (error.response?.status !== 404) {
+          setSnackbar({
+            open: true,
+            message: 'Failed to fetch quote expiration configuration',
+            severity: 'error'
+          });
+        }
+      }
+    };
+
     fetchPreciousMetalNames();
     fetchLivePricing();
     fetchSpotPrices();
@@ -197,6 +221,7 @@ function SystemConfig() {
     fetchDiamondEstimates();
     fetchUserPreference();
     fetchCaratConversion();
+    fetchQuoteExpirationConfig();
   }, []);
 
   const handleTabChange = (event, newValue) => {
@@ -408,20 +433,111 @@ function SystemConfig() {
     }
   };
 
+  const handleDaysChange = async (event) => {
+    const value = parseInt(event.target.value);
+    if (!isNaN(value) && value >= 0) {
+      setQuoteExpirationDays(value);
+      
+      if (value < 1) {
+        setSnackbar({
+          open: true,
+          message: 'Days must be a positive number',
+          severity: 'error'
+        });
+        return;
+      }
+
+      setLoading(true);
+      try {
+        let response;
+        if (configId) {
+          response = await axios.put(`${API_BASE_URL}/quote-expiration/config/${configId}`, {
+            days: value,
+            updated_by: 'user'
+          });
+        } else {
+          response = await axios.post(`${API_BASE_URL}/quote-expiration/config`, {
+            days: value,
+            created_by: 'user'
+          });
+        }
+
+        setOriginalDays(value);
+        setConfigId(response.data.config.id);
+        setSnackbar({
+          open: true,
+          message: 'Quote expiration configuration saved successfully',
+          severity: 'success'
+        });
+      } catch (error) {
+        console.error('Error saving quote expiration config:', error);
+        setSnackbar({
+          open: true,
+          message: 'Failed to save quote expiration configuration',
+          severity: 'error'
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (quoteExpirationDays < 1) {
+      setSnackbar({
+        open: true,
+        message: 'Days must be a positive number',
+        severity: 'error'
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      let response;
+      if (configId) {
+        // Update existing configuration
+        response = await axios.put(`${API_BASE_URL}/quote-expiration/config/${configId}`, {
+          days: quoteExpirationDays,
+          updated_by: 'user' // You might want to get this from user context
+        });
+      } else {
+        // Create new configuration
+        response = await axios.post(`${API_BASE_URL}/quote-expiration/config`, {
+          days: quoteExpirationDays,
+          created_by: 'user' // You might want to get this from user context
+        });
+      }
+
+      setOriginalDays(quoteExpirationDays);
+      setConfigId(response.data.config.id);
+      setSnackbar({
+        open: true,
+        message: 'Quote expiration configuration saved successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving quote expiration config:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save quote expiration configuration',
+        severity: 'error'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCloseSnackbar = () => {
+    setSnackbar({ ...snackbar, open: false });
+  };
+
+  const hasChanges = quoteExpirationDays !== originalDays;
 
   return (
     <Container>
-      <Box sx={{ mb: 1 }}>
-        {/* <Typography variant="h5" color="primary" gutterBottom>
-          System Configuration
-        </Typography> */}
-        <Tabs 
-          value={activeTab} 
-          onChange={handleTabChange}
-          variant="scrollable"
-          scrollButtons="auto"
-          sx={{ borderBottom: 1, borderColor: 'divider' }}
-        >
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+        <Tabs value={activeTab} onChange={handleTabChange}>
           <Tab label="General" />
           <Tab label="Security" />
           <Tab label="Notifications" />
@@ -481,6 +597,26 @@ function SystemConfig() {
                   rows={2}
                   value={generalSettings.address}
                   onChange={handleGeneralSettingsChange}
+                />
+              </Grid>
+            </Grid>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Quote Expiration Days"
+                  type="number"
+                  value={quoteExpirationDays}
+                  onChange={handleDaysChange}
+                  InputProps={{
+                    endAdornment: <InputAdornment position="end">days</InputAdornment>,
+                  }}
+                  helperText="Number of days before a quote expires"
+                  inputProps={{ min: 1 }}
+                  disabled={loading}
                 />
               </Grid>
             </Grid>
