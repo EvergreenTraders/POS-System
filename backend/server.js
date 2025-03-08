@@ -977,6 +977,108 @@ app.get('/api/quote-expiration/history', async (req, res) => {
   }
 });
 
+// Customer management endpoints
+app.get('/api/customers', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT *, TO_CHAR(date_of_birth, \'YYYY-MM-DD\') as date_of_birth, TO_CHAR(id_expiry_date, \'YYYY-MM-DD\') as id_expiry_date FROM customers ORDER BY created_at DESC'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching customers:', err);
+    res.status(500).json({ error: 'Failed to fetch customers' });
+  }
+});
+
+app.get('/api/customers/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT *, TO_CHAR(date_of_birth, \'YYYY-MM-DD\') as date_of_birth, TO_CHAR(id_expiry_date, \'YYYY-MM-DD\') as id_expiry_date FROM customers WHERE id = $1',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching customer:', err);
+    res.status(500).json({ error: 'Failed to fetch customer' });
+  }
+});
+
+app.post('/api/customers', authenticateToken, async (req, res) => {
+  try {
+    const {
+      first_name, last_name, email, phone,
+      address_line1, address_line2, city, state, postal_code, country,
+      id_type, id_number, id_expiry_date, id_issuing_authority,
+      date_of_birth, status, risk_level, notes
+    } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO customers (
+        first_name, last_name, email, phone,
+        address_line1, address_line2, city, state, postal_code, country,
+        id_type, id_number, id_expiry_date, id_issuing_authority,
+        date_of_birth, status, risk_level, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
+      [first_name, last_name, email, phone,
+       address_line1, address_line2, city, state, postal_code, country,
+       id_type, id_number, id_expiry_date, id_issuing_authority,
+       date_of_birth, status, risk_level, notes]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error creating customer:', err);
+    if (err.code === '23505') { // Unique violation
+      res.status(400).json({ error: 'Email already exists' });
+    } else {
+      res.status(500).json({ error: 'Failed to create customer' });
+    }
+  }
+});
+
+app.put('/api/customers/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      first_name, last_name, email, phone,
+      address_line1, address_line2, city, state, postal_code, country,
+      id_type, id_number, id_expiry_date, id_issuing_authority,
+      date_of_birth, status, risk_level, notes
+    } = req.body;
+
+    const result = await pool.query(
+      `UPDATE customers SET
+        first_name = $1, last_name = $2, email = $3, phone = $4,
+        address_line1 = $5, address_line2 = $6, city = $7, state = $8,
+        postal_code = $9, country = $10, id_type = $11, id_number = $12,
+        id_expiry_date = $13, id_issuing_authority = $14, date_of_birth = $15,
+        status = $16, risk_level = $17, notes = $18
+      WHERE id = $19
+      RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
+      [first_name, last_name, email, phone,
+       address_line1, address_line2, city, state, postal_code, country,
+       id_type, id_number, id_expiry_date, id_issuing_authority,
+       date_of_birth, status, risk_level, notes, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating customer:', err);
+    if (err.code === '23505') {
+      res.status(400).json({ error: 'Email already exists' });
+    } else {
+      res.status(500).json({ error: 'Failed to update customer' });
+    }
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -987,3 +1089,16 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+// Authentication middleware
+function authenticateToken(req, res, next) {
+  const authHeader = req.header('Authorization');
+  const token = authHeader && authHeader.split(' ')[1];
+  if (token == null) return res.status(401).json({ error: 'Access denied. No token provided.' });
+
+  jwt.verify(token, process.env.JWT_SECRET || 'evergreen_jwt_secret_2024', (err, user) => {
+    if (err) return res.status(403).json({ error: 'Access denied. Invalid token.' });
+    req.user = user;
+    next();
+  });
+}

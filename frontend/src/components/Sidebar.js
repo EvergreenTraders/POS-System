@@ -23,6 +23,7 @@ import {
   ChevronLeft as ChevronLeftIcon,
   LocalAtm as PawnsIcon,
   Description as QuoteIcon,
+  People as PeopleIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
@@ -129,6 +130,15 @@ function Sidebar() {
               <QuoteIcon />
             </ListItemIcon>
             {isOpen && <ListItemText primary="Quotes" />}
+          </StyledListItem>
+        </StyledLink>
+
+        <StyledLink to="/customers">
+          <StyledListItem active={isActive('/customers')}>
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+              <PeopleIcon />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Customers" />}
           </StyledListItem>
         </StyledLink>
 

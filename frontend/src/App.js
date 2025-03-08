@@ -19,6 +19,7 @@ import GemEstimator from './pages/GemEstimator';
 import Pawns from './pages/Pawns';
 import Checkout from './pages/Checkout';
 import QuoteManager from './pages/QuoteManager';
+import CustomerManager from './pages/CustomerManager';
 
 const theme = createTheme({
   palette: {
@@ -194,6 +195,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <Pawns />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/customers"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CustomerManager />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
