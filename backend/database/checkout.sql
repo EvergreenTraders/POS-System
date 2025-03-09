@@ -1,5 +1,4 @@
 -- Create quotes table
-drop table if exists quotes;
 CREATE TABLE IF NOT EXISTS quotes (
     id SERIAL PRIMARY KEY,
     items JSONB NOT NULL,
