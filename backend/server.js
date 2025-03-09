@@ -977,8 +977,9 @@ app.get('/api/quote-expiration/history', async (req, res) => {
   }
 });
 
-// Customer management endpoints
-app.get('/api/customers', authenticateToken, async (req, res) => {
+// Customer routes
+app.get('api/customers', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
   try {
     const result = await pool.query(
       'SELECT *, TO_CHAR(date_of_birth, \'YYYY-MM-DD\') as date_of_birth, TO_CHAR(id_expiry_date, \'YYYY-MM-DD\') as id_expiry_date FROM customers ORDER BY created_at DESC'
@@ -987,6 +988,37 @@ app.get('/api/customers', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error fetching customers:', err);
     res.status(500).json({ error: 'Failed to fetch customers' });
+  }
+});
+
+app.get('/api/customers/search', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { firstName, lastName } = req.query;
+    let query = 'SELECT * FROM customers WHERE 1=1';
+    const params = [];
+    let paramCount = 1;
+
+    if (firstName) {
+      query += ` AND LOWER(first_name) LIKE $${paramCount}`;
+      params.push(`%${firstName.toLowerCase()}%`);
+      paramCount++;
+    }
+
+    if (lastName) {
+      query += ` AND LOWER(last_name) LIKE $${paramCount}`;
+      params.push(`%${lastName.toLowerCase()}%`);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await client.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error searching customers:', err);
+    res.status(500).json({ error: 'Failed to search customers' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1008,6 +1040,7 @@ app.get('/api/customers/:id', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/customers', authenticateToken, async (req, res) => {
+  console.log("req.body", authenticateToken);
   try {
     const {
       first_name, last_name, email, phone,
@@ -1078,6 +1111,7 @@ app.put('/api/customers/:id', authenticateToken, async (req, res) => {
     }
   }
 });
+
 
 // Error handling middleware
 app.use((err, req, res, next) => {
