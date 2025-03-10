@@ -42,10 +42,11 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
+import { useAuth } from '../context/AuthContext';
 
 function GemEstimator() {
   const API_BASE_URL = config.apiUrl;
-
+  const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [metalFormState, setMetalFormState] = useState({});
@@ -57,6 +58,7 @@ function GemEstimator() {
   });
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
+  const [from, setFrom] = useState(location.state?.from || '');
 
   const handleMetalFormChange = (formState) => {
       setMetalFormState(formState);
@@ -1432,9 +1434,11 @@ function GemEstimator() {
       priceEstimates
     }));
 
-    navigate('/checkout', { 
+    // Navigate to customer selection with items and preserve auth state
+    navigate('/customer', { 
       state: { 
-        items: updatedItems
+        items: updatedItems,
+        from: 'gem-estimator'
       }
     });
   };

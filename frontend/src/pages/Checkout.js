@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
+import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import {
   Container,
   Paper,
@@ -44,7 +46,8 @@ const API_BASE_URL = config.apiUrl;
 function Checkout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const items = location.state?.items || [];
+  const { cartItems, selectedCustomer, clearCart } = useCart();
+  const { user } = useAuth();
 
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentDetails, setPaymentDetails] = useState({
@@ -58,9 +61,9 @@ function Checkout() {
   // Quote related states
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
   const [quoteDetails, setQuoteDetails] = useState({
-    customerName: '',
-    customerEmail: '',
-    customerPhone: ''
+    customerName: selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : '',
+    customerEmail: selectedCustomer?.email || '',
+    customerPhone: selectedCustomer?.phone || ''
   });
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({
@@ -70,7 +73,7 @@ function Checkout() {
   });
 
   const calculateTotal = () => {
-    return items.reduce((total, item) => {
+    return cartItems.reduce((total, item) => {
       const transactionType = item.transactionType || 'pawn';
       return total + parseFloat(item.itemPriceEstimates[transactionType] || 0);
     }, 0);
@@ -113,81 +116,122 @@ function Checkout() {
     });
   };
 
-  const handleSubmit = () => {
-    // Here you would typically process the payment
-    console.log('Processing payment:', {
-      method: paymentMethod,
-      details: paymentDetails,
-      total: calculateTotal(),
-      items,
-    });
-    // Navigate to success page or show confirmation
-  };
-
-  // Handle saving quote
-  const handleSaveQuote = async () => {
-    // Validate required fields
-    if (!quoteDetails.customerName || !quoteDetails.customerEmail || !quoteDetails.customerPhone) {
-      setSnackbar({
-        open: true,
-        message: 'Please fill in all required fields',
-        severity: 'error'
-      });
-      return;
-    }
-
-    setLoading(true);
+  const handleSubmit = async () => {
     try {
-      const formattedItems = items.map(item => ({
-        transactionType: item.transactionType || 'pawn',
-        estimatedValue: item.estimatedValue,
-        metalPurity: item.purity,
-        weight: item.weight,
-        itemPriceEstimates: item.itemPriceEstimates,
-        category: item.category,
-        metalType: item.metal,
-        primaryGem: item.primaryGem,
-        secondaryGem: item.secondaryGem,
-      }));
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Authentication token not found');
+      }
 
-      const quoteData = {
-        customerName: quoteDetails.customerName,
-        customerEmail: quoteDetails.customerEmail,
-        customerPhone: quoteDetails.customerPhone,
-        items: formattedItems,
-        totalAmount: calculateTotal()
-      };
-            
-      const response = await axios.post(`${config.apiUrl}/quotes`, quoteData);
+      const response = await axios.post(
+        `${config.apiUrl}/transactions`,
+        {
+          items: cartItems,
+          customer: selectedCustomer,
+          paymentDetails,
+          paymentMethod,
+          status: 'completed',
+          created_at: new Date().toISOString()
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
 
-      setSnackbar({
-        open: true,
-        message: `Quote saved successfully! `,
-        severity: 'success'
-      });
-      setQuoteDialogOpen(false);
-      
-      // Clear quote details
-      setQuoteDetails({
-        customerName: '',
-        customerEmail: '',
-        customerPhone: ''
-      });
-      
-      // Navigate back to the previous page after a short delay
-      setTimeout(() => {
-        navigate(-1);
-      }, 2000);
+      if (response.status === 200) {
+        setSnackbar({
+          open: true,
+          message: 'Payment processed successfully',
+          severity: 'success'
+        });
+        clearCart();
+        // Navigate back to estimation with auth state preserved
+        navigate('/gem-estimator', { 
+          state: { 
+            from: 'checkout'
+          }
+        });
+      }
     } catch (error) {
-      setSnackbar({
-        open: true,
-        message: error.response?.data?.error || 'Failed to save quote',
-        severity: 'error'
-      });
-    } finally {
-      setLoading(false);
+      if (error.message === 'Authentication token not found') {
+        // Preserve cart state and redirect to login
+        sessionStorage.setItem('redirectAfterLogin', '/checkout');
+        navigate('/login');
+      } else {
+        setSnackbar({
+          open: true,
+          message: `Error: ${error.message}`,
+          severity: 'error'
+        });
+      }
     }
   };
+
+  const handleSaveQuote = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Authentication token not found');
+      }
+
+      const response = await axios.post(
+        `${config.apiUrl}/quotes`,
+        {
+          items: cartItems,
+          customer: {
+            name: quoteDetails.customerName,
+            email: quoteDetails.customerEmail,
+            phone: quoteDetails.customerPhone
+          },
+          created_at: new Date().toISOString(),
+          status: 'active'
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      if (response.status === 200) {
+        setSnackbar({
+          open: true,
+          message: 'Quote saved successfully',
+          severity: 'success'
+        });
+        setQuoteDialogOpen(false);
+        clearCart();
+        // Navigate back to estimation with auth state preserved
+        navigate('/gem-estimator', { 
+          state: { 
+            from: 'checkout'
+          }
+        });
+      }
+    } catch (error) {
+      if (error.message === 'Authentication token not found') {
+        // Preserve cart state and redirect to login
+        sessionStorage.setItem('redirectAfterLogin', '/checkout');
+        navigate('/login');
+      } else {
+        setSnackbar({
+          open: true,
+          message: `Error: ${error.message}`,
+          severity: 'error'
+        });
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedCustomer || cartItems.length === 0) {
+      navigate('/gem-estimator');
+    }
+  }, [selectedCustomer, cartItems, navigate]);
 
   return (
     <Container maxWidth="lg">
@@ -201,6 +245,31 @@ function Checkout() {
         </Button>
         
         <Grid container spacing={3}>
+          {/* Customer Details */}
+          <Grid item xs={12}>
+            <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Customer Details
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="subtitle1">
+                    <strong>Name:</strong> {selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : 'Not specified'}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="subtitle1">
+                    <strong>Email:</strong> {selectedCustomer?.email || 'Not specified'}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="subtitle1">
+                    <strong>Phone:</strong> {selectedCustomer?.phone || 'Not specified'}
+                  </Typography>
+                </Grid>
+              </Grid>
+            </Paper>
+          </Grid>
           {/* Order Summary */}
           <Grid item xs={12} md={8}>
             <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
@@ -217,7 +286,7 @@ function Checkout() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {items.map((item, index) => (
+                    {cartItems.map((item, index) => (
                       <TableRow key={index}>
                         <TableCell>
                           {item.weight}g {item.metal} {item.type === 'diamond' ? '(Diamond)' : item.type === 'stone' ? '(Stone)' : ''}

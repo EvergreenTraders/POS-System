@@ -24,15 +24,15 @@ import CustomerManager from './pages/CustomerManager';
 const theme = createTheme({
   palette: {
     primary: {
-      main: '#1a472a', // Dark green
-      light: '#2e7d32', // Lighter green
-      dark: '#0d3319', // Darker green
+      main: '#1a472a',
+      light: '#2e7d32',
+      dark: '#0d3319',
     },
     secondary: {
-      main: '#66bb6a', // Complementary green
+      main: '#66bb6a',
     },
     background: {
-      default: '#e8f5e9', // Light green background
+      default: '#e8f5e9',
       paper: '#ffffff',
     },
   },
@@ -53,6 +53,9 @@ const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token');
 
   if (!token || !user) {
+    // Save the current path for redirection after login
+    const currentPath = window.location.pathname;
+    sessionStorage.setItem('redirectAfterLogin', currentPath);
     return <Navigate to="/login" replace />;
   }
   return children;
@@ -82,11 +85,11 @@ const AuthenticatedLayout = ({ children }) => (
 
 function App() {
   return (
-    <CartProvider>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <Router>
-          <AuthProvider>
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Router>
+        <AuthProvider>
+          <CartProvider>
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route
@@ -135,6 +138,36 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <GemEstimator />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/customer"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CustomerManager />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/checkout"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <Checkout />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/quote-manager"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <QuoteManager />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
@@ -210,16 +243,6 @@ function App() {
                 }
               />
               <Route
-                path="/checkout"
-                element={
-                  <ProtectedRoute>
-                    <AuthenticatedLayout>
-                      <Checkout />
-                    </AuthenticatedLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
                 path="/quotes"
                 element={
                   <ProtectedRoute>
@@ -231,10 +254,10 @@ function App() {
               />
               <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
-          </AuthProvider>
-        </Router>
-      </ThemeProvider>
-    </CartProvider>
+          </CartProvider>
+        </AuthProvider>
+      </Router>
+    </ThemeProvider>
   );
 }
 

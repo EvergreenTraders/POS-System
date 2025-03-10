@@ -84,7 +84,15 @@ const Login = () => {
                 localStorage.setItem('token', response.data.token);
                 localStorage.setItem('user', JSON.stringify(response.data.user));
                 setUser(response.data.user);
-                navigate('/');
+
+                // Check for redirect path
+                const redirectPath = sessionStorage.getItem('redirectAfterLogin');
+                if (redirectPath) {
+                    sessionStorage.removeItem('redirectAfterLogin');
+                    navigate(redirectPath);
+                } else {
+                    navigate('/');
+                }
             }
         } catch (err) {
             setError('Invalid credentials. Please try again.');

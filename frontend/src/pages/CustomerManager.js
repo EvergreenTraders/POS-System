@@ -6,9 +6,16 @@ import {
   Alert, IconButton, List, ListItem, ListItemText, Divider, CircularProgress
 } from '@mui/material';
 import { Add as AddIcon, Edit as EditIcon } from '@mui/icons-material';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import config from '../config';
 
 const CustomerManager = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { setCustomer, addToCart, cartItems } = useCart();
+  const { user } = useAuth();
   const [customers, setCustomers] = useState([]);
   const [quoteExpirationConfig, setQuoteExpirationConfig] = useState({ days: 30 });
   const [searchForm, setSearchForm] = useState({
@@ -45,7 +52,6 @@ const CustomerManager = () => {
     message: '',
     severity: 'success'
   });
-  const token = localStorage.getItem('token');
 
   useEffect(() => {
     fetchCustomers();
@@ -54,7 +60,7 @@ const CustomerManager = () => {
   const fetchCustomers = async () => {
     try {
       const response = await fetch(`${config.apiUrl}/customers`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       if (!response.ok) throw new Error('Failed to fetch customers');
       const data = await response.json();
@@ -87,7 +93,7 @@ const CustomerManager = () => {
       }).toString();
       
       const response = await fetch(`${config.apiUrl}/customers/search?${queryParams}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       
       if (!response.ok) throw new Error('Failed to search customers');
@@ -132,15 +138,12 @@ const CustomerManager = () => {
         method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify({
           ...formData,
           status: 'active',
-          created_at: new Date().toISOString(),
-          // Let database triggers handle quote expiration for registered customers
-          expires_in: formData.isGuest ? quoteExpirationConfig.days : null,
-          days_remaining: formData.isGuest ? quoteExpirationConfig.days : null
+          created_at: new Date().toISOString()
         })
       });
 
@@ -150,6 +153,18 @@ const CustomerManager = () => {
 
       const savedCustomer = await response.json();
       setSelectedCustomer(savedCustomer);
+      setCustomer(savedCustomer); // Save to CartContext
+
+      // If we have items in location state, add them to cart context and navigate
+      if (location.state?.items?.length > 0) {
+        addToCart(location.state.items);
+        navigate('/checkout', { 
+          state: { 
+            from: location.state.from || 'customer'
+          }
+        });
+      }
+
       handleCloseDialog();
       fetchCustomers();
     } catch (error) {
@@ -237,54 +252,53 @@ const CustomerManager = () => {
   };
 
   const handleSelectCustomer = (customer) => {
-    // Ensure proper quote expiration tracking
     const selectedCustomer = {
       ...customer,
       created_at: new Date().toISOString(),
-      // Quote expiration will be set by database trigger from quote_expiration table
-      expires_in: null,
-      days_remaining: null,
       status: 'active'
     };
     
+    setCustomer(selectedCustomer); // Save to CartContext
     setSelectedCustomer(selectedCustomer);
-    handleEdit(selectedCustomer);
+    
+    // If we have items in location state, add them to cart context and navigate
+    if (location.state?.items?.length > 0) {
+      addToCart(location.state.items);
+      navigate('/checkout', { 
+        state: { 
+          from: location.state.from || 'customer'
+        }
+      });
+    }
+    
     showSnackbar(`Selected ${customer.first_name} ${customer.last_name}`, 'success');
     handleCloseSearchDialog();
   };
 
   const handleRegisterNew = () => {
-    // Create new customer with system-configured quote expiration
     const newCustomer = {
       first_name: '',
       last_name: '',
       email: '',
       phone: '',
       status: 'active',
-      created_at: new Date().toISOString(),
-      // Quote expiration will be set by database trigger
-      expires_in: null,
-      days_remaining: null
+      created_at: new Date().toISOString()
     };
     
+    setCustomer(newCustomer); // Save to CartContext
     setSelectedCustomer(newCustomer);
     handleEdit(newCustomer);
     handleCloseSearchDialog();
   };
 
   const handleProceedAsGuest = () => {
-    // Create a temporary guest customer with quote expiration from system config
     const guestCustomer = {
-      id: `guest_${Date.now()}`, // Unique ID for tracking
+      id: `guest_${Date.now()}`,
       first_name: 'Guest',
       last_name: 'Customer',
       isGuest: true,
       status: 'active',
-      // Quote expiration fields from system config
-      expires_in: quoteExpirationConfig.days,
-      days_remaining: quoteExpirationConfig.days,
       created_at: new Date().toISOString(),
-      // Empty fields for guest
       email: '',
       phone: '',
       address_line1: '',
@@ -293,12 +307,23 @@ const CustomerManager = () => {
       state: '',
       postal_code: '',
       country: '',
-      notes: `Guest customer`
+      notes: 'Guest customer'
     };
 
+    setCustomer(guestCustomer); // Save to CartContext
     setSelectedCustomer(guestCustomer);
-    handleEdit(guestCustomer);
-    showSnackbar(`Proceeding as guest customer`, 'info');
+    
+    // If we have items in location state, add them to cart context and navigate
+    if (location.state?.items?.length > 0) {
+      addToCart(location.state.items);
+      navigate('/checkout', { 
+        state: { 
+          from: location.state.from || 'customer'
+        }
+      });
+    }
+    
+    showSnackbar('Proceeding as guest customer', 'info');
     handleCloseSearchDialog();
   };
 
