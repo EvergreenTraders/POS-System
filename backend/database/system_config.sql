@@ -69,7 +69,6 @@ BEGIN
     ('retail', 80.00);
     END IF;
 
-    -- Drop the price_estimates table if it exists
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'price_estimates') THEN    
     CREATE TABLE price_estimates (
         precious_metal_type_id INT NOT NULL,
@@ -108,27 +107,44 @@ BEGIN
         INSERT INTO carat_to_gram_conversion (carats, grams) VALUES (1, 0.20);
     END IF;
 
-    -- Create quote_expiration table for storing quote expiration configuration
+    -- Create quote_expiration table for storing expiration period configuration
     CREATE TABLE IF NOT EXISTS quote_expiration (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY DEFAULT 1,
         days INTEGER NOT NULL DEFAULT 30,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP,
-        created_by VARCHAR(100),
-        updated_by VARCHAR(100),
         CONSTRAINT valid_days CHECK (days > 0)
     );
 
-    -- Add comments
+    -- Add comments for documentation
     COMMENT ON TABLE quote_expiration IS 'Stores configuration for quote expiration period';
     COMMENT ON COLUMN quote_expiration.days IS 'Number of days to keep quotes before marking them as expired';
-    COMMENT ON COLUMN quote_expiration.created_by IS 'User who created this configuration';
-    COMMENT ON COLUMN quote_expiration.updated_by IS 'User who last updated this configuration';
 
-    -- Insert default configuration
-    INSERT INTO quote_expiration (days, created_by)
-    VALUES (30, 'system')
-    ON CONFLICT DO NOTHING;
+    -- Insert default configuration if table is empty
+    INSERT INTO quote_expiration (days)
+    SELECT 30
+    WHERE NOT EXISTS (
+        SELECT 1 FROM quote_expiration
+    );
 
+    -- Create inventory_hold_period table for storing hold duration configuration
+    CREATE TABLE IF NOT EXISTS inventory_hold_period (
+        id SERIAL PRIMARY KEY,
+        days INTEGER NOT NULL DEFAULT 7,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP,
+        CONSTRAINT valid_hold_days CHECK (days > 0)
+    );
+
+    -- Add comments
+    COMMENT ON TABLE inventory_hold_period IS 'Stores configuration for inventory hold duration';
+    COMMENT ON COLUMN inventory_hold_period.days IS 'Number of days to keep inventory items in HOLD status';
+
+    -- Insert default configuration if table is empty
+    INSERT INTO inventory_hold_period (days)
+    SELECT 7
+    WHERE NOT EXISTS (
+        SELECT 1 FROM inventory_hold_period
+    );
 
 END $$;

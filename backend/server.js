@@ -29,16 +29,50 @@ const updateQuoteDaysRemaining = async () => {
   }
 };
 
-// Schedule daily update of quote days remaining (runs at midnight)
+// Function to update inventory hold status
+const updateInventoryHoldStatus = async () => {
+  try {
+    // Get the current hold period configuration
+    const configResult = await pool.query('SELECT days FROM inventory_hold_period ORDER BY created_at DESC LIMIT 1');
+    if (configResult.rows.length === 0) {
+      console.log('No inventory hold period configuration found');
+      return;
+    }
+
+    const holdPeriod = configResult.rows[0].days;
+
+    // Update inventory status for items that have exceeded their hold period
+    const updateQuery = `
+      UPDATE transactions 
+      SET inventory_status = 'AVAILABLE'
+      WHERE inventory_status = 'HOLD'
+      AND created_at < NOW() - INTERVAL '1 day' * $1
+      RETURNING transaction_id
+    `;
+    
+    const result = await pool.query(updateQuery, [holdPeriod]);
+    if (result.rows.length > 0) {
+      const formattedIds = result.rows.map(r => r.transaction_id).join(', ');
+      console.log(`[${new Date().toISOString()}] Updated inventory status to AVAILABLE for transactions: ${formattedIds}`);
+      console.log(`Hold period of ${holdPeriod} days exceeded for ${result.rows.length} item(s)`);
+    }
+  } catch (error) {
+    console.error('Error updating inventory hold status:', error);
+  }
+};
+
+// Schedule daily update of quote days remaining and inventory hold status (runs at midnight)
 setInterval(() => {
   const now = new Date();
   if (now.getHours() === 0 && now.getMinutes() === 0) {
     updateQuoteDaysRemaining();
+    updateInventoryHoldStatus();
   }
 }, 60000); // Check every minute
 
-// Run initial update when server starts
+// Run initial updates when server starts
 updateQuoteDaysRemaining();
+updateInventoryHoldStatus();
 
 // Test database connection
 pool.connect()
@@ -846,21 +880,18 @@ app.get('/api/quote-expiration/config', async (req, res) => {
         id,
         days,
         created_at,
-        updated_at,
-        created_by,
-        updated_by
+        updated_at
       FROM quote_expiration 
-      ORDER BY id DESC 
+      ORDER BY created_at DESC
       LIMIT 1
     `);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'No quote expiration configuration found' });
     }
-    
     res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error fetching quote expiration config:', error);
+  } catch (err) {
+    console.error('Error fetching quote expiration config:', err);
     res.status(500).json({ error: 'Failed to fetch quote expiration configuration' });
   }
 });
@@ -868,7 +899,7 @@ app.get('/api/quote-expiration/config', async (req, res) => {
 app.post('/api/quote-expiration/config', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { days, created_by } = req.body;
+    const { days } = req.body;
     
     if (!days || days < 1) {
       return res.status(400).json({ error: 'Days must be a positive number' });
@@ -878,102 +909,67 @@ app.post('/api/quote-expiration/config', async (req, res) => {
 
     // Insert new configuration
     const insertResult = await client.query(`
-      INSERT INTO quote_expiration (days, created_by)
-      VALUES ($1, $2)
-      RETURNING id, days, created_at, created_by
-    `, [days, created_by || 'system']);
+      INSERT INTO quote_expiration (days)
+      VALUES ($1)
+      RETURNING id, days, created_at, updated_at
+    `, [days]);
 
     // Update expired quotes with new configuration
     await client.query(`
       UPDATE quotes 
-      SET status = 'expired' 
-      WHERE status = 'pending' 
+      SET status = 'EXPIRED'
+      WHERE status = 'PENDING'
       AND created_at < NOW() - INTERVAL '1 day' * $1
     `, [days]);
 
     await client.query('COMMIT');
-    
-    res.status(201).json({
-      message: 'Quote expiration configuration created successfully',
-      config: insertResult.rows[0]
-    });
-  } catch (error) {
+    res.status(201).json(insertResult.rows[0]);
+  } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error creating quote expiration config:', error);
+    console.error('Error creating quote expiration config:', err);
     res.status(500).json({ error: 'Failed to create quote expiration configuration' });
   } finally {
     client.release();
   }
 });
 
-app.put('/api/quote-expiration/config/:id', async (req, res) => {
-  const client = await pool.connect();
+// Inventory Hold Period Configuration API Endpoints
+app.get('/api/inventory-hold-period/config', async (req, res) => {
   try {
-    const { id } = req.params;
-    const { days, updated_by } = req.body;
-    
-    if (!days || days < 1) {
-      return res.status(400).json({ error: 'Days must be a positive number' });
+    const result = await pool.query('SELECT * FROM inventory_hold_period ORDER BY created_at DESC LIMIT 1');
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No inventory hold period configuration found' });
     }
-
-    await client.query('BEGIN');
-
-    // Update configuration
-    const updateResult = await client.query(`
-      UPDATE quote_expiration 
-      SET days = $1, 
-          updated_at = CURRENT_TIMESTAMP,
-          updated_by = $2
-      WHERE id = $3
-      RETURNING id, days, created_at, updated_at, created_by, updated_by
-    `, [days, updated_by || 'system', id]);
-
-    if (updateResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Quote expiration configuration not found' });
-    }
-
-    // Update expired quotes with new configuration
-    await client.query(`
-      UPDATE quotes 
-      SET status = 'expired' 
-      WHERE status = 'pending' 
-      AND created_at < NOW() - INTERVAL '1 day' * $1
-    `, [days]);
-
-    await client.query('COMMIT');
-    
-    res.json({
-      message: 'Quote expiration configuration updated successfully',
-      config: updateResult.rows[0]
-    });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error updating quote expiration config:', error);
-    res.status(500).json({ error: 'Failed to update quote expiration configuration' });
-  } finally {
-    client.release();
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching inventory hold period config:', err);
+    res.status(500).json({ error: 'Failed to fetch inventory hold period configuration' });
   }
 });
 
-app.get('/api/quote-expiration/history', async (req, res) => {
+app.post('/api/inventory-hold-period/config', async (req, res) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(`
-      SELECT 
-        id,
-        days,
-        created_at,
-        updated_at,
-        created_by,
-        updated_by
-      FROM quote_expiration 
-      ORDER BY created_at DESC
-    `);
-    
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error fetching quote expiration history:', error);
-    res.status(500).json({ error: 'Failed to fetch quote expiration history' });
+    const { days } = req.body;
+
+    await client.query('BEGIN');
+
+    // Create new configuration
+    const insertQuery = `
+      INSERT INTO inventory_hold_period (days)
+      VALUES ($1)
+      RETURNING *
+    `;
+    const result = await client.query(insertQuery, [days]);
+
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error creating inventory hold period config:', err);
+    res.status(500).json({ error: 'Failed to create inventory hold period configuration' });
+  } finally {
+    client.release();
   }
 });
 
