@@ -126,7 +126,13 @@ function Checkout() {
       // Create a transaction for each cart item
       const transactionPromises = cartItems.map(item => {
         const transactionType = item.transactionType || 'pawn';
-        console.log("item",item);
+
+        // Ensure at least one image is marked as primary
+        const imageData = item.images ? item.images.map((img, index) => ({
+          url: img.url,
+          is_primary: img.isPrimary || (!item.images.some(i => i.isPrimary) && index === 0)
+        })) : [];
+
         return axios.post(
           `${config.apiUrl}/transactions`,
           {
@@ -136,13 +142,13 @@ function Checkout() {
             metal_purity: item.purity,
             weight: parseFloat(item.weight),
             category: item.category,
-            metal_type: item.metalType,
+            metal_type: item.metal,
             primary_gem: item.primaryGem,
             secondary_gem: item.secondaryGem,
             price: parseFloat(item.itemPriceEstimates[transactionType] || 0),
             payment_method: paymentMethod,
-            status: 'completed',
-            created_at: new Date().toISOString()
+            inventory_status: 'HOLD',
+            images: imageData
           },
           {
             headers: {
@@ -153,7 +159,7 @@ function Checkout() {
         );
       });
 
-      await Promise.all(transactionPromises);
+      const results = await Promise.all(transactionPromises);
       
       setSnackbar({
         open: true,

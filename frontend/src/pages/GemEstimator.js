@@ -115,7 +115,6 @@ function GemEstimator() {
     const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
     const totalWeight = parseFloat(addMetal[0].weight || 0) + gemWeightInGrams;
 
-
     // Get primary and secondary gem details based on their types
     let primaryGemDetails = '';
     let secondaryGemDetails = '';
@@ -153,7 +152,10 @@ function GemEstimator() {
         retail: priceEstimates.retail
       },
       transactionType: itemTransactionTypes[estimatedItems.length] || 'pawn',
-      image: images.find(img => img.isPrimary) || images[0]
+      images: images.map(img => ({
+        url: img.url,
+        isPrimary: img.isPrimary || false
+      }))
     };
     setEstimatedItems(prev => [...prev, newItem]);
 

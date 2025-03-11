@@ -1022,7 +1022,7 @@ app.get('/api/customers/search', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/customers/:id', authenticateToken, async (req, res) => {
+app.get('/api/customers/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
@@ -1039,7 +1039,7 @@ app.get('/api/customers/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/customers', authenticateToken, async (req, res) => {
+app.post('/api/customers', async (req, res) => {
   console.log("req.body", authenticateToken);
   try {
     const {
@@ -1073,7 +1073,7 @@ app.post('/api/customers', authenticateToken, async (req, res) => {
   }
 });
 
-app.put('/api/customers/:id', authenticateToken, async (req, res) => {
+app.put('/api/customers/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -1118,6 +1118,7 @@ app.get('/api/transactions', async (req, res) => {
     const query = `
       SELECT 
         t.id,
+        t.transaction_id,
         t.customer_id,
         t.transaction_type,
         t.estimated_value,
@@ -1129,7 +1130,7 @@ app.get('/api/transactions', async (req, res) => {
         t.secondary_gem,
         t.price,
         t.payment_method,
-        t.status,
+        t.inventory_status,
         t.created_at,
         c.first_name,
         c.last_name,
@@ -1150,9 +1151,12 @@ app.get('/api/transactions', async (req, res) => {
 app.get('/api/transactions/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const query = `
+    
+    // Get transaction details
+    const transactionQuery = `
       SELECT 
         t.id,
+        t.transaction_id,
         t.customer_id,
         t.transaction_type,
         t.estimated_value,
@@ -1164,7 +1168,7 @@ app.get('/api/transactions/:id', async (req, res) => {
         t.secondary_gem,
         t.price,
         t.payment_method,
-        t.status,
+        t.inventory_status,
         t.created_at,
         c.first_name,
         c.last_name,
@@ -1174,16 +1178,205 @@ app.get('/api/transactions/:id', async (req, res) => {
       LEFT JOIN customers c ON t.customer_id = c.id
       WHERE t.id = $1
     `;
-    const result = await pool.query(query, [id]);
     
-    if (result.rows.length === 0) {
+    const imagesQuery = `
+      SELECT id, image_url, is_primary, created_at
+      FROM transaction_images
+      WHERE transaction_id = $1
+      ORDER BY is_primary DESC, created_at ASC
+    `;
+
+    const [transactionResult, imagesResult] = await Promise.all([
+      pool.query(transactionQuery, [id]),
+      pool.query(imagesQuery, [id])
+    ]);
+    
+    if (transactionResult.rows.length === 0) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
     
-    res.json(result.rows[0]);
+    // Combine transaction with its images
+    const transaction = transactionResult.rows[0];
+    transaction.images = imagesResult.rows;
+    
+    res.json(transaction);
   } catch (err) {
     console.error('Error fetching transaction:', err);
     res.status(500).json({ error: 'Failed to fetch transaction' });
+  }
+});
+
+// Function to generate transaction ID
+async function generateTransactionId(maxAttempts = 10) {
+  const prefix = 'TSD';
+  let attempts = 0;
+  let isUnique = false;
+  let transactionId;
+
+  while (!isUnique && attempts < maxAttempts) {
+    attempts++;
+    // Generate a random 6-digit number
+    const randomNum = Math.floor(100000 + Math.random() * 900000);
+    transactionId = `${prefix}${randomNum}`;
+
+    try {
+      // Check if this ID already exists in the database
+      const checkQuery = 'SELECT COUNT(*) FROM transactions WHERE transaction_id = $1';
+      const result = await pool.query(checkQuery, [transactionId]);
+      
+      if (result.rows[0].count === '0') {
+        isUnique = true;
+      }
+    } catch (err) {
+      console.error('Error checking transaction ID uniqueness:', err);
+      throw new Error('Failed to generate unique transaction ID');
+    }
+  }
+
+  if (!isUnique) {
+    throw new Error('Failed to generate unique transaction ID after maximum attempts');
+  }
+
+  return transactionId;
+}
+
+app.post('/api/transactions', async (req, res) => {
+  try {
+    const {
+      customer_id,
+      transaction_type,
+      estimated_value,
+      metal_purity,
+      weight,
+      category,
+      metal_type,
+      primary_gem,
+      secondary_gem,
+      price,
+      payment_method,
+      inventory_status,
+      images // Array of {url, isPrimary} objects
+    } = req.body;
+
+    // Required fields validation
+    if (!customer_id || !transaction_type || !estimated_value || !price || !payment_method) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Generate unique transaction ID
+    let transactionId;
+    try {
+      transactionId = await generateTransactionId();
+    } catch (err) {
+      console.error('Transaction ID generation error:', err);
+      return res.status(500).json({ error: 'Failed to generate transaction ID', details: err.message });
+    }
+
+    // Begin transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Insert transaction
+      const transactionQuery = `
+        INSERT INTO transactions (
+          transaction_id,
+          customer_id,
+          transaction_type,
+          estimated_value,
+          metal_purity,
+          weight,
+          category,
+          metal_type,
+          primary_gem,
+          secondary_gem,
+          price,
+          payment_method,
+          inventory_status,
+          created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
+        RETURNING 
+          id,
+          transaction_id,
+          customer_id,
+          transaction_type,
+          estimated_value,
+          metal_purity,
+          weight,
+          category,
+          metal_type,
+          primary_gem,
+          secondary_gem,
+          price,
+          payment_method,
+          inventory_status,
+          created_at
+      `;
+
+      const transactionResult = await client.query(transactionQuery, [
+        transactionId,
+        customer_id,
+        transaction_type,
+        estimated_value,
+        metal_purity,
+        weight,
+        category,
+        metal_type,
+        primary_gem,
+        secondary_gem,
+        price,
+        payment_method,
+        'HOLD'
+      ]);
+
+      const transaction = transactionResult.rows[0];
+
+      // Save images if provided
+      let savedImages = [];
+      if (images && images.length > 0) {
+        const imageQuery = `
+          INSERT INTO transaction_images (
+            transaction_id, 
+            image_url, 
+            is_primary
+          )
+          VALUES ($1, $2, $3)
+          RETURNING id, image_url, is_primary
+        `;
+
+        // Ensure only one primary image
+        const hasPrimary = images.some(img => img.isPrimary);
+        savedImages = await Promise.all(
+          images.map((img, index) => {
+            // If no primary image was specified, make the first image primary
+            const isPrimary = img.isPrimary || (!hasPrimary && index === 0);
+            return client.query(imageQuery, [
+              transaction.id,
+              img.url,
+              isPrimary
+            ]).then(result => result.rows[0]);
+          })
+        );
+      }
+
+      await client.query('COMMIT');
+
+      // Return transaction with images
+      res.status(201).json({
+        ...transaction,
+        images: savedImages
+      });
+
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+  } catch (err) {
+    console.error('Error creating transaction:', err);
+    res.status(500).json({ error: 'Failed to create transaction', details: err.message });
   }
 });
 
@@ -1201,7 +1394,7 @@ app.put('/api/transactions/:id', async (req, res) => {
       secondary_gem,
       price,
       payment_method,
-      status
+      inventory_status
     } = req.body;
 
     // First check if transaction exists
@@ -1225,10 +1418,11 @@ app.put('/api/transactions/:id', async (req, res) => {
         secondary_gem = COALESCE($8, secondary_gem),
         price = COALESCE($9, price),
         payment_method = COALESCE($10, payment_method),
-        status = COALESCE($11, status)
+        inventory_status = COALESCE($11, inventory_status)
       WHERE id = $12
       RETURNING 
         id,
+        transaction_id,
         customer_id,
         transaction_type,
         estimated_value,
@@ -1240,7 +1434,7 @@ app.put('/api/transactions/:id', async (req, res) => {
         secondary_gem,
         price,
         payment_method,
-        status,
+        inventory_status,
         created_at
     `;
     
@@ -1255,7 +1449,7 @@ app.put('/api/transactions/:id', async (req, res) => {
       secondary_gem,
       price,
       payment_method,
-      status,
+      inventory_status,
       id
     ]);
 
