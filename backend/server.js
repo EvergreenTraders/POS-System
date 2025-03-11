@@ -1112,6 +1112,159 @@ app.put('/api/customers/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Transaction routes
+app.get('/api/transactions', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        t.id,
+        t.customer_id,
+        t.transaction_type,
+        t.estimated_value,
+        t.metal_purity,
+        t.weight,
+        t.category,
+        t.metal_type,
+        t.primary_gem,
+        t.secondary_gem,
+        t.price,
+        t.payment_method,
+        t.status,
+        t.created_at,
+        c.first_name,
+        c.last_name,
+        c.email,
+        c.phone
+      FROM transactions t
+      LEFT JOIN customers c ON t.customer_id = c.id
+      ORDER BY t.created_at DESC
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching transactions:', err);
+    res.status(500).json({ error: 'Failed to fetch transactions' });
+  }
+});
+
+app.get('/api/transactions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = `
+      SELECT 
+        t.id,
+        t.customer_id,
+        t.transaction_type,
+        t.estimated_value,
+        t.metal_purity,
+        t.weight,
+        t.category,
+        t.metal_type,
+        t.primary_gem,
+        t.secondary_gem,
+        t.price,
+        t.payment_method,
+        t.status,
+        t.created_at,
+        c.first_name,
+        c.last_name,
+        c.email,
+        c.phone
+      FROM transactions t
+      LEFT JOIN customers c ON t.customer_id = c.id
+      WHERE t.id = $1
+    `;
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching transaction:', err);
+    res.status(500).json({ error: 'Failed to fetch transaction' });
+  }
+});
+
+app.put('/api/transactions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      transaction_type,
+      estimated_value,
+      metal_purity,
+      weight,
+      category,
+      metal_type,
+      primary_gem,
+      secondary_gem,
+      price,
+      payment_method,
+      status
+    } = req.body;
+
+    // First check if transaction exists
+    const checkQuery = 'SELECT * FROM transactions WHERE id = $1';
+    const checkResult = await pool.query(checkQuery, [id]);
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    const query = `
+      UPDATE transactions 
+      SET 
+        transaction_type = COALESCE($1, transaction_type),
+        estimated_value = COALESCE($2, estimated_value),
+        metal_purity = COALESCE($3, metal_purity),
+        weight = COALESCE($4, weight),
+        category = COALESCE($5, category),
+        metal_type = COALESCE($6, metal_type),
+        primary_gem = COALESCE($7, primary_gem),
+        secondary_gem = COALESCE($8, secondary_gem),
+        price = COALESCE($9, price),
+        payment_method = COALESCE($10, payment_method),
+        status = COALESCE($11, status)
+      WHERE id = $12
+      RETURNING 
+        id,
+        customer_id,
+        transaction_type,
+        estimated_value,
+        metal_purity,
+        weight,
+        category,
+        metal_type,
+        primary_gem,
+        secondary_gem,
+        price,
+        payment_method,
+        status,
+        created_at
+    `;
+    
+    const result = await pool.query(query, [
+      transaction_type,
+      estimated_value,
+      metal_purity,
+      weight,
+      category,
+      metal_type,
+      primary_gem,
+      secondary_gem,
+      price,
+      payment_method,
+      status,
+      id
+    ]);
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating transaction:', err);
+    res.status(500).json({ error: 'Failed to update transaction', details: err.message });
+  }
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {

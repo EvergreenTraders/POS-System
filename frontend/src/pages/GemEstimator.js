@@ -2314,7 +2314,7 @@ function GemEstimator() {
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Box>
                             <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
-                              {item.weight}g {item.purity} {item.metal} {item.gems}
+                              {item.weight}g {item.purity} {item.metal} {item.primaryGem.split(' ')[0]} {item.secondaryGem.split(' ')[0]}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
                               {item.category}

@@ -123,38 +123,50 @@ function Checkout() {
         throw new Error('Authentication token not found');
       }
 
-      const response = await axios.post(
-        `${config.apiUrl}/transactions`,
-        {
-          items: cartItems,
-          customer: selectedCustomer,
-          paymentDetails,
-          paymentMethod,
-          status: 'completed',
-          created_at: new Date().toISOString()
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
+      // Create a transaction for each cart item
+      const transactionPromises = cartItems.map(item => {
+        const transactionType = item.transactionType || 'pawn';
+        console.log("item",item);
+        return axios.post(
+          `${config.apiUrl}/transactions`,
+          {
+            customer_id: selectedCustomer.id,
+            transaction_type: item.transactionType,
+            estimated_value: parseFloat(item.itemPriceEstimates[transactionType] || 0),
+            metal_purity: item.purity,
+            weight: parseFloat(item.weight),
+            category: item.category,
+            metal_type: item.metalType,
+            primary_gem: item.primaryGem,
+            secondary_gem: item.secondaryGem,
+            price: parseFloat(item.itemPriceEstimates[transactionType] || 0),
+            payment_method: paymentMethod,
+            status: 'completed',
+            created_at: new Date().toISOString()
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            }
           }
-        }
-      );
+        );
+      });
 
-      if (response.status === 200) {
-        setSnackbar({
-          open: true,
-          message: 'Payment processed successfully',
-          severity: 'success'
-        });
-        clearCart();
-        // Navigate back to estimation with auth state preserved
-        navigate('/gem-estimator', { 
-          state: { 
-            from: 'checkout'
-          }
-        });
-      }
+      await Promise.all(transactionPromises);
+      
+      setSnackbar({
+        open: true,
+        message: 'Payment processed successfully',
+        severity: 'success'
+      });
+      clearCart();
+      // Navigate back to estimation with auth state preserved
+      navigate('/gem-estimator', { 
+        state: { 
+          from: 'checkout'
+        }
+      });
     } catch (error) {
       if (error.message === 'Authentication token not found') {
         // Preserve cart state and redirect to login
@@ -289,7 +301,7 @@ function Checkout() {
                     {cartItems.map((item, index) => (
                       <TableRow key={index}>
                         <TableCell>
-                          {item.weight}g {item.metal} {item.type === 'diamond' ? '(Diamond)' : item.type === 'stone' ? '(Stone)' : ''}
+                          {item.weight}g {item.metal} {item.primaryGem.split(' ')[0]} {item.secondaryGem.split(' ')[0]}
                         </TableCell>
                         <TableCell>{item.transactionType}</TableCell>
                         <TableCell align="right">
