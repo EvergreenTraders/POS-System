@@ -2307,7 +2307,7 @@ function GemEstimator() {
                     >
                       <TableCell>
                           <img 
-                            src={item.image?.url || ''} 
+                            src={item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url || ''} 
                             alt="No image" 
                             style={{ width: '50px', height: '50px', objectFit: 'cover' }} 
                           />

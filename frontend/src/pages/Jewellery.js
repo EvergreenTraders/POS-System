@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Container,
   Typography,
@@ -18,112 +18,67 @@ import {
   InputAdornment,
   Grid,
   Tooltip,
+  CircularProgress
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import SearchIcon from '@mui/icons-material/Search';
-
-// Dummy data for the jewellery inventory
-const jewelleryData = [
-  {
-    id: 'TSD1234567890123456',
-    name: 'Diamond Ring',
-    type: 'Ring',
-    material: '18K White Gold',
-    price: 2499.99,
-    weight: '4.2g',
-    inStock: true,
-    stones: 'Diamond',
-    caratWeight: '1.0ct',
-    description: 'Elegant solitaire diamond ring with excellent clarity and cut',
-    dimensions: '16.5mm diameter',
-    certification: 'GIA Certified',
-    manufacturer: 'Luxury Jewels Co.',
-    dateAdded: '2025-01-15',
-    image: 'https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=300&h=300&fit=crop'
-  },
-  {
-    id: 'TND9876543210987654',
-    name: 'Sapphire Necklace',
-    type: 'Necklace',
-    material: '14K Yellow Gold',
-    price: 1299.99,
-    weight: '8.5g',
-    inStock: true,
-    stones: 'Sapphire',
-    caratWeight: '2.5ct',
-    description: 'Beautiful sapphire pendant necklace with delicate chain',
-    dimensions: '18 inches chain length',
-    certification: 'IGI Certified',
-    manufacturer: 'Royal Gems Ltd.',
-    dateAdded: '2025-01-20',
-    image: 'https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=300&h=300&fit=crop'
-  },
-  {
-    id: 'TSD2468135790123456',
-    name: 'Pearl Earrings',
-    type: 'Earrings',
-    material: 'Sterling Silver',
-    price: 299.99,
-    weight: '3.0g',
-    inStock: false,
-    stones: 'Pearl',
-    caratWeight: 'N/A',
-    description: 'Classic freshwater pearl drop earrings',
-    dimensions: '25mm length',
-    certification: 'N/A',
-    manufacturer: 'Pearl Paradise Inc.',
-    dateAdded: '2025-01-25',
-    image: 'https://images.unsplash.com/photo-1629224316810-9d8805b95e76?w=300&h=300&fit=crop'
-  },
-  {
-    id: 'TND1357924680123456',
-    name: 'Ruby Bracelet',
-    type: 'Bracelet',
-    material: '18K Rose Gold',
-    price: 1899.99,
-    weight: '12.3g',
-    inStock: true,
-    stones: 'Ruby',
-    caratWeight: '3.2ct',
-    description: 'Stunning ruby tennis bracelet with secure clasp',
-    dimensions: '7 inches length',
-    certification: 'SSEF Certified',
-    manufacturer: 'Precious Designs Co.',
-    dateAdded: '2025-02-01',
-    image: 'https://images.unsplash.com/photo-1611591437281-460bfbe1220a?w=300&h=300&fit=crop'
-  },
-  {
-    id: 'TSD5678901234567890',
-    name: 'Emerald Pendant',
-    type: 'Pendant',
-    material: 'Platinum',
-    price: 3299.99,
-    weight: '5.8g',
-    inStock: true,
-    stones: 'Emerald',
-    caratWeight: '1.8ct',
-    description: 'Exquisite emerald pendant with diamond halo',
-    dimensions: '22mm x 15mm',
-    certification: 'Gubelin Certified',
-    manufacturer: 'Elite Jewellers',
-    dateAdded: '2025-02-10',
-    image: 'https://images.unsplash.com/photo-1608042314453-ae338d80c427?w=300&h=300&fit=crop'
-  }
-];
+import config from '../config';
+import axios from 'axios';
 
 function Jewellery() {
   const navigate = useNavigate();
-  const [selectedItem, setSelectedItem] = useState(jewelleryData[0]);
+  const API_BASE_URL = config.apiUrl;
+  const [selectedItem, setSelectedItem] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [serialQuery, setSerialQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [transactions, setTransactions] = useState([]);
+
+  useEffect(() => {
+    fetchTransactions();
+  }, []);
+
+  const fetchTransactions = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/transactions`);
+      setTransactions(response.data);
+      if (response.data.length > 0) {
+        setSelectedItem(response.data[0]);
+      }
+    } catch (error) {
+      console.error('Error fetching transactions:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleRowClick = (item) => {
     setSelectedItem(item);
   };
 
   const truncateNumber = (number) => {
-    return number.substring(0, 7) + '...';
+    return number.substring(0, 14) + '...' + number.substring(number.length - 4);
   };
+
+  const formatPrice = (price) => {
+    if (typeof price !== 'number' || isNaN(price)) {
+      return '0.00';
+    }
+    return price.toFixed(2);
+  };
+
+  // Filter transactions based on search queries
+  const filteredTransactions = transactions.filter(item => {
+    const matchesSearch = searchQuery === '' || 
+      item.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.category?.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesSerial = serialQuery === '' || 
+      item.transaction_id?.toLowerCase().includes(serialQuery.toLowerCase());
+
+    return matchesSearch && matchesSerial;
+  });
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -157,7 +112,7 @@ function Jewellery() {
             />
             <TextField
               size="small"
-              placeholder="Search by serial number..."
+              placeholder="Search by transaction ID..."
               value={serialQuery}
               onChange={(e) => setSerialQuery(e.target.value)}
               sx={{ flex: 1 }}
@@ -178,57 +133,53 @@ function Jewellery() {
             </Button>
           </Box>
 
-          <TableContainer component={Paper} sx={{ mb: 3 }}>
-            <Table sx={{ minWidth: 650 }} aria-label="jewellery inventory table">
+          <TableContainer component={Paper} sx={{ flex: 1, overflow: 'auto' }}>
+            <Table stickyHeader sx={{ minWidth: 650 }} aria-label="jewellery inventory table">
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ width: '100px' }}>Number</TableCell>
+                  <TableCell sx={{ width: '100px' }}>ID</TableCell>
                   <TableCell>Name</TableCell>
-                  <TableCell>Type</TableCell>
-                  <TableCell>Material</TableCell>
+                  <TableCell>Category</TableCell>
                   <TableCell>Price</TableCell>
                   <TableCell>Weight</TableCell>
-                  <TableCell>Stock Status</TableCell>
-                  <TableCell>Stones</TableCell>
-                  <TableCell>Carat Weight</TableCell>
+                  <TableCell> Status</TableCell>
+                  <TableCell>Date</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {jewelleryData.map((item) => (
-                  <TableRow
-                    key={item.id}
-                    sx={{ 
-                      cursor: 'pointer',
-                      '&:hover': { backgroundColor: 'rgba(0, 0, 0, 0.04)' },
-                      backgroundColor: selectedItem?.id === item.id ? 'rgba(0, 0, 0, 0.08)' : 'inherit'
-                    }}
-                    onClick={() => handleRowClick(item)}
-                  >
-                    <TableCell>
-                      <Tooltip title={item.id} arrow>
-                        <Typography
-                          sx={{
-                            width: '100%',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            fontFamily: 'monospace'
-                          }}
-                        >
-                          {truncateNumber(item.id)}
-                        </Typography>
-                      </Tooltip>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center">
+                      <CircularProgress />
                     </TableCell>
-                    <TableCell>{item.name}</TableCell>
-                    <TableCell>{item.type}</TableCell>
-                    <TableCell>{item.material}</TableCell>
-                    <TableCell>${item.price.toFixed(2)}</TableCell>
-                    <TableCell>{item.weight}</TableCell>
-                    <TableCell>{item.inStock ? 'In Stock' : 'Out of Stock'}</TableCell>
-                    <TableCell>{item.stones}</TableCell>
-                    <TableCell>{item.caratWeight}</TableCell>
                   </TableRow>
-                ))}
+                ) : filteredTransactions.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center">
+                      No transactions found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredTransactions.map((item) => (
+                    <TableRow
+                      key={item.id}
+                      sx={{ 
+                        cursor: 'pointer',
+                        '&:hover': { bgcolor: 'action.hover' },
+                        bgcolor: selectedItem?.id === item.id ? 'action.selected' : 'inherit'
+                      }}
+                      onClick={() => handleRowClick(item)}
+                    >
+                      <TableCell> {item.transaction_id} </TableCell>
+                      <TableCell>{`${item.weight}g ${item.metal_purity} ${item.metal_type}`}</TableCell>
+                      <TableCell>{item.category}</TableCell>
+                      <TableCell>${formatPrice(item.price)}</TableCell>
+                      <TableCell>{item.weight}g</TableCell>
+                      <TableCell>{item.inventory_status}</TableCell>
+                      <TableCell>{item.created_date}</TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </TableContainer>
@@ -243,93 +194,84 @@ function Jewellery() {
             bgcolor: 'background.paper',
           }}
         >
-          <Box sx={{ 
-            height: '100%',
-            overflow: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 2,
-            p: 2
-          }}>
-            {/* Image and Basic Info Section */}
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              {/* Image */}
-              <Box sx={{ width: '120px', height: '120px', flexShrink: 0 }}>
-                <img 
-                  src={selectedItem.image} 
-                  alt={selectedItem.name}
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    borderRadius: '8px',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-                  }}
-                />
+          {selectedItem && (
+            <Box sx={{ 
+              height: '100%',
+              overflow: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+              p: 2
+            }}>
+              {/* Image and Basic Info Section */}
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                {/* Image */}
+                <Box sx={{ width: '120px', height: '120px', flexShrink: 0 }}>
+                  <img 
+                    src={selectedItem.images?.find(img => img.is_primary)?.image_url || 
+                         selectedItem.images?.[0]?.image_url || 
+                         'placeholder-image-url.jpg'} 
+                    alt={selectedItem.name || 'Item'}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      borderRadius: '8px',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                    }}
+                  />
+                </Box>
+                
+                {/* Basic Info */}
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                    {`${selectedItem.weight}g ${selectedItem.metal_purity} ${selectedItem.metal_type}`}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary" sx={{ mb: 0.5 }}> {selectedItem.category}
+                  </Typography>
+                  <Typography variant="h6" sx={{ color: 'success.main', mb: 0.5 }}>
+                    ${formatPrice(selectedItem.price)}
+                  </Typography>
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      color: selectedItem.inventory_status === 'HOLD' ? 'success.main' : 'error.main',
+                      fontWeight: 'medium'
+                    }}
+                  >
+                    {selectedItem.inventory_status || 'HOLD'}
+                  </Typography>
+                </Box>
               </Box>
-              
-              {/* Basic Info */}
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-                  {selectedItem.name}
+
+              {/* Specifications */}
+              <Paper elevation={0} sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 2 }}>
+                <Typography variant="subtitle2" sx={{ color: 'primary.main', mb: 1 }}>
+                  Specifications
                 </Typography>
-                <Typography variant="body2" color="textSecondary" sx={{ mb: 0.5 }}>
-                  {selectedItem.type}
-                </Typography>
-                <Typography variant="h6" sx={{ color: 'success.main', mb: 0.5 }}>
-                  ${selectedItem.price.toFixed(2)}
-                </Typography>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    color: selectedItem.inStock ? 'success.main' : 'error.main',
-                    fontWeight: 'medium'
-                  }}
-                >
-                  {selectedItem.inStock ? 'In Stock' : 'Out of Stock'}
-                </Typography>
-              </Box>
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
+                  <Box>
+                    <Typography variant="caption" color="textSecondary">Weight</Typography>
+                    <Typography variant="body2">{selectedItem.weight}g</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="textSecondary">Dimensions</Typography>
+                    <Typography variant="body2">{selectedItem.dimensions || 'N/A'}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="textSecondary">Certification</Typography>
+                    <Typography variant="body2">{selectedItem.certification || 'N/A'}</Typography>
+                  </Box>
+                </Box>
+              </Paper>
+
+              {/* ID Section */}
+              <Paper elevation={0} sx={{ p: 1, bgcolor: 'grey.50', borderRadius: 2 }}>
+                <Typography variant="caption" color="textSecondary">Transaction ID</Typography>
+                <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{selectedItem.transaction_id}</Typography>
+              </Paper>
             </Box>
-
-            {/* Specifications */}
-            <Paper elevation={0} sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 2 }}>
-              <Typography variant="subtitle2" sx={{ color: 'primary.main', mb: 1 }}>
-                Specifications
-              </Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
-                <Box>
-                  <Typography variant="caption" color="textSecondary">Material</Typography>
-                  <Typography variant="body2">{selectedItem.material}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="textSecondary">Weight</Typography>
-                  <Typography variant="body2">{selectedItem.weight}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="textSecondary">Stones</Typography>
-                  <Typography variant="body2">{selectedItem.stones}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="textSecondary">Carat</Typography>
-                  <Typography variant="body2">{selectedItem.caratWeight}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="textSecondary">Dimensions</Typography>
-                  <Typography variant="body2">{selectedItem.dimensions}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="textSecondary">Certification</Typography>
-                  <Typography variant="body2">{selectedItem.certification}</Typography>
-                </Box>
-              </Box>
-            </Paper>
-
-            {/* ID Section */}
-            <Paper elevation={0} sx={{ p: 1, bgcolor: 'grey.50', borderRadius: 2 }}>
-              <Typography variant="caption" color="textSecondary">Item Number</Typography>
-              <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{selectedItem.id}</Typography>
-            </Paper>
-          </Box>
+          )}
         </Grid>
       </Grid>
     </Box>

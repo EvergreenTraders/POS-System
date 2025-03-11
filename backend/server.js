@@ -1117,29 +1117,22 @@ app.get('/api/transactions', async (req, res) => {
   try {
     const query = `
       SELECT 
-        t.id,
-        t.transaction_id,
-        t.customer_id,
-        t.transaction_type,
-        t.estimated_value,
-        t.metal_purity,
-        t.weight,
-        t.category,
-        t.metal_type,
-        t.primary_gem,
-        t.secondary_gem,
-        t.price,
-        t.payment_method,
-        t.inventory_status,
-        t.created_at,
-        c.first_name,
-        c.last_name,
-        c.email,
-        c.phone
+        t.*,
+        COALESCE(json_agg(
+          json_build_object(
+            'id', ti.id,
+            'image_url', ti.image_url,
+            'is_primary', ti.is_primary
+          )
+        ) FILTER (WHERE ti.id IS NOT NULL), '[]') as images,
+        CAST(t.price AS FLOAT) as price,
+        TO_CHAR(t.created_at, 'YYYY-MM-DD') as created_date
       FROM transactions t
-      LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN transaction_images ti ON t.id = ti.transaction_id
+      GROUP BY t.id
       ORDER BY t.created_at DESC
     `;
+    
     const result = await pool.query(query);
     res.json(result.rows);
   } catch (err) {
