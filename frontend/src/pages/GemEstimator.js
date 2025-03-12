@@ -211,6 +211,7 @@ function GemEstimator() {
     name: '',
     shape: '',
     color: 'Red',
+    color_id: 5, // Default to Red's ID
     weight: '',
     width: '',
     depth: '',
@@ -309,11 +310,13 @@ function GemEstimator() {
         if (stoneTypesData.length > 0) {
           setPrimaryStoneForm(prev => ({
             ...prev,
-            color: 'Red'
+            color: 'Red',
+            color_id: 5
           }));
           setSecondaryStoneForm(prev => ({
             ...prev,
-            color: 'Red'
+            color: 'Red',
+            color_id: 5
           }));
         }
 
@@ -964,7 +967,7 @@ function GemEstimator() {
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Type *</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
             {colorSpecificStoneTypes
-              .filter(stone => stone.color === getCurrentStoneForm().color)
+              .filter(stone => stone.color_id === getCurrentStoneForm().color_id)
               .map((stone) => (
                 <Paper
                   key={stone.type}
@@ -1004,10 +1007,14 @@ function GemEstimator() {
                 <Grid item xs={6} key={color.id}>
                   <Paper
                     onClick={() => {
-                      setCurrentStoneForm(prev => ({
-                        ...prev,
-                        color: color.color
-                      }));
+                      setCurrentStoneForm(prev => {
+                        const newForm = {
+                          ...prev,
+                          color: color.color,
+                          color_id: color.id
+                        };
+                        return newForm;
+                      });
                     }}
 
                     sx={{

@@ -1,5 +1,6 @@
 DO $$
 BEGIN
+    drop table if exists stone_color;
     -- Stone Color Table
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_color') THEN
         CREATE TABLE stone_color (
@@ -17,9 +18,8 @@ BEGIN
         ('Brown'),
         ('Black'),
         ('White'),
-        ('Teal'),
-        ('Gray'),
-        ('Pink');
+        ('Pink'),
+        ('Other');
     END IF;
 
     -- Stone Shape Table
@@ -48,26 +48,57 @@ BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_types') THEN
         CREATE TABLE stone_types (
             id SERIAL PRIMARY KEY,
-            color VARCHAR(50) NOT NULL,
+            color_id INTEGER NOT NULL,
             type VARCHAR(50) NOT NULL,
-            image_path VARCHAR(255)
+            image_path VARCHAR(255),
+            FOREIGN KEY (color_id) REFERENCES stone_color(id)
         );
         
-        INSERT INTO stone_types (color, type, image_path) VALUES
-        ('Red', 'Red 1', '/images/stones/red/red 1.png'),
-        ('Red', 'Red 2', '/images/stones/red/red 2.png'),
-        ('Red', 'Red 3', '/images/stones/red/red 3.png'),
-        ('Red', 'Red 4', '/images/stones/red/red 4.png'),
-        ('Red', 'Red 5', '/images/stones/red/red 5.png'),
-        ('Red', 'Red 6', '/images/stones/red/red 6.png'),
-        ('Red', 'Red 7', '/images/stones/red/red 7.png'),
-        ('Red', 'Red 8', '/images/stones/red/red 8.png'),
-        ('Red', 'Red 9', '/images/stones/red/red 9.png'),
-        ('Teal', 'Teal 1', '/images/stones/teal/teal 1.png'),
-        ('Teal', 'Teal 2', '/images/stones/teal/teal 2.png'),
-        ('Teal', 'Teal 3', '/images/stones/teal/teal 3.jpg'),
-        ('Teal', 'Teal 4', '/images/stones/teal/teal 4.png'),
-        ('Teal', 'Teal 5', '/images/stones/teal/teal 5.png');
+        INSERT INTO stone_types (color_id, type, image_path) VALUES
+            (5, 'Ruby', '/images/stones/red/red 1.png'),
+            (5, 'Garnet', '/images/stones/red/red 2.png'),
+            (5, 'Alexandrite', '/images/stones/red/red 3.png'),
+            (3, 'Sapphire', '/images/stones/red/red 4.png'),
+            (3, 'Emerald', '/images/stones/red/red 5.png'),
+            (3, 'Topaz', '/images/stones/red/red 6.png'),
+            (3, 'Opal', '/images/stones/red/red 7.png'),
+            (3, 'Alexandrite', '/images/stones/red/red 8.png'),
+            (1, 'Sapphire', '/images/stones/red/red 9.png'),
+            (1, 'Peridot', '/images/stones/teal/teal 1.png'),
+            (1, 'Topaz', '/images/stones/teal/teal 2.png'),
+            (1, 'Opal', '/images/stones/teal/teal 3.jpg'),
+            (1, 'Emerald', '/images/stones/teal/teal 4.png'),
+            (2, 'Sapphire', '/images/stones/teal/teal 4.png'),
+            (2, 'Peridot', '/images/stones/teal/teal 5.png'),
+            (2, 'Emerald', '/images/stones/teal/teal 6.png'),
+            (2, 'Garnet', '/images/stones/teal/teal 7.png'),
+            (2, 'Alexandrite', '/images/stones/teal/teal 8.png'),
+            (4, 'Sapphire', '/images/stones/teal/teal 9.png'),
+            (4, 'Ruby', '/images/stones/teal/teal 10.png'),
+            (4, 'Garnet', '/images/stones/teal/teal 11.png'),
+            (4, 'Topaz', '/images/stones/teal/teal 12.png'),
+            (4, 'Opal', '/images/stones/teal/teal 13.png'),
+            (4, 'Alexandrite', '/images/stones/teal/teal 14.png'),
+            (7, 'Peridot', '/images/stones/teal/teal 14.png'),
+            (7, 'Garnet', '/images/stones/teal/teal 14.png'),
+            (7, 'Topaz', '/images/stones/teal/teal 14.png'),
+            (8, 'Opal', '/images/stones/teal/teal 14.png'),
+            (8, 'Pearl', '/images/stones/teal/teal 14.png'),
+            (9, 'Sapphire', '/images/stones/teal/teal 14.png'),
+            (9, 'Opal', '/images/stones/teal/teal 14.png'),
+            (9, 'Pearl', '/images/stones/teal/teal 14.png'),
+            (10, 'Sapphire', '/images/stones/teal/teal 14.png'),
+            (10, 'Ruby', '/images/stones/teal/teal 14.png'),
+            (10, 'Garnet', '/images/stones/teal/teal 14.png'),
+            (10, 'Topaz', '/images/stones/teal/teal 14.png'),
+            (10, 'Opal', '/images/stones/teal/teal 14.png'),
+            (6, 'Ruby', '/images/stones/teal/teal 14.png'),
+            (6, 'Alexandrite', '/images/stones/teal/teal 14.png'),
+            (11, 'Alexandrite', '/images/stones/teal/teal 14.png'),
+            (11, 'Quartz', '/images/stones/teal/teal 14.png'),
+            (11, 'Topaz', '/images/stones/teal/teal 14.png'),
+            (11, 'Opal', '/images/stones/teal/teal 14.png'),
+            (11, 'Pearl', '/images/stones/teal/teal 14.png');
     END IF;
 
     -- Stone Type Table
