@@ -463,7 +463,7 @@ function SystemConfig() {
     }
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/quote-expiration/config`, {
+      const response = await axios.put(`${API_BASE_URL}/quote-expiration/config`, {
         days: newDays
       });
       
@@ -496,7 +496,7 @@ function SystemConfig() {
     }
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/inventory-hold-period/config`, {
+      const response = await axios.put(`${API_BASE_URL}/inventory-hold-period/config`, {
         days: newDays
       });
       

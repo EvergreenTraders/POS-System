@@ -109,7 +109,6 @@ BEGIN
 
     -- Create quote_expiration table for storing expiration period configuration
     CREATE TABLE IF NOT EXISTS quote_expiration (
-        id INTEGER PRIMARY KEY DEFAULT 1,
         days INTEGER NOT NULL DEFAULT 30,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP,
@@ -121,15 +120,10 @@ BEGIN
     COMMENT ON COLUMN quote_expiration.days IS 'Number of days to keep quotes before marking them as expired';
 
     -- Insert default configuration if table is empty
-    INSERT INTO quote_expiration (days)
-    SELECT 30
-    WHERE NOT EXISTS (
-        SELECT 1 FROM quote_expiration
-    );
+    INSERT INTO quote_expiration (days) VALUES (30);
 
     -- Create inventory_hold_period table for storing hold duration configuration
     CREATE TABLE IF NOT EXISTS inventory_hold_period (
-        id SERIAL PRIMARY KEY,
         days INTEGER NOT NULL DEFAULT 7,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP,
@@ -141,10 +135,6 @@ BEGIN
     COMMENT ON COLUMN inventory_hold_period.days IS 'Number of days to keep inventory items in HOLD status';
 
     -- Insert default configuration if table is empty
-    INSERT INTO inventory_hold_period (days)
-    SELECT 7
-    WHERE NOT EXISTS (
-        SELECT 1 FROM inventory_hold_period
-    );
+    INSERT INTO inventory_hold_period (days) VALUES (7);
 
 END $$;

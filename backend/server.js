@@ -877,10 +877,7 @@ app.get('/api/quote-expiration/config', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
-        id,
-        days,
-        created_at,
-        updated_at
+        *
       FROM quote_expiration 
       ORDER BY created_at DESC
       LIMIT 1
@@ -896,7 +893,7 @@ app.get('/api/quote-expiration/config', async (req, res) => {
   }
 });
 
-app.post('/api/quote-expiration/config', async (req, res) => {
+app.put('/api/quote-expiration/config', async (req, res) => {
   const client = await pool.connect();
   try {
     const { days } = req.body;
@@ -907,12 +904,24 @@ app.post('/api/quote-expiration/config', async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Insert new configuration
-    const insertResult = await client.query(`
-      INSERT INTO quote_expiration (days)
-      VALUES ($1)
-      RETURNING id, days, created_at, updated_at
+    // Update configuration or insert if none exists
+    const updateResult = await client.query(`
+      UPDATE quote_expiration
+      SET days = $1, updated_at = CURRENT_TIMESTAMP
+      RETURNING days, created_at, updated_at
     `, [days]);
+
+    // If no rows were updated, insert new configuration
+    let result;
+    if (updateResult.rowCount === 0) {
+      result = await client.query(`
+        INSERT INTO quote_expiration (days)
+        VALUES ($1)
+        RETURNING id, days, created_at, updated_at
+      `, [days]);
+    } else {
+      result = updateResult;
+    }
 
     // Update expired quotes with new configuration
     await client.query(`
@@ -923,7 +932,7 @@ app.post('/api/quote-expiration/config', async (req, res) => {
     `, [days]);
 
     await client.query('COMMIT');
-    res.status(201).json(insertResult.rows[0]);
+    res.json(result.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error creating quote expiration config:', err);
@@ -947,23 +956,42 @@ app.get('/api/inventory-hold-period/config', async (req, res) => {
   }
 });
 
-app.post('/api/inventory-hold-period/config', async (req, res) => {
+app.put('/api/inventory-hold-period/config', async (req, res) => {
   const client = await pool.connect();
   try {
     const { days } = req.body;
 
     await client.query('BEGIN');
 
-    // Create new configuration
-    const insertQuery = `
-      INSERT INTO inventory_hold_period (days)
-      VALUES ($1)
+    // Update configuration or insert if none exists
+    const updateResult = await client.query(`
+      UPDATE inventory_hold_period
+      SET days = $1, updated_at = CURRENT_TIMESTAMP
       RETURNING *
-    `;
-    const result = await client.query(insertQuery, [days]);
+    `, [days]);
+
+    // If no rows were updated, insert new configuration
+    let result;
+    if (updateResult.rowCount === 0) {
+      result = await client.query(`
+        INSERT INTO inventory_hold_period (days)
+        VALUES ($1)
+        RETURNING *
+      `, [days]);
+    } else {
+      result = updateResult;
+    }
+
+    // Update any inventory items that should no longer be on hold
+    await client.query(`
+      UPDATE transactions 
+      SET inventory_status = 'AVAILABLE' 
+      WHERE inventory_status = 'HOLD' 
+      AND created_at < NOW() - INTERVAL '1 day' * $1
+    `, [days]);
 
     await client.query('COMMIT');
-    res.status(201).json(result.rows[0]);
+    res.json(result.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error creating inventory hold period config:', err);
