@@ -199,11 +199,10 @@ function Checkout() {
         `${config.apiUrl}/quotes`,
         {
           items: cartItems,
-          customer: {
-            name: quoteDetails.customerName,
-            email: quoteDetails.customerEmail,
-            phone: quoteDetails.customerPhone
-          },
+          totalAmount: calculateTotal(),
+          customerName: quoteDetails.customerName,
+          customerEmail: quoteDetails.customerEmail,
+          customerPhone: quoteDetails.customerPhone,
           created_at: new Date().toISOString(),
           status: 'active'
         },

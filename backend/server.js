@@ -49,7 +49,6 @@ const updateInventoryHoldStatus = async () => {
       AND created_at < NOW() - INTERVAL '1 day' * $1
       RETURNING transaction_id
     `;
-    
     const result = await pool.query(updateQuery, [holdPeriod]);
     if (result.rows.length > 0) {
       const formattedIds = result.rows.map(r => r.transaction_id).join(', ');
@@ -720,7 +719,7 @@ app.put('/api/carat-conversion', async (req, res) => {
 // Quote Management API Endpoints
 app.post('/api/quotes', async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, items, totalAmount, expiresIn = 30 } = req.body;
+    const { customerName, customerEmail, customerPhone, items, totalAmount } = req.body;
     
     // Validate required fields
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -731,6 +730,16 @@ app.post('/api/quotes', async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      
+      // Get current expiration configuration
+      const configResult = await client.query(`
+        SELECT days 
+        FROM quote_expiration 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `);
+      
+      const expiresIn = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
       
       // Insert into quotes table
       const quoteQuery = `
@@ -757,12 +766,10 @@ app.post('/api/quotes', async (req, res) => {
         expiresIn
       ]);
       
-      
       await client.query('COMMIT');
       res.status(201).json(quoteResult.rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
-      console.error('Database error:', err);
       throw err;
     } finally {
       client.release();
@@ -923,13 +930,8 @@ app.put('/api/quote-expiration/config', async (req, res) => {
       result = updateResult;
     }
 
-    // Update expired quotes with new configuration
-    await client.query(`
-      UPDATE quotes 
-      SET status = 'EXPIRED'
-      WHERE status = 'PENDING'
-      AND created_at < NOW() - INTERVAL '1 day' * $1
-    `, [days]);
+    // Note: We no longer update existing quotes' expires_in value
+    // New quotes will use this configuration when created
 
     await client.query('COMMIT');
     res.json(result.rows[0]);
@@ -966,7 +968,7 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
     // Update configuration or insert if none exists
     const updateResult = await client.query(`
       UPDATE inventory_hold_period
-      SET days = $1, updated_at = CURRENT_TIMESTAMP
+      SET days = $1
       RETURNING *
     `, [days]);
 
@@ -1125,6 +1127,7 @@ app.put('/api/customers/:id', async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Customer not found' });
     }
+    
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error updating customer:', err);

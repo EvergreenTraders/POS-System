@@ -90,7 +90,6 @@ function SystemConfig() {
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [gramsInput, setGramsInput] = useState('');
   const [diamondEstimates, setDiamondEstimates] = useState([]);
-  const [quoteExpirationDays, setQuoteExpirationDays] = useState(30);
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
   const [loading, setLoading] = useState(false);
 
@@ -194,23 +193,7 @@ function SystemConfig() {
       }
     };
 
-    const fetchQuoteExpirationConfig = async () => {
-      try {
-        const response = await axios.get(`${API_BASE_URL}/quote-expiration/config`);
-        const config = response.data;
-        setQuoteExpirationDays(config.days);
-      } catch (error) {
-        console.error('Error fetching quote expiration config:', error);
-        if (error.response?.status !== 404) {
-          setSnackbar({
-            open: true,
-            message: 'Failed to fetch quote expiration configuration',
-            severity: 'error'
-          });
-        }
-      }
-    };
-
+  
     const fetchInventoryHoldPeriod = async () => {
       try {
         const response = await axios.get(`${API_BASE_URL}/inventory-hold-period/config`);
@@ -238,7 +221,6 @@ function SystemConfig() {
     fetchDiamondEstimates();
     fetchUserPreference();
     fetchCaratConversion();
-    fetchQuoteExpirationConfig();
     fetchInventoryHoldPeriod();
   }, []);
 
@@ -451,38 +433,6 @@ function SystemConfig() {
     }
   };
 
-  const handleQuoteExpirationChange = async (event) => {
-    const newDays = parseInt(event.target.value);
-    if (newDays <= 0) {
-      setSnackbar({
-        open: true,
-        message: 'Quote expiration period must be at least 1 day',
-        severity: 'error'
-      });
-      return;
-    }
-
-    try {
-      const response = await axios.put(`${API_BASE_URL}/quote-expiration/config`, {
-        days: newDays
-      });
-      
-      setQuoteExpirationDays(response.data.days);
-      
-      setSnackbar({
-        open: true,
-        message: `Quote expiration period updated successfully. Quotes will expire after ${newDays} days.`,
-        severity: 'success'
-      });
-    } catch (error) {
-      console.error('Error updating quote expiration period:', error);
-      setSnackbar({
-        open: true,
-        message: 'Failed to update quote expiration period',
-        severity: 'error'
-      });
-    }
-  };
 
   const handleInventoryHoldPeriodChange = async (event) => {
     const newDays = parseInt(event.target.value);
@@ -594,21 +544,6 @@ function SystemConfig() {
 
           <ConfigSection>
             <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Quote Expiration Days"
-                  type="number"
-                  value={quoteExpirationDays}
-                  onChange={handleQuoteExpirationChange}
-                  InputProps={{
-                    endAdornment: <InputAdornment position="end">days</InputAdornment>,
-                  }}
-                  helperText="Number of days before a quote expires"
-                  inputProps={{ min: 1 }}
-                  disabled={loading}
-                />
-              </Grid>
               <Grid item xs={12} md={6}>
               <TextField
                 label="Hold Period Duration"

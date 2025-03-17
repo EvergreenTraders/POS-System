@@ -69,12 +69,15 @@ function QuoteManager() {
 
   const handleUpdateExpirationDays = async () => {
     try {
+      // Update the configuration in quote_expiration table
       await axios.put(`${API_BASE_URL}/quote-expiration/config`, {
         days: tempExpirationDays
-      });
+      });    
       setExpirationDays(tempExpirationDays);
       setEditingExpiration(false);
-      // Refresh quotes as some might be expired with new setting
+      
+      // Refresh quotes to show current expiration status
+      // Note: New quotes will use the updated expiration period
       fetchQuotes();
     } catch (error) {
       console.error('Error updating expiration days:', error);
@@ -238,7 +241,7 @@ function QuoteManager() {
                 </TableCell>
                 <TableCell>
                   {quote.status === 'pending' ? (
-                    `${getRemainingDays(quote.created_at)} days`
+                    `${quote.days_remaining} days`
                   ) : (
                     '-'
                   )}
