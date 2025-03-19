@@ -53,15 +53,10 @@ const CustomerManager = () => {
     severity: 'success'
   });
 
-  useEffect(() => {
-    fetchCustomers();
-  }, []);
-
   const fetchCustomers = async () => {
     try {
-      const response = await fetch(`${config.apiUrl}/customers`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
+      const response = await fetch(`${config.apiUrl}/customers`);
+      console.log('Response:', response);
       if (!response.ok) throw new Error('Failed to fetch customers');
       const data = await response.json();
       setCustomers(data);
@@ -166,7 +161,7 @@ const CustomerManager = () => {
       }
 
       handleCloseDialog();
-      fetchCustomers();
+     // fetchCustomers();
     } catch (error) {
       showSnackbar(`Error: ${error.message}`, 'error');
     } finally {

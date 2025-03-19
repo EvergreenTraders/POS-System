@@ -4,20 +4,21 @@ drop table if exists transactions;
 -- Create transactions table
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,
-    transaction_id VARCHAR(20) NOT NULL UNIQUE,
+    transaction_id VARCHAR(50) NOT NULL UNIQUE, -- TSDXXXXXX format (9 chars)
     customer_id INTEGER NOT NULL REFERENCES customers(id),
-    transaction_type VARCHAR(50) NOT NULL,
+    transaction_type VARCHAR(50),
     estimated_value DECIMAL(10,2) NOT NULL,
     metal_purity VARCHAR(50),
     weight DECIMAL(10,3),
-    category VARCHAR(20),
+    category VARCHAR(100),
     metal_type VARCHAR(50),
     primary_gem VARCHAR(100),
     secondary_gem VARCHAR(100),
     price DECIMAL(10,2) NOT NULL,
     payment_method VARCHAR(50) NOT NULL,
     inventory_status VARCHAR(50) NOT NULL DEFAULT 'HOLD',
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create transaction_images table

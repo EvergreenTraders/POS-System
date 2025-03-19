@@ -23,10 +23,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   Snackbar,
   Alert,
 } from '@mui/material';
@@ -58,13 +54,6 @@ function Checkout() {
     cardholderName: '',
   });
 
-  // Quote related states
-  const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
-  const [quoteDetails, setQuoteDetails] = useState({
-    customerName: selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : '',
-    customerEmail: selectedCustomer?.email || '',
-    customerPhone: selectedCustomer?.phone || ''
-  });
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -87,32 +76,6 @@ function Checkout() {
     setPaymentDetails({
       ...paymentDetails,
       [field]: event.target.value,
-    });
-  };
-
-  const handleQuoteInputChange = (field) => (event) => {
-    const value = event.target.value;
-    
-    // Basic validation
-    if (field === 'customerPhone') {
-      // Allow only numbers and basic phone formatting characters
-      if (!/^[0-9+\-() ]*$/.test(value)) {
-        return;
-      }
-    } else if (field === 'customerEmail') {
-      // Basic email format validation
-      if (value && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
-        setSnackbar({
-          open: true,
-          message: 'Please enter a valid email address',
-          severity: 'warning'
-        });
-      }
-    }
-
-    setQuoteDetails({
-      ...quoteDetails,
-      [field]: value,
     });
   };
 
@@ -189,10 +152,22 @@ function Checkout() {
   };
 
   const handleSaveQuote = async () => {
+    if (!selectedCustomer) {
+      setSnackbar({
+        open: true,
+        message: 'Please select a customer first',
+        severity: 'warning'
+      });
+      return;
+    }
+
     try {
+      setLoading(true);
       const token = localStorage.getItem('token');
       if (!token) {
-        throw new Error('Authentication token not found');
+        sessionStorage.setItem('redirectAfterLogin', '/checkout');
+        navigate('/login');
+        return;
       }
 
       const response = await axios.post(
@@ -200,9 +175,10 @@ function Checkout() {
         {
           items: cartItems,
           totalAmount: calculateTotal(),
-          customerName: quoteDetails.customerName,
-          customerEmail: quoteDetails.customerEmail,
-          customerPhone: quoteDetails.customerPhone,
+          customer_id: selectedCustomer.id,
+          customerName: `${selectedCustomer.first_name} ${selectedCustomer.last_name}`,
+          customerEmail: selectedCustomer.email,
+          customerPhone: selectedCustomer.phone,
           created_at: new Date().toISOString(),
           status: 'active'
         },
@@ -214,33 +190,30 @@ function Checkout() {
         }
       );
 
-      if (response.status === 200) {
+      if (response.status === 201 && response.data) {
+        const expiresIn = response.data.expires_in || 30;
         setSnackbar({
           open: true,
-          message: 'Quote saved successfully',
+          message: `Quote ${response.data.quote_id} saved successfully. Valid for ${expiresIn} days.`,
           severity: 'success'
         });
-        setQuoteDialogOpen(false);
         clearCart();
-        // Navigate back to estimation with auth state preserved
-        navigate('/gem-estimator', { 
-          state: { 
-            from: 'checkout'
-          }
-        });
-      }
-    } catch (error) {
-      if (error.message === 'Authentication token not found') {
-        // Preserve cart state and redirect to login
-        sessionStorage.setItem('redirectAfterLogin', '/checkout');
-        navigate('/login');
+        setTimeout(() => {
+          navigate('/gem-estimator');
+        }, 2000); // Show message for 2 seconds before navigating
       } else {
-        setSnackbar({
-          open: true,
-          message: `Error: ${error.message}`,
-          severity: 'error'
-        });
+        throw new Error('Failed to save quote');
       }
+      
+    } catch (error) {
+      console.error('Error saving quote:', error);
+      setSnackbar({
+        open: true,
+        message: `Error saving quote: ${error.message}`,
+        severity: 'error'
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -401,9 +374,10 @@ function Checkout() {
                 <Button
                   variant="outlined"
                   startIcon={<SaveIcon />}
-                  onClick={() => setQuoteDialogOpen(true)}
+                  onClick={handleSaveQuote}
+                  disabled={loading}
                 >
-                  Save as Quote
+                  {loading ? 'Saving...' : 'Save as Quote'}
                 </Button>
                 <Button
                   variant="contained"
@@ -419,61 +393,18 @@ function Checkout() {
         </Grid>
       </Box>
 
-      {/* Quote Dialog */}
-      <Dialog open={quoteDialogOpen} onClose={() => setQuoteDialogOpen(false)}>
-        <DialogTitle>Save as Quote</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            <TextField
-              fullWidth
-              required
-              label="Customer Name"
-              value={quoteDetails.customerName}
-              onChange={handleQuoteInputChange('customerName')}
-              margin="normal"
-            />
-            <TextField
-              fullWidth
-              required
-              label="Customer Email"
-              type="email"
-              value={quoteDetails.customerEmail}
-              onChange={handleQuoteInputChange('customerEmail')}
-              margin="normal"
-            />
-            <TextField
-              fullWidth
-              required
-              label="Customer Phone"
-              value={quoteDetails.customerPhone}
-              onChange={handleQuoteInputChange('customerPhone')}
-              margin="normal"
-            />
-            <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
-              Quote expiration period is set in the Quote Manager settings
-            </Typography>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setQuoteDialogOpen(false)}>Cancel</Button>
-          <Button 
-            onClick={handleSaveQuote}
-            variant="contained" 
-            startIcon={<SaveIcon />}
-            disabled={loading}
-          >
-            {loading ? 'Saving...' : 'Save Quote'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       {/* Snackbar for notifications */}
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        autoHideDuration={2000}
+        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity}>
+        <Alert 
+          onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
           {snackbar.message}
         </Alert>
       </Snackbar>

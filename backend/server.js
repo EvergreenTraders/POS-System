@@ -43,11 +43,19 @@ const updateInventoryHoldStatus = async () => {
 
     // Update inventory status for items that have exceeded their hold period
     const updateQuery = `
-      UPDATE transactions 
-      SET inventory_status = 'AVAILABLE'
-      WHERE inventory_status = 'HOLD'
-      AND created_at < NOW() - INTERVAL '1 day' * $1
-      RETURNING transaction_id
+      WITH expired_holds AS (
+        SELECT transaction_id 
+        FROM transactions 
+        WHERE inventory_status = 'HOLD'
+        AND created_at < NOW() - INTERVAL '1 day' * $1
+      )
+      UPDATE transactions t
+      SET 
+        inventory_status = 'AVAILABLE',
+        updated_at = CURRENT_TIMESTAMP
+      FROM expired_holds e
+      WHERE t.transaction_id = e.transaction_id
+      RETURNING t.transaction_id;
     `;
     const result = await pool.query(updateQuery, [holdPeriod]);
     if (result.rows.length > 0) {
@@ -563,7 +571,7 @@ app.get('/api/user_preferences', async (req, res) => {
     console.error('Error fetching user preferences:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
-})
+});
 
 // PUT route for updating user preferences
 app.put('/api/user_preferences', async (req, res) => {
@@ -578,7 +586,7 @@ app.put('/api/user_preferences', async (req, res) => {
     console.error('Error updating user preferences:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
-})
+});
 
 // Live Pricing API Endpoint
 app.get('/api/live_pricing', async (req, res) => {
@@ -756,7 +764,7 @@ app.post('/api/quotes', async (req, res) => {
         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, 'pending', $6)
         RETURNING id, items, total_amount, customer_name, customer_email, customer_phone, 
                   created_at, status, expires_in, days_remaining`;
-
+      
       const quoteResult = await client.query(quoteQuery, [
         JSON.stringify(items),
         totalAmount,
@@ -765,7 +773,7 @@ app.post('/api/quotes', async (req, res) => {
         customerPhone || null,
         expiresIn
       ]);
-      
+
       await client.query('COMMIT');
       res.status(201).json(quoteResult.rows[0]);
     } catch (err) {
@@ -1004,18 +1012,18 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
 });
 
 // Customer routes
-app.get('api/customers', authenticateToken, async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const result = await pool.query(
-      'SELECT *, TO_CHAR(date_of_birth, \'YYYY-MM-DD\') as date_of_birth, TO_CHAR(id_expiry_date, \'YYYY-MM-DD\') as id_expiry_date FROM customers ORDER BY created_at DESC'
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching customers:', err);
-    res.status(500).json({ error: 'Failed to fetch customers' });
-  }
-});
+// app.get('api/customers', async (req, res) => {
+//   const client = await pool.connect();
+//   try {
+//     const result = await pool.query(
+//       'SELECT *, TO_CHAR(date_of_birth, \'YYYY-MM-DD\') as date_of_birth, TO_CHAR(id_expiry_date, \'YYYY-MM-DD\') as id_expiry_date FROM customers ORDER BY created_at DESC'
+//     );
+//     res.json(result.rows);
+//   } catch (err) {
+//     console.error('Error fetching customers:', err);
+//     res.status(500).json({ error: 'Failed to fetch customers' });
+//   }
+// });
 
 app.get('/api/customers/search', authenticateToken, async (req, res) => {
   const client = await pool.connect();
@@ -1228,7 +1236,7 @@ app.get('/api/transactions/:id', async (req, res) => {
 
 // Function to generate transaction ID
 async function generateTransactionId(maxAttempts = 10) {
-  const prefix = 'TSD';
+  const prefix = 'TSD';  
   let attempts = 0;
   let isUnique = false;
   let transactionId;
