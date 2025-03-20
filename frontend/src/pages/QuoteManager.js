@@ -27,6 +27,8 @@ import SearchIcon from '@mui/icons-material/Search';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import SaveIcon from '@mui/icons-material/Save';
+import EditIcon from '@mui/icons-material/Edit';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000/api';
 
@@ -37,6 +39,7 @@ function QuoteManager() {
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [quoteToDelete, setQuoteToDelete] = useState(null);
+  const [editingItemIndex, setEditingItemIndex] = useState(-1);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [expirationDays, setExpirationDays] = useState(30);
@@ -170,6 +173,50 @@ function QuoteManager() {
       quote.id.toString().includes(searchTerm)
     );
   });
+
+  const handleItemPriceChange = (index, newPrice) => {
+    const updatedQuote = { ...selectedQuote };
+    
+    // Create a new itemPriceEstimates object to ensure state update
+    updatedQuote.items[index] = {
+      ...updatedQuote.items[index],
+      itemPriceEstimates: {
+        ...updatedQuote.items[index].itemPriceEstimates,
+        [updatedQuote.items[index].transactionType]: parseFloat(newPrice)
+      }
+    };
+    
+    setSelectedQuote(updatedQuote);
+  };
+
+  const handleSaveItemChanges = async () => {
+    try {
+      const response = await axios.put(`${API_BASE_URL}/quotes/${selectedQuote.id}`, {
+        items: selectedQuote.items
+      });
+      
+      setEditingItemIndex(-1);
+      setSelectedQuote(response.data);
+      fetchQuotes();
+    } catch (error) {
+      console.error('Error updating quote items:', error.response?.data || error);
+    }
+  };
+
+  const handleDeleteItem = async (index) => {
+    const updatedQuote = { ...selectedQuote };
+    updatedQuote.items = updatedQuote.items.filter((_, i) => i !== index);
+    
+    try {
+      await axios.put(`${API_BASE_URL}/quotes/${selectedQuote.id}`, {
+        items: updatedQuote.items
+      });
+      setSelectedQuote(updatedQuote);
+      fetchQuotes(); // Refresh quotes list
+    } catch (error) {
+      console.error('Error deleting quote item:', error);
+    }
+  };
 
   return (
     <Container maxWidth="lg">
@@ -340,6 +387,7 @@ function QuoteManager() {
                       <TableCell>Item</TableCell>
                       <TableCell>Transaction Type</TableCell>
                       <TableCell align="right">Price</TableCell>
+                      <TableCell align="right">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -350,7 +398,49 @@ function QuoteManager() {
                         </TableCell>
                         <TableCell>{item.transactionType}</TableCell>
                         <TableCell align="right">
-                          ${item.itemPriceEstimates[item.transactionType]?.toFixed(2)}
+                          {editingItemIndex === index ? (
+                            <TextField
+                              type="number"
+                              size="small"
+                              value={item.itemPriceEstimates[item.transactionType]}
+                              onChange={(e) => handleItemPriceChange(index, e.target.value)}
+                              inputProps={{ min: 0, step: 0.01 }}
+                              sx={{ width: 100 }}
+                            />
+                          ) : (
+                            `$${item.itemPriceEstimates[item.transactionType]?.toFixed(2)}`
+                          )}
+                        </TableCell>
+                        <TableCell align="right">
+                          {editingItemIndex === index ? (
+                            <IconButton 
+                              onClick={handleSaveItemChanges}
+                              color="primary"
+                              size="small"
+                              title="Save Changes"
+                            >
+                              <SaveIcon />
+                            </IconButton>
+                          ) : (
+                            <IconButton
+                              onClick={() => setEditingItemIndex(index)}
+                              color="primary"
+                              size="small"
+                              title="Edit Price"
+                              disabled={selectedQuote.status !== 'pending'}
+                            >
+                              <EditIcon />
+                            </IconButton>
+                          )}
+                          <IconButton
+                            onClick={() => handleDeleteItem(index)}
+                            color="error"
+                            size="small"
+                            title="Delete Item"
+                            disabled={selectedQuote.status !== 'pending'}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -368,7 +458,12 @@ function QuoteManager() {
                   Proceed to Checkout
                 </Button>
               )}
-              <Button onClick={() => setDetailsDialogOpen(false)}>Close</Button>
+              <Button onClick={() => {
+                setDetailsDialogOpen(false);
+                setEditingItemIndex(-1);
+              }}>
+                Close
+              </Button>
             </DialogActions>
           </>
         )}

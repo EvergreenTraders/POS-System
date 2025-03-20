@@ -829,34 +829,34 @@ app.get('/api/quotes/:id', async (req, res) => {
 app.put('/api/quotes/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, expiresIn } = req.body;
-    
-    const updateFields = [];
-    const queryParams = [];
-    let paramCounter = 1;
+    const { items } = req.body;
 
-    if (status) {
-      updateFields.push(`status = $${paramCounter}`);
-      queryParams.push(status);
-      paramCounter++;
+    if (!items) {
+      return res.status(400).json({ error: 'Items are required for update' });
     }
 
-    if (expiresIn !== undefined) {
-      updateFields.push(`expires_in = $${paramCounter}`);
-      queryParams.push(expiresIn);
-      paramCounter++;
-    }
+    // Calculate total amount from the items
+    const totalAmount = items.reduce((sum, item) => {
+      const price = item.itemPriceEstimates[item.transactionType] || 0;
+      return sum + price;
+    }, 0);
 
-    updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
-    queryParams.push(id);
+    // Prepare query parameters
+    const queryParams = [JSON.stringify(items), totalAmount, id];
 
-    const result = await pool.query(
-      `UPDATE quotes 
-       SET ${updateFields.join(', ')}
-       WHERE id = $${paramCounter}
-       RETURNING *`,
-      queryParams
-    );
+    // The update_quote_days_remaining trigger will:
+    // 1. Keep the original expires_in value from quote_expiration config
+    // 2. Update days_remaining based on (CURRENT_TIMESTAMP - created_at)
+    // 3. Auto-expire quote if days_remaining <= 0
+    const query = `
+      UPDATE quotes 
+      SET items = $1::jsonb,
+          total_amount = $2,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING *`;
+
+    const result = await pool.query(query, queryParams);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Quote not found' });
