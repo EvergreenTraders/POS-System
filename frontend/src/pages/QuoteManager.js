@@ -21,7 +21,8 @@ import {
   Grid,
   Box,
   TextField,
-  Tooltip
+  Tooltip,
+  Snackbar
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
@@ -45,6 +46,11 @@ function QuoteManager() {
   const [expirationDays, setExpirationDays] = useState(30);
   const [editingExpiration, setEditingExpiration] = useState(false);
   const [tempExpirationDays, setTempExpirationDays] = useState(30);
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'info'
+  });
 
   useEffect(() => {
     fetchQuotes();
@@ -118,13 +124,59 @@ function QuoteManager() {
   };
 
   const handleCheckout = (quote) => {
-    // Navigate to checkout with the quote items
+    // Only allow checkout for pending quotes
+    if (quote.status !== 'pending') {
+      setSnackbar({
+        open: true,
+        message: `Cannot proceed to checkout: Quote is ${quote.status}`,
+        severity: 'error'
+      });
+      return;
+    }
+
+    // Check if quote has expired based on days_remaining from the trigger system
+    if (!quote.days_remaining || quote.days_remaining <= 0) {
+      setSnackbar({
+        open: true,
+        message: `Quote has expired (${quote.expires_in} day limit reached)`,
+        severity: 'error'
+      });
+      return;
+    }
+
+    // Ensure we have items in the quote
+    if (!quote.items || quote.items.length === 0) {
+      setSnackbar({
+        open: true,
+        message: 'Cannot proceed to checkout: Quote has no items',
+        severity: 'error'
+      });
+      return;
+    }
+
+    // Navigate to checkout with quote and customer info
     navigate('/checkout', {
+      replace: true, // Use replace to prevent back navigation issues
       state: {
-        items: quote.items,
-        quoteId: quote.id
+        items: quote.items.map(item => ({
+          ...item,
+          quoteExpiresIn: quote.expires_in,
+          quoteDaysRemaining: quote.days_remaining
+        })),
+        quoteId: quote.id,
+        customerName: quote.customer_name,
+        customerEmail: quote.customer_email,
+        customerPhone: quote.customer_phone
       }
     });
+  };
+
+  const handleQuoteAction = (quote, action) => {
+    if (action === 'checkout') {
+      handleCheckout(quote);
+    } else if (action === 'view') {
+      handleViewDetails(quote);
+    }
   };
 
   const handleUpdateStatus = async (quoteId, newStatus) => {
@@ -312,33 +364,36 @@ function QuoteManager() {
                   )}
                 </TableCell>
                 <TableCell>
-                  <IconButton
-                    size="small"
-                    onClick={() => handleViewDetails(quote)}
-                    title="View Details"
-                  >
-                    <VisibilityIcon />
-                  </IconButton>
-                  {quote.status === 'pending' && (
-                    <>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Tooltip title="View Details">
                       <IconButton
                         size="small"
-                        onClick={() => handleCheckout(quote)}
-                        title="Proceed to Checkout"
-                        color="primary"
+                        onClick={() => handleViewDetails(quote,"view")}
                       >
-                        <ShoppingCartIcon />
+                        <VisibilityIcon />
                       </IconButton>
+                    </Tooltip>
+                    {quote.status === 'pending' && (
+                      <Tooltip title="Proceed to Checkout">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleQuoteAction(quote, 'checkout')}
+                          color="primary"
+                        >
+                          <ShoppingCartIcon />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                    <Tooltip title="Delete Quote">
                       <IconButton
                         size="small"
                         onClick={() => handleDeleteClick(quote)}
-                        title="Delete Quote"
                         color="error"
                       >
                         <DeleteIcon />
                       </IconButton>
-                    </>
-                  )}
+                    </Tooltip>
+                  </Box>
                 </TableCell>
               </TableRow>
             ))}
@@ -451,7 +506,7 @@ function QuoteManager() {
             <DialogActions>
               {selectedQuote?.status === 'pending' && (
                 <Button
-                  onClick={() => handleCheckout(selectedQuote)}
+                  onClick={() => handleQuoteAction(selectedQuote, 'checkout')}
                   color="primary"
                   startIcon={<ShoppingCartIcon />}
                 >
@@ -484,6 +539,14 @@ function QuoteManager() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        message={snackbar.message}
+        severity={snackbar.severity}
+      />
     </Container>
   );
 }

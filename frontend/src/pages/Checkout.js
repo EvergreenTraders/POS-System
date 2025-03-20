@@ -42,8 +42,9 @@ const API_BASE_URL = config.apiUrl;
 function Checkout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { cartItems, selectedCustomer, clearCart } = useCart();
+  const { cartItems, addToCart, selectedCustomer, setCustomer, clearCart } = useCart();
   const { user } = useAuth();
+  const [isInitialized, setIsInitialized] = useState(false);
 
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentDetails, setPaymentDetails] = useState({
@@ -99,25 +100,19 @@ function Checkout() {
         return axios.post(
           `${config.apiUrl}/transactions`,
           {
-            customer_id: selectedCustomer.id,
-            transaction_type: item.transactionType,
-            estimated_value: parseFloat(item.itemPriceEstimates[transactionType] || 0),
-            metal_purity: item.purity,
-            weight: parseFloat(item.weight),
-            category: item.category,
-            metal_type: item.metal,
-            primary_gem: item.primaryGem,
-            secondary_gem: item.secondaryGem,
-            price: parseFloat(item.itemPriceEstimates[transactionType] || 0),
+            customer_name: selectedCustomer.name,
+            customer_email: selectedCustomer.email,
+            customer_phone: selectedCustomer.phone,
+            item_id: item.id,
+            transaction_type: transactionType,
+            amount: parseFloat(item.itemPriceEstimates[transactionType] || 0),
             payment_method: paymentMethod,
-            inventory_status: 'HOLD',
-            images: imageData
+            payment_details: paymentDetails,
+            images: imageData,
+            quote_id: location.state?.quoteId || null
           },
           {
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`
-            }
+            headers: { Authorization: `Bearer ${token}` }
           }
         );
       });
@@ -152,7 +147,7 @@ function Checkout() {
   };
 
   const handleSaveQuote = async () => {
-    if (!selectedCustomer) {
+    if (!selectedCustomer?.name) {
       setSnackbar({
         open: true,
         message: 'Please select a customer first',
@@ -175,10 +170,9 @@ function Checkout() {
         {
           items: cartItems,
           totalAmount: calculateTotal(),
-          customer_id: selectedCustomer.id,
-          customerName: `${selectedCustomer.first_name} ${selectedCustomer.last_name}`,
-          customerEmail: selectedCustomer.email,
-          customerPhone: selectedCustomer.phone,
+          customer_name: selectedCustomer.name,
+          customer_email: selectedCustomer.email,
+          customer_phone: selectedCustomer.phone,
           created_at: new Date().toISOString(),
           status: 'active'
         },
@@ -217,23 +211,56 @@ function Checkout() {
     }
   };
 
-  useEffect(() => {
-    if (!selectedCustomer || cartItems.length === 0) {
+  const handleBackToEstimation = () => {
+    // Clear cart and customer data before navigating
+    clearCart();
+    setCustomer(null);
+    
+    // If we came from a quote, go back to quote manager
+    if (location.state?.quoteId) {
+      navigate('/quote-manager');
+    } else {
+      // Otherwise go to gem estimator
       navigate('/gem-estimator');
     }
-  }, [selectedCustomer, cartItems, navigate]);
+  };
+
+  // Set customer info and cart items from quote if available
+  useEffect(() => {
+    if (!isInitialized && location.state?.items && location.state?.customerName) {
+      // Set the customer info
+      const customer = {
+        name: location.state.customerName,
+        email: location.state.customerEmail || '',
+        phone: location.state.customerPhone || '',
+        id: null // For quotes, we don't have a customer ID
+      };
+      setCustomer(customer);
+
+      // Set the cart items
+      addToCart(location.state.items);
+      setIsInitialized(true);
+    }
+  }, [location.state, setCustomer, addToCart, isInitialized]);
+
+  // Only redirect if we have no data after initialization
+  useEffect(() => {
+    if (isInitialized && (!selectedCustomer?.name || cartItems.length === 0)) {
+      navigate('/quote-manager');
+    }
+  }, [selectedCustomer, cartItems, navigate, isInitialized]);
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ my: 4 }}>
+      <Box sx={{ py: 4 }}>
         <Button
+          variant="outlined"
+          onClick={handleBackToEstimation}
           startIcon={<ArrowBackIcon />}
-          onClick={() => navigate(-1)}
           sx={{ mb: 2 }}
         >
-          Back to Estimation
+          {location.state?.quoteId ? 'Back to Quotes' : 'Back to Estimation'}
         </Button>
-        
         <Grid container spacing={3}>
           {/* Customer Details */}
           <Grid item xs={12}>
@@ -244,7 +271,7 @@ function Checkout() {
               <Grid container spacing={2}>
                 <Grid item xs={12} sm={4}>
                   <Typography variant="subtitle1">
-                    <strong>Name:</strong> {selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : 'Not specified'}
+                    <strong>Name:</strong> {selectedCustomer?.name || 'Not specified'}
                   </Typography>
                 </Grid>
                 <Grid item xs={12} sm={4}>
