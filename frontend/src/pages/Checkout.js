@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
+import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import {
   Container,
   Paper,
@@ -21,10 +23,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   Snackbar,
   Alert,
 } from '@mui/material';
@@ -44,7 +42,9 @@ const API_BASE_URL = config.apiUrl;
 function Checkout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const items = location.state?.items || [];
+  const { cartItems, addToCart, selectedCustomer, setCustomer, clearCart } = useCart();
+  const { user } = useAuth();
+  const [isInitialized, setIsInitialized] = useState(false);
 
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentDetails, setPaymentDetails] = useState({
@@ -55,13 +55,6 @@ function Checkout() {
     cardholderName: '',
   });
 
-  // Quote related states
-  const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
-  const [quoteDetails, setQuoteDetails] = useState({
-    customerName: '',
-    customerEmail: '',
-    customerPhone: ''
-  });
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -70,7 +63,7 @@ function Checkout() {
   });
 
   const calculateTotal = () => {
-    return items.reduce((total, item) => {
+    return cartItems.reduce((total, item) => {
       const transactionType = item.transactionType || 'pawn';
       return total + parseFloat(item.itemPriceEstimates[transactionType] || 0);
     }, 0);
@@ -87,101 +80,130 @@ function Checkout() {
     });
   };
 
-  const handleQuoteInputChange = (field) => (event) => {
-    const value = event.target.value;
-    
-    // Basic validation
-    if (field === 'customerPhone') {
-      // Allow only numbers and basic phone formatting characters
-      if (!/^[0-9+\-() ]*$/.test(value)) {
-        return;
+  const handleSubmit = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Authentication token not found');
       }
-    } else if (field === 'customerEmail') {
-      // Basic email format validation
-      if (value && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
+
+      // Create a transaction for each cart item
+      const transactionPromises = cartItems.map(item => {
+        const transactionType = item.transactionType || 'pawn';
+
+        // Ensure at least one image is marked as primary
+        const imageData = item.images ? item.images.map((img, index) => ({
+          url: img.url,
+          is_primary: img.isPrimary || (!item.images.some(i => i.isPrimary) && index === 0)
+        })) : [];
+
+        return axios.post(
+          `${config.apiUrl}/transactions`,
+          {
+            customer_name: selectedCustomer.name,
+            customer_email: selectedCustomer.email,
+            customer_phone: selectedCustomer.phone,
+            item_id: item.id,
+            transaction_type: transactionType,
+            amount: parseFloat(item.itemPriceEstimates[transactionType] || 0),
+            payment_method: paymentMethod,
+            payment_details: paymentDetails,
+            images: imageData,
+            quote_id: location.state?.quoteId || null
+          },
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+      });
+
+      const results = await Promise.all(transactionPromises);
+      
+      setSnackbar({
+        open: true,
+        message: 'Payment processed successfully',
+        severity: 'success'
+      });
+      clearCart();
+      // Navigate back to estimation with auth state preserved
+      navigate('/gem-estimator', { 
+        state: { 
+          from: 'checkout'
+        }
+      });
+    } catch (error) {
+      if (error.message === 'Authentication token not found') {
+        // Preserve cart state and redirect to login
+        sessionStorage.setItem('redirectAfterLogin', '/checkout');
+        navigate('/login');
+      } else {
         setSnackbar({
           open: true,
-          message: 'Please enter a valid email address',
-          severity: 'warning'
+          message: `Error: ${error.message}`,
+          severity: 'error'
         });
       }
     }
-
-    setQuoteDetails({
-      ...quoteDetails,
-      [field]: value,
-    });
   };
 
-  const handleSubmit = () => {
-    // Here you would typically process the payment
-    console.log('Processing payment:', {
-      method: paymentMethod,
-      details: paymentDetails,
-      total: calculateTotal(),
-      items,
-    });
-    // Navigate to success page or show confirmation
-  };
-
-  // Handle saving quote
   const handleSaveQuote = async () => {
-    // Validate required fields
-    if (!quoteDetails.customerName || !quoteDetails.customerEmail || !quoteDetails.customerPhone) {
+    if (!selectedCustomer?.name) {
       setSnackbar({
         open: true,
-        message: 'Please fill in all required fields',
-        severity: 'error'
+        message: 'Please select a customer first',
+        severity: 'warning'
       });
       return;
     }
 
-    setLoading(true);
     try {
-      const formattedItems = items.map(item => ({
-        transactionType: item.transactionType || 'pawn',
-        estimatedValue: item.estimatedValue,
-        metalPurity: item.purity,
-        weight: item.weight,
-        itemPriceEstimates: item.itemPriceEstimates,
-        category: item.category,
-        metalType: item.metal,
-        primaryGem: item.primaryGem,
-        secondaryGem: item.secondaryGem,
-      }));
+      setLoading(true);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        sessionStorage.setItem('redirectAfterLogin', '/checkout');
+        navigate('/login');
+        return;
+      }
 
-      const quoteData = {
-        customerName: quoteDetails.customerName,
-        customerEmail: quoteDetails.customerEmail,
-        customerPhone: quoteDetails.customerPhone,
-        items: formattedItems,
-        totalAmount: calculateTotal()
-      };
-            
-      const response = await axios.post(`${config.apiUrl}/quotes`, quoteData);
+      const response = await axios.post(
+        `${config.apiUrl}/quotes`,
+        {
+          items: cartItems,
+          totalAmount: calculateTotal(),
+          customer_name: selectedCustomer.name,
+          customer_email: selectedCustomer.email,
+          customer_phone: selectedCustomer.phone,
+          created_at: new Date().toISOString(),
+          status: 'active'
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
 
-      setSnackbar({
-        open: true,
-        message: `Quote saved successfully! `,
-        severity: 'success'
-      });
-      setQuoteDialogOpen(false);
+      if (response.status === 201 && response.data) {
+        const expiresIn = response.data.expires_in || 30;
+        setSnackbar({
+          open: true,
+          message: `Quote ${response.data.quote_id} saved successfully. Valid for ${expiresIn} days.`,
+          severity: 'success'
+        });
+        clearCart();
+        setTimeout(() => {
+          navigate('/gem-estimator');
+        }, 2000); // Show message for 2 seconds before navigating
+      } else {
+        throw new Error('Failed to save quote');
+      }
       
-      // Clear quote details
-      setQuoteDetails({
-        customerName: '',
-        customerEmail: '',
-        customerPhone: ''
-      });
-      
-      // Navigate back to the previous page after a short delay
-      setTimeout(() => {
-        navigate(-1);
-      }, 2000);
     } catch (error) {
+      console.error('Error saving quote:', error);
       setSnackbar({
         open: true,
-        message: error.response?.data?.error || 'Failed to save quote',
+        message: `Error saving quote: ${error.message}`,
         severity: 'error'
       });
     } finally {
@@ -189,18 +211,82 @@ function Checkout() {
     }
   };
 
+  const handleBackToEstimation = () => {
+    // Clear cart and customer data before navigating
+    clearCart();
+    setCustomer(null);
+    
+    // If we came from a quote, go back to quote manager
+    if (location.state?.quoteId) {
+      navigate('/quote-manager');
+    } else {
+      // Otherwise go to gem estimator
+      navigate('/gem-estimator');
+    }
+  };
+
+  // Set customer info and cart items from quote if available
+  useEffect(() => {
+    if (!isInitialized && location.state?.items && location.state?.customerName) {
+      // Set the customer info
+      const customer = {
+        name: location.state.customerName,
+        email: location.state.customerEmail || '',
+        phone: location.state.customerPhone || '',
+        id: null // For quotes, we don't have a customer ID
+      };
+      setCustomer(customer);
+
+      // Set the cart items
+      addToCart(location.state.items);
+      setIsInitialized(true);
+    }
+  }, [location.state, setCustomer, addToCart, isInitialized]);
+
+  // Only redirect if we have no data after initialization
+  useEffect(() => {
+    if (isInitialized && (!selectedCustomer?.name || cartItems.length === 0)) {
+      navigate('/quote-manager');
+    }
+  }, [selectedCustomer, cartItems, navigate, isInitialized]);
+
   return (
     <Container maxWidth="lg">
-      <Box sx={{ my: 4 }}>
+      <Box sx={{ py: 4 }}>
         <Button
+          variant="outlined"
+          onClick={handleBackToEstimation}
           startIcon={<ArrowBackIcon />}
-          onClick={() => navigate(-1)}
           sx={{ mb: 2 }}
         >
-          Back to Estimation
+          {location.state?.quoteId ? 'Back to Quotes' : 'Back to Estimation'}
         </Button>
-        
         <Grid container spacing={3}>
+          {/* Customer Details */}
+          <Grid item xs={12}>
+            <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Customer Details
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="subtitle1">
+                    <strong>Name:</strong> {selectedCustomer?.name || 'Not specified'}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="subtitle1">
+                    <strong>Email:</strong> {selectedCustomer?.email || 'Not specified'}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Typography variant="subtitle1">
+                    <strong>Phone:</strong> {selectedCustomer?.phone || 'Not specified'}
+                  </Typography>
+                </Grid>
+              </Grid>
+            </Paper>
+          </Grid>
           {/* Order Summary */}
           <Grid item xs={12} md={8}>
             <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
@@ -217,10 +303,10 @@ function Checkout() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {items.map((item, index) => (
+                    {cartItems.map((item, index) => (
                       <TableRow key={index}>
                         <TableCell>
-                          {item.weight}g {item.metal} {item.type === 'diamond' ? '(Diamond)' : item.type === 'stone' ? '(Stone)' : ''}
+                          {item.weight}g {item.metal} {item.primaryGem.split(' ')[0]} {item.secondaryGem.split(' ')[0]}
                         </TableCell>
                         <TableCell>{item.transactionType}</TableCell>
                         <TableCell align="right">
@@ -315,9 +401,10 @@ function Checkout() {
                 <Button
                   variant="outlined"
                   startIcon={<SaveIcon />}
-                  onClick={() => setQuoteDialogOpen(true)}
+                  onClick={handleSaveQuote}
+                  disabled={loading}
                 >
-                  Save as Quote
+                  {loading ? 'Saving...' : 'Save as Quote'}
                 </Button>
                 <Button
                   variant="contained"
@@ -333,61 +420,18 @@ function Checkout() {
         </Grid>
       </Box>
 
-      {/* Quote Dialog */}
-      <Dialog open={quoteDialogOpen} onClose={() => setQuoteDialogOpen(false)}>
-        <DialogTitle>Save as Quote</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            <TextField
-              fullWidth
-              required
-              label="Customer Name"
-              value={quoteDetails.customerName}
-              onChange={handleQuoteInputChange('customerName')}
-              margin="normal"
-            />
-            <TextField
-              fullWidth
-              required
-              label="Customer Email"
-              type="email"
-              value={quoteDetails.customerEmail}
-              onChange={handleQuoteInputChange('customerEmail')}
-              margin="normal"
-            />
-            <TextField
-              fullWidth
-              required
-              label="Customer Phone"
-              value={quoteDetails.customerPhone}
-              onChange={handleQuoteInputChange('customerPhone')}
-              margin="normal"
-            />
-            <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
-              Quote expiration period is set in the Quote Manager settings
-            </Typography>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setQuoteDialogOpen(false)}>Cancel</Button>
-          <Button 
-            onClick={handleSaveQuote}
-            variant="contained" 
-            startIcon={<SaveIcon />}
-            disabled={loading}
-          >
-            {loading ? 'Saving...' : 'Save Quote'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       {/* Snackbar for notifications */}
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        autoHideDuration={2000}
+        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity}>
+        <Alert 
+          onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
           {snackbar.message}
         </Alert>
       </Snackbar>

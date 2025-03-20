@@ -4,19 +4,10 @@ const CartContext = createContext();
 
 export function CartProvider({ children }) {
   const [cartItems, setCartItems] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
 
-  const addToCart = (product) => {
-    setCartItems(prevItems => {
-      const existingItem = prevItems.find(item => item.id === product.id);
-      if (existingItem) {
-        return prevItems.map(item =>
-          item.id === product.id
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        );
-      }
-      return [...prevItems, { ...product, quantity: 1 }];
-    });
+  const addToCart = (items) => {
+    setCartItems(items);
   };
 
   const removeFromCart = (productId) => {
@@ -34,7 +25,23 @@ export function CartProvider({ children }) {
   };
 
   const getCartTotal = () => {
-    return cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+    return cartItems.reduce((total, item) => {
+      const transactionType = item.transactionType || 'pawn';
+      return total + parseFloat(item.itemPriceEstimates[transactionType] || 0);
+    }, 0);
+  };
+
+  const setCustomer = (customer) => {
+    setSelectedCustomer(customer);
+  };
+
+  const clearCustomer = () => {
+    setSelectedCustomer(null);
+  };
+
+  const clearCart = () => {
+    setCartItems([]);
+    setSelectedCustomer(null);
   };
 
   return (
@@ -44,6 +51,10 @@ export function CartProvider({ children }) {
       removeFromCart,
       updateQuantity,
       getCartTotal,
+      selectedCustomer,
+      setCustomer,
+      clearCustomer,
+      clearCart,
     }}>
       {children}
     </CartContext.Provider>

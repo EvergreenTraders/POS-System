@@ -19,19 +19,20 @@ import GemEstimator from './pages/GemEstimator';
 import Pawns from './pages/Pawns';
 import Checkout from './pages/Checkout';
 import QuoteManager from './pages/QuoteManager';
+import CustomerManager from './pages/CustomerManager';
 
 const theme = createTheme({
   palette: {
     primary: {
-      main: '#1a472a', // Dark green
-      light: '#2e7d32', // Lighter green
-      dark: '#0d3319', // Darker green
+      main: '#1a472a',
+      light: '#2e7d32',
+      dark: '#0d3319',
     },
     secondary: {
-      main: '#66bb6a', // Complementary green
+      main: '#66bb6a',
     },
     background: {
-      default: '#e8f5e9', // Light green background
+      default: '#e8f5e9',
       paper: '#ffffff',
     },
   },
@@ -52,40 +53,88 @@ const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token');
 
   if (!token || !user) {
+    // Save the current path for redirection after login
+    const currentPath = window.location.pathname;
+    sessionStorage.setItem('redirectAfterLogin', currentPath);
     return <Navigate to="/login" replace />;
   }
   return children;
 };
 
 // Layout component for authenticated pages
-const AuthenticatedLayout = ({ children }) => (
-  <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-    <Navbar />
-    <Sidebar />
-    <Box
-      component="main"
-      sx={{
-        flexGrow: 1,
-        p: 3,
-        mt: 8,
-        transition: theme => theme.transitions.create('margin', {
-          easing: theme.transitions.easing.sharp,
-          duration: theme.transitions.duration.enteringScreen,
-        }),
-      }}
-    >
-      {children}
+const AuthenticatedLayout = ({ children }) => {
+  const [isFullScreen, setIsFullScreen] = React.useState(false);
+
+  const requestFullScreen = async (element) => {
+    try {
+      if (element.requestFullscreen) {
+        await element.requestFullscreen();
+      } else if (element.webkitRequestFullscreen) {
+        await element.webkitRequestFullscreen();
+      } else if (element.msRequestFullscreen) {
+        await element.msRequestFullscreen();
+      }
+      setIsFullScreen(true);
+    } catch (err) {
+      console.error('Error attempting to enable full-screen:', err);
+    }
+  };
+
+  const handleFullScreen = () => {
+    const element = document.documentElement;
+    if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
+      requestFullScreen(element);
+    }
+  };
+
+  React.useEffect(() => {
+    const handleUserInteraction = () => {
+      handleFullScreen();
+      // Remove event listeners after first interaction
+      document.removeEventListener('click', handleUserInteraction);
+      document.removeEventListener('keypress', handleUserInteraction);
+    };
+
+    // Add event listeners for user interaction
+    document.addEventListener('click', handleUserInteraction);
+    document.addEventListener('keypress', handleUserInteraction);
+
+    // Cleanup function
+    return () => {
+      document.removeEventListener('click', handleUserInteraction);
+      document.removeEventListener('keypress', handleUserInteraction);
+    };
+  }, []);
+
+  return (
+    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+      <Navbar />
+      <Sidebar />
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          p: 3,
+          mt: 8,
+          transition: theme => theme.transitions.create('margin', {
+            easing: theme.transitions.easing.sharp,
+            duration: theme.transitions.duration.enteringScreen,
+          }),
+        }}
+      >
+        {children}
+      </Box>
     </Box>
-  </Box>
-);
+  );
+};
 
 function App() {
   return (
-    <CartProvider>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <Router>
-          <AuthProvider>
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Router>
+        <AuthProvider>
+          <CartProvider>
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route
@@ -134,6 +183,36 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <GemEstimator />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/customer"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CustomerManager />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/checkout"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <Checkout />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/quote-manager"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <QuoteManager />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
@@ -199,11 +278,11 @@ function App() {
                 }
               />
               <Route
-                path="/checkout"
+                path="/customers"
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <Checkout />
+                      <CustomerManager />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
@@ -220,10 +299,10 @@ function App() {
               />
               <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
-          </AuthProvider>
-        </Router>
-      </ThemeProvider>
-    </CartProvider>
+          </CartProvider>
+        </AuthProvider>
+      </Router>
+    </ThemeProvider>
   );
 }
 

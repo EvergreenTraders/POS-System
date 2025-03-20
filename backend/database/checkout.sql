@@ -1,5 +1,4 @@
 -- Create quotes table
-drop table if exists quotes;
 CREATE TABLE IF NOT EXISTS quotes (
     id SERIAL PRIMARY KEY,
     items JSONB NOT NULL,
@@ -33,7 +32,7 @@ COMMENT ON COLUMN quotes.days_remaining IS 'Number of days remaining before the 
 CREATE OR REPLACE FUNCTION update_quotes_days_remaining()
 RETURNS void AS $$
 BEGIN
-    -- Update days_remaining for all active quotes
+    -- Update days_remaining for all active quotes based on their original expires_in
     UPDATE quotes 
     SET 
         days_remaining = expires_in - EXTRACT(DAY FROM (CURRENT_TIMESTAMP - created_at))::INTEGER,
@@ -49,7 +48,7 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION set_quote_expiration()
 RETURNS trigger AS $$
 BEGIN
-    -- Get the expiration days from quote_expiration table
+    -- Get the expiration days from quote_expiration table only for new quotes
     SELECT days INTO NEW.expires_in
     FROM quote_expiration
     ORDER BY updated_at DESC NULLS LAST
@@ -72,7 +71,11 @@ CREATE TRIGGER set_quote_expiration_trigger
 CREATE OR REPLACE FUNCTION update_days_remaining()
 RETURNS trigger AS $$
 BEGIN
-    NEW.days_remaining := NEW.expires_in - EXTRACT(DAY FROM (CURRENT_TIMESTAMP - NEW.created_at))::INTEGER;
+    -- Keep the original expires_in value
+    NEW.expires_in := OLD.expires_in;
+    
+    -- Calculate days_remaining based on the original expires_in
+    NEW.days_remaining := OLD.expires_in - EXTRACT(DAY FROM (CURRENT_TIMESTAMP - OLD.created_at))::INTEGER;
     
     -- Auto-expire quotes when days_remaining reaches 0
     IF NEW.days_remaining <= 0 AND NEW.status = 'pending' THEN
@@ -87,21 +90,3 @@ CREATE TRIGGER update_quote_days_remaining
     BEFORE UPDATE ON quotes
     FOR EACH ROW
     EXECUTE FUNCTION update_days_remaining();
-
--- Update existing quotes with expiration from config
-UPDATE quotes q
-SET expires_in = (
-    SELECT days 
-    FROM quote_expiration 
-    ORDER BY updated_at DESC NULLS LAST 
-    LIMIT 1
-)
-WHERE q.expires_in IS NULL;
-
--- Update days_remaining for existing quotes
-UPDATE quotes 
-SET days_remaining = 
-    CASE 
-        WHEN status = 'expired' THEN 0
-        ELSE expires_in - EXTRACT(DAY FROM (CURRENT_TIMESTAMP - created_at))::INTEGER
-    END;

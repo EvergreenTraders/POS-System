@@ -21,25 +21,37 @@ import {
   Grid,
   Box,
   TextField,
-  Tooltip
+  Tooltip,
+  Snackbar
 } from '@mui/material';
+import config from '../config';
 import SearchIcon from '@mui/icons-material/Search';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import SaveIcon from '@mui/icons-material/Save';
+import EditIcon from '@mui/icons-material/Edit';
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000/api';
+const API_BASE_URL = config.apiUrl;
 
 function QuoteManager() {
   const navigate = useNavigate();
   const [quotes, setQuotes] = useState([]);
   const [selectedQuote, setSelectedQuote] = useState(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [quoteToDelete, setQuoteToDelete] = useState(null);
+  const [editingItemIndex, setEditingItemIndex] = useState(-1);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [expirationDays, setExpirationDays] = useState(30);
   const [editingExpiration, setEditingExpiration] = useState(false);
   const [tempExpirationDays, setTempExpirationDays] = useState(30);
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'info'
+  });
 
   useEffect(() => {
     fetchQuotes();
@@ -69,12 +81,15 @@ function QuoteManager() {
 
   const handleUpdateExpirationDays = async () => {
     try {
+      // Update the configuration in quote_expiration table
       await axios.put(`${API_BASE_URL}/quote-expiration/config`, {
         days: tempExpirationDays
-      });
+      });    
       setExpirationDays(tempExpirationDays);
       setEditingExpiration(false);
-      // Refresh quotes as some might be expired with new setting
+      
+      // Refresh quotes to show current expiration status
+      // Note: New quotes will use the updated expiration period
       fetchQuotes();
     } catch (error) {
       console.error('Error updating expiration days:', error);
@@ -110,13 +125,59 @@ function QuoteManager() {
   };
 
   const handleCheckout = (quote) => {
-    // Navigate to checkout with the quote items
+    // Only allow checkout for pending quotes
+    if (quote.status !== 'pending') {
+      setSnackbar({
+        open: true,
+        message: `Cannot proceed to checkout: Quote is ${quote.status}`,
+        severity: 'error'
+      });
+      return;
+    }
+
+    // Check if quote has expired based on days_remaining from the trigger system
+    if (!quote.days_remaining || quote.days_remaining <= 0) {
+      setSnackbar({
+        open: true,
+        message: `Quote has expired (${quote.expires_in} day limit reached)`,
+        severity: 'error'
+      });
+      return;
+    }
+
+    // Ensure we have items in the quote
+    if (!quote.items || quote.items.length === 0) {
+      setSnackbar({
+        open: true,
+        message: 'Cannot proceed to checkout: Quote has no items',
+        severity: 'error'
+      });
+      return;
+    }
+
+    // Navigate to checkout with quote and customer info
     navigate('/checkout', {
+      replace: true, // Use replace to prevent back navigation issues
       state: {
-        items: quote.items,
-        quoteId: quote.id
+        items: quote.items.map(item => ({
+          ...item,
+          quoteExpiresIn: quote.expires_in,
+          quoteDaysRemaining: quote.days_remaining
+        })),
+        quoteId: quote.id,
+        customerName: quote.customer_name,
+        customerEmail: quote.customer_email,
+        customerPhone: quote.customer_phone
       }
     });
+  };
+
+  const handleQuoteAction = (quote, action) => {
+    if (action === 'checkout') {
+      handleCheckout(quote);
+    } else if (action === 'view') {
+      handleViewDetails(quote);
+    }
   };
 
   const handleUpdateStatus = async (quoteId, newStatus) => {
@@ -127,6 +188,22 @@ function QuoteManager() {
       fetchQuotes(); // Refresh quotes list
     } catch (error) {
       console.error('Error updating quote status:', error);
+    }
+  };
+
+  const handleDeleteClick = (quote) => {
+    setQuoteToDelete(quote);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDelete = async () => {
+    try {
+      await axios.delete(`${API_BASE_URL}/quotes/${quoteToDelete.id}`);
+      setDeleteDialogOpen(false);
+      setQuoteToDelete(null);
+      fetchQuotes(); // Refresh quotes list
+    } catch (error) {
+      console.error('Error deleting quote:', error);
     }
   };
 
@@ -149,6 +226,50 @@ function QuoteManager() {
       quote.id.toString().includes(searchTerm)
     );
   });
+
+  const handleItemPriceChange = (index, newPrice) => {
+    const updatedQuote = { ...selectedQuote };
+    
+    // Create a new itemPriceEstimates object to ensure state update
+    updatedQuote.items[index] = {
+      ...updatedQuote.items[index],
+      itemPriceEstimates: {
+        ...updatedQuote.items[index].itemPriceEstimates,
+        [updatedQuote.items[index].transactionType]: parseFloat(newPrice)
+      }
+    };
+    
+    setSelectedQuote(updatedQuote);
+  };
+
+  const handleSaveItemChanges = async () => {
+    try {
+      const response = await axios.put(`${API_BASE_URL}/quotes/${selectedQuote.id}`, {
+        items: selectedQuote.items
+      });
+      
+      setEditingItemIndex(-1);
+      setSelectedQuote(response.data);
+      fetchQuotes();
+    } catch (error) {
+      console.error('Error updating quote items:', error.response?.data || error);
+    }
+  };
+
+  const handleDeleteItem = async (index) => {
+    const updatedQuote = { ...selectedQuote };
+    updatedQuote.items = updatedQuote.items.filter((_, i) => i !== index);
+    
+    try {
+      await axios.put(`${API_BASE_URL}/quotes/${selectedQuote.id}`, {
+        items: updatedQuote.items
+      });
+      setSelectedQuote(updatedQuote);
+      fetchQuotes(); // Refresh quotes list
+    } catch (error) {
+      console.error('Error deleting quote item:', error);
+    }
+  };
 
   return (
     <Container maxWidth="lg">
@@ -238,39 +359,42 @@ function QuoteManager() {
                 </TableCell>
                 <TableCell>
                   {quote.status === 'pending' ? (
-                    `${getRemainingDays(quote.created_at)} days`
+                    `${quote.days_remaining} days`
                   ) : (
                     '-'
                   )}
                 </TableCell>
                 <TableCell>
-                  <IconButton
-                    size="small"
-                    onClick={() => handleViewDetails(quote)}
-                    title="View Details"
-                  >
-                    <VisibilityIcon />
-                  </IconButton>
-                  {quote.status === 'pending' && (
-                    <>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Tooltip title="View Details">
                       <IconButton
                         size="small"
-                        onClick={() => handleCheckout(quote)}
-                        title="Proceed to Checkout"
-                        color="primary"
+                        onClick={() => handleViewDetails(quote,"view")}
                       >
-                        <ShoppingCartIcon />
+                        <VisibilityIcon />
                       </IconButton>
+                    </Tooltip>
+                    {quote.status === 'pending' && (
+                      <Tooltip title="Proceed to Checkout">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleQuoteAction(quote, 'checkout')}
+                          color="primary"
+                        >
+                          <ShoppingCartIcon />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                    <Tooltip title="Delete Quote">
                       <IconButton
                         size="small"
-                        onClick={() => handleUpdateStatus(quote.id, 'cancelled')}
-                        title="Cancel Quote"
+                        onClick={() => handleDeleteClick(quote)}
                         color="error"
                       >
                         <DeleteIcon />
                       </IconButton>
-                    </>
-                  )}
+                    </Tooltip>
+                  </Box>
                 </TableCell>
               </TableRow>
             ))}
@@ -303,11 +427,6 @@ function QuoteManager() {
                   <Typography variant="body2">Created: {formatDate(selectedQuote.created_at)}</Typography>
                   <Typography variant="body2">Status: {selectedQuote.status}</Typography>
                   <Typography variant="body2">Total: ${selectedQuote.total_amount}</Typography>
-                  {selectedQuote.status === 'pending' && (
-                    <Typography variant="body2" color={getRemainingDays(selectedQuote.created_at) <= 3 ? 'error' : 'textPrimary'}>
-                      Expires in: {getRemainingDays(selectedQuote.created_at)} days
-                    </Typography>
-                  )}
                 </Grid>
               </Grid>
 
@@ -316,20 +435,67 @@ function QuoteManager() {
                 <Table size="small">
                   <TableHead>
                     <TableRow>
+                      <TableCell>Category</TableCell>
                       <TableCell>Item</TableCell>
                       <TableCell>Transaction Type</TableCell>
                       <TableCell align="right">Price</TableCell>
+                      <TableCell align="right">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {selectedQuote.items.map((item, index) => (
                       <TableRow key={index}>
+                         <TableCell>
+                          {item.category}
+                        </TableCell>
                         <TableCell>
-                          {item.weight}g {item.metal} {item.type === 'diamond' ? '(Diamond)' : item.type === 'stone' ? '(Stone)' : ''}
+                          {item.weight}g {item.purity} {item.metal} 
                         </TableCell>
                         <TableCell>{item.transactionType}</TableCell>
                         <TableCell align="right">
-                          ${item.itemPriceEstimates[item.transactionType]?.toFixed(2)}
+                          {editingItemIndex === index ? (
+                            <TextField
+                              type="number"
+                              size="small"
+                              value={item.itemPriceEstimates[item.transactionType]}
+                              onChange={(e) => handleItemPriceChange(index, e.target.value)}
+                              inputProps={{ min: 0, step: 0.01 }}
+                              sx={{ width: 100 }}
+                            />
+                          ) : (
+                            `$${item.itemPriceEstimates[item.transactionType]?.toFixed(2)}`
+                          )}
+                        </TableCell>
+                        <TableCell align="right">
+                          {editingItemIndex === index ? (
+                            <IconButton 
+                              onClick={handleSaveItemChanges}
+                              color="primary"
+                              size="small"
+                              title="Save Changes"
+                            >
+                              <SaveIcon />
+                            </IconButton>
+                          ) : (
+                            <IconButton
+                              onClick={() => setEditingItemIndex(index)}
+                              color="primary"
+                              size="small"
+                              title="Edit Price"
+                              disabled={selectedQuote.status !== 'pending'}
+                            >
+                              <EditIcon />
+                            </IconButton>
+                          )}
+                          <IconButton
+                            onClick={() => handleDeleteItem(index)}
+                            color="error"
+                            size="small"
+                            title="Delete Item"
+                            disabled={selectedQuote.status !== 'pending'}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -340,18 +506,47 @@ function QuoteManager() {
             <DialogActions>
               {selectedQuote?.status === 'pending' && (
                 <Button
-                  onClick={() => handleCheckout(selectedQuote)}
+                  onClick={() => handleQuoteAction(selectedQuote, 'checkout')}
                   color="primary"
                   startIcon={<ShoppingCartIcon />}
                 >
                   Proceed to Checkout
                 </Button>
               )}
-              <Button onClick={() => setDetailsDialogOpen(false)}>Close</Button>
+              <Button onClick={() => {
+                setDetailsDialogOpen(false);
+                setEditingItemIndex(-1);
+              }}>
+                Close
+              </Button>
             </DialogActions>
           </>
         )}
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+        <DialogTitle>Delete Quote</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete this quote? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleDelete} color="error" variant="contained">
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        message={snackbar.message}
+        severity={snackbar.severity}
+      />
     </Container>
   );
 }

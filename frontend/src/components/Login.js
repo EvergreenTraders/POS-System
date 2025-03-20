@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import config from '../config';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
@@ -69,8 +69,50 @@ const Login = () => {
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
+    const [isFullScreen, setIsFullScreen] = React.useState(false);
     const navigate = useNavigate();
     const { setUser } = useAuth();
+
+    const requestFullScreen = async (element) => {
+        try {
+            if (element.requestFullscreen) {
+                await element.requestFullscreen();
+            } else if (element.webkitRequestFullscreen) {
+                await element.webkitRequestFullscreen();
+            } else if (element.msRequestFullscreen) {
+                await element.msRequestFullscreen();
+            }
+            setIsFullScreen(true);
+        } catch (err) {
+            console.error('Error attempting to enable full-screen:', err);
+        }
+    };
+
+    const handleFullScreen = () => {
+        const element = document.documentElement;
+        if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
+            requestFullScreen(element);
+        }
+    };
+
+    useEffect(() => {
+        const handleUserInteraction = () => {
+            handleFullScreen();
+            // Remove event listeners after first interaction
+            document.removeEventListener('click', handleUserInteraction);
+            document.removeEventListener('keypress', handleUserInteraction);
+        };
+
+        // Add event listeners for user interaction
+        document.addEventListener('click', handleUserInteraction);
+        document.addEventListener('keypress', handleUserInteraction);
+
+        // Cleanup function
+        return () => {
+            document.removeEventListener('click', handleUserInteraction);
+            document.removeEventListener('keypress', handleUserInteraction);
+        };
+    }, []);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -84,7 +126,15 @@ const Login = () => {
                 localStorage.setItem('token', response.data.token);
                 localStorage.setItem('user', JSON.stringify(response.data.user));
                 setUser(response.data.user);
-                navigate('/');
+
+                // Check for redirect path
+                const redirectPath = sessionStorage.getItem('redirectAfterLogin');
+                if (redirectPath) {
+                    sessionStorage.removeItem('redirectAfterLogin');
+                    navigate(redirectPath);
+                } else {
+                    navigate('/');
+                }
             }
         } catch (err) {
             setError('Invalid credentials. Please try again.');

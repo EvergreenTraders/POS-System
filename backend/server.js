@@ -29,16 +29,57 @@ const updateQuoteDaysRemaining = async () => {
   }
 };
 
-// Schedule daily update of quote days remaining (runs at midnight)
+// Function to update inventory hold status
+const updateInventoryHoldStatus = async () => {
+  try {
+    // Get the current hold period configuration
+    const configResult = await pool.query('SELECT days FROM inventory_hold_period ORDER BY created_at DESC LIMIT 1');
+    if (configResult.rows.length === 0) {
+      console.log('No inventory hold period configuration found');
+      return;
+    }
+
+    const holdPeriod = configResult.rows[0].days;
+
+    // Update inventory status for items that have exceeded their hold period
+    const updateQuery = `
+      WITH expired_holds AS (
+        SELECT transaction_id 
+        FROM transactions 
+        WHERE inventory_status = 'HOLD'
+        AND created_at < NOW() - INTERVAL '1 day' * $1
+      )
+      UPDATE transactions t
+      SET 
+        inventory_status = 'AVAILABLE',
+        updated_at = CURRENT_TIMESTAMP
+      FROM expired_holds e
+      WHERE t.transaction_id = e.transaction_id
+      RETURNING t.transaction_id;
+    `;
+    const result = await pool.query(updateQuery, [holdPeriod]);
+    if (result.rows.length > 0) {
+      const formattedIds = result.rows.map(r => r.transaction_id).join(', ');
+      console.log(`[${new Date().toISOString()}] Updated inventory status to AVAILABLE for transactions: ${formattedIds}`);
+      console.log(`Hold period of ${holdPeriod} days exceeded for ${result.rows.length} item(s)`);
+    }
+  } catch (error) {
+    console.error('Error updating inventory hold status:', error);
+  }
+};
+
+// Schedule daily update of quote days remaining and inventory hold status (runs at midnight)
 setInterval(() => {
   const now = new Date();
   if (now.getHours() === 0 && now.getMinutes() === 0) {
     updateQuoteDaysRemaining();
+    updateInventoryHoldStatus();
   }
 }, 60000); // Check every minute
 
-// Run initial update when server starts
+// Run initial updates when server starts
 updateQuoteDaysRemaining();
+updateInventoryHoldStatus();
 
 // Test database connection
 pool.connect()
@@ -475,7 +516,7 @@ app.get('/api/stone_shape', async (req, res) => {
 // Stone Color API Endpoint
 app.get('/api/stone_color', async (req, res) => {
   try {
-    const result = await pool.query('SELECT color FROM stone_color');
+    const result = await pool.query('SELECT * FROM stone_color');
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching stone colors:', error);
@@ -530,7 +571,7 @@ app.get('/api/user_preferences', async (req, res) => {
     console.error('Error fetching user preferences:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
-})
+});
 
 // PUT route for updating user preferences
 app.put('/api/user_preferences', async (req, res) => {
@@ -545,7 +586,7 @@ app.put('/api/user_preferences', async (req, res) => {
     console.error('Error updating user preferences:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
-})
+});
 
 // Live Pricing API Endpoint
 app.get('/api/live_pricing', async (req, res) => {
@@ -686,7 +727,7 @@ app.put('/api/carat-conversion', async (req, res) => {
 // Quote Management API Endpoints
 app.post('/api/quotes', async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, items, totalAmount, expiresIn = 30 } = req.body;
+    const { customerName, customerEmail, customerPhone, items, totalAmount } = req.body;
     
     // Validate required fields
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -697,6 +738,16 @@ app.post('/api/quotes', async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      
+      // Get current expiration configuration
+      const configResult = await client.query(`
+        SELECT days 
+        FROM quote_expiration 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `);
+      
+      const expiresIn = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
       
       // Insert into quotes table
       const quoteQuery = `
@@ -713,7 +764,7 @@ app.post('/api/quotes', async (req, res) => {
         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, 'pending', $6)
         RETURNING id, items, total_amount, customer_name, customer_email, customer_phone, 
                   created_at, status, expires_in, days_remaining`;
-
+      
       const quoteResult = await client.query(quoteQuery, [
         JSON.stringify(items),
         totalAmount,
@@ -722,13 +773,11 @@ app.post('/api/quotes', async (req, res) => {
         customerPhone || null,
         expiresIn
       ]);
-      
-      
+
       await client.query('COMMIT');
       res.status(201).json(quoteResult.rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
-      console.error('Database error:', err);
       throw err;
     } finally {
       client.release();
@@ -780,34 +829,34 @@ app.get('/api/quotes/:id', async (req, res) => {
 app.put('/api/quotes/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, expiresIn } = req.body;
-    
-    const updateFields = [];
-    const queryParams = [];
-    let paramCounter = 1;
+    const { items } = req.body;
 
-    if (status) {
-      updateFields.push(`status = $${paramCounter}`);
-      queryParams.push(status);
-      paramCounter++;
+    if (!items) {
+      return res.status(400).json({ error: 'Items are required for update' });
     }
 
-    if (expiresIn !== undefined) {
-      updateFields.push(`expires_in = $${paramCounter}`);
-      queryParams.push(expiresIn);
-      paramCounter++;
-    }
+    // Calculate total amount from the items
+    const totalAmount = items.reduce((sum, item) => {
+      const price = item.itemPriceEstimates[item.transactionType] || 0;
+      return sum + price;
+    }, 0);
 
-    updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
-    queryParams.push(id);
+    // Prepare query parameters
+    const queryParams = [JSON.stringify(items), totalAmount, id];
 
-    const result = await pool.query(
-      `UPDATE quotes 
-       SET ${updateFields.join(', ')}
-       WHERE id = $${paramCounter}
-       RETURNING *`,
-      queryParams
-    );
+    // The update_quote_days_remaining trigger will:
+    // 1. Keep the original expires_in value from quote_expiration config
+    // 2. Update days_remaining based on (CURRENT_TIMESTAMP - created_at)
+    // 3. Auto-expire quote if days_remaining <= 0
+    const query = `
+      UPDATE quotes 
+      SET items = $1::jsonb,
+          total_amount = $2,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING *`;
+
+    const result = await pool.query(query, queryParams);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Quote not found' });
@@ -843,32 +892,26 @@ app.get('/api/quote-expiration/config', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
-        id,
-        days,
-        created_at,
-        updated_at,
-        created_by,
-        updated_by
+        *
       FROM quote_expiration 
-      ORDER BY id DESC 
+      ORDER BY created_at DESC
       LIMIT 1
     `);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'No quote expiration configuration found' });
     }
-    
     res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error fetching quote expiration config:', error);
+  } catch (err) {
+    console.error('Error fetching quote expiration config:', err);
     res.status(500).json({ error: 'Failed to fetch quote expiration configuration' });
   }
 });
 
-app.post('/api/quote-expiration/config', async (req, res) => {
+app.put('/api/quote-expiration/config', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { days, created_by } = req.body;
+    const { days } = req.body;
     
     if (!days || days < 1) {
       return res.status(400).json({ error: 'Days must be a positive number' });
@@ -876,104 +919,577 @@ app.post('/api/quote-expiration/config', async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Insert new configuration
-    const insertResult = await client.query(`
-      INSERT INTO quote_expiration (days, created_by)
-      VALUES ($1, $2)
-      RETURNING id, days, created_at, created_by
-    `, [days, created_by || 'system']);
-
-    // Update expired quotes with new configuration
-    await client.query(`
-      UPDATE quotes 
-      SET status = 'expired' 
-      WHERE status = 'pending' 
-      AND created_at < NOW() - INTERVAL '1 day' * $1
+    // Update configuration or insert if none exists
+    const updateResult = await client.query(`
+      UPDATE quote_expiration
+      SET days = $1, updated_at = CURRENT_TIMESTAMP
+      RETURNING days, created_at, updated_at
     `, [days]);
 
+    // If no rows were updated, insert new configuration
+    let result;
+    if (updateResult.rowCount === 0) {
+      result = await client.query(`
+        INSERT INTO quote_expiration (days)
+        VALUES ($1)
+        RETURNING id, days, created_at, updated_at
+      `, [days]);
+    } else {
+      result = updateResult;
+    }
+
+    // Note: We no longer update existing quotes' expires_in value
+    // New quotes will use this configuration when created
+
     await client.query('COMMIT');
-    
-    res.status(201).json({
-      message: 'Quote expiration configuration created successfully',
-      config: insertResult.rows[0]
-    });
-  } catch (error) {
+    res.json(result.rows[0]);
+  } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error creating quote expiration config:', error);
+    console.error('Error creating quote expiration config:', err);
     res.status(500).json({ error: 'Failed to create quote expiration configuration' });
   } finally {
     client.release();
   }
 });
 
-app.put('/api/quote-expiration/config/:id', async (req, res) => {
+// Inventory Hold Period Configuration API Endpoints
+app.get('/api/inventory-hold-period/config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM inventory_hold_period ORDER BY created_at DESC LIMIT 1');
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No inventory hold period configuration found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching inventory hold period config:', err);
+    res.status(500).json({ error: 'Failed to fetch inventory hold period configuration' });
+  }
+});
+
+app.put('/api/inventory-hold-period/config', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { id } = req.params;
-    const { days, updated_by } = req.body;
-    
-    if (!days || days < 1) {
-      return res.status(400).json({ error: 'Days must be a positive number' });
-    }
+    const { days } = req.body;
 
     await client.query('BEGIN');
 
-    // Update configuration
+    // Update configuration or insert if none exists
     const updateResult = await client.query(`
-      UPDATE quote_expiration 
-      SET days = $1, 
-          updated_at = CURRENT_TIMESTAMP,
-          updated_by = $2
-      WHERE id = $3
-      RETURNING id, days, created_at, updated_at, created_by, updated_by
-    `, [days, updated_by || 'system', id]);
+      UPDATE inventory_hold_period
+      SET days = $1
+      RETURNING *
+    `, [days]);
 
-    if (updateResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Quote expiration configuration not found' });
+    // If no rows were updated, insert new configuration
+    let result;
+    if (updateResult.rowCount === 0) {
+      result = await client.query(`
+        INSERT INTO inventory_hold_period (days)
+        VALUES ($1)
+        RETURNING *
+      `, [days]);
+    } else {
+      result = updateResult;
     }
 
-    // Update expired quotes with new configuration
+    // Update any inventory items that should no longer be on hold
     await client.query(`
-      UPDATE quotes 
-      SET status = 'expired' 
-      WHERE status = 'pending' 
+      UPDATE transactions 
+      SET inventory_status = 'AVAILABLE' 
+      WHERE inventory_status = 'HOLD' 
       AND created_at < NOW() - INTERVAL '1 day' * $1
     `, [days]);
 
     await client.query('COMMIT');
-    
-    res.json({
-      message: 'Quote expiration configuration updated successfully',
-      config: updateResult.rows[0]
-    });
-  } catch (error) {
+    res.json(result.rows[0]);
+  } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error updating quote expiration config:', error);
-    res.status(500).json({ error: 'Failed to update quote expiration configuration' });
+    console.error('Error creating inventory hold period config:', err);
+    res.status(500).json({ error: 'Failed to create inventory hold period configuration' });
   } finally {
     client.release();
   }
 });
 
-app.get('/api/quote-expiration/history', async (req, res) => {
+// Customer routes
+// app.get('api/customers', async (req, res) => {
+//   const client = await pool.connect();
+//   try {
+//     const result = await pool.query(
+//       'SELECT *, TO_CHAR(date_of_birth, \'YYYY-MM-DD\') as date_of_birth, TO_CHAR(id_expiry_date, \'YYYY-MM-DD\') as id_expiry_date FROM customers ORDER BY created_at DESC'
+//     );
+//     res.json(result.rows);
+//   } catch (err) {
+//     console.error('Error fetching customers:', err);
+//     res.status(500).json({ error: 'Failed to fetch customers' });
+//   }
+// });
+
+app.get('/api/customers/search', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(`
-      SELECT 
-        id,
-        days,
-        created_at,
-        updated_at,
-        created_by,
-        updated_by
-      FROM quote_expiration 
-      ORDER BY created_at DESC
-    `);
-    
+    const { firstName, lastName, phone } = req.query;
+    let query = 'SELECT * FROM customers WHERE 1=1';
+    const params = [];
+    let paramCount = 1;
+
+    if (firstName) {
+      query += ` AND LOWER(first_name) LIKE $${paramCount}`;
+      params.push(`%${firstName.toLowerCase()}%`);
+      paramCount++;
+    }
+
+    if (lastName) {
+      query += ` AND LOWER(last_name) LIKE $${paramCount}`;
+      params.push(`%${lastName.toLowerCase()}%`);
+    }
+
+    if (phone) {
+      query += ` AND LOWER(phone) LIKE $${paramCount}`;
+      params.push(`%${phone}%`);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await client.query(query, params);
     res.json(result.rows);
-  } catch (error) {
-    console.error('Error fetching quote expiration history:', error);
-    res.status(500).json({ error: 'Failed to fetch quote expiration history' });
+  } catch (err) {
+    console.error('Error searching customers:', err);
+    res.status(500).json({ error: 'Failed to search customers' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/customers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT *, TO_CHAR(date_of_birth, \'YYYY-MM-DD\') as date_of_birth, TO_CHAR(id_expiry_date, \'YYYY-MM-DD\') as id_expiry_date FROM customers WHERE id = $1',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching customer:', err);
+    res.status(500).json({ error: 'Failed to fetch customer' });
+  }
+});
+
+app.post('/api/customers', async (req, res) => {
+  console.log("req.body", authenticateToken);
+  try {
+    const {
+      first_name, last_name, email, phone,
+      address_line1, address_line2, city, state, postal_code, country,
+      id_type, id_number, id_expiry_date, id_issuing_authority,
+      date_of_birth, status, risk_level, notes
+    } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO customers (
+        first_name, last_name, email, phone,
+        address_line1, address_line2, city, state, postal_code, country,
+        id_type, id_number, id_expiry_date, id_issuing_authority,
+        date_of_birth, status, risk_level, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
+      [first_name, last_name, email, phone,
+       address_line1, address_line2, city, state, postal_code, country,
+       id_type, id_number, id_expiry_date, id_issuing_authority,
+       date_of_birth, status, risk_level, notes]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error creating customer:', err);
+    if (err.code === '23505') { // Unique violation
+      res.status(400).json({ error: 'Email already exists' });
+    } else {
+      res.status(500).json({ error: 'Failed to create customer' });
+    }
+  }
+});
+
+app.put('/api/customers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      first_name, last_name, email, phone,
+      address_line1, address_line2, city, state, postal_code, country,
+      id_type, id_number, id_expiry_date, id_issuing_authority,
+      date_of_birth, status, risk_level, notes
+    } = req.body;
+
+    const result = await pool.query(
+      `UPDATE customers SET
+        first_name = $1, last_name = $2, email = $3, phone = $4,
+        address_line1 = $5, address_line2 = $6, city = $7, state = $8,
+        postal_code = $9, country = $10, id_type = $11, id_number = $12,
+        id_expiry_date = $13, id_issuing_authority = $14, date_of_birth = $15,
+        status = $16, risk_level = $17, notes = $18
+      WHERE id = $19
+      RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
+      [first_name, last_name, email, phone,
+       address_line1, address_line2, city, state, postal_code, country,
+       id_type, id_number, id_expiry_date, id_issuing_authority,
+       date_of_birth, status, risk_level, notes, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating customer:', err);
+    if (err.code === '23505') {
+      res.status(400).json({ error: 'Email already exists' });
+    } else {
+      res.status(500).json({ error: 'Failed to update customer' });
+    }
+  }
+});
+
+// Transaction routes
+app.get('/api/transactions', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        t.*,
+        COALESCE(json_agg(
+          json_build_object(
+            'id', ti.id,
+            'image_url', ti.image_url,
+            'is_primary', ti.is_primary
+          )
+        ) FILTER (WHERE ti.id IS NOT NULL), '[]') as images,
+        CAST(t.price AS FLOAT) as price,
+        TO_CHAR(t.created_at, 'YYYY-MM-DD') as created_date
+      FROM transactions t
+      LEFT JOIN transaction_images ti ON t.id = ti.transaction_id
+      GROUP BY t.id
+      ORDER BY t.created_at DESC
+    `;
+    
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching transactions:', err);
+    res.status(500).json({ error: 'Failed to fetch transactions' });
+  }
+});
+
+app.get('/api/transactions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Get transaction details
+    const transactionQuery = `
+      SELECT 
+        t.id,
+        t.transaction_id,
+        t.customer_id,
+        t.transaction_type,
+        t.estimated_value,
+        t.metal_purity,
+        t.weight,
+        t.category,
+        t.metal_type,
+        t.primary_gem,
+        t.secondary_gem,
+        t.price,
+        t.payment_method,
+        t.inventory_status,
+        t.created_at,
+        c.first_name,
+        c.last_name,
+        c.email,
+        c.phone
+      FROM transactions t
+      LEFT JOIN customers c ON t.customer_id = c.id
+      WHERE t.id = $1
+    `;
+    
+    const imagesQuery = `
+      SELECT id, image_url, is_primary, created_at
+      FROM transaction_images
+      WHERE transaction_id = $1
+      ORDER BY is_primary DESC, created_at ASC
+    `;
+
+    const [transactionResult, imagesResult] = await Promise.all([
+      pool.query(transactionQuery, [id]),
+      pool.query(imagesQuery, [id])
+    ]);
+    
+    if (transactionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    // Combine transaction with its images
+    const transaction = transactionResult.rows[0];
+    transaction.images = imagesResult.rows;
+    
+    res.json(transaction);
+  } catch (err) {
+    console.error('Error fetching transaction:', err);
+    res.status(500).json({ error: 'Failed to fetch transaction' });
+  }
+});
+
+// Function to generate transaction ID
+async function generateTransactionId(maxAttempts = 10) {
+  const prefix = 'TSD';  
+  let attempts = 0;
+  let isUnique = false;
+  let transactionId;
+
+  while (!isUnique && attempts < maxAttempts) {
+    attempts++;
+    // Generate a random 6-digit number
+    const randomNum = Math.floor(100000 + Math.random() * 900000);
+    transactionId = `${prefix}${randomNum}`;
+
+    try {
+      // Check if this ID already exists in the database
+      const checkQuery = 'SELECT COUNT(*) FROM transactions WHERE transaction_id = $1';
+      const result = await pool.query(checkQuery, [transactionId]);
+      
+      if (result.rows[0].count === '0') {
+        isUnique = true;
+      }
+    } catch (err) {
+      console.error('Error checking transaction ID uniqueness:', err);
+      throw new Error('Failed to generate unique transaction ID');
+    }
+  }
+
+  if (!isUnique) {
+    throw new Error('Failed to generate unique transaction ID after maximum attempts');
+  }
+
+  return transactionId;
+}
+
+app.post('/api/transactions', async (req, res) => {
+  try {
+    const {
+      customer_id,
+      transaction_type,
+      estimated_value,
+      metal_purity,
+      weight,
+      category,
+      metal_type,
+      primary_gem,
+      secondary_gem,
+      price,
+      payment_method,
+      inventory_status,
+      images // Array of {url, isPrimary} objects
+    } = req.body;
+
+    // Required fields validation
+    if (!customer_id || !transaction_type || !estimated_value || !price || !payment_method) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Generate unique transaction ID
+    let transactionId;
+    try {
+      transactionId = await generateTransactionId();
+    } catch (err) {
+      console.error('Transaction ID generation error:', err);
+      return res.status(500).json({ error: 'Failed to generate transaction ID', details: err.message });
+    }
+
+    // Begin transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Insert transaction
+      const transactionQuery = `
+        INSERT INTO transactions (
+          transaction_id,
+          customer_id,
+          transaction_type,
+          estimated_value,
+          metal_purity,
+          weight,
+          category,
+          metal_type,
+          primary_gem,
+          secondary_gem,
+          price,
+          payment_method,
+          inventory_status,
+          created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
+        RETURNING 
+          id,
+          transaction_id,
+          customer_id,
+          transaction_type,
+          estimated_value,
+          metal_purity,
+          weight,
+          category,
+          metal_type,
+          primary_gem,
+          secondary_gem,
+          price,
+          payment_method,
+          inventory_status,
+          created_at
+      `;
+
+      const transactionResult = await client.query(transactionQuery, [
+        transactionId,
+        customer_id,
+        transaction_type,
+        estimated_value,
+        metal_purity,
+        weight,
+        category,
+        metal_type,
+        primary_gem,
+        secondary_gem,
+        price,
+        payment_method,
+        'HOLD'
+      ]);
+
+      const transaction = transactionResult.rows[0];
+
+      // Save images if provided
+      let savedImages = [];
+      if (images && images.length > 0) {
+        const imageQuery = `
+          INSERT INTO transaction_images (
+            transaction_id, 
+            image_url, 
+            is_primary
+          )
+          VALUES ($1, $2, $3)
+          RETURNING id, image_url, is_primary
+        `;
+
+        // Ensure only one primary image
+        const hasPrimary = images.some(img => img.isPrimary);
+        savedImages = await Promise.all(
+          images.map((img, index) => {
+            // If no primary image was specified, make the first image primary
+            const isPrimary = img.isPrimary || (!hasPrimary && index === 0);
+            return client.query(imageQuery, [
+              transaction.id,
+              img.url,
+              isPrimary
+            ]).then(result => result.rows[0]);
+          })
+        );
+      }
+
+      await client.query('COMMIT');
+
+      // Return transaction with images
+      res.status(201).json({
+        ...transaction,
+        images: savedImages
+      });
+
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+  } catch (err) {
+    console.error('Error creating transaction:', err);
+    res.status(500).json({ error: 'Failed to create transaction', details: err.message });
+  }
+});
+
+app.put('/api/transactions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      transaction_type,
+      estimated_value,
+      metal_purity,
+      weight,
+      category,
+      metal_type,
+      primary_gem,
+      secondary_gem,
+      price,
+      payment_method,
+      inventory_status
+    } = req.body;
+
+    // First check if transaction exists
+    const checkQuery = 'SELECT * FROM transactions WHERE id = $1';
+    const checkResult = await pool.query(checkQuery, [id]);
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    const query = `
+      UPDATE transactions 
+      SET 
+        transaction_type = COALESCE($1, transaction_type),
+        estimated_value = COALESCE($2, estimated_value),
+        metal_purity = COALESCE($3, metal_purity),
+        weight = COALESCE($4, weight),
+        category = COALESCE($5, category),
+        metal_type = COALESCE($6, metal_type),
+        primary_gem = COALESCE($7, primary_gem),
+        secondary_gem = COALESCE($8, secondary_gem),
+        price = COALESCE($9, price),
+        payment_method = COALESCE($10, payment_method),
+        inventory_status = COALESCE($11, inventory_status)
+      WHERE id = $12
+      RETURNING 
+        id,
+        transaction_id,
+        customer_id,
+        transaction_type,
+        estimated_value,
+        metal_purity,
+        weight,
+        category,
+        metal_type,
+        primary_gem,
+        secondary_gem,
+        price,
+        payment_method,
+        inventory_status,
+        created_at
+    `;
+    
+    const result = await pool.query(query, [
+      transaction_type,
+      estimated_value,
+      metal_purity,
+      weight,
+      category,
+      metal_type,
+      primary_gem,
+      secondary_gem,
+      price,
+      payment_method,
+      inventory_status,
+      id
+    ]);
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating transaction:', err);
+    res.status(500).json({ error: 'Failed to update transaction', details: err.message });
   }
 });
 
@@ -987,3 +1503,16 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+// Authentication middleware
+function authenticateToken(req, res, next) {
+  const authHeader = req.header('Authorization');
+  const token = authHeader && authHeader.split(' ')[1];
+  if (token == null) return res.status(401).json({ error: 'Access denied. No token provided.' });
+
+  jwt.verify(token, process.env.JWT_SECRET || 'evergreen_jwt_secret_2024', (err, user) => {
+    if (err) return res.status(403).json({ error: 'Access denied. Invalid token.' });
+    req.user = user;
+    next();
+  });
+}

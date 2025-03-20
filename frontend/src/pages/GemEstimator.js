@@ -42,10 +42,11 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
+import { useAuth } from '../context/AuthContext';
 
 function GemEstimator() {
   const API_BASE_URL = config.apiUrl;
-
+  const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [metalFormState, setMetalFormState] = useState({});
@@ -57,6 +58,7 @@ function GemEstimator() {
   });
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
+  const [from, setFrom] = useState(location.state?.from || '');
 
   const handleMetalFormChange = (formState) => {
       setMetalFormState(formState);
@@ -113,7 +115,6 @@ function GemEstimator() {
     const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
     const totalWeight = parseFloat(addMetal[0].weight || 0) + gemWeightInGrams;
 
-
     // Get primary and secondary gem details based on their types
     let primaryGemDetails = '';
     let secondaryGemDetails = '';
@@ -151,7 +152,10 @@ function GemEstimator() {
         retail: priceEstimates.retail
       },
       transactionType: itemTransactionTypes[estimatedItems.length] || 'pawn',
-      image: images.find(img => img.isPrimary) || images[0]
+      images: images.map(img => ({
+        url: img.url,
+        isPrimary: img.isPrimary || false
+      }))
     };
     setEstimatedItems(prev => [...prev, newItem]);
 
@@ -207,6 +211,7 @@ function GemEstimator() {
     name: '',
     shape: '',
     color: 'Red',
+    color_id: 5, // Default to Red's ID
     weight: '',
     width: '',
     depth: '',
@@ -305,11 +310,13 @@ function GemEstimator() {
         if (stoneTypesData.length > 0) {
           setPrimaryStoneForm(prev => ({
             ...prev,
-            color: 'Red'
+            color: 'Red',
+            color_id: 5
           }));
           setSecondaryStoneForm(prev => ({
             ...prev,
-            color: 'Red'
+            color: 'Red',
+            color_id: 5
           }));
         }
 
@@ -960,7 +967,7 @@ function GemEstimator() {
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Type *</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
             {colorSpecificStoneTypes
-              .filter(stone => stone.color === getCurrentStoneForm().color)
+              .filter(stone => stone.color_id === getCurrentStoneForm().color_id)
               .map((stone) => (
                 <Paper
                   key={stone.type}
@@ -1000,10 +1007,14 @@ function GemEstimator() {
                 <Grid item xs={6} key={color.id}>
                   <Paper
                     onClick={() => {
-                      setCurrentStoneForm(prev => ({
-                        ...prev,
-                        color: color.color
-                      }));
+                      setCurrentStoneForm(prev => {
+                        const newForm = {
+                          ...prev,
+                          color: color.color,
+                          color_id: color.id
+                        };
+                        return newForm;
+                      });
                     }}
 
                     sx={{
@@ -1432,9 +1443,11 @@ function GemEstimator() {
       priceEstimates
     }));
 
-    navigate('/checkout', { 
+    // Navigate to customer selection with items and preserve auth state
+    navigate('/customer', { 
       state: { 
-        items: updatedItems
+        items: updatedItems,
+        from: 'gem-estimator'
       }
     });
   };
@@ -2301,7 +2314,7 @@ function GemEstimator() {
                     >
                       <TableCell>
                           <img 
-                            src={item.image?.url || ''} 
+                            src={item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url || ''} 
                             alt="No image" 
                             style={{ width: '50px', height: '50px', objectFit: 'cover' }} 
                           />
@@ -2310,7 +2323,7 @@ function GemEstimator() {
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Box>
                             <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
-                              {item.weight}g {item.purity} {item.metal} {item.gems}
+                              {item.weight}g {item.purity} {item.metal} {item.primaryGem.split(' ')[0]} {item.secondaryGem.split(' ')[0]}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
                               {item.category}
