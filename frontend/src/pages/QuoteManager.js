@@ -24,6 +24,7 @@ import {
   Tooltip,
   Snackbar
 } from '@mui/material';
+import config from '../config';
 import SearchIcon from '@mui/icons-material/Search';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -31,7 +32,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import SaveIcon from '@mui/icons-material/Save';
 import EditIcon from '@mui/icons-material/Edit';
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000/api';
+const API_BASE_URL = config.apiUrl;
 
 function QuoteManager() {
   const navigate = useNavigate();
@@ -426,11 +427,6 @@ function QuoteManager() {
                   <Typography variant="body2">Created: {formatDate(selectedQuote.created_at)}</Typography>
                   <Typography variant="body2">Status: {selectedQuote.status}</Typography>
                   <Typography variant="body2">Total: ${selectedQuote.total_amount}</Typography>
-                  {selectedQuote.status === 'pending' && (
-                    <Typography variant="body2" color={getRemainingDays(selectedQuote.created_at) <= 3 ? 'error' : 'textPrimary'}>
-                      Expires in: {getRemainingDays(selectedQuote.created_at)} days
-                    </Typography>
-                  )}
                 </Grid>
               </Grid>
 
@@ -439,6 +435,7 @@ function QuoteManager() {
                 <Table size="small">
                   <TableHead>
                     <TableRow>
+                      <TableCell>Category</TableCell>
                       <TableCell>Item</TableCell>
                       <TableCell>Transaction Type</TableCell>
                       <TableCell align="right">Price</TableCell>
@@ -448,8 +445,11 @@ function QuoteManager() {
                   <TableBody>
                     {selectedQuote.items.map((item, index) => (
                       <TableRow key={index}>
+                         <TableCell>
+                          {item.category}
+                        </TableCell>
                         <TableCell>
-                          {item.weight}g {item.metal} {item.type === 'diamond' ? '(Diamond)' : item.type === 'stone' ? '(Stone)' : ''}
+                          {item.weight}g {item.purity} {item.metal} 
                         </TableCell>
                         <TableCell>{item.transactionType}</TableCell>
                         <TableCell align="right">

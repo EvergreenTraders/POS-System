@@ -1028,7 +1028,7 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
 app.get('/api/customers/search', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { firstName, lastName } = req.query;
+    const { firstName, lastName, phone } = req.query;
     let query = 'SELECT * FROM customers WHERE 1=1';
     const params = [];
     let paramCount = 1;
@@ -1042,6 +1042,11 @@ app.get('/api/customers/search', authenticateToken, async (req, res) => {
     if (lastName) {
       query += ` AND LOWER(last_name) LIKE $${paramCount}`;
       params.push(`%${lastName.toLowerCase()}%`);
+    }
+
+    if (phone) {
+      query += ` AND LOWER(phone) LIKE $${paramCount}`;
+      params.push(`%${phone}%`);
     }
 
     query += ' ORDER BY created_at DESC';

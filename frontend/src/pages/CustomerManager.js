@@ -20,7 +20,8 @@ const CustomerManager = () => {
   const [quoteExpirationConfig, setQuoteExpirationConfig] = useState({ days: 30 });
   const [searchForm, setSearchForm] = useState({
     firstName: '',
-    lastName: ''
+    lastName: '',
+    phone: ''
   });
   const [formData, setFormData] = useState({
     first_name: '',
@@ -75,8 +76,8 @@ const CustomerManager = () => {
 
   const handleSearch = async (e) => {
     e.preventDefault();
-    if (!searchForm.firstName && !searchForm.lastName) {
-      showSnackbar('Please enter at least first name or last name', 'warning');
+    if (!searchForm.firstName && !searchForm.lastName && !searchForm.phone) {
+      showSnackbar('Please enter at least one search criteria', 'warning');
       return;
     }
 
@@ -84,7 +85,8 @@ const CustomerManager = () => {
     try {
       const queryParams = new URLSearchParams({
         firstName: searchForm.firstName.trim(),
-        lastName: searchForm.lastName.trim()
+        lastName: searchForm.lastName.trim(),
+        phone: searchForm.phone.trim()
       }).toString();
       
       const response = await fetch(`${config.apiUrl}/customers/search?${queryParams}`, {
@@ -337,9 +339,6 @@ const CustomerManager = () => {
               value={searchForm.firstName}
               onChange={handleInputChange}
               fullWidth
-              error={!searchForm.firstName && !searchForm.lastName}
-              helperText={!searchForm.firstName && !searchForm.lastName ? 'Enter first name or last name' : ''}
-              placeholder="Enter first name"
             />
           </Grid>
           <Grid item xs={12}>
@@ -349,9 +348,15 @@ const CustomerManager = () => {
               value={searchForm.lastName}
               onChange={handleInputChange}
               fullWidth
-              error={!searchForm.firstName && !searchForm.lastName}
-              helperText={!searchForm.firstName && !searchForm.lastName ? 'Enter first name or last name' : ''}
-              placeholder="Enter last name"
+            />
+          </Grid>
+          <Grid item xs={12}>
+            <TextField
+              name="phone"
+              label="Phone Number"
+              value={searchForm.phone}
+              onChange={handleInputChange}
+              fullWidth
             />
           </Grid>
           <Grid item xs={12}>
@@ -360,7 +365,7 @@ const CustomerManager = () => {
               color="primary"
               onClick={handleSearch}
               fullWidth
-              disabled={loading || (!searchForm.firstName && !searchForm.lastName)}
+              disabled={loading || (!searchForm.firstName && !searchForm.lastName && !searchForm.phone)}
               sx={{ height: '48px' }}
             >
               {loading ? (
@@ -373,6 +378,8 @@ const CustomerManager = () => {
               )}
             </Button>
           </Grid>
+        </Grid>
+        <Grid container direction="column">
           <Grid item xs={12}>
             <Divider>OR</Divider>
           </Grid>
@@ -485,6 +492,7 @@ const CustomerManager = () => {
                     color="primary"
                     onClick={handleRegisterNew}
                     fullWidth
+                    sx={{ height: '48px' }}
                   >
                     Register New Customer
                   </Button>
@@ -497,6 +505,7 @@ const CustomerManager = () => {
                     variant="outlined"
                     onClick={handleProceedAsGuest}
                     fullWidth
+                    sx={{ height: '48px' }}
                   >
                     Continue as Guest
                   </Button>
@@ -518,7 +527,7 @@ const CustomerManager = () => {
         <DialogContent>
           <Box sx={{ mt: 2 }}>
             <Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}>
-              <Grid container spacing={2}>
+              <Grid container>
                 <Grid item xs={12} sm={6}>
                   <TextField
                     name="first_name"
@@ -529,6 +538,7 @@ const CustomerManager = () => {
                     required
                     error={!formData.first_name}
                     helperText={!formData.first_name ? 'First name is required' : ''}
+                    margin="dense"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -541,6 +551,7 @@ const CustomerManager = () => {
                     required
                     error={!formData.last_name}
                     helperText={!formData.last_name ? 'Last name is required' : ''}
+                    margin="dense"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -554,15 +565,17 @@ const CustomerManager = () => {
                     required={!formData.isGuest}
                     error={!formData.isGuest && !formData.email}
                     helperText={!formData.isGuest && !formData.email ? 'Email is required for registered customers' : ''}
+                    margin="dense"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
                   <TextField
                     name="phone"
-                    label="Phone"
+                    label="Phone Number"
                     value={formData.phone || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                   />
                 </Grid>
                 {/* Address Fields */}
@@ -578,6 +591,7 @@ const CustomerManager = () => {
                     value={formData.address_line1 || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                   />
                 </Grid>
                 <Grid item xs={12}>
@@ -587,6 +601,7 @@ const CustomerManager = () => {
                     value={formData.address_line2 || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -596,6 +611,7 @@ const CustomerManager = () => {
                     value={formData.city || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -605,6 +621,7 @@ const CustomerManager = () => {
                     value={formData.state || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -614,6 +631,7 @@ const CustomerManager = () => {
                     value={formData.postal_code || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -623,6 +641,7 @@ const CustomerManager = () => {
                     value={formData.country || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                   />
                 </Grid>
                 {/* ID Fields */}
@@ -638,6 +657,7 @@ const CustomerManager = () => {
                     value={formData.id_type || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -647,6 +667,7 @@ const CustomerManager = () => {
                     value={formData.id_number || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -657,6 +678,7 @@ const CustomerManager = () => {
                     value={formData.id_expiry_date || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                     InputLabelProps={{ shrink: true }}
                   />
                 </Grid>
@@ -667,6 +689,7 @@ const CustomerManager = () => {
                     value={formData.id_issuing_authority || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -677,6 +700,7 @@ const CustomerManager = () => {
                     value={formData.date_of_birth || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    margin="dense"
                     InputLabelProps={{ shrink: true }}
                   />
                 </Grid>
@@ -689,6 +713,7 @@ const CustomerManager = () => {
                     fullWidth
                     multiline
                     rows={4}
+                    margin="dense"
                   />
                 </Grid>
               </Grid>
