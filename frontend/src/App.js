@@ -62,26 +62,71 @@ const ProtectedRoute = ({ children }) => {
 };
 
 // Layout component for authenticated pages
-const AuthenticatedLayout = ({ children }) => (
-  <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-    <Navbar />
-    <Sidebar />
-    <Box
-      component="main"
-      sx={{
-        flexGrow: 1,
-        p: 3,
-        mt: 8,
-        transition: theme => theme.transitions.create('margin', {
-          easing: theme.transitions.easing.sharp,
-          duration: theme.transitions.duration.enteringScreen,
-        }),
-      }}
-    >
-      {children}
+const AuthenticatedLayout = ({ children }) => {
+  const [isFullScreen, setIsFullScreen] = React.useState(false);
+
+  const requestFullScreen = async (element) => {
+    try {
+      if (element.requestFullscreen) {
+        await element.requestFullscreen();
+      } else if (element.webkitRequestFullscreen) {
+        await element.webkitRequestFullscreen();
+      } else if (element.msRequestFullscreen) {
+        await element.msRequestFullscreen();
+      }
+      setIsFullScreen(true);
+    } catch (err) {
+      console.error('Error attempting to enable full-screen:', err);
+    }
+  };
+
+  const handleFullScreen = () => {
+    const element = document.documentElement;
+    if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
+      requestFullScreen(element);
+    }
+  };
+
+  React.useEffect(() => {
+    const handleUserInteraction = () => {
+      handleFullScreen();
+      // Remove event listeners after first interaction
+      document.removeEventListener('click', handleUserInteraction);
+      document.removeEventListener('keypress', handleUserInteraction);
+    };
+
+    // Add event listeners for user interaction
+    document.addEventListener('click', handleUserInteraction);
+    document.addEventListener('keypress', handleUserInteraction);
+
+    // Cleanup function
+    return () => {
+      document.removeEventListener('click', handleUserInteraction);
+      document.removeEventListener('keypress', handleUserInteraction);
+    };
+  }, []);
+
+  return (
+    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+      <Navbar />
+      <Sidebar />
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          p: 3,
+          mt: 8,
+          transition: theme => theme.transitions.create('margin', {
+            easing: theme.transitions.easing.sharp,
+            duration: theme.transitions.duration.enteringScreen,
+          }),
+        }}
+      >
+        {children}
+      </Box>
     </Box>
-  </Box>
-);
+  );
+};
 
 function App() {
   return (
