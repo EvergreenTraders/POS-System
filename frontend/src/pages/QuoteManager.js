@@ -35,6 +35,8 @@ function QuoteManager() {
   const [quotes, setQuotes] = useState([]);
   const [selectedQuote, setSelectedQuote] = useState(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [quoteToDelete, setQuoteToDelete] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [expirationDays, setExpirationDays] = useState(30);
@@ -130,6 +132,22 @@ function QuoteManager() {
       fetchQuotes(); // Refresh quotes list
     } catch (error) {
       console.error('Error updating quote status:', error);
+    }
+  };
+
+  const handleDeleteClick = (quote) => {
+    setQuoteToDelete(quote);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDelete = async () => {
+    try {
+      await axios.delete(`${API_BASE_URL}/quotes/${quoteToDelete.id}`);
+      setDeleteDialogOpen(false);
+      setQuoteToDelete(null);
+      fetchQuotes(); // Refresh quotes list
+    } catch (error) {
+      console.error('Error deleting quote:', error);
     }
   };
 
@@ -266,8 +284,8 @@ function QuoteManager() {
                       </IconButton>
                       <IconButton
                         size="small"
-                        onClick={() => handleUpdateStatus(quote.id, 'cancelled')}
-                        title="Cancel Quote"
+                        onClick={() => handleDeleteClick(quote)}
+                        title="Delete Quote"
                         color="error"
                       >
                         <DeleteIcon />
@@ -354,6 +372,22 @@ function QuoteManager() {
             </DialogActions>
           </>
         )}
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+        <DialogTitle>Delete Quote</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete this quote? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleDelete} color="error" variant="contained">
+            Delete
+          </Button>
+        </DialogActions>
       </Dialog>
     </Container>
   );
