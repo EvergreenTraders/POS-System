@@ -1493,6 +1493,18 @@ app.put('/api/transactions/:id', async (req, res) => {
   }
 });
 
+// Transaction Types API Endpoints
+app.get('/api/transaction-types', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM transaction_type ORDER BY id';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching transaction types:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);

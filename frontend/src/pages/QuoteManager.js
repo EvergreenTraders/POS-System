@@ -22,7 +22,9 @@ import {
   Box,
   TextField,
   Tooltip,
-  Snackbar
+  Snackbar,
+  Select,
+  MenuItem
 } from '@mui/material';
 import config from '../config';
 import SearchIcon from '@mui/icons-material/Search';
@@ -47,6 +49,7 @@ function QuoteManager() {
   const [expirationDays, setExpirationDays] = useState(30);
   const [editingExpiration, setEditingExpiration] = useState(false);
   const [tempExpirationDays, setTempExpirationDays] = useState(30);
+  const [transactionTypes, setTransactionTypes] = useState([]);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
@@ -56,6 +59,7 @@ function QuoteManager() {
   useEffect(() => {
     fetchQuotes();
     fetchExpirationDays();
+    fetchTransactionTypes();
   }, []);
 
   const fetchQuotes = async () => {
@@ -76,6 +80,15 @@ function QuoteManager() {
       setTempExpirationDays(response.data.days);
     } catch (error) {
       console.error('Error fetching expiration days:', error);
+    }
+  };
+
+  const fetchTransactionTypes = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/transaction-types`);
+      setTransactionTypes(response.data);
+    } catch (error) {
+      console.error('Error fetching transaction types:', error);
     }
   };
 
@@ -237,6 +250,28 @@ function QuoteManager() {
         ...updatedQuote.items[index].itemPriceEstimates,
         [updatedQuote.items[index].transactionType]: parseFloat(newPrice)
       }
+    };
+    
+    setSelectedQuote(updatedQuote);
+  };
+
+  const handleTransactionTypeChange = (index, newType) => {
+    const updatedQuote = { ...selectedQuote };
+    const currentItem = updatedQuote.items[index];
+    
+    // Initialize price estimates if they don't exist
+    if (!currentItem.itemPriceEstimates) {
+      currentItem.itemPriceEstimates = {};
+    }
+
+    if (!currentItem.itemPriceEstimates[newType]) {
+      const oldPrice = currentItem.itemPriceEstimates[currentItem.transactionType] || 0;
+      currentItem.itemPriceEstimates[newType] = oldPrice;
+    }
+    
+    updatedQuote.items[index] = {
+      ...currentItem,
+      transactionType: newType
     };
     
     setSelectedQuote(updatedQuote);
@@ -451,7 +486,22 @@ function QuoteManager() {
                         <TableCell>
                           {item.weight}g {item.purity} {item.metal} 
                         </TableCell>
-                        <TableCell>{item.transactionType}</TableCell>
+                        <TableCell>{editingItemIndex === index ? (
+                          <Select
+                            size="small"
+                            value={item.transactionType}
+                            onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
+                            sx={{ minWidth: 120 }}
+                          >
+                            {transactionTypes.map(type => (
+                              <MenuItem key={type.id} value={type.type}>
+                                {type.type.charAt(0).toUpperCase() + type.type.slice(1)}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        ) : (
+                          item.transactionType.charAt(0).toUpperCase() + item.transactionType.slice(1)
+                        )}</TableCell>
                         <TableCell align="right">
                           {editingItemIndex === index ? (
                             <TextField
