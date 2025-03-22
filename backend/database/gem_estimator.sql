@@ -1,6 +1,5 @@
 DO $$
 BEGIN
-    drop table if exists stone_color;
     -- Stone Color Table
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_color') THEN
         CREATE TABLE stone_color (

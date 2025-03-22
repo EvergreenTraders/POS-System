@@ -22,7 +22,9 @@ import {
   Box,
   TextField,
   Tooltip,
-  Snackbar
+  Snackbar,
+  Select,
+  MenuItem
 } from '@mui/material';
 import config from '../config';
 import SearchIcon from '@mui/icons-material/Search';
@@ -42,11 +44,13 @@ function QuoteManager() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [quoteToDelete, setQuoteToDelete] = useState(null);
   const [editingItemIndex, setEditingItemIndex] = useState(-1);
+  const [editingItem, setEditingItem] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [expirationDays, setExpirationDays] = useState(30);
   const [editingExpiration, setEditingExpiration] = useState(false);
   const [tempExpirationDays, setTempExpirationDays] = useState(30);
+  const [transactionTypes, setTransactionTypes] = useState([]);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
@@ -56,6 +60,7 @@ function QuoteManager() {
   useEffect(() => {
     fetchQuotes();
     fetchExpirationDays();
+    fetchTransactionTypes();
   }, []);
 
   const fetchQuotes = async () => {
@@ -76,6 +81,15 @@ function QuoteManager() {
       setTempExpirationDays(response.data.days);
     } catch (error) {
       console.error('Error fetching expiration days:', error);
+    }
+  };
+
+  const fetchTransactionTypes = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/transaction-types`);
+      setTransactionTypes(response.data);
+    } catch (error) {
+      console.error('Error fetching transaction types:', error);
     }
   };
 
@@ -228,27 +242,46 @@ function QuoteManager() {
   });
 
   const handleItemPriceChange = (index, newPrice) => {
-    const updatedQuote = { ...selectedQuote };
-    
-    // Create a new itemPriceEstimates object to ensure state update
-    updatedQuote.items[index] = {
-      ...updatedQuote.items[index],
+    setEditingItem({
+      ...editingItem,
       itemPriceEstimates: {
-        ...updatedQuote.items[index].itemPriceEstimates,
-        [updatedQuote.items[index].transactionType]: parseFloat(newPrice)
+        ...editingItem.itemPriceEstimates,
+        [editingItem.transactionType]: parseFloat(newPrice)
       }
-    };
+    });
+  };
+
+  const handleTransactionTypeChange = (index, newType) => {
+    const currentItem = editingItem;
     
-    setSelectedQuote(updatedQuote);
+    if (!currentItem.itemPriceEstimates) {
+      currentItem.itemPriceEstimates = {};
+    }
+
+    if (!currentItem.itemPriceEstimates[newType]) {
+      const oldPrice = currentItem.itemPriceEstimates[currentItem.transactionType] || 0;
+      currentItem.itemPriceEstimates[newType] = oldPrice;
+    }
+    
+    setEditingItem({
+      ...currentItem,
+      transactionType: newType
+    });
   };
 
   const handleSaveItemChanges = async () => {
     try {
+      // Create a new array with the updated item
+      const updatedItems = selectedQuote.items.map((item, idx) => 
+        idx === editingItemIndex ? editingItem : item
+      );
+
       const response = await axios.put(`${API_BASE_URL}/quotes/${selectedQuote.id}`, {
-        items: selectedQuote.items
+        items: updatedItems
       });
       
       setEditingItemIndex(-1);
+      setEditingItem(null);
       setSelectedQuote(response.data);
       fetchQuotes();
     } catch (error) {
@@ -332,8 +365,8 @@ function QuoteManager() {
               <TableCell>Quote ID</TableCell>
               <TableCell>Customer</TableCell>
               <TableCell>Date</TableCell>
-              <TableCell>Total Amount</TableCell>
-              <TableCell>Status</TableCell>
+              <TableCell>Transaction Type</TableCell>
+              <TableCell>Price</TableCell>
               <TableCell>Expires In</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
@@ -349,14 +382,13 @@ function QuoteManager() {
                   </Typography>
                 </TableCell>
                 <TableCell>{formatDate(quote.created_at)}</TableCell>
-                <TableCell>${quote.total_amount}</TableCell>
                 <TableCell>
-                  <Chip
-                    label={quote.status}
-                    color={getStatusColor(quote.status, quote.created_at)}
-                    size="small"
-                  />
+                  {quote.items && quote.items[0] ? 
+                    quote.items[0].transactionType.charAt(0).toUpperCase() + quote.items[0].transactionType.slice(1)
+                    : '-'
+                  }
                 </TableCell>
+                <TableCell>${quote.total_amount}</TableCell>
                 <TableCell>
                   {quote.status === 'pending' ? (
                     `${quote.days_remaining} days`
@@ -451,13 +483,28 @@ function QuoteManager() {
                         <TableCell>
                           {item.weight}g {item.purity} {item.metal} 
                         </TableCell>
-                        <TableCell>{item.transactionType}</TableCell>
+                        <TableCell>{editingItemIndex === index ? (
+                          <Select
+                            size="small"
+                            value={editingItem.transactionType}
+                            onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
+                            sx={{ minWidth: 120 }}
+                          >
+                            {transactionTypes.map(type => (
+                              <MenuItem key={type.id} value={type.type}>
+                                {type.type.charAt(0).toUpperCase() + type.type.slice(1)}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        ) : (
+                          item.transactionType.charAt(0).toUpperCase() + item.transactionType.slice(1)
+                        )}</TableCell>
                         <TableCell align="right">
                           {editingItemIndex === index ? (
                             <TextField
                               type="number"
                               size="small"
-                              value={item.itemPriceEstimates[item.transactionType]}
+                              value={editingItem.itemPriceEstimates[editingItem.transactionType]}
                               onChange={(e) => handleItemPriceChange(index, e.target.value)}
                               inputProps={{ min: 0, step: 0.01 }}
                               sx={{ width: 100 }}
@@ -478,7 +525,10 @@ function QuoteManager() {
                             </IconButton>
                           ) : (
                             <IconButton
-                              onClick={() => setEditingItemIndex(index)}
+                              onClick={() => {
+                                setEditingItemIndex(index);
+                                setEditingItem({...item}); // Create a copy of the item for editing
+                              }}
                               color="primary"
                               size="small"
                               title="Edit Price"
@@ -516,6 +566,7 @@ function QuoteManager() {
               <Button onClick={() => {
                 setDetailsDialogOpen(false);
                 setEditingItemIndex(-1);
+                setEditingItem(null);
               }}>
                 Close
               </Button>
