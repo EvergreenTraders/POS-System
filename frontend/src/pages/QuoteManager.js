@@ -363,11 +363,13 @@ function QuoteManager() {
           <TableHead>
             <TableRow>
               <TableCell>Quote ID</TableCell>
+              <TableCell>Item ID</TableCell>
               <TableCell>Customer</TableCell>
               <TableCell>Date</TableCell>
               <TableCell>Transaction Type</TableCell>
               <TableCell>Price</TableCell>
-              <TableCell>Expires In</TableCell>
+              <TableCell>Expires In (Days)</TableCell>
+              <TableCell>Days Remaining</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -375,6 +377,7 @@ function QuoteManager() {
             {filteredQuotes.map((quote) => (
               <TableRow key={quote.id}>
                 <TableCell>{quote.id}</TableCell>
+                <TableCell>{quote.item_id}</TableCell>
                 <TableCell>
                   <Typography variant="body2">{quote.customer_name}</Typography>
                   <Typography variant="caption" color="textSecondary">
@@ -383,17 +386,18 @@ function QuoteManager() {
                 </TableCell>
                 <TableCell>{formatDate(quote.created_at)}</TableCell>
                 <TableCell>
-                  {quote.items && quote.items[0] ? 
-                    quote.items[0].transactionType.charAt(0).toUpperCase() + quote.items[0].transactionType.slice(1)
+                  {quote.transaction_type ? 
+                    quote.transaction_type.charAt(0).toUpperCase() + quote.transaction_type.slice(1)
                     : '-'
                   }
                 </TableCell>
                 <TableCell>${quote.total_amount}</TableCell>
+                <TableCell>{quote.expires_in}</TableCell>
                 <TableCell>
-                  {quote.status === 'pending' ? (
+                  {quote.days_remaining > 0 ? (
                     `${quote.days_remaining} days`
                   ) : (
-                    '-'
+                    'Expired'
                   )}
                 </TableCell>
                 <TableCell>
