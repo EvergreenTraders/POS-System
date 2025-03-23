@@ -1,9 +1,7 @@
-drop table if exists quotes;
 -- Create quotes table with new structure
 CREATE TABLE quotes (
     id SERIAL PRIMARY KEY,
     item_id VARCHAR(10) NOT NULL,
-    total_amount DECIMAL(10,2) NOT NULL,
     customer_id INTEGER NOT NULL,
     employee_id INTEGER NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -16,6 +14,9 @@ CREATE TABLE quotes (
     CONSTRAINT fk_quotes_employee FOREIGN KEY (employee_id) REFERENCES employees(employee_id)
 );
 
+-- Remove total_amount column from existing table
+ALTER TABLE quotes DROP COLUMN IF EXISTS total_amount;
+
 -- Create indexes for better performance
 CREATE INDEX idx_quotes_customer_id ON quotes(customer_id);
 CREATE INDEX idx_quotes_item_id ON quotes(item_id);
@@ -25,7 +26,6 @@ CREATE INDEX idx_quotes_created_at ON quotes(created_at);
 -- Add comments
 COMMENT ON TABLE quotes IS 'Stores customer quotes for future transactions';
 COMMENT ON COLUMN quotes.item_id IS 'Reference to item in jewelry table';
-COMMENT ON COLUMN quotes.total_amount IS 'Total amount of the quote';
 COMMENT ON COLUMN quotes.customer_id IS 'Reference to customer in customers table';
 COMMENT ON COLUMN quotes.employee_id IS 'Reference to employee who created the quote';
 COMMENT ON COLUMN quotes.expires_in IS 'Number of days until the quote expires';
@@ -69,7 +69,6 @@ $$ LANGUAGE plpgsql;
 -- Insert sample quotes
 INSERT INTO quotes (
     item_id,
-    total_amount,
     customer_id,
     employee_id,
     created_at,
@@ -79,31 +78,31 @@ INSERT INTO quotes (
     transaction_type
 ) VALUES
 -- Diamond Ring Quote
-('RING001', 15000.00, 1, 1, '2025-03-20 10:00:00', NULL, 30, 30, 'buy' ),
+('RING001', 1, 1, '2025-03-20 10:00:00', NULL, 30, 30, 'buy' ),
 
 -- Tennis Bracelet Quote
-('BRAC001', 18000.00, 2, 2, '2025-03-21 14:30:00', NULL, 30, 29, 'pawn' ),
+('BRAC001', 2, 2, '2025-03-21 14:30:00', NULL, 30, 29, 'pawn' ),
 
 -- Emerald Pendant Quote
-('PEND001', 9000.00, 1, 1, '2025-03-19 09:15:00', '2025-03-19 15:20:00', 30, 28, 'buy' ),
+('PEND001', 1, 1, '2025-03-19 09:15:00', '2025-03-19 15:20:00', 30, 28, 'buy' ),
 
 -- Diamond Studs Quote
-('EARR002', 22000.00, 1, 2, '2025-03-18 16:45:00', NULL, 30, 0, 'retail' ),
+('EARR002', 1, 2, '2025-03-18 16:45:00', NULL, 30, 0, 'retail' ),
 
 -- Ruby Ring Quote
-('RING002', 3200.00, 2, 1, '2025-03-22 11:00:00', NULL, 15, 15, 'buy' ),
+('RING002', 2, 1, '2025-03-22 11:00:00', NULL, 15, 15, 'buy' ),
 
 -- Gold Chain Quote
-('NECK002', 3200.00, 2, 2, '2025-03-21 13:20:00', NULL, 30, 29, 'pawn' ),
+('NECK002', 2, 2, '2025-03-21 13:20:00', NULL, 30, 29, 'pawn' ),
 
 -- Opal Pendant Quote
-('PEND002', 550.00, 1, 1, '2025-03-20 17:00:00', NULL, 30, 28, 'buy' ),
+('PEND002', 1, 1, '2025-03-20 17:00:00', NULL, 30, 28, 'buy' ),
 
 -- Pearl Earrings Quote
-('EARR001', 3800.00, 2, 2, '2025-03-19 10:30:00', '2025-03-19 14:15:00', 30, 28, 'pawn' ),
+('EARR001', 2, 2, '2025-03-19 10:30:00', '2025-03-19 14:15:00', 30, 28, 'pawn' ),
 
 -- Sapphire Necklace Quote
-('NECK001', 1400.00, 1, 1, '2025-03-18 09:00:00', NULL, 15, 0, 'buy' ),
+('NECK001', 1, 1, '2025-03-18 09:00:00', NULL, 15, 0, 'buy' ),
 
 -- Jade Bangle Quote
-('BRAC002', 4200.00, 1, 2, '2025-03-22 00:30:00', NULL, 30, 30, 'retail' );
+('BRAC002', 1, 2, '2025-03-22 00:30:00', NULL, 30, 30, 'retail' );

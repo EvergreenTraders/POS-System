@@ -728,11 +728,11 @@ app.put('/api/carat-conversion', async (req, res) => {
 app.post('/api/quotes', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { item_id, total_amount, customer_id, employee_id } = req.body;
+    const { item_id, customer_id, employee_id } = req.body;
     
     // Validate required fields
-    if (!item_id || !customer_id || !employee_id || !total_amount) {
-      return res.status(400).json({ error: 'item_id, customer_id, employee_id, and total_amount are required' });
+    if (!item_id || !customer_id || !employee_id) {
+      return res.status(400).json({ error: 'item_id, customer_id, and employee_id are required' });
     }
 
     await client.query('BEGIN');
@@ -751,18 +751,16 @@ app.post('/api/quotes', async (req, res) => {
     const quoteQuery = `
       INSERT INTO quotes (
         item_id,
-        total_amount,
         customer_id,
         employee_id,
         expires_in,
         created_at
       )
-      VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3, $5, CURRENT_TIMESTAMP)
       RETURNING *`;
     
     const quoteResult = await client.query(quoteQuery, [
       item_id,
-      total_amount,
       customer_id,
       employee_id,
       expires_in
@@ -789,9 +787,15 @@ app.get('/api/quotes', async (req, res) => {
       SELECT 
         q.*,
         c.first_name || ' ' || c.last_name as customer_name,
-        c.email as customer_email
+        c.email as customer_email,
+        c.phone as customer_phone,
+        j.short_desc as item_description,
+        j.buy_price,
+        j.pawn_value,
+        j.retail_price
       FROM quotes q
       LEFT JOIN customers c ON q.customer_id = c.id
+      LEFT JOIN jewelry j ON q.item_id = j.item_id
       ORDER BY q.created_at DESC
     `;
     const result = await pool.query(query);
@@ -824,53 +828,51 @@ app.get('/api/quotes/:id', async (req, res) => {
 app.put('/api/quotes/:id', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { id } = req.params;
-    const { total_amount, expires_in } = req.body;
-
     await client.query('BEGIN');
 
-    // Prepare query parameters and SET clause
-    const updates = [];
-    const values = [];
-    let paramCount = 1;
+    const { id } = req.params;
+    const { transaction_type } = req.body;
 
-    if (total_amount !== undefined) {
-      updates.push(`total_amount = $${paramCount}`);
-      values.push(total_amount);
-      paramCount++;
-    }
-
-    if (expires_in !== undefined) {
-      updates.push(`expires_in = $${paramCount}`);
-      values.push(expires_in);
-      paramCount++;
-    }
-
-    // Always update updated_at
-    updates.push(`updated_at = CURRENT_TIMESTAMP`);
-
-    // Add the id as the last parameter
-    values.push(id);
-
-    const query = `
+    // Update only the transaction_type in quotes table
+    const updateQuoteQuery = `
       UPDATE quotes 
-      SET ${updates.join(', ')}
-      WHERE id = $${paramCount}
-      RETURNING *`;
+      SET 
+        transaction_type = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      RETURNING *
+    `;
+    await client.query(updateQuoteQuery, [transaction_type, id]);
 
-    const result = await client.query(query, values);
-    
-    if (result.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Quote not found' });
-    }
-    
+    // Then fetch the updated quote with all related information
+    const getUpdatedQuoteQuery = `
+      SELECT 
+        q.*,
+        c.first_name || ' ' || c.last_name as customer_name,
+        c.email as customer_email,
+        c.phone as customer_phone,
+        j.short_desc as item_description,
+        j.buy_price,
+        j.pawn_value,
+        j.retail_price
+      FROM quotes q
+      LEFT JOIN customers c ON q.customer_id = c.id
+      LEFT JOIN jewelry j ON q.item_id = j.item_id
+      WHERE q.id = $1
+    `;
+    const result = await client.query(getUpdatedQuoteQuery, [id]);
+
     await client.query('COMMIT');
-    res.json(result.rows[0]);
+
+    if (result.rows.length > 0) {
+      res.json(result.rows[0]);
+    } else {
+      res.status(404).json({ error: 'Quote not found' });
+    }
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error updating quote:', err);
-    res.status(500).json({ error: 'Failed to update quote' });
+    res.status(500).json({ error: 'Failed to update quote', details: err.message });
   } finally {
     client.release();
   }
@@ -891,6 +893,49 @@ app.delete('/api/quotes/:id', async (req, res) => {
   } catch (err) {
     console.error('Error deleting quote:', err);
     res.status(500).json({ error: 'Failed to delete quote' });
+  }
+});
+
+// Jewelry price update endpoint
+app.put('/api/jewelry/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params;
+    const { buy_price, pawn_value, retail_price } = req.body;
+
+    const updateQuery = `
+      UPDATE jewelry 
+      SET 
+        buy_price = $1,
+        pawn_value = $2,
+        retail_price = $3,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = $4
+      RETURNING *
+    `;
+
+    const result = await client.query(updateQuery, [
+      buy_price,
+      pawn_value,
+      retail_price,
+      id
+    ]);
+
+    await client.query('COMMIT');
+
+    if (result.rows.length > 0) {
+      res.json(result.rows[0]);
+    } else {
+      res.status(404).json({ error: 'Jewelry item not found' });
+    }
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating jewelry prices:', err);
+    res.status(500).json({ error: 'Failed to update jewelry prices', details: err.message });
+  } finally {
+    client.release();
   }
 });
 

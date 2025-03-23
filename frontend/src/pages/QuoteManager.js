@@ -138,52 +138,41 @@ function QuoteManager() {
     setDetailsDialogOpen(true);
   };
 
-  const handleCheckout = (quote) => {
-    // Only allow checkout for pending quotes
-    if (quote.status !== 'pending') {
-      setSnackbar({
-        open: true,
-        message: `Cannot proceed to checkout: Quote is ${quote.status}`,
-        severity: 'error'
-      });
-      return;
-    }
+  const handleCheckout = async (quote) => {
+    try {
+      // Create a new transaction from the quote
+      const transactionData = {
+        customer_id: quote.customer_id,
+        item_id: quote.item_id,
+        transaction_type: quote.transaction_type,
+        total_amount: quote.total_amount,
+        employee_id: quote.employee_id
+      };
 
-    // Check if quote has expired based on days_remaining from the trigger system
-    if (!quote.days_remaining || quote.days_remaining <= 0) {
-      setSnackbar({
-        open: true,
-        message: `Quote has expired (${quote.expires_in} day limit reached)`,
-        severity: 'error'
-      });
-      return;
-    }
-
-    // Ensure we have items in the quote
-    if (!quote.items || quote.items.length === 0) {
-      setSnackbar({
-        open: true,
-        message: 'Cannot proceed to checkout: Quote has no items',
-        severity: 'error'
-      });
-      return;
-    }
-
-    // Navigate to checkout with quote and customer info
-    navigate('/checkout', {
-      replace: true, // Use replace to prevent back navigation issues
-      state: {
-        items: quote.items.map(item => ({
-          ...item,
-          quoteExpiresIn: quote.expires_in,
-          quoteDaysRemaining: quote.days_remaining
-        })),
-        quoteId: quote.id,
-        customerName: quote.customer_name,
-        customerEmail: quote.customer_email,
-        customerPhone: quote.customer_phone
+      // Create the transaction
+      const response = await axios.post(`${API_BASE_URL}/transactions`, transactionData);
+      
+      if (response.data) {
+        setSnackbar({
+          open: true,
+          message: 'Transaction created successfully',
+          severity: 'success'
+        });
+        
+        // Close any open dialogs
+        setDetailsDialogOpen(false);
+        
+        // Navigate to the transaction page
+        navigate(`/transactions/${response.data.id}`);
       }
-    });
+    } catch (error) {
+      console.error('Error creating transaction:', error);
+      setSnackbar({
+        open: true,
+        message: 'Error creating transaction: ' + (error.response?.data?.error || error.message),
+        severity: 'error'
+      });
+    }
   };
 
   const handleQuoteAction = (quote, action) => {
@@ -191,6 +180,8 @@ function QuoteManager() {
       handleCheckout(quote);
     } else if (action === 'view') {
       handleViewDetails(quote);
+    } else if (action === 'transaction') {
+      // Add logic for transaction action
     }
   };
 
@@ -231,6 +222,128 @@ function QuoteManager() {
     });
   };
 
+  const getRelevantPrice = (quote, type) => {
+    switch (type) {
+      case 'buy':
+        return quote.buy_price;
+      case 'pawn':
+        return quote.pawn_value;
+      case 'retail':
+        return quote.retail_price;
+      default:
+        return quote.total_amount;
+    }
+  };
+
+  const getDisplayPrice = (quote) => {
+    switch (quote.transaction_type) {
+      case 'buy':
+        return quote.buy_price;
+      case 'pawn':
+        return quote.pawn_value;
+      case 'retail':
+        return quote.retail_price;
+      default:
+        return 0;
+    }
+  };
+
+  const getDisplayPriceLabel = (quote) => {
+    switch (quote.transaction_type) {
+      case 'buy':
+        return 'Buy Price';
+      case 'pawn':
+        return 'Pawn Value';
+      case 'retail':
+        return 'Retail Price';
+      default:
+        return 'Price';
+    }
+  };
+
+  const handleTransactionTypeChange = (e) => {
+    const newType = e.target.value;
+    const relevantPrice = getRelevantPrice(selectedQuote, newType);
+    
+    setEditingItem(prev => ({
+      ...prev,
+      transaction_type: newType,
+      buy_price: newType === 'buy' ? relevantPrice : prev.buy_price,
+      pawn_value: newType === 'pawn' ? relevantPrice : prev.pawn_value,
+      retail_price: newType === 'retail' ? relevantPrice : prev.retail_price
+    }));
+  };
+
+  const handlePriceChange = (e) => {
+    const newPrice = parseFloat(e.target.value) || 0;
+    const type = editingItem.transaction_type;
+    
+    setEditingItem(prev => ({
+      ...prev,
+      buy_price: type === 'buy' ? newPrice : prev.buy_price,
+      pawn_value: type === 'pawn' ? newPrice : prev.pawn_value,
+      retail_price: type === 'retail' ? newPrice : prev.retail_price
+    }));
+  };
+
+  const handleSaveItemChanges = async () => {
+    try {
+      // First update the quote's transaction type
+      const quoteResponse = await axios.put(`${API_BASE_URL}/quotes/${editingItem.id}`, {
+        transaction_type: editingItem.transaction_type
+      });
+
+      // Then update the jewelry prices
+      const jewelryResponse = await axios.put(`${API_BASE_URL}/jewelry/${editingItem.item_id}`, {
+        buy_price: editingItem.buy_price,
+        pawn_value: editingItem.pawn_value,
+        retail_price: editingItem.retail_price
+      });
+
+      if (quoteResponse.data && jewelryResponse.data) {
+        const updatedQuote = {
+          ...quoteResponse.data,
+          buy_price: jewelryResponse.data.buy_price,
+          pawn_value: jewelryResponse.data.pawn_value,
+          retail_price: jewelryResponse.data.retail_price
+        };
+        
+        setSelectedQuote(updatedQuote);
+        setQuotes(quotes.map(q => q.id === updatedQuote.id ? updatedQuote : q));
+        
+        setSnackbar({
+          open: true,
+          message: 'Quote and prices updated successfully',
+          severity: 'success'
+        });
+      }
+      
+      setEditingItem(null);
+    } catch (error) {
+      console.error('Error updating quote:', error);
+      setSnackbar({
+        open: true,
+        message: 'Error updating quote: ' + (error.response?.data?.error || error.message),
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleDeleteItem = async (index) => {
+    const updatedQuote = { ...selectedQuote };
+    updatedQuote.items = updatedQuote.items.filter((_, i) => i !== index);
+    
+    try {
+      await axios.put(`${API_BASE_URL}/quotes/${selectedQuote.id}`, {
+        items: updatedQuote.items
+      });
+      setSelectedQuote(updatedQuote);
+      fetchQuotes(); // Refresh quotes list
+    } catch (error) {
+      console.error('Error deleting quote item:', error);
+    }
+  };
+
   const filteredQuotes = quotes.filter(quote => {
     const searchLower = searchTerm.toLowerCase();
     return (
@@ -249,59 +362,6 @@ function QuoteManager() {
         [editingItem.transactionType]: parseFloat(newPrice)
       }
     });
-  };
-
-  const handleTransactionTypeChange = (index, newType) => {
-    const currentItem = editingItem;
-    
-    if (!currentItem.itemPriceEstimates) {
-      currentItem.itemPriceEstimates = {};
-    }
-
-    if (!currentItem.itemPriceEstimates[newType]) {
-      const oldPrice = currentItem.itemPriceEstimates[currentItem.transactionType] || 0;
-      currentItem.itemPriceEstimates[newType] = oldPrice;
-    }
-    
-    setEditingItem({
-      ...currentItem,
-      transactionType: newType
-    });
-  };
-
-  const handleSaveItemChanges = async () => {
-    try {
-      // Create a new array with the updated item
-      const updatedItems = selectedQuote.items.map((item, idx) => 
-        idx === editingItemIndex ? editingItem : item
-      );
-
-      const response = await axios.put(`${API_BASE_URL}/quotes/${selectedQuote.id}`, {
-        items: updatedItems
-      });
-      
-      setEditingItemIndex(-1);
-      setEditingItem(null);
-      setSelectedQuote(response.data);
-      fetchQuotes();
-    } catch (error) {
-      console.error('Error updating quote items:', error.response?.data || error);
-    }
-  };
-
-  const handleDeleteItem = async (index) => {
-    const updatedQuote = { ...selectedQuote };
-    updatedQuote.items = updatedQuote.items.filter((_, i) => i !== index);
-    
-    try {
-      await axios.put(`${API_BASE_URL}/quotes/${selectedQuote.id}`, {
-        items: updatedQuote.items
-      });
-      setSelectedQuote(updatedQuote);
-      fetchQuotes(); // Refresh quotes list
-    } catch (error) {
-      console.error('Error deleting quote item:', error);
-    }
   };
 
   return (
@@ -366,7 +426,6 @@ function QuoteManager() {
               <TableCell>Item ID</TableCell>
               <TableCell>Customer</TableCell>
               <TableCell>Date</TableCell>
-              <TableCell>Transaction Type</TableCell>
               <TableCell>Price</TableCell>
               <TableCell>Expires In (Days)</TableCell>
               <TableCell>Days Remaining</TableCell>
@@ -386,12 +445,13 @@ function QuoteManager() {
                 </TableCell>
                 <TableCell>{formatDate(quote.created_at)}</TableCell>
                 <TableCell>
-                  {quote.transaction_type ? 
-                    quote.transaction_type.charAt(0).toUpperCase() + quote.transaction_type.slice(1)
-                    : '-'
-                  }
+                  <Typography variant="body1">
+                    ${getDisplayPrice(quote)}
+                  </Typography>
+                  <Typography variant="caption" color="textSecondary">
+                    {getDisplayPriceLabel(quote)}
+                  </Typography>
                 </TableCell>
-                <TableCell>${quote.total_amount}</TableCell>
                 <TableCell>{quote.expires_in}</TableCell>
                 <TableCell>
                   {quote.days_remaining > 0 ? (
@@ -461,115 +521,126 @@ function QuoteManager() {
                 <Grid item xs={12} sm={6}>
                   <Typography variant="subtitle2">Quote Information</Typography>
                   <Typography variant="body2">Created: {formatDate(selectedQuote.created_at)}</Typography>
-                  <Typography variant="body2">Status: {selectedQuote.status}</Typography>
-                  <Typography variant="body2">Total: ${selectedQuote.total_amount}</Typography>
+                  <Typography variant="body2">
+                    Status: {selectedQuote.days_remaining > 0 ? 'Active' : 'Expired'}
+                  </Typography>
+                  <Typography variant="body2">
+                    Expires In: {selectedQuote.expires_in} days
+                    {selectedQuote.days_remaining > 0 && ` (${selectedQuote.days_remaining} days remaining)`}
+                  </Typography>
+                  <Typography variant="body2">Total: ${getDisplayPrice(selectedQuote)}</Typography>
                 </Grid>
               </Grid>
 
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>Items</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Transaction Details</Typography>
               <TableContainer component={Paper} variant="outlined">
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Category</TableCell>
-                      <TableCell>Item</TableCell>
+                      <TableCell>Item ID</TableCell>
+                      <TableCell>Description</TableCell>
                       <TableCell>Transaction Type</TableCell>
                       <TableCell align="right">Price</TableCell>
                       <TableCell align="right">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {selectedQuote.items.map((item, index) => (
-                      <TableRow key={index}>
-                         <TableCell>
-                          {item.category}
-                        </TableCell>
-                        <TableCell>
-                          {item.weight}g {item.purity} {item.metal} 
-                        </TableCell>
-                        <TableCell>{editingItemIndex === index ? (
+                    <TableRow>
+                      <TableCell>{selectedQuote.item_id}</TableCell>
+                      <TableCell>{selectedQuote.item_description}</TableCell>
+                      <TableCell>
+                        {editingItem ? (
                           <Select
                             size="small"
-                            value={editingItem.transactionType}
-                            onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
+                            value={editingItem.transaction_type}
+                            onChange={handleTransactionTypeChange}
                             sx={{ minWidth: 120 }}
                           >
                             {transactionTypes.map(type => (
-                              <MenuItem key={type.id} value={type.type}>
+                              <MenuItem key={type.type} value={type.type}>
                                 {type.type.charAt(0).toUpperCase() + type.type.slice(1)}
                               </MenuItem>
                             ))}
                           </Select>
                         ) : (
-                          item.transactionType.charAt(0).toUpperCase() + item.transactionType.slice(1)
-                        )}</TableCell>
-                        <TableCell align="right">
-                          {editingItemIndex === index ? (
-                            <TextField
-                              type="number"
-                              size="small"
-                              value={editingItem.itemPriceEstimates[editingItem.transactionType]}
-                              onChange={(e) => handleItemPriceChange(index, e.target.value)}
-                              inputProps={{ min: 0, step: 0.01 }}
-                              sx={{ width: 100 }}
-                            />
-                          ) : (
-                            `$${item.itemPriceEstimates[item.transactionType]?.toFixed(2)}`
-                          )}
-                        </TableCell>
-                        <TableCell align="right">
-                          {editingItemIndex === index ? (
-                            <IconButton 
-                              onClick={handleSaveItemChanges}
-                              color="primary"
-                              size="small"
-                              title="Save Changes"
-                            >
-                              <SaveIcon />
-                            </IconButton>
-                          ) : (
+                          selectedQuote.transaction_type.charAt(0).toUpperCase() + selectedQuote.transaction_type.slice(1)
+                        )}
+                      </TableCell>
+                      <TableCell align="right">
+                        {editingItem ? (
+                          <TextField
+                            type="number"
+                            size="small"
+                            value={getDisplayPrice(editingItem)}
+                            onChange={handlePriceChange}
+                            inputProps={{ 
+                              step: "0.01",
+                              min: "0"
+                            }}
+                            sx={{ width: 100 }}
+                          />
+                        ) : (
+                          <>
+                            <Typography variant="body1">
+                              ${getDisplayPrice(selectedQuote)}
+                            </Typography>
+                          </>
+                        )}
+                      </TableCell>
+                      <TableCell align="right">
+                        {editingItem ? (
+                          <IconButton 
+                            onClick={handleSaveItemChanges}
+                            color="primary"
+                            size="small"
+                            title="Save Changes"
+                          >
+                            <SaveIcon />
+                          </IconButton>
+                        ) : (
+                          <>
                             <IconButton
                               onClick={() => {
-                                setEditingItemIndex(index);
-                                setEditingItem({...item}); // Create a copy of the item for editing
+                                setEditingItem({...selectedQuote});
                               }}
                               color="primary"
                               size="small"
-                              title="Edit Price"
-                              disabled={selectedQuote.status !== 'pending'}
+                              title="Edit Quote"
+                              disabled={!selectedQuote.days_remaining || selectedQuote.days_remaining <= 0}
                             >
                               <EditIcon />
                             </IconButton>
-                          )}
-                          <IconButton
-                            onClick={() => handleDeleteItem(index)}
-                            color="error"
-                            size="small"
-                            title="Delete Item"
-                            disabled={selectedQuote.status !== 'pending'}
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                            <IconButton
+                              onClick={() => {
+                                setQuoteToDelete(selectedQuote);
+                                setDeleteDialogOpen(true);
+                              }}
+                              color="error"
+                              size="small"
+                              title="Delete Quote"
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </>
+                        )}
+                      </TableCell>
+                    </TableRow>
                   </TableBody>
                 </Table>
               </TableContainer>
             </DialogContent>
             <DialogActions>
-              {selectedQuote?.status === 'pending' && (
+              {selectedQuote.days_remaining > 0 && (
                 <Button
-                  onClick={() => handleQuoteAction(selectedQuote, 'checkout')}
+                  onClick={() => handleQuoteAction(selectedQuote, 'transaction')}
                   color="primary"
                   startIcon={<ShoppingCartIcon />}
                 >
-                  Proceed to Checkout
+                  Proceed to Transaction
                 </Button>
               )}
               <Button onClick={() => {
                 setDetailsDialogOpen(false);
-                setEditingItemIndex(-1);
                 setEditingItem(null);
               }}>
                 Close
