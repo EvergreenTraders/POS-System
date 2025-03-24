@@ -407,36 +407,6 @@ const CustomerManager = () => {
         </Grid>
       </Paper>
 
-      {/* Customer List */}
-      {/* <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Name</TableCell>
-              <TableCell>Email</TableCell>
-              <TableCell>Phone</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {customers.map((customer) => (
-              <TableRow key={customer.id}>
-                <TableCell>{`${customer.first_name} ${customer.last_name}`}</TableCell>
-                <TableCell>{customer.email}</TableCell>
-                <TableCell>{customer.phone}</TableCell>
-                <TableCell>{customer.status}</TableCell>
-                <TableCell>
-                  <IconButton onClick={() => handleEdit(customer)} size="small">
-                    <EditIcon />
-                  </IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer> */}
-
       {/* Search Results Dialog */}
       <Dialog
         open={openSearchDialog}

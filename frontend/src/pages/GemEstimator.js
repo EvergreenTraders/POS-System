@@ -43,10 +43,12 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
 
 function GemEstimator() {
   const API_BASE_URL = config.apiUrl;
   const { user } = useAuth();
+  const { addToCart } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
   const [metalFormState, setMetalFormState] = useState({});
@@ -1431,7 +1433,11 @@ function GemEstimator() {
     // Update the transaction types for all items
     const updatedItems = estimatedItems.map((item, index) => ({
       ...item,
-      transactionType: itemTransactionTypes[index] || item.transactionType || 'pawn'
+      transactionType: itemTransactionTypes[index] || item.transactionType,
+      itemPriceEstimates: {
+        ...item.itemPriceEstimates,
+        [itemTransactionTypes[index]]: parseFloat(item.itemPriceEstimates[itemTransactionTypes[index]] || 0)
+      }
     }));
 
     // Save the current state in session storage as backup

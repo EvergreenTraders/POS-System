@@ -27,7 +27,8 @@ export function CartProvider({ children }) {
   const getCartTotal = () => {
     return cartItems.reduce((total, item) => {
       const transactionType = item.transactionType || 'pawn';
-      return total + parseFloat(item.itemPriceEstimates[transactionType] || 0);
+      const priceEstimates = item.itemPriceEstimates || {};
+      return total + parseFloat(priceEstimates[transactionType] || 0);
     }, 0);
   };
 

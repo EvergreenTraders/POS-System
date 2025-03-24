@@ -366,36 +366,39 @@ function QuoteManager() {
     });
   };
 
-  const handleProceedToCheckout = () => {
+  const handleProceedToCheckout = (quoteToUse) => {
+    // Use the passed quote or selectedQuote (for dialog)
+    const quote = quoteToUse || selectedQuote;
+    
     // Add the quote item to cart first
     addToCart({
-      id: selectedQuote.item_id,
-      description: selectedQuote.item_description,
+      id: quote.item_id,
+      description: quote.item_description,
       itemPriceEstimates: {
-        [selectedQuote.transaction_type]: parseFloat(selectedQuote.price) || 0
+        [quote.transaction_type]: parseFloat(quote.price) || 0
       },
-      transactionType: selectedQuote.transaction_type,
-      images: selectedQuote.images || [],
-      price: getDisplayPrice(selectedQuote)
+      transactionType: quote.transaction_type,
+      images: quote.images || [],
+      price: getDisplayPrice(quote)
     });
 
     // Set the customer information
     setCustomer({
-      id: selectedQuote.customer_id,
-      name: selectedQuote.customer_name,
-      email: selectedQuote.customer_email,
-      phone: selectedQuote.customer_phone
+      id: quote.customer_id,
+      name: quote.customer_name,
+      email: quote.customer_email,
+      phone: quote.customer_phone
     });
 
     navigate('/checkout', {
       state: {
-        customerId: selectedQuote.customer_id,
-        itemId: selectedQuote.item_id,
-        customerName: selectedQuote.customer_name,
-        customerEmail: selectedQuote.customer_email,
-        customerPhone: selectedQuote.customer_phone,
+        customerId: quote.customer_id,
+        itemId: quote.item_id,
+        customerName: quote.customer_name,
+        customerEmail: quote.customer_email,
+        customerPhone: quote.customer_phone,
         returnPath: '/quotes',
-        quoteId: selectedQuote.id
+        quoteId: quote.id
       }
     });
   };
@@ -501,16 +504,16 @@ function QuoteManager() {
                     <Tooltip title="View Details">
                       <IconButton
                         size="small"
-                        onClick={() => handleViewDetails(quote,"view")}
+                        onClick={() => handleViewDetails(quote)}
                       >
                         <VisibilityIcon />
                       </IconButton>
                     </Tooltip>
-                    {quote.status === 'pending' && (
+                    {quote.days_remaining > 0 && (
                       <Tooltip title="Proceed to Checkout">
                         <IconButton
                           size="small"
-                          onClick={() => handleQuoteAction(quote, 'checkout')}
+                          onClick={() => handleProceedToCheckout(quote)}
                           color="primary"
                         >
                           <ShoppingCartIcon />
@@ -674,7 +677,7 @@ function QuoteManager() {
               </Button>
               {selectedQuote && selectedQuote.days_remaining > 0 && (
                 <Button 
-                  onClick={handleProceedToCheckout}
+                  onClick={() => handleProceedToCheckout(selectedQuote)}
                   variant="contained" 
                   color="primary"
                   startIcon={<ShoppingCartIcon />}
