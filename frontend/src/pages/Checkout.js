@@ -64,8 +64,7 @@ function Checkout() {
 
   const calculateTotal = () => {
     return cartItems.reduce((total, item) => {
-      const transactionType = item.transactionType || 'pawn';
-      return total + parseFloat(item.itemPriceEstimates[transactionType] || 0);
+      return total + parseFloat(item.price || 0);
     }, 0);
   };
 
@@ -105,7 +104,7 @@ function Checkout() {
             customer_phone: selectedCustomer.phone,
             item_id: item.id,
             transaction_type: transactionType,
-            amount: parseFloat(item.itemPriceEstimates[transactionType] || 0),
+            amount: parseFloat(item.price || 0),
             payment_method: paymentMethod,
             payment_details: paymentDetails,
             images: imageData,
@@ -306,11 +305,11 @@ function Checkout() {
                     {cartItems.map((item, index) => (
                       <TableRow key={index}>
                         <TableCell>
-                          {item.weight}g {item.metal} {item.primaryGem.split(' ')[0]} {item.secondaryGem.split(' ')[0]}
+                          {item.weight && `${item.weight}g`} {item.metal_type} {item.description}
                         </TableCell>
                         <TableCell>{item.transactionType}</TableCell>
                         <TableCell align="right">
-                          ${item.itemPriceEstimates[item.transactionType]?.toFixed(2)}
+                          ${item.price}
                         </TableCell>
                       </TableRow>
                     ))}

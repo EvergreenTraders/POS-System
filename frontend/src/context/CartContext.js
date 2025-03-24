@@ -6,8 +6,8 @@ export function CartProvider({ children }) {
   const [cartItems, setCartItems] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
 
-  const addToCart = (items) => {
-    setCartItems(items);
+  const addToCart = (item) => {
+    setCartItems(prevItems => [...prevItems, item]);
   };
 
   const removeFromCart = (productId) => {

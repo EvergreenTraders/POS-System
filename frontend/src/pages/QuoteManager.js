@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { useCart } from '../context/CartContext';
 import {
   Container,
   Paper,
@@ -38,6 +39,7 @@ const API_BASE_URL = config.apiUrl;
 
 function QuoteManager() {
   const navigate = useNavigate();
+  const { addToCart, setCustomer } = useCart();
   const [quotes, setQuotes] = useState([]);
   const [selectedQuote, setSelectedQuote] = useState(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
@@ -364,8 +366,42 @@ function QuoteManager() {
     });
   };
 
+  const handleProceedToCheckout = () => {
+    // Add the quote item to cart first
+    addToCart({
+      id: selectedQuote.item_id,
+      description: selectedQuote.item_description,
+      itemPriceEstimates: {
+        [selectedQuote.transaction_type]: parseFloat(selectedQuote.price) || 0
+      },
+      transactionType: selectedQuote.transaction_type,
+      images: selectedQuote.images || [],
+      price: getDisplayPrice(selectedQuote)
+    });
+
+    // Set the customer information
+    setCustomer({
+      id: selectedQuote.customer_id,
+      name: selectedQuote.customer_name,
+      email: selectedQuote.customer_email,
+      phone: selectedQuote.customer_phone
+    });
+
+    navigate('/checkout', {
+      state: {
+        customerId: selectedQuote.customer_id,
+        itemId: selectedQuote.item_id,
+        customerName: selectedQuote.customer_name,
+        customerEmail: selectedQuote.customer_email,
+        customerPhone: selectedQuote.customer_phone,
+        returnPath: '/quotes',
+        quoteId: selectedQuote.id
+      }
+    });
+  };
+
   return (
-    <Container maxWidth="lg">
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="h4" component="h1" gutterBottom>
           Quote Manager
@@ -630,21 +666,22 @@ function QuoteManager() {
               </TableContainer>
             </DialogContent>
             <DialogActions>
-              {selectedQuote.days_remaining > 0 && (
-                <Button
-                  onClick={() => handleQuoteAction(selectedQuote, 'transaction')}
-                  color="primary"
-                  startIcon={<ShoppingCartIcon />}
-                >
-                  Proceed to Transaction
-                </Button>
-              )}
               <Button onClick={() => {
                 setDetailsDialogOpen(false);
                 setEditingItem(null);
               }}>
                 Close
               </Button>
+              {selectedQuote && selectedQuote.days_remaining > 0 && (
+                <Button 
+                  onClick={handleProceedToCheckout}
+                  variant="contained" 
+                  color="primary"
+                  startIcon={<ShoppingCartIcon />}
+                >
+                  Proceed to Checkout
+                </Button>
+              )}
             </DialogActions>
           </>
         )}
