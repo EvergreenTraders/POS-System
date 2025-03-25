@@ -154,7 +154,7 @@ const CustomerManager = () => {
 
       // If we have items in location state, add them to cart context and navigate
       if (location.state?.items?.length > 0) {
-        addToCart(location.state.items);
+        location.state.items.forEach(item => addToCart(item));
         navigate('/checkout', { 
           state: { 
             from: location.state.from || 'customer'
@@ -250,7 +250,10 @@ const CustomerManager = () => {
 
   const handleSelectCustomer = (customer) => {
     const selectedCustomer = {
-      ...customer,
+      id: customer.id,
+      name: `${customer.first_name} ${customer.last_name}`,
+      email: customer.email,
+      phone: customer.phone,
       created_at: new Date().toISOString(),
       status: 'active'
     };
@@ -260,7 +263,7 @@ const CustomerManager = () => {
     
     // If we have items in location state, add them to cart context and navigate
     if (location.state?.items?.length > 0) {
-      addToCart(location.state.items);
+      location.state.items.forEach(item => addToCart(item));
       navigate('/checkout', { 
         state: { 
           from: location.state.from || 'customer'
@@ -291,20 +294,12 @@ const CustomerManager = () => {
   const handleProceedAsGuest = () => {
     const guestCustomer = {
       id: `guest_${Date.now()}`,
-      first_name: 'Guest',
-      last_name: 'Customer',
+      name: 'Guest Customer',
       isGuest: true,
       status: 'active',
       created_at: new Date().toISOString(),
       email: '',
-      phone: '',
-      address_line1: '',
-      address_line2: '',
-      city: '',
-      state: '',
-      postal_code: '',
-      country: '',
-      notes: 'Guest customer'
+      phone: ''
     };
 
     setCustomer(guestCustomer); // Save to CartContext
@@ -312,7 +307,7 @@ const CustomerManager = () => {
     
     // If we have items in location state, add them to cart context and navigate
     if (location.state?.items?.length > 0) {
-      addToCart(location.state.items);
+      location.state.items.forEach(item => addToCart(item));
       navigate('/checkout', { 
         state: { 
           from: location.state.from || 'customer'

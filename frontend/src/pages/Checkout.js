@@ -64,7 +64,7 @@ function Checkout() {
 
   const calculateTotal = () => {
     return cartItems.reduce((total, item) => {
-      return total + parseFloat(item.price || 0);
+      return total + parseFloat(item.price);
     }, 0);
   };
 
@@ -80,16 +80,26 @@ function Checkout() {
   };
 
   const handleSubmit = async () => {
+    if (!selectedCustomer?.id) {
+      setSnackbar({
+        open: true,
+        message: 'Please select a customer first',
+        severity: 'warning'
+      });
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       if (!token) {
         throw new Error('Authentication token not found');
       }
 
+      // Get employee ID from token
+      const employeeId = JSON.parse(atob(token.split('.')[1])).id;
+
       // Create a transaction for each cart item
       const transactionPromises = cartItems.map(item => {
-        const transactionType = item.transactionType || 'pawn';
-
         // Ensure at least one image is marked as primary
         const imageData = item.images ? item.images.map((img, index) => ({
           url: img.url,
@@ -99,16 +109,13 @@ function Checkout() {
         return axios.post(
           `${config.apiUrl}/transactions`,
           {
-            customer_name: selectedCustomer.name,
-            customer_email: selectedCustomer.email,
-            customer_phone: selectedCustomer.phone,
-            item_id: item.id,
-            transaction_type: transactionType,
-            amount: parseFloat(item.price || 0),
+            customer_id: selectedCustomer.id,
+            employee_id: employeeId,
+            transaction_type: item.transaction_type,
+            price: parseFloat(item.price),
             payment_method: paymentMethod,
             payment_details: paymentDetails,
             images: imageData,
-            quote_id: location.state?.quoteId || null
           },
           {
             headers: { Authorization: `Bearer ${token}` }
@@ -303,13 +310,13 @@ function Checkout() {
                   </TableHead>
                   <TableBody>
                     {cartItems.map((item, index) => (
-                      <TableRow key={index}>
+                      <TableRow key={item.id || index}>
                         <TableCell>
-                          {item.weight && `${item.weight}g`} {item.metal_type} {item.description}
+                          {item.description} 
                         </TableCell>
                         <TableCell>{item.transactionType}</TableCell>
                         <TableCell align="right">
-                          ${item.price}
+                          ${parseFloat(item.price).toFixed(2)}
                         </TableCell>
                       </TableRow>
                     ))}
