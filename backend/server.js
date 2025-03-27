@@ -939,6 +939,25 @@ app.put('/api/jewelry/:id', async (req, res) => {
   }
 });
 
+// Get all jewelry items
+app.get('/api/jewelry', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        j.*,
+        TO_CHAR(j.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
+        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at
+      FROM jewelry j
+      ORDER BY j.created_at DESC
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching jewelry items:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Quote Expiration Configuration API Endpoints
 app.get('/api/quote-expiration/config', async (req, res) => {
   try {
@@ -1576,7 +1595,6 @@ app.get('/api/jewelry/prefix/:prefix', async (req, res) => {
 app.post('/api/jewelry', async (req, res) => {
   const client = await pool.connect();
   try {
-    console.log('Received cart items:', req.body);
     await client.query('BEGIN');
     
     const { cartItems } = req.body;

@@ -25,7 +25,8 @@ import {
   Tooltip,
   Snackbar,
   Select,
-  MenuItem
+  MenuItem,
+  CircularProgress
 } from '@mui/material';
 import config from '../config';
 import SearchIcon from '@mui/icons-material/Search';
@@ -57,6 +58,10 @@ function QuoteManager() {
     open: false,
     message: '',
     severity: 'info'
+  });
+  const [sortConfig, setSortConfig] = useState({
+    key: 'created_at',
+    direction: 'desc'
   });
 
   useEffect(() => {
@@ -403,6 +408,40 @@ function QuoteManager() {
     });
   };
 
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortedQuotes = () => {
+    const sortedQuotes = [...filteredQuotes].sort((a, b) => {
+      // Handle numeric fields
+      if (['id', 'price', 'expires_in'].includes(sortConfig.key)) {
+        const aValue = sortConfig.key === 'price' ? getDisplayPrice(a) : parseFloat(a[sortConfig.key]) || 0;
+        const bValue = sortConfig.key === 'price' ? getDisplayPrice(b) : parseFloat(b[sortConfig.key]) || 0;
+        return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
+      }
+      // Handle date fields
+      else if (sortConfig.key === 'created_at') {
+        return sortConfig.direction === 'asc' 
+          ? new Date(a[sortConfig.key]) - new Date(b[sortConfig.key])
+          : new Date(b[sortConfig.key]) - new Date(a[sortConfig.key]);
+      }
+      // Handle text fields (case-insensitive alphabetical sort)
+      else {
+        const aValue = (a[sortConfig.key] || '').toString().toLowerCase();
+        const bValue = (b[sortConfig.key] || '').toString().toLowerCase();
+        return sortConfig.direction === 'asc'
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      }
+    });
+    return sortedQuotes;
+  };
+
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -457,82 +496,141 @@ function QuoteManager() {
       </Paper>
 
       {/* Quotes Table */}
-      <TableContainer component={Paper}>
-        <Table>
+      <TableContainer component={Paper} sx={{ flex: 1, overflow: 'auto' }}>
+        <Table stickyHeader>
           <TableHead>
             <TableRow>
-              <TableCell>Quote ID</TableCell>
-              <TableCell>Item ID</TableCell>
-              <TableCell>Customer</TableCell>
-              <TableCell>Date</TableCell>
-              <TableCell>Price</TableCell>
-              <TableCell>Expires In (Days)</TableCell>
-              <TableCell>Days Remaining</TableCell>
+              <TableCell 
+                onClick={() => handleSort('id')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Quote ID {sortConfig.key === 'id' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('customer_name')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Item {sortConfig.key === 'customer_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('item_description')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Customer {sortConfig.key === 'item_description' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('transaction_type')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Type {sortConfig.key === 'transaction_type' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('price')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+                align="right"
+              >
+                Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('created_at')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Created {sortConfig.key === 'created_at' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('expires_in')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Expires In {sortConfig.key === 'expires_in' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('expires_in')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Days Remaining {sortConfig.key === 'days_remaining' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {filteredQuotes.map((quote) => (
-              <TableRow key={quote.id}>
-                <TableCell>{quote.id}</TableCell>
-                <TableCell>{quote.item_id}</TableCell>
-                <TableCell>
-                  <Typography variant="body2">{quote.customer_name}</Typography>
-                  <Typography variant="caption" color="textSecondary">
-                    {quote.customer_email}
-                  </Typography>
-                </TableCell>
-                <TableCell>{formatDate(quote.created_at)}</TableCell>
-                <TableCell>
-                  <Typography variant="body1">
-                    ${getDisplayPrice(quote)}
-                  </Typography>
-                  <Typography variant="caption" color="textSecondary">
-                    {getDisplayPriceLabel(quote)}
-                  </Typography>
-                </TableCell>
-                <TableCell>{quote.expires_in}</TableCell>
-                <TableCell>
-                  {quote.days_remaining > 0 ? (
-                    `${quote.days_remaining} days`
-                  ) : (
-                    'Expired'
-                  )}
-                </TableCell>
-                <TableCell>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Tooltip title="View Details">
-                      <IconButton
-                        size="small"
-                        onClick={() => handleViewDetails(quote)}
-                      >
-                        <VisibilityIcon />
-                      </IconButton>
-                    </Tooltip>
-                    {quote.days_remaining > 0 && (
-                      <Tooltip title="Proceed to Checkout">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleProceedToCheckout(quote)}
-                          color="primary"
-                        >
-                          <ShoppingCartIcon />
-                        </IconButton>
-                      </Tooltip>
-                    )}
-                    <Tooltip title="Delete Quote">
-                      <IconButton
-                        size="small"
-                        onClick={() => handleDeleteClick(quote)}
-                        color="error"
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={8} align="center">
+                  <CircularProgress />
                 </TableCell>
               </TableRow>
-            ))}
+            ) : getSortedQuotes().length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={8} align="center">
+                  No quotes found
+                </TableCell>
+              </TableRow>
+            ) : (
+              getSortedQuotes().map((quote) => (
+                <TableRow key={quote.id}>
+                  <TableCell>{quote.id}</TableCell>
+                  <TableCell>{quote.item_id}</TableCell>
+                  <TableCell>
+                    <Typography variant="body2">{quote.customer_name}</Typography>
+                    <Typography variant="caption" color="textSecondary">
+                      {quote.customer_email}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>{quote.transaction_type}</TableCell>
+                  <TableCell>
+                    <Typography variant="body1">
+                      ${getDisplayPrice(quote)}
+                    </Typography>
+                    <Typography variant="caption" color="textSecondary">
+                      {getDisplayPriceLabel(quote)}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>{formatDate(quote.created_at)}</TableCell>
+                  <TableCell>
+                      {quote.expires_in} days
+                  </TableCell>
+                  <TableCell>
+                    {quote.days_remaining > 0 ? (
+                      `${quote.days_remaining} days`
+                    ) : (
+                      'Expired'
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Tooltip title="View Details">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleViewDetails(quote)}
+                        >
+                          <VisibilityIcon />
+                        </IconButton>
+                      </Tooltip>
+                      {quote.days_remaining > 0 && (
+                        <Tooltip title="Proceed to Checkout">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleProceedToCheckout(quote)}
+                            color="primary"
+                          >
+                            <ShoppingCartIcon />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      <Tooltip title="Delete Quote">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDeleteClick(quote)}
+                          color="error"
+                        >
+                          <DeleteIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </TableContainer>
