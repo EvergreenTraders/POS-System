@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { useCart } from '../context/CartContext';
 import {
   Container,
   Paper,
@@ -22,7 +23,10 @@ import {
   Box,
   TextField,
   Tooltip,
-  Snackbar
+  Snackbar,
+  Select,
+  MenuItem,
+  CircularProgress
 } from '@mui/material';
 import config from '../config';
 import SearchIcon from '@mui/icons-material/Search';
@@ -36,26 +40,34 @@ const API_BASE_URL = config.apiUrl;
 
 function QuoteManager() {
   const navigate = useNavigate();
+  const { addToCart, setCustomer } = useCart();
   const [quotes, setQuotes] = useState([]);
   const [selectedQuote, setSelectedQuote] = useState(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [quoteToDelete, setQuoteToDelete] = useState(null);
   const [editingItemIndex, setEditingItemIndex] = useState(-1);
+  const [editingItem, setEditingItem] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [expirationDays, setExpirationDays] = useState(30);
   const [editingExpiration, setEditingExpiration] = useState(false);
   const [tempExpirationDays, setTempExpirationDays] = useState(30);
+  const [transactionTypes, setTransactionTypes] = useState([]);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
     severity: 'info'
   });
+  const [sortConfig, setSortConfig] = useState({
+    key: 'created_at',
+    direction: 'desc'
+  });
 
   useEffect(() => {
     fetchQuotes();
     fetchExpirationDays();
+    fetchTransactionTypes();
   }, []);
 
   const fetchQuotes = async () => {
@@ -76,6 +88,15 @@ function QuoteManager() {
       setTempExpirationDays(response.data.days);
     } catch (error) {
       console.error('Error fetching expiration days:', error);
+    }
+  };
+
+  const fetchTransactionTypes = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/transaction-types`);
+      setTransactionTypes(response.data);
+    } catch (error) {
+      console.error('Error fetching transaction types:', error);
     }
   };
 
@@ -124,52 +145,41 @@ function QuoteManager() {
     setDetailsDialogOpen(true);
   };
 
-  const handleCheckout = (quote) => {
-    // Only allow checkout for pending quotes
-    if (quote.status !== 'pending') {
-      setSnackbar({
-        open: true,
-        message: `Cannot proceed to checkout: Quote is ${quote.status}`,
-        severity: 'error'
-      });
-      return;
-    }
+  const handleCheckout = async (quote) => {
+    try {
+      // Create a new transaction from the quote
+      const transactionData = {
+        customer_id: quote.customer_id,
+        item_id: quote.item_id,
+        transaction_type: quote.transaction_type,
+        total_amount: quote.total_amount,
+        employee_id: quote.employee_id
+      };
 
-    // Check if quote has expired based on days_remaining from the trigger system
-    if (!quote.days_remaining || quote.days_remaining <= 0) {
-      setSnackbar({
-        open: true,
-        message: `Quote has expired (${quote.expires_in} day limit reached)`,
-        severity: 'error'
-      });
-      return;
-    }
-
-    // Ensure we have items in the quote
-    if (!quote.items || quote.items.length === 0) {
-      setSnackbar({
-        open: true,
-        message: 'Cannot proceed to checkout: Quote has no items',
-        severity: 'error'
-      });
-      return;
-    }
-
-    // Navigate to checkout with quote and customer info
-    navigate('/checkout', {
-      replace: true, // Use replace to prevent back navigation issues
-      state: {
-        items: quote.items.map(item => ({
-          ...item,
-          quoteExpiresIn: quote.expires_in,
-          quoteDaysRemaining: quote.days_remaining
-        })),
-        quoteId: quote.id,
-        customerName: quote.customer_name,
-        customerEmail: quote.customer_email,
-        customerPhone: quote.customer_phone
+      // Create the transaction
+      const response = await axios.post(`${API_BASE_URL}/transactions`, transactionData);
+      
+      if (response.data) {
+        setSnackbar({
+          open: true,
+          message: 'Transaction created successfully',
+          severity: 'success'
+        });
+        
+        // Close any open dialogs
+        setDetailsDialogOpen(false);
+        
+        // Navigate to the transaction page
+        navigate(`/transactions/${response.data.id}`);
       }
-    });
+    } catch (error) {
+      console.error('Error creating transaction:', error);
+      setSnackbar({
+        open: true,
+        message: 'Error creating transaction: ' + (error.response?.data?.error || error.message),
+        severity: 'error'
+      });
+    }
   };
 
   const handleQuoteAction = (quote, action) => {
@@ -177,6 +187,8 @@ function QuoteManager() {
       handleCheckout(quote);
     } else if (action === 'view') {
       handleViewDetails(quote);
+    } else if (action === 'transaction') {
+      // Add logic for transaction action
     }
   };
 
@@ -217,42 +229,110 @@ function QuoteManager() {
     });
   };
 
-  const filteredQuotes = quotes.filter(quote => {
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      quote.customer_name?.toLowerCase().includes(searchLower) ||
-      quote.customer_email?.toLowerCase().includes(searchLower) ||
-      quote.customer_phone?.includes(searchTerm) ||
-      quote.id.toString().includes(searchTerm)
-    );
-  });
+  const getRelevantPrice = (quote, type) => {
+    switch (type) {
+      case 'buy':
+        return quote.buy_price;
+      case 'pawn':
+        return quote.pawn_value;
+      case 'retail':
+        return quote.retail_price;
+      default:
+        return quote.total_amount;
+    }
+  };
 
-  const handleItemPriceChange = (index, newPrice) => {
-    const updatedQuote = { ...selectedQuote };
+  const getDisplayPrice = (quote) => {
+    switch (quote.transaction_type) {
+      case 'buy':
+        return quote.buy_price;
+      case 'pawn':
+        return quote.pawn_value;
+      case 'retail':
+        return quote.retail_price;
+      default:
+        return 0;
+    }
+  };
+
+  const getDisplayPriceLabel = (quote) => {
+    switch (quote.transaction_type) {
+      case 'buy':
+        return 'Buy Price';
+      case 'pawn':
+        return 'Pawn Value';
+      case 'retail':
+        return 'Retail Price';
+      default:
+        return 'Price';
+    }
+  };
+
+  const handleTransactionTypeChange = (e) => {
+    const newType = e.target.value;
+    const relevantPrice = getRelevantPrice(selectedQuote, newType);
     
-    // Create a new itemPriceEstimates object to ensure state update
-    updatedQuote.items[index] = {
-      ...updatedQuote.items[index],
-      itemPriceEstimates: {
-        ...updatedQuote.items[index].itemPriceEstimates,
-        [updatedQuote.items[index].transactionType]: parseFloat(newPrice)
-      }
-    };
+    setEditingItem(prev => ({
+      ...prev,
+      transaction_type: newType,
+      buy_price: newType === 'buy' ? relevantPrice : prev.buy_price,
+      pawn_value: newType === 'pawn' ? relevantPrice : prev.pawn_value,
+      retail_price: newType === 'retail' ? relevantPrice : prev.retail_price
+    }));
+  };
+
+  const handlePriceChange = (e) => {
+    const newPrice = parseFloat(e.target.value) || 0;
+    const type = editingItem.transaction_type;
     
-    setSelectedQuote(updatedQuote);
+    setEditingItem(prev => ({
+      ...prev,
+      buy_price: type === 'buy' ? newPrice : prev.buy_price,
+      pawn_value: type === 'pawn' ? newPrice : prev.pawn_value,
+      retail_price: type === 'retail' ? newPrice : prev.retail_price
+    }));
   };
 
   const handleSaveItemChanges = async () => {
     try {
-      const response = await axios.put(`${API_BASE_URL}/quotes/${selectedQuote.id}`, {
-        items: selectedQuote.items
+      // First update the quote's transaction type
+      const quoteResponse = await axios.put(`${API_BASE_URL}/quotes/${editingItem.id}`, {
+        transaction_type: editingItem.transaction_type
       });
+
+      // Then update the jewelry prices
+      const jewelryResponse = await axios.put(`${API_BASE_URL}/jewelry/${editingItem.item_id}`, {
+        buy_price: editingItem.buy_price,
+        pawn_value: editingItem.pawn_value,
+        retail_price: editingItem.retail_price
+      });
+
+      if (quoteResponse.data && jewelryResponse.data) {
+        const updatedQuote = {
+          ...quoteResponse.data,
+          buy_price: jewelryResponse.data.buy_price,
+          pawn_value: jewelryResponse.data.pawn_value,
+          retail_price: jewelryResponse.data.retail_price
+        };
+        
+        setSelectedQuote(updatedQuote);
+        setQuotes(quotes.map(q => q.id === updatedQuote.id ? updatedQuote : q));
+        
+        setSnackbar({
+          open: true,
+          message: 'Quote and prices updated successfully',
+          severity: 'success'
+        });
+      }
       
-      setEditingItemIndex(-1);
-      setSelectedQuote(response.data);
-      fetchQuotes();
+      setEditingItem(null);
     } catch (error) {
-      console.error('Error updating quote items:', error.response?.data || error);
+      console.error('Error updating quote:', error);
+      setSnackbar({
+        open: true,
+        message: 'Error updating quote: ' + (error.response?.data?.error || error.message),
+        severity: 'error'
+      });
     }
   };
 
@@ -271,8 +351,99 @@ function QuoteManager() {
     }
   };
 
+  const filteredQuotes = quotes.filter(quote => {
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      quote.customer_name?.toLowerCase().includes(searchLower) ||
+      quote.customer_email?.toLowerCase().includes(searchLower) ||
+      quote.customer_phone?.includes(searchTerm) ||
+      quote.id.toString().includes(searchTerm)
+    );
+  });
+
+  const handleItemPriceChange = (index, newPrice) => {
+    setEditingItem({
+      ...editingItem,
+      itemPriceEstimates: {
+        ...editingItem.itemPriceEstimates,
+        [editingItem.transactionType]: parseFloat(newPrice)
+      }
+    });
+  };
+
+  const handleProceedToCheckout = (quoteToUse) => {
+    // Use the passed quote or selectedQuote (for dialog)
+    const quote = quoteToUse || selectedQuote;
+    
+    // Add the quote item to cart first
+    addToCart({
+      id: quote.item_id,
+      short_desc: quote.item_description,
+      itemPriceEstimates: {
+        [quote.transaction_type]: parseFloat(quote.price) || 0
+      },
+      transaction_type: quote.transaction_type,
+      images: quote.images || [],
+      price: getDisplayPrice(quote)
+    });
+
+    // Set the customer information
+    setCustomer({
+      id: quote.customer_id,
+      name: quote.customer_name,
+      email: quote.customer_email,
+      phone: quote.customer_phone
+    });
+
+    navigate('/checkout', {
+      state: {
+        customerId: quote.customer_id,
+        itemId: quote.item_id,
+        customerName: quote.customer_name,
+        customerEmail: quote.customer_email,
+        customerPhone: quote.customer_phone,
+        returnPath: '/quotes',
+        quoteId: quote.id
+      }
+    });
+  };
+
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortedQuotes = () => {
+    const sortedQuotes = [...filteredQuotes].sort((a, b) => {
+      // Handle numeric fields
+      if (['id', 'price', 'expires_in'].includes(sortConfig.key)) {
+        const aValue = sortConfig.key === 'price' ? getDisplayPrice(a) : parseFloat(a[sortConfig.key]) || 0;
+        const bValue = sortConfig.key === 'price' ? getDisplayPrice(b) : parseFloat(b[sortConfig.key]) || 0;
+        return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
+      }
+      // Handle date fields
+      else if (sortConfig.key === 'created_at') {
+        return sortConfig.direction === 'asc' 
+          ? new Date(a[sortConfig.key]) - new Date(b[sortConfig.key])
+          : new Date(b[sortConfig.key]) - new Date(a[sortConfig.key]);
+      }
+      // Handle text fields (case-insensitive alphabetical sort)
+      else {
+        const aValue = (a[sortConfig.key] || '').toString().toLowerCase();
+        const bValue = (b[sortConfig.key] || '').toString().toLowerCase();
+        return sortConfig.direction === 'asc'
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      }
+    });
+    return sortedQuotes;
+  };
+
   return (
-    <Container maxWidth="lg">
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="h4" component="h1" gutterBottom>
           Quote Manager
@@ -325,79 +496,141 @@ function QuoteManager() {
       </Paper>
 
       {/* Quotes Table */}
-      <TableContainer component={Paper}>
-        <Table>
+      <TableContainer component={Paper} sx={{ flex: 1, overflow: 'auto' }}>
+        <Table stickyHeader>
           <TableHead>
             <TableRow>
-              <TableCell>Quote ID</TableCell>
-              <TableCell>Customer</TableCell>
-              <TableCell>Date</TableCell>
-              <TableCell>Total Amount</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Expires In</TableCell>
+              <TableCell 
+                onClick={() => handleSort('id')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Quote ID {sortConfig.key === 'id' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('customer_name')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Item {sortConfig.key === 'customer_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('item_description')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Customer {sortConfig.key === 'item_description' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('transaction_type')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Type {sortConfig.key === 'transaction_type' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('price')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+                align="right"
+              >
+                Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('created_at')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Created {sortConfig.key === 'created_at' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('expires_in')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Expires In {sortConfig.key === 'expires_in' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
+              <TableCell 
+                onClick={() => handleSort('expires_in')}
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
+              >
+                Days Remaining {sortConfig.key === 'days_remaining' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+              </TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {filteredQuotes.map((quote) => (
-              <TableRow key={quote.id}>
-                <TableCell>{quote.id}</TableCell>
-                <TableCell>
-                  <Typography variant="body2">{quote.customer_name}</Typography>
-                  <Typography variant="caption" color="textSecondary">
-                    {quote.customer_email}
-                  </Typography>
-                </TableCell>
-                <TableCell>{formatDate(quote.created_at)}</TableCell>
-                <TableCell>${quote.total_amount}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={quote.status}
-                    color={getStatusColor(quote.status, quote.created_at)}
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell>
-                  {quote.status === 'pending' ? (
-                    `${quote.days_remaining} days`
-                  ) : (
-                    '-'
-                  )}
-                </TableCell>
-                <TableCell>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Tooltip title="View Details">
-                      <IconButton
-                        size="small"
-                        onClick={() => handleViewDetails(quote,"view")}
-                      >
-                        <VisibilityIcon />
-                      </IconButton>
-                    </Tooltip>
-                    {quote.status === 'pending' && (
-                      <Tooltip title="Proceed to Checkout">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleQuoteAction(quote, 'checkout')}
-                          color="primary"
-                        >
-                          <ShoppingCartIcon />
-                        </IconButton>
-                      </Tooltip>
-                    )}
-                    <Tooltip title="Delete Quote">
-                      <IconButton
-                        size="small"
-                        onClick={() => handleDeleteClick(quote)}
-                        color="error"
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={8} align="center">
+                  <CircularProgress />
                 </TableCell>
               </TableRow>
-            ))}
+            ) : getSortedQuotes().length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={8} align="center">
+                  No quotes found
+                </TableCell>
+              </TableRow>
+            ) : (
+              getSortedQuotes().map((quote) => (
+                <TableRow key={quote.id}>
+                  <TableCell>{quote.id}</TableCell>
+                  <TableCell>{quote.item_id}</TableCell>
+                  <TableCell>
+                    <Typography variant="body2">{quote.customer_name}</Typography>
+                    <Typography variant="caption" color="textSecondary">
+                      {quote.customer_email}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>{quote.transaction_type}</TableCell>
+                  <TableCell>
+                    <Typography variant="body1">
+                      ${getDisplayPrice(quote)}
+                    </Typography>
+                    <Typography variant="caption" color="textSecondary">
+                      {getDisplayPriceLabel(quote)}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>{formatDate(quote.created_at)}</TableCell>
+                  <TableCell>
+                      {quote.expires_in} days
+                  </TableCell>
+                  <TableCell>
+                    {quote.days_remaining > 0 ? (
+                      `${quote.days_remaining} days`
+                    ) : (
+                      'Expired'
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Tooltip title="View Details">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleViewDetails(quote)}
+                        >
+                          <VisibilityIcon />
+                        </IconButton>
+                      </Tooltip>
+                      {quote.days_remaining > 0 && (
+                        <Tooltip title="Proceed to Checkout">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleProceedToCheckout(quote)}
+                            color="primary"
+                          >
+                            <ShoppingCartIcon />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      <Tooltip title="Delete Quote">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDeleteClick(quote)}
+                          color="error"
+                        >
+                          <DeleteIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </TableContainer>
@@ -425,100 +658,131 @@ function QuoteManager() {
                 <Grid item xs={12} sm={6}>
                   <Typography variant="subtitle2">Quote Information</Typography>
                   <Typography variant="body2">Created: {formatDate(selectedQuote.created_at)}</Typography>
-                  <Typography variant="body2">Status: {selectedQuote.status}</Typography>
-                  <Typography variant="body2">Total: ${selectedQuote.total_amount}</Typography>
+                  <Typography variant="body2">
+                    Status: {selectedQuote.days_remaining > 0 ? 'Active' : 'Expired'}
+                  </Typography>
+                  <Typography variant="body2">
+                    Expires In: {selectedQuote.expires_in} days
+                    {selectedQuote.days_remaining > 0 && ` (${selectedQuote.days_remaining} days remaining)`}
+                  </Typography>
+                  <Typography variant="body2">Total: ${getDisplayPrice(selectedQuote)}</Typography>
                 </Grid>
               </Grid>
 
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>Items</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Transaction Details</Typography>
               <TableContainer component={Paper} variant="outlined">
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Category</TableCell>
-                      <TableCell>Item</TableCell>
+                      <TableCell>Item ID</TableCell>
+                      <TableCell>Description</TableCell>
                       <TableCell>Transaction Type</TableCell>
                       <TableCell align="right">Price</TableCell>
                       <TableCell align="right">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {selectedQuote.items.map((item, index) => (
-                      <TableRow key={index}>
-                         <TableCell>
-                          {item.category}
-                        </TableCell>
-                        <TableCell>
-                          {item.weight}g {item.purity} {item.metal} 
-                        </TableCell>
-                        <TableCell>{item.transactionType}</TableCell>
-                        <TableCell align="right">
-                          {editingItemIndex === index ? (
-                            <TextField
-                              type="number"
-                              size="small"
-                              value={item.itemPriceEstimates[item.transactionType]}
-                              onChange={(e) => handleItemPriceChange(index, e.target.value)}
-                              inputProps={{ min: 0, step: 0.01 }}
-                              sx={{ width: 100 }}
-                            />
-                          ) : (
-                            `$${item.itemPriceEstimates[item.transactionType]?.toFixed(2)}`
-                          )}
-                        </TableCell>
-                        <TableCell align="right">
-                          {editingItemIndex === index ? (
-                            <IconButton 
-                              onClick={handleSaveItemChanges}
-                              color="primary"
-                              size="small"
-                              title="Save Changes"
-                            >
-                              <SaveIcon />
-                            </IconButton>
-                          ) : (
+                    <TableRow>
+                      <TableCell>{selectedQuote.item_id}</TableCell>
+                      <TableCell>{selectedQuote.item_description}</TableCell>
+                      <TableCell>
+                        {editingItem ? (
+                          <Select
+                            size="small"
+                            value={editingItem.transaction_type}
+                            onChange={handleTransactionTypeChange}
+                            sx={{ minWidth: 120 }}
+                          >
+                            {transactionTypes.map(type => (
+                              <MenuItem key={type.type} value={type.type}>
+                                {type.type.charAt(0).toUpperCase() + type.type.slice(1)}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        ) : (
+                          selectedQuote.transaction_type.charAt(0).toUpperCase() + selectedQuote.transaction_type.slice(1)
+                        )}
+                      </TableCell>
+                      <TableCell align="right">
+                        {editingItem ? (
+                          <TextField
+                            type="number"
+                            size="small"
+                            value={getDisplayPrice(editingItem)}
+                            onChange={handlePriceChange}
+                            inputProps={{ 
+                              step: "0.01",
+                              min: "0"
+                            }}
+                            sx={{ width: 100 }}
+                          />
+                        ) : (
+                          <>
+                            <Typography variant="body1">
+                              ${getDisplayPrice(selectedQuote)}
+                            </Typography>
+                          </>
+                        )}
+                      </TableCell>
+                      <TableCell align="right">
+                        {editingItem ? (
+                          <IconButton 
+                            onClick={handleSaveItemChanges}
+                            color="primary"
+                            size="small"
+                            title="Save Changes"
+                          >
+                            <SaveIcon />
+                          </IconButton>
+                        ) : (
+                          <>
                             <IconButton
-                              onClick={() => setEditingItemIndex(index)}
+                              onClick={() => {
+                                setEditingItem({...selectedQuote});
+                              }}
                               color="primary"
                               size="small"
-                              title="Edit Price"
-                              disabled={selectedQuote.status !== 'pending'}
+                              title="Edit Quote"
+                              disabled={!selectedQuote.days_remaining || selectedQuote.days_remaining <= 0}
                             >
                               <EditIcon />
                             </IconButton>
-                          )}
-                          <IconButton
-                            onClick={() => handleDeleteItem(index)}
-                            color="error"
-                            size="small"
-                            title="Delete Item"
-                            disabled={selectedQuote.status !== 'pending'}
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                            <IconButton
+                              onClick={() => {
+                                setQuoteToDelete(selectedQuote);
+                                setDeleteDialogOpen(true);
+                              }}
+                              color="error"
+                              size="small"
+                              title="Delete Quote"
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </>
+                        )}
+                      </TableCell>
+                    </TableRow>
                   </TableBody>
                 </Table>
               </TableContainer>
             </DialogContent>
             <DialogActions>
-              {selectedQuote?.status === 'pending' && (
-                <Button
-                  onClick={() => handleQuoteAction(selectedQuote, 'checkout')}
+              <Button onClick={() => {
+                setDetailsDialogOpen(false);
+                setEditingItem(null);
+              }}>
+                Close
+              </Button>
+              {selectedQuote && selectedQuote.days_remaining > 0 && (
+                <Button 
+                  onClick={() => handleProceedToCheckout(selectedQuote)}
+                  variant="contained" 
                   color="primary"
                   startIcon={<ShoppingCartIcon />}
                 >
                   Proceed to Checkout
                 </Button>
               )}
-              <Button onClick={() => {
-                setDetailsDialogOpen(false);
-                setEditingItemIndex(-1);
-              }}>
-                Close
-              </Button>
             </DialogActions>
           </>
         )}

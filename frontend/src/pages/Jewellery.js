@@ -32,22 +32,22 @@ function Jewellery() {
   const [searchQuery, setSearchQuery] = useState('');
   const [serialQuery, setSerialQuery] = useState('');
   const [loading, setLoading] = useState(true);
-  const [transactions, setTransactions] = useState([]);
+  const [jewelryItems, setJewelryItems] = useState([]);
 
   useEffect(() => {
-    fetchTransactions();
+    fetchJewelryItems();
   }, []);
 
-  const fetchTransactions = async () => {
+  const fetchJewelryItems = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_BASE_URL}/transactions`);
-      setTransactions(response.data);
+      const response = await axios.get(`${API_BASE_URL}/jewelry`);
+      setJewelryItems(response.data);
       if (response.data.length > 0) {
         setSelectedItem(response.data[0]);
       }
     } catch (error) {
-      console.error('Error fetching transactions:', error);
+      console.error('Error fetching jewelry items:', error);
     } finally {
       setLoading(false);
     }
@@ -68,14 +68,14 @@ function Jewellery() {
     return price.toFixed(2);
   };
 
-  // Filter transactions based on search queries
-  const filteredTransactions = transactions.filter(item => {
+  // Filter jewelry items based on search queries
+  const filteredItems = jewelryItems.filter(item => {
     const matchesSearch = searchQuery === '' || 
-      item.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.category?.toLowerCase().includes(searchQuery.toLowerCase());
+      item.short_desc?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.metal_category?.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesSerial = serialQuery === '' || 
-      item.transaction_id?.toLowerCase().includes(serialQuery.toLowerCase());
+      item.item_id?.toLowerCase().includes(serialQuery.toLowerCase());
 
     return matchesSearch && matchesSerial;
   });
@@ -112,7 +112,7 @@ function Jewellery() {
             />
             <TextField
               size="small"
-              placeholder="Search by transaction ID..."
+              placeholder="Search by item ID..."
               value={serialQuery}
               onChange={(e) => setSerialQuery(e.target.value)}
               sx={{ flex: 1 }}
@@ -138,11 +138,11 @@ function Jewellery() {
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ width: '100px' }}>ID</TableCell>
-                  <TableCell>Name</TableCell>
+                  <TableCell>Description</TableCell>
                   <TableCell>Category</TableCell>
                   <TableCell>Price</TableCell>
                   <TableCell>Weight</TableCell>
-                  <TableCell> Status</TableCell>
+                  <TableCell>Status</TableCell>
                   <TableCell>Date</TableCell>
                 </TableRow>
               </TableHead>
@@ -153,14 +153,14 @@ function Jewellery() {
                       <CircularProgress />
                     </TableCell>
                   </TableRow>
-                ) : filteredTransactions.length === 0 ? (
+                ) : filteredItems.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} align="center">
-                      No transactions found
+                      No jewelry items found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredTransactions.map((item) => (
+                  filteredItems.map((item) => (
                     <TableRow
                       key={item.id}
                       sx={{ 
@@ -170,13 +170,13 @@ function Jewellery() {
                       }}
                       onClick={() => handleRowClick(item)}
                     >
-                      <TableCell> {item.transaction_id} </TableCell>
-                      <TableCell>{`${item.weight}g ${item.metal_purity} ${item.metal_type}`}</TableCell>
+                      <TableCell>{item.item_id}</TableCell>
+                      <TableCell>{item.short_desc}</TableCell>
                       <TableCell>{item.category}</TableCell>
-                      <TableCell>${formatPrice(item.price)}</TableCell>
-                      <TableCell>{item.weight}g</TableCell>
-                      <TableCell>{item.inventory_status}</TableCell>
-                      <TableCell>{item.created_date}</TableCell>
+                      <TableCell>${item.buy_price}</TableCell>
+                      <TableCell>{item.metal_weight}g</TableCell>
+                      <TableCell>{item.status}</TableCell>
+                      <TableCell>{new Date(item.created_at).toLocaleDateString()}</TableCell>
                     </TableRow>
                   ))
                 )}
@@ -225,12 +225,12 @@ function Jewellery() {
                 {/* Basic Info */}
                 <Box sx={{ flex: 1 }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-                    {`${selectedItem.weight}g ${selectedItem.metal_purity} ${selectedItem.metal_type}`}
+                    {`${selectedItem.metal_weight}g ${selectedItem.metal_purity} ${selectedItem.metal_type}`}
                   </Typography>
-                  <Typography variant="body2" color="textSecondary" sx={{ mb: 0.5 }}> {selectedItem.category}
+                  <Typography variant="body2" color="textSecondary" sx={{ mb: 0.5 }}> {selectedItem.metal_category}
                   </Typography>
                   <Typography variant="h6" sx={{ color: 'success.main', mb: 0.5 }}>
-                    ${formatPrice(selectedItem.price)}
+                    ${formatPrice(selectedItem.retail_price)}
                   </Typography>
                   <Typography 
                     variant="body2" 
@@ -252,7 +252,7 @@ function Jewellery() {
                 <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
                   <Box>
                     <Typography variant="caption" color="textSecondary">Weight</Typography>
-                    <Typography variant="body2">{selectedItem.weight}g</Typography>
+                    <Typography variant="body2">{selectedItem.metal_weight}g</Typography>
                   </Box>
                   <Box>
                     <Typography variant="caption" color="textSecondary">Dimensions</Typography>
@@ -267,8 +267,8 @@ function Jewellery() {
 
               {/* ID Section */}
               <Paper elevation={0} sx={{ p: 1, bgcolor: 'grey.50', borderRadius: 2 }}>
-                <Typography variant="caption" color="textSecondary">Transaction ID</Typography>
-                <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{selectedItem.transaction_id}</Typography>
+                <Typography variant="caption" color="textSecondary">Item ID</Typography>
+                <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{selectedItem.item_id}</Typography>
               </Paper>
             </Box>
           )}

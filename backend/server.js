@@ -726,84 +726,83 @@ app.put('/api/carat-conversion', async (req, res) => {
 
 // Quote Management API Endpoints
 app.post('/api/quotes', async (req, res) => {
+  const client = await pool.connect();
   try {
-    const { customerName, customerEmail, customerPhone, items, totalAmount } = req.body;
+    const { item_id, customer_id, employee_id } = req.body;
     
     // Validate required fields
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Items array is required and must not be empty' });
+    if (!item_id || !customer_id || !employee_id) {
+      return res.status(400).json({ error: 'item_id, customer_id, and employee_id are required' });
     }
 
-    // Start a transaction
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      
-      // Get current expiration configuration
-      const configResult = await client.query(`
-        SELECT days 
-        FROM quote_expiration 
-        ORDER BY created_at DESC 
-        LIMIT 1
-      `);
-      
-      const expiresIn = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
-      
-      // Insert into quotes table
-      const quoteQuery = `
-        INSERT INTO quotes (
-          items,
-          total_amount, 
-          customer_name, 
-          customer_email, 
-          customer_phone, 
-          created_at,
-          status,
-          expires_in
-        )
-        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, 'pending', $6)
-        RETURNING id, items, total_amount, customer_name, customer_email, customer_phone, 
-                  created_at, status, expires_in, days_remaining`;
-      
-      const quoteResult = await client.query(quoteQuery, [
-        JSON.stringify(items),
-        totalAmount,
-        customerName,
-        customerEmail || null,
-        customerPhone || null,
-        expiresIn
-      ]);
+    await client.query('BEGIN');
+    
+    // Get current expiration configuration
+    const configResult = await client.query(`
+      SELECT days 
+      FROM quote_expiration 
+      ORDER BY created_at DESC 
+      LIMIT 1
+    `);
+    
+    const expires_in = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
+    
+    // Insert into quotes table
+    const quoteQuery = `
+      INSERT INTO quotes (
+        item_id,
+        customer_id,
+        employee_id,
+        expires_in,
+        created_at
+      )
+      VALUES ($1, $2, $3, $5, CURRENT_TIMESTAMP)
+      RETURNING *`;
+    
+    const quoteResult = await client.query(quoteQuery, [
+      item_id,
+      customer_id,
+      employee_id,
+      expires_in
+    ]);
 
-      await client.query('COMMIT');
-      res.status(201).json(quoteResult.rows[0]);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    await client.query('COMMIT');
+    res.status(201).json(quoteResult.rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('Error saving quote:', err);
     res.status(500).json({ 
       error: 'Failed to save quote', 
       details: err.message,
       stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
+  } finally {
+    client.release();
   }
 });
 
 app.get('/api/quotes', async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, items, total_amount, customer_name, customer_email, customer_phone, 
-              created_at, updated_at, status, expires_in, days_remaining 
-       FROM quotes 
-       ORDER BY created_at DESC`
-    );
+    const query = `
+      SELECT 
+        q.*,
+        c.first_name || ' ' || c.last_name as customer_name,
+        c.email as customer_email,
+        c.phone as customer_phone,
+        j.short_desc as item_description,
+        j.buy_price,
+        j.pawn_value,
+        j.retail_price
+      FROM quotes q
+      LEFT JOIN customers c ON q.customer_id = c.id
+      LEFT JOIN jewelry j ON q.item_id = j.item_id
+      ORDER BY q.created_at DESC
+    `;
+    const result = await pool.query(query);
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching quotes:', err);
-    res.status(500).json({ error: 'Internal server error', details: err.message });
+    res.status(500).json({ error: 'Failed to fetch quotes' });
   }
 });
 
@@ -822,50 +821,60 @@ app.get('/api/quotes/:id', async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching quote:', err);
-    res.status(500).json({ error: 'Internal server error', details: err.message });
+    res.status(500).json({ error: 'Failed to fetch quote' });
   }
 });
 
 app.put('/api/quotes/:id', async (req, res) => {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+
     const { id } = req.params;
-    const { items } = req.body;
+    const { transaction_type } = req.body;
 
-    if (!items) {
-      return res.status(400).json({ error: 'Items are required for update' });
-    }
-
-    // Calculate total amount from the items
-    const totalAmount = items.reduce((sum, item) => {
-      const price = item.itemPriceEstimates[item.transactionType] || 0;
-      return sum + price;
-    }, 0);
-
-    // Prepare query parameters
-    const queryParams = [JSON.stringify(items), totalAmount, id];
-
-    // The update_quote_days_remaining trigger will:
-    // 1. Keep the original expires_in value from quote_expiration config
-    // 2. Update days_remaining based on (CURRENT_TIMESTAMP - created_at)
-    // 3. Auto-expire quote if days_remaining <= 0
-    const query = `
+    // Update only the transaction_type in quotes table
+    const updateQuoteQuery = `
       UPDATE quotes 
-      SET items = $1::jsonb,
-          total_amount = $2,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = $3
-      RETURNING *`;
+      SET 
+        transaction_type = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      RETURNING *
+    `;
+    await client.query(updateQuoteQuery, [transaction_type, id]);
 
-    const result = await pool.query(query, queryParams);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Quote not found' });
+    // Then fetch the updated quote with all related information
+    const getUpdatedQuoteQuery = `
+      SELECT 
+        q.*,
+        c.first_name || ' ' || c.last_name as customer_name,
+        c.email as customer_email,
+        c.phone as customer_phone,
+        j.short_desc as item_description,
+        j.buy_price,
+        j.pawn_value,
+        j.retail_price
+      FROM quotes q
+      LEFT JOIN customers c ON q.customer_id = c.id
+      LEFT JOIN jewelry j ON q.item_id = j.item_id
+      WHERE q.id = $1
+    `;
+    const result = await client.query(getUpdatedQuoteQuery, [id]);
+
+    await client.query('COMMIT');
+
+    if (result.rows.length > 0) {
+      res.json(result.rows[0]);
+    } else {
+      res.status(404).json({ error: 'Quote not found' });
     }
-    
-    res.json(result.rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('Error updating quote:', err);
-    res.status(500).json({ error: 'Internal server error', details: err.message });
+    res.status(500).json({ error: 'Failed to update quote', details: err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -883,7 +892,69 @@ app.delete('/api/quotes/:id', async (req, res) => {
     res.json({ message: 'Quote deleted successfully' });
   } catch (err) {
     console.error('Error deleting quote:', err);
-    res.status(500).json({ error: 'Internal server error', details: err.message });
+    res.status(500).json({ error: 'Failed to delete quote' });
+  }
+});
+
+// Jewelry price update endpoint
+app.put('/api/jewelry/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params;
+    const { buy_price, pawn_value, retail_price } = req.body;
+
+    const updateQuery = `
+      UPDATE jewelry 
+      SET 
+        buy_price = $1,
+        pawn_value = $2,
+        retail_price = $3,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = $4
+      RETURNING *
+    `;
+
+    const result = await client.query(updateQuery, [
+      buy_price,
+      pawn_value,
+      retail_price,
+      id
+    ]);
+
+    await client.query('COMMIT');
+
+    if (result.rows.length > 0) {
+      res.json(result.rows[0]);
+    } else {
+      res.status(404).json({ error: 'Jewelry item not found' });
+    }
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating jewelry prices:', err);
+    res.status(500).json({ error: 'Failed to update jewelry prices', details: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Get all jewelry items
+app.get('/api/jewelry', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        j.*,
+        TO_CHAR(j.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
+        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at
+      FROM jewelry j
+      ORDER BY j.created_at DESC
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching jewelry items:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -1490,6 +1561,168 @@ app.put('/api/transactions/:id', async (req, res) => {
   } catch (err) {
     console.error('Error updating transaction:', err);
     res.status(500).json({ error: 'Failed to update transaction', details: err.message });
+  }
+});
+
+// Transaction Types API Endpoints
+app.get('/api/transaction-types', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM transaction_type ORDER BY id';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching transaction types:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get jewelry items by prefix
+app.get('/api/jewelry/prefix/:prefix', async (req, res) => {
+  try {
+    const { prefix } = req.params;
+    const result = await pool.query(
+      "SELECT item_id FROM jewelry WHERE item_id LIKE $1 ORDER BY item_id",
+      [`${prefix}%`]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching jewelry items:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add jewelry item endpoint
+app.post('/api/jewelry', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    const { cartItems } = req.body;
+
+    // Process each cart item
+    const jewelryItems = await Promise.all(cartItems.map(async item => {
+      // Insert jewelry record
+      const jewelryQuery = `
+        INSERT INTO jewelry (
+          item_id,
+          long_desc,
+          short_desc,
+          category,
+          brand,
+          damages,
+          vintage,
+          stamps,
+          images,
+          metal_weight,
+          precious_metal_type,
+          non_precious_metal_type,
+          metal_purity,
+          jewelry_color,
+          purity_value,
+          est_metal_value,
+          primary_gem_type,
+          primary_gem_category,
+          primary_gem_size,
+          primary_gem_quantity,
+          primary_gem_shape,
+          primary_gem_weight,
+          primary_gem_color,
+          primary_gem_exact_color,
+          primary_gem_clarity,
+          primary_gem_cut,
+          primary_gem_lab_grown,
+          primary_gem_authentic,
+          primary_gem_value,
+          secondary_gem_type,
+          secondary_gem_category,
+          secondary_gem_size,
+          secondary_gem_quantity,
+          secondary_gem_shape,
+          secondary_gem_weight,
+          secondary_gem_color,
+          secondary_gem_exact_color,
+          secondary_gem_clarity,
+          secondary_gem_cut,
+          secondary_gem_lab_grown,
+          secondary_gem_authentic,
+          secondary_gem_value,
+          buy_price,
+          pawn_value,
+          retail_price,
+          status,
+          location,
+          condition,
+          created_at,
+          updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 
+                 $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, 
+                 $41, $42, $43, $44, $45, $46, $47, $48, NOW(), NOW())
+        RETURNING *`;
+
+      // Map cart item fields to jewelry table fields
+      const jewelryValues = [
+        item.item_id,                                              // $1
+        item.long_desc || '',                                    // $2
+        item.short_desc || '',                             // $3
+        item.metal_category || '',                                // $4
+        item.brand || '',                                         // $5
+        item.damages || '',                                       // $6
+        item.vintage || false,                                    // $7
+        item.stamps || '',                                        // $8
+        JSON.stringify(item.images || []),                        // $9
+        parseFloat(item.metal_weight) || 0,                       // $10
+        item.precious_metal_type || '',                                    // $11
+        item.non_precious_metal_type || '',                       // $12
+        item.metal_purity || '',                                  // $13
+        item.jewelry_color || '',                                 // $14
+        parseFloat(item.metal_purity_value) || 0,                // $15
+        parseFloat(item.est_metal_value) || 0,                       // $16
+        item.primary_gem_type || '',                             // $17
+        item.primary_gem_category || '',                      // $18
+        item.primary_gem_size || 0,                             // $19
+        item.primary_gem_quantity || 0,                // $20
+        item.primary_gem_shape || '',                            // $21
+        parseFloat(item.primary_gem_weight) || 0,                // $22
+        item.primary_gem_color || '',                            // $23
+        item.primary_gem_exact_color || '',                      // $24
+        item.primary_gem_clarity || '',                          // $25
+        item.primary_gem_cut || '',                              // $26
+        item.primary_gem_lab_grown || false,                     // $27
+        item.primary_gem_authentic || false,                     // $28
+        parseFloat(item.primary_gem_value) || 0,                 // $29
+        item.secondary_gem_type || '',                           // $30
+        item.secondary_gem_category || '',                       // $31
+        item.secondary_gem_size || 0,                           // $32
+        item.secondary_gem_quantity || 0,              // $33
+        item.secondary_gem_shape || '',                          // $34
+        parseFloat(item.secondary_gem_weight) || 0,              // $35
+        item.secondary_gem_color || '',                          // $36
+        item.secondary_gem_exact_color || '',                    // $37
+        item.secondary_gem_clarity || '',                        // $38
+        item.secondary_gem_cut || '',                            // $39
+        item.secondary_gem_lab_grown || false,                   // $40
+        item.secondary_gem_authentic || false,                   // $41
+        parseFloat(item.secondary_gem_value) || 0,               // $42
+        item.buy_price,    // $43
+        item.pawn_value,   // $44
+        item.retail_price, // $45
+        'HOLD',                                                // $46
+        'SOUTH STORE',                                                 // $47
+        'GOOD'                                                   // $48
+      ];
+
+      const result = await client.query(jewelryQuery, jewelryValues);
+      return result.rows[0];
+    }));
+
+    await client.query('COMMIT');
+    res.status(201).json(jewelryItems);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating jewelry items:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
   }
 });
 
