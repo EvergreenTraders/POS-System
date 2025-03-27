@@ -143,36 +143,36 @@ function GemEstimator() {
         primary_gem_lab_grown: diamondSummary[0].labGrown,
         primary_gem_value: diamondSummary[0].estimatedValue
       } : addedGemTypes.primary === 'stone' ? {
-        primary_gem_shape: stoneSummary[0].shape ,
-        primary_gem_quantity: stoneSummary[0].quantity,
-        primary_gem_authentic: stoneSummary[0].authentic,
-        primary_gem_type: stoneSummary[0].type,
-        primary_gem_color: stoneSummary[0].color,
-        primary_gem_weight: stoneSummary[0].weight,
-        primary_gem_value: stoneSummary[0].estimatedValue
+        primary_gem_shape: stoneSummary?.[0]?.shape || '',
+        primary_gem_quantity: stoneSummary?.[0]?.quantity || 0,
+        primary_gem_authentic: stoneSummary?.[0]?.authentic || false,
+        primary_gem_type: stoneSummary?.[0]?.type || '',
+        primary_gem_color: stoneSummary?.[0]?.color || '',
+        primary_gem_weight: stoneSummary?.[0]?.weight || 0,
+        primary_gem_value: stoneSummary?.[0]?.estimatedValue || 0
       } : {}),
 
       // Secondary gem details
       secondary_gem_category: addedGemTypes.secondary || null,
-      ...(addedGemTypes.secondary === 'diamond' ? {
-        secondary_gem_shape: diamondSummary[1].shape,
-        secondary_gem_clarity: diamondSummary[1].clarity,
-        secondary_gem_color: diamondSummary[1].color,
-        secondary_gem_exact_color: diamondSummary[1].exactColor,
-        secondary_gem_cut: diamondSummary[1].cut,
-        secondary_gem_weight: diamondSummary[1].weight,
-        secondary_gem_size: diamondSummary[1].size,
-        secondary_gem_quantity: diamondSummary[1].quantity,
-        secondary_gem_lab_grown: diamondSummary[1].labGrown,
-        secondary_gem_value: diamondSummary[1].estimatedValue
-      } : addedGemTypes.secondary === 'stone' ? {
-        secondary_gem_shape: stoneSummary[1].shape,
-        secondary_gem_quantity: stoneSummary[1].quantity,
-        secondary_gem_authentic: stoneSummary[1].authentic,
-        secondary_gem_type: stoneSummary[1].type,
-        secondary_gem_color: stoneSummary[1].color,
-        secondary_gem_weight: stoneSummary[1].weight,
-        secondary_gem_value: stoneSummary[1].estimatedValue
+      ...(addedGemTypes.secondary === 'diamond' && diamondSummary?.[1] ? {
+        secondary_gem_shape: diamondSummary[1].shape || '',
+        secondary_gem_clarity: diamondSummary[1].clarity || '',
+        secondary_gem_color: diamondSummary[1].color || '',
+        secondary_gem_exact_color: diamondSummary[1].exactColor || '',
+        secondary_gem_cut: diamondSummary[1].cut || '',
+        secondary_gem_weight: diamondSummary[1].weight || 0,
+        secondary_gem_size: diamondSummary[1].size || '',
+        secondary_gem_quantity: diamondSummary[1].quantity || 0,
+        secondary_gem_lab_grown: diamondSummary[1].labGrown || false,
+        secondary_gem_value: diamondSummary[1].estimatedValue || 0
+      } : addedGemTypes.secondary === 'stone' && stoneSummary?.[1] ? {
+        secondary_gem_shape: stoneSummary[1].shape || '',
+        secondary_gem_quantity: stoneSummary[1].quantity || 0,
+        secondary_gem_authentic: stoneSummary[1].authentic || false,
+        secondary_gem_type: stoneSummary[1].type || '',
+        secondary_gem_color: stoneSummary[1].color || '',
+        secondary_gem_weight: stoneSummary[1].weight || 0,
+        secondary_gem_value: stoneSummary[1].estimatedValue || 0
       } : {}),
       // Price estimates
       transaction_type: 'pawn',
@@ -185,7 +185,7 @@ function GemEstimator() {
         isPrimary: img.isPrimary || false
       })),
        // Additional jewelry details
-       short_desc: `${addMetal[0].weight}g ${addMetal[0].purity.purity || addMetal[0].purity.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' ? diamondSummary[0].shape : stoneSummary[0]?.type}` : ''}${addedGemTypes.secondary ? ` ${addedGemTypes.secondary === 'diamond' ? diamondSummary[1].shape : stoneSummary[1]?.type}` : ''}`,
+       short_desc: `${addMetal[0].weight}g ${addMetal[0].purity.purity || addMetal[0].purity.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' ? diamondSummary?.[0]?.shape : stoneSummary?.[0]?.type}` : ''}${addedGemTypes.secondary ? ` ${addedGemTypes.secondary === 'diamond' ? diamondSummary?.[1]?.shape : stoneSummary?.[1]?.type}` : ''}`,
        long_desc: `${addMetal[0].purity?.purity || addMetal[0].purity.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}`
     };
 
@@ -1579,10 +1579,6 @@ function GemEstimator() {
       ...prev,
       [isPrimary ? 'primary' : 'secondary']: 'stone'
     }));
-  };
-
-  const handleBack = () => {
-    navigate(-1);
   };
 
   return (

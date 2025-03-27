@@ -79,6 +79,39 @@ function Checkout() {
     });
   };
 
+  // Function to generate unique item ID
+  const generateItemId = async (metalCategory) => {
+    try {
+      // Get first 4 letters of metal category, uppercase and padded with X if needed
+      const prefix = (metalCategory || 'METL').toUpperCase().slice(0, 4).padEnd(4, 'X');
+
+      // Get all existing items with this prefix
+      const response = await axios.get(
+        `${config.apiUrl}/jewelry/prefix/${prefix}`,
+        {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        }
+      );
+
+      let sequenceNumber = 1;
+      if (response.data && response.data.length > 0) {
+        // Find highest sequence number
+        const maxId = response.data.reduce((max, item) => {
+          const sequence = parseInt(item.item_id.slice(-3));
+          return sequence > max ? sequence : max;
+        }, 0);
+        sequenceNumber = maxId + 1;
+      }
+
+      // Format sequence number to 3 digits with leading zeros
+      const formattedSequence = String(sequenceNumber).padStart(3, '0');
+      return `${prefix}${formattedSequence}`;
+    } catch (error) {
+      console.error('Error generating item ID:', error);
+      throw new Error('Unable to generate unique item ID');
+    }
+  };
+
   const handleSubmit = async () => {
     if (!selectedCustomer?.id) {
       setSnackbar({
@@ -98,30 +131,52 @@ function Checkout() {
       // Get employee ID from token
       const employeeId = JSON.parse(atob(token.split('.')[1])).id;
 
-      // Create a transaction for each cart item
-      const transactionPromises = cartItems.map(item => {
-        // Ensure at least one image is marked as primary
-        const imageData = item.images ? item.images.map((img, index) => ({
-          url: img.url,
-          is_primary: img.isPrimary || (!item.images.some(i => i.isPrimary) && index === 0)
-        })) : [];
+      // Generate item IDs for all cart items
+      const itemsWithIds = await Promise.all(cartItems.map(async item => ({
+        ...item,
+        item_id: await generateItemId(item.metal_category)
+      })));
 
-        return axios.post(
+      console.log('Generated items with IDs:', itemsWithIds);
+
+      // Create jewelry items for all cart items
+      const jewelryResponse = await axios.post(
+        `${config.apiUrl}/jewelry`,
+        {
+          cartItems: itemsWithIds.map(item => ({
+            ...item,
+            customer_id: selectedCustomer.id,
+            price: parseFloat(item.price),
+            images: item.images ? item.images.map((img, index) => ({
+              url: img.url,
+              is_primary: img.isPrimary || (!item.images.some(i => i.isPrimary) && index === 0)
+            })) : []
+          }))
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+
+      // Create transactions for each jewelry item
+      const transactionPromises = jewelryResponse.data.map(jewelry => 
+        axios.post(
           `${config.apiUrl}/transactions`,
           {
             customer_id: selectedCustomer.id,
             employee_id: employeeId,
-            transaction_type: item.transaction_type,
-            price: parseFloat(item.price),
+            transaction_type: jewelry.transaction_type,
+            price: parseFloat(jewelry.price),
             payment_method: paymentMethod,
             payment_details: paymentDetails,
-            images: imageData,
+            jewelry_id: jewelry.item_id,
+            images: jewelry.images
           },
           {
             headers: { Authorization: `Bearer ${token}` }
           }
-        );
-      });
+        )
+      );
 
       const results = await Promise.all(transactionPromises);
       

@@ -1557,6 +1557,157 @@ app.get('/api/transaction-types', async (req, res) => {
   }
 });
 
+// Get jewelry items by prefix
+app.get('/api/jewelry/prefix/:prefix', async (req, res) => {
+  try {
+    const { prefix } = req.params;
+    const result = await pool.query(
+      "SELECT item_id FROM jewelry WHERE item_id LIKE $1 ORDER BY item_id",
+      [`${prefix}%`]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching jewelry items:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add jewelry item endpoint
+app.post('/api/jewelry', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    console.log('Received cart items:', req.body);
+    await client.query('BEGIN');
+    
+    const { cartItems } = req.body;
+
+    // Process each cart item
+    const jewelryItems = await Promise.all(cartItems.map(async item => {
+      // Insert jewelry record
+      const jewelryQuery = `
+        INSERT INTO jewelry (
+          item_id,
+          long_desc,
+          short_desc,
+          category,
+          brand,
+          damages,
+          vintage,
+          stamps,
+          images,
+          metal_weight,
+          precious_metal_type,
+          non_precious_metal_type,
+          metal_purity,
+          jewelry_color,
+          purity_value,
+          est_metal_value,
+          primary_gem_type,
+          primary_gem_category,
+          primary_gem_size,
+          primary_gem_quantity,
+          primary_gem_shape,
+          primary_gem_weight,
+          primary_gem_color,
+          primary_gem_exact_color,
+          primary_gem_clarity,
+          primary_gem_cut,
+          primary_gem_lab_grown,
+          primary_gem_authentic,
+          primary_gem_value,
+          secondary_gem_type,
+          secondary_gem_category,
+          secondary_gem_size,
+          secondary_gem_quantity,
+          secondary_gem_shape,
+          secondary_gem_weight,
+          secondary_gem_color,
+          secondary_gem_exact_color,
+          secondary_gem_clarity,
+          secondary_gem_cut,
+          secondary_gem_lab_grown,
+          secondary_gem_authentic,
+          secondary_gem_value,
+          buy_price,
+          pawn_value,
+          retail_price,
+          status,
+          location,
+          condition,
+          created_at,
+          updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 
+                 $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, 
+                 $41, $42, $43, $44, $45, $46, $47, $48, NOW(), NOW())
+        RETURNING *`;
+
+      // Map cart item fields to jewelry table fields
+      const jewelryValues = [
+        item.item_id,                                              // $1
+        item.long_desc || '',                                    // $2
+        item.short_desc || '',                             // $3
+        item.metal_category || '',                                // $4
+        item.brand || '',                                         // $5
+        item.damages || '',                                       // $6
+        item.vintage || false,                                    // $7
+        item.stamps || '',                                        // $8
+        JSON.stringify(item.images || []),                        // $9
+        parseFloat(item.metal_weight) || 0,                       // $10
+        item.precious_metal_type || '',                                    // $11
+        item.non_precious_metal_type || '',                       // $12
+        item.metal_purity || '',                                  // $13
+        item.jewelry_color || '',                                 // $14
+        parseFloat(item.metal_purity_value) || 0,                // $15
+        parseFloat(item.est_metal_value) || 0,                       // $16
+        item.primary_gem_type || '',                             // $17
+        item.primary_gem_category || '',                      // $18
+        item.primary_gem_size || 0,                             // $19
+        item.primary_gem_quantity || 0,                // $20
+        item.primary_gem_shape || '',                            // $21
+        parseFloat(item.primary_gem_weight) || 0,                // $22
+        item.primary_gem_color || '',                            // $23
+        item.primary_gem_exact_color || '',                      // $24
+        item.primary_gem_clarity || '',                          // $25
+        item.primary_gem_cut || '',                              // $26
+        item.primary_gem_lab_grown || false,                     // $27
+        item.primary_gem_authentic || false,                     // $28
+        parseFloat(item.primary_gem_value) || 0,                 // $29
+        item.secondary_gem_type || '',                           // $30
+        item.secondary_gem_category || '',                       // $31
+        item.secondary_gem_size || 0,                           // $32
+        item.secondary_gem_quantity || 0,              // $33
+        item.secondary_gem_shape || '',                          // $34
+        parseFloat(item.secondary_gem_weight) || 0,              // $35
+        item.secondary_gem_color || '',                          // $36
+        item.secondary_gem_exact_color || '',                    // $37
+        item.secondary_gem_clarity || '',                        // $38
+        item.secondary_gem_cut || '',                            // $39
+        item.secondary_gem_lab_grown || false,                   // $40
+        item.secondary_gem_authentic || false,                   // $41
+        parseFloat(item.secondary_gem_value) || 0,               // $42
+        item.buy_price,    // $43
+        item.pawn_value,   // $44
+        item.retail_price, // $45
+        'HOLD',                                                // $46
+        'SOUTH STORE',                                                 // $47
+        'GOOD'                                                   // $48
+      ];
+
+      const result = await client.query(jewelryQuery, jewelryValues);
+      return result.rows[0];
+    }));
+
+    await client.query('COMMIT');
+    res.status(201).json(jewelryItems);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating jewelry items:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
