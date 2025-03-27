@@ -154,7 +154,7 @@ const CustomerManager = () => {
 
       // If we have items in location state, add them to cart context and navigate
       if (location.state?.items?.length > 0) {
-        location.state.items.forEach(item => addToCart(item));
+      //  location.state.items.forEach(item => addToCart(item));
         navigate('/checkout', { 
           state: { 
             from: location.state.from || 'customer'
@@ -263,7 +263,7 @@ const CustomerManager = () => {
     
     // If we have items in location state, add them to cart context and navigate
     if (location.state?.items?.length > 0) {
-      location.state.items.forEach(item => addToCart(item));
+    //  location.state.items.forEach(item => addToCart(item));
       navigate('/checkout', { 
         state: { 
           from: location.state.from || 'customer'

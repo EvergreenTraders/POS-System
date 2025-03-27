@@ -373,11 +373,11 @@ function QuoteManager() {
     // Add the quote item to cart first
     addToCart({
       id: quote.item_id,
-      description: quote.item_description,
+      short_desc: quote.item_description,
       itemPriceEstimates: {
         [quote.transaction_type]: parseFloat(quote.price) || 0
       },
-      transactionType: quote.transaction_type,
+      transaction_type: quote.transaction_type,
       images: quote.images || [],
       price: getDisplayPrice(quote)
     });

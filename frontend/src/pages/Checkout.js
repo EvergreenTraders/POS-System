@@ -218,15 +218,27 @@ function Checkout() {
   };
 
   const handleBackToEstimation = () => {
-    // Clear cart and customer data before navigating
-    clearCart();
-    setCustomer(null);
-    
     // If we came from a quote, go back to quote manager
     if (location.state?.quoteId) {
+      clearCart();
+      setCustomer(null);
       navigate('/quote-manager');
     } else {
-      // Otherwise go to gem estimator
+      // Save the cart items to session storage before navigating back
+      sessionStorage.setItem('estimationState', JSON.stringify({
+        items: cartItems.map(item => ({
+          ...item,
+          price_estimates: {
+            pawn: parseFloat(item.price || 0),
+            buy: parseFloat(item.price || 0),
+            retail: parseFloat(item.price || 0),
+            [item.transaction_type]: parseFloat(item.price || 0)
+          }
+        }))
+      }));
+      clearCart();
+      setCustomer(null);
+      // Go back to gem estimator
       navigate('/gem-estimator');
     }
   };
@@ -312,9 +324,9 @@ function Checkout() {
                     {cartItems.map((item, index) => (
                       <TableRow key={item.id || index}>
                         <TableCell>
-                          {item.description} 
+                          {item.short_desc} 
                         </TableCell>
-                        <TableCell>{item.transactionType}</TableCell>
+                        <TableCell>{item.transaction_type}</TableCell>
                         <TableCell align="right">
                           ${parseFloat(item.price).toFixed(2)}
                         </TableCell>

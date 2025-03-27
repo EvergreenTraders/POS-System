@@ -117,30 +117,8 @@ function GemEstimator() {
     const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
     const totalWeight = parseFloat(addMetal[0].weight || 0) + gemWeightInGrams;
 
-    // Get primary and secondary gem details based on their types
-    let primaryGemDetails = '';
-    let secondaryGemDetails = '';
-
-    if (addedGemTypes.primary === 'diamond' && addedGemTypes.secondary === 'diamond') {
-      // Both are diamonds
-      primaryGemDetails = `${diamondSummary[0].shape} ${diamondSummary[0].clarity} ${diamondSummary[0].color} ${diamondSummary[0].cut}`;
-      secondaryGemDetails = `${diamondSummary[1].shape} ${diamondSummary[1].clarity} ${diamondSummary[1].color} ${diamondSummary[1].cut}`;
-    } else if (addedGemTypes.primary === 'stone' && addedGemTypes.secondary === 'diamond') {
-      // Primary is stone, secondary is diamond
-      primaryGemDetails = `${stoneSummary[0].name} ${stoneSummary[0].shape}`;
-      secondaryGemDetails = `${diamondSummary[0].shape} ${diamondSummary[0].clarity} ${diamondSummary[0].color} ${diamondSummary[0].cut}`;
-    } else if (addedGemTypes.primary === 'diamond' && addedGemTypes.secondary === 'stone') {
-      // Primary is diamond, secondary is stone
-      primaryGemDetails = `${diamondSummary[0].shape} ${diamondSummary[0].clarity} ${diamondSummary[0].color} ${diamondSummary[0].cut}`;
-      secondaryGemDetails = `${stoneSummary[0].name} ${stoneSummary[0].shape}`;
-    } else if (addedGemTypes.primary === 'stone' && addedGemTypes.secondary === 'stone') {
-      // Both are stones
-      primaryGemDetails = `${stoneSummary[0].name} ${stoneSummary[0].shape}`;
-      secondaryGemDetails = `${stoneSummary[1].name} ${stoneSummary[1].shape}`;
-    }
-
     // Create new item with all required jewelry fields
-    const newItem = {
+    const jewelryItem = {
       // Basic item details
       metal_weight: addMetal[0].weight,
       precious_metal_type: addMetal[0].preciousMetalType,
@@ -151,27 +129,8 @@ function GemEstimator() {
       metal_spot_price: addMetal[0].spotPrice,
       est_metal_value: addMetal[0].estimatedValue.toFixed(2),
 
-      // Additional jewelry details
-      brand: addMetal[0].brand || null,
-      damages: addMetal[0].damages || null,
-      vintage: addMetal[0].vintage || false,
-      stamps: addMetal[0].stamps || null,
-      short_desc: `${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}${primaryGemDetails?.type ? ` with ${primaryGemDetails.type}` : ''}`,
-      long_desc: `${addMetal[0].purity?.purity || addMetal[0].purity.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}` +
-        (primaryGemDetails?.type ? `\nPrimary Stone: ${primaryGemDetails.type}` + 
-          (primaryGemDetails.weight ? ` (${primaryGemDetails.weight}ct)` : '') +
-          (primaryGemDetails.clarity ? `, Clarity: ${primaryGemDetails.clarity}` : '') +
-          (primaryGemDetails.color ? `, Color: ${primaryGemDetails.color}` : '') +
-          (primaryGemDetails.cut ? `, Cut: ${primaryGemDetails.cut}` : '') : '') +
-        (secondaryGemDetails?.type ? `\nSecondary Stone: ${secondaryGemDetails.type}` +
-          (secondaryGemDetails.weight ? ` (${secondaryGemDetails.weight}ct)` : '') : '') +
-        (addMetal[0].brand ? `\nBrand: ${addMetal[0].brand}` : '') +
-        (addMetal[0].vintage ? '\nVintage piece' : '') +
-        (addMetal[0].stamps ? `\nStamps: ${addMetal[0].stamps}` : '') +
-        (addMetal[0].damages ? `\nDamages: ${addMetal[0].damages}` : ''),
-
       // Primary gem details
-      primary_gem_category: addedGemTypes.primary,
+      primary_gem_category: addedGemTypes.primary || null,
       ...(addedGemTypes.primary === 'diamond' ? {
         primary_gem_shape: diamondSummary[0].shape,
         primary_gem_clarity: diamondSummary[0].clarity,
@@ -183,18 +142,18 @@ function GemEstimator() {
         primary_gem_quantity: diamondSummary[0].quantity,
         primary_gem_lab_grown: diamondSummary[0].labGrown,
         primary_gem_value: diamondSummary[0].estimatedValue
-      } : {
-        primary_gem_shape: stoneSummary[0].shape,
+      } : addedGemTypes.primary === 'stone' ? {
+        primary_gem_shape: stoneSummary[0].shape ,
         primary_gem_quantity: stoneSummary[0].quantity,
         primary_gem_authentic: stoneSummary[0].authentic,
         primary_gem_type: stoneSummary[0].type,
         primary_gem_color: stoneSummary[0].color,
         primary_gem_weight: stoneSummary[0].weight,
         primary_gem_value: stoneSummary[0].estimatedValue
-      }),
+      } : {}),
 
       // Secondary gem details
-      secondary_gem_category: addedGemTypes.secondary,
+      secondary_gem_category: addedGemTypes.secondary || null,
       ...(addedGemTypes.secondary === 'diamond' ? {
         secondary_gem_shape: diamondSummary[1].shape,
         secondary_gem_clarity: diamondSummary[1].clarity,
@@ -206,7 +165,7 @@ function GemEstimator() {
         secondary_gem_quantity: diamondSummary[1].quantity,
         secondary_gem_lab_grown: diamondSummary[1].labGrown,
         secondary_gem_value: diamondSummary[1].estimatedValue
-      } : {
+      } : addedGemTypes.secondary === 'stone' ? {
         secondary_gem_shape: stoneSummary[1].shape,
         secondary_gem_quantity: stoneSummary[1].quantity,
         secondary_gem_authentic: stoneSummary[1].authentic,
@@ -214,32 +173,29 @@ function GemEstimator() {
         secondary_gem_color: stoneSummary[1].color,
         secondary_gem_weight: stoneSummary[1].weight,
         secondary_gem_value: stoneSummary[1].estimatedValue
-      }),
-
-      // Transaction details
-      transaction_type: itemTransactionTypes[estimatedItems.length] || 'pawn',
-      // Store all price estimates
+      } : {}),
+      // Price estimates
+      transaction_type: 'pawn',
       buy_price: priceEstimates.buy,
       pawn_price: priceEstimates.pawn,
       retail_price: priceEstimates.retail,
-      // Set current price based on transaction type
-      price: priceEstimates[itemTransactionTypes[estimatedItems.length] || 'pawn'],
-      
       // Images
       images: images.map(img => ({
         url: img.url,
         isPrimary: img.isPrimary || false
-      }))
+      })),
+       // Additional jewelry details
+       short_desc: `${addMetal[0].weight}g ${addMetal[0].purity.purity || addMetal[0].purity.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' ? diamondSummary[0].shape : stoneSummary[0]?.type}` : ''}${addedGemTypes.secondary ? ` ${addedGemTypes.secondary === 'diamond' ? diamondSummary[1].shape : stoneSummary[1]?.type}` : ''}`,
+       long_desc: `${addMetal[0].purity?.purity || addMetal[0].purity.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}`
     };
-    console.log("newirem", newItem);
 
     // Add the item to estimated items array with all price information
     const itemWithPrices = {
-      ...newItem,
+      ...jewelryItem,
       price_estimates: {
-        buy: newItem.buy_price,
-        pawn: newItem.pawn_price,
-        retail: newItem.retail_price
+        buy: jewelryItem.buy_price,
+        pawn: jewelryItem.pawn_price,
+        retail: jewelryItem.retail_price
       }
     };
     setEstimatedItems(prev => [...prev, itemWithPrices]);
@@ -485,6 +441,20 @@ function GemEstimator() {
         fetchCaratConversion();
     fetchDiamondEstimates();
   }, []);
+
+  useEffect(() => {
+    // Try to restore state from location or session storage
+    if (!estimatedItems.length) {
+      const savedState = sessionStorage.getItem('estimationState');
+      if (savedState) {
+        const parsedState = JSON.parse(savedState);
+        if (parsedState.items) {
+          // If we have items, restore them to the estimator
+          setEstimatedItems(parsedState.items);
+        }
+      }
+    }
+  }, [estimatedItems.length]);
 
   const fetchDiamondSizes = async (diamondShapeId) => {
     try {
@@ -1151,7 +1121,7 @@ function GemEstimator() {
           <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
         </Grid>
         {getCurrentStoneForm().quantity > 1 && (
-          <Grid item>
+          <Grid item xs>
             <FormControl sx={{ minWidth: 120 }}>
               <Select
                 value={getCurrentStoneForm().valuationType}
@@ -1314,7 +1284,7 @@ function GemEstimator() {
     if (activeTab.startsWith('primary')) {
       return (
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h6" sx={{ mb: 0, mr: 2 }}>
+          <Typography variant="h6">
             ESTIMATE PRIMARY GEM
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -1342,7 +1312,7 @@ function GemEstimator() {
     } else {
       return (
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h6" sx={{ mb: 0, mr: 2 }}>
+          <Typography variant="h6">
             EST. SECONDARY GEM
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -1404,17 +1374,21 @@ function GemEstimator() {
   }, [estimatedItems]);
 
   useEffect(() => {
-    // Initialize estimated items from location state or session storage
-    if (location.state?.items?.length > 0) {
-      setEstimatedItems(location.state.items);
-    } else {
+    // Try to restore state from location or session storage
+    if (!estimatedItems.length) {
       const savedState = sessionStorage.getItem('estimationState');
       if (savedState) {
         const parsedState = JSON.parse(savedState);
-        setEstimatedItems(parsedState.estimatedItems || []);
+        if (parsedState.items) {
+          setEstimatedItems(parsedState.items);
+        }
       }
     }
-  }, [location.state?.items]);
+    // Clear the session storage after restoring items
+    return () => {
+      sessionStorage.removeItem('estimationState');
+    };
+  }, [estimatedItems.length]);
 
   useEffect(() => {
     // Focus on shape input when component mounts
@@ -1425,28 +1399,47 @@ function GemEstimator() {
 
   const SliderStyled = styled(Slider)({});
 
-  const handleTransactionTypeChange = (index, value) => {
-    setItemTransactionTypes(prev => ({
-      ...prev,
-      [index]: value
-    }));
+  const handleTransactionTypeChange = (index, newType) => {
+    setEstimatedItems(prevItems => {
+      const updatedItems = [...prevItems];
+      updatedItems[index] = {
+        ...updatedItems[index],
+        transaction_type: newType
+      };
+      return updatedItems;
+    });
+  };
+
+  const handlePriceChange = (index, newPrice) => {
+    setEstimatedItems(prevItems => {
+      const updatedItems = [...prevItems];
+      const item = { ...updatedItems[index] };
+      
+      // Update the price for the current transaction type
+      item.price_estimates[item.transaction_type] = parseFloat(newPrice);
+      updatedItems[index] = item;
+      
+      return updatedItems;
+    });
   };
 
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedItemIndex, setSelectedItemIndex] = useState(null);
-  const [itemDetails, setItemDetails] = useState({});
+  const [itemDetails, setItemDetails] = useState({
+    brand: '',
+    additionalInfo: '',
+    isVintage: false,
+    stamps: ''
+  });
 
   const handleOpenDialog = (index) => {
     setSelectedItemIndex(index);
     setItemDetails(prev => ({
       ...prev,
-      [index]: {
-        ...prev[index],
-        brand: prev[index]?.brand || '',
-        additionalInfo: prev[index]?.additionalInfo || '',
-        isVintage: prev[index]?.isVintage || false,
-        stamps: prev[index]?.stamps || ''
-      }
+      brand: prev.brand || '',
+      additionalInfo: prev.additionalInfo || '',
+      isVintage: prev.isVintage || false,
+      stamps: prev.stamps || ''
     }));
     setOpenDialog(true);
   };
@@ -1461,11 +1454,24 @@ function GemEstimator() {
     
     setItemDetails(prev => ({
       ...prev,
-      [selectedItemIndex]: {
-        ...prev[selectedItemIndex],
-        [field]: value
-      }
+      [field]: value
     }));
+  };
+
+  const handleDetailSave = () => {
+    setEstimatedItems(prevItems => {
+      const updatedItems = [...prevItems];
+      const updatedItem = {
+        ...updatedItems[selectedItemIndex],
+        brand: itemDetails.brand,
+        damages: itemDetails.additionalInfo,
+        vintage: itemDetails.isVintage,
+        stamps: itemDetails.stamps
+      };
+      updatedItems[selectedItemIndex] = updatedItem;
+      return updatedItems;
+    });
+    setOpenDialog(false);
   };
 
   const calculateTotalGemWeight = () => {
@@ -1498,26 +1504,22 @@ function GemEstimator() {
   };
 
   const handleCheckout = () => {
-    // Update the transaction types and prices for all items
-    const updatedItems = estimatedItems.map((item, index) => {
-      const currentTransactionType = itemTransactionTypes[index] || 'pawn';
-      return {
-        ...item,
-        transaction_type: currentTransactionType,
-        price: item.price_estimates[currentTransactionType]
-      };
-    });
-
-    // Save the current state in session storage as backup
-    sessionStorage.setItem('estimationState', JSON.stringify({
-      items: updatedItems,
-      transactionTypes: itemTransactionTypes
+    // Save the current state in session storage before navigating
+    const updatedItems = estimatedItems.map((item) => ({
+      ...item,
+      price: item.price_estimates[item.transaction_type]
     }));
-
-    // Add items to cart and navigate to checkout
-    updatedItems.forEach(item => addToCart(item));
     
-    navigate('/checkout', { 
+    sessionStorage.setItem('estimationState', JSON.stringify({
+      items: updatedItems
+    }));
+    
+    // Add items to cart before navigation
+    updatedItems.forEach(item => addToCart(item));
+    console.log("updatedItems",updatedItems);
+    
+    // Navigate to customer manager
+    navigate('/customer', { 
       state: { 
         items: updatedItems,
         from: 'estimator' 
@@ -1834,7 +1836,7 @@ function GemEstimator() {
                         setExactColor(startColor);
                       }}
                     >
-                      <Typography variant="caption" align="center" sx={{ mt: 1 }}>
+                      <Typography variant="caption" align="center">
                         {color.name}
                       </Typography>
                       <Typography variant="caption" align="center">
@@ -2410,7 +2412,7 @@ function GemEstimator() {
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Select
-                          value={itemTransactionTypes[index] || 'pawn'}
+                          value={item.transaction_type || 'pawn'}
                           onChange={(e) => handleTransactionTypeChange(index, e.target.value)}
                           size="small"
                           sx={{ 
@@ -2424,7 +2426,7 @@ function GemEstimator() {
                             <Box>
                               <Typography variant="body2">Pawn</Typography>
                               <Typography variant="caption" color="text.secondary">
-                                ${(item.pawn_price || 0).toFixed(2)}
+                                ${(item.price_estimates?.["pawn"] || 0).toFixed(2)}
                               </Typography>
                             </Box>
                           </MenuItem>
@@ -2432,7 +2434,7 @@ function GemEstimator() {
                             <Box>
                               <Typography variant="body2">Buy</Typography>
                               <Typography variant="caption" color="text.secondary">
-                                ${(item.buy_price || 0).toFixed(2)}
+                                ${(item.price_estimates?.["buy"] || 0).toFixed(2)}
                               </Typography>
                             </Box>
                           </MenuItem>
@@ -2440,7 +2442,7 @@ function GemEstimator() {
                             <Box>
                               <Typography variant="body2">Retail</Typography>
                               <Typography variant="caption" color="text.secondary">
-                                ${(item.retail_price || 0).toFixed(2)}
+                                ${(item.price_estimates?.["retail"] || 0).toFixed(2)}
                               </Typography>
                             </Box>
                           </MenuItem>
@@ -2450,12 +2452,12 @@ function GemEstimator() {
                         <TextField 
                           type="number"
                           value={
-                            item.transaction_type === 'pawn' ? (item.pawn_price || 0).toFixed(2) :
-                            item.transaction_type === 'buy' ? (item.buy_price || 0).toFixed(2) :
-                            item.transaction_type === 'retail' ? (item.retail_price || 0).toFixed(2) :
+                            item.transaction_type === 'pawn' ? (item.price_estimates?.["pawn"] || 0).toFixed(2) :
+                            item.transaction_type === 'buy' ? (item.price_estimates?.["buy"] || 0).toFixed(2) :
+                            item.transaction_type === 'retail' ? (item.price_estimates?.["retail"] || 0).toFixed(2) :
                             (0).toFixed(2)
                           }
-                          //onChange={(e) => handlePriceChange(index, e.target.value)}
+                          onChange={(e) => handlePriceChange(index, e.target.value)}
                           InputProps={{
                             startAdornment: <InputAdornment position="start">$</InputAdornment>,
                             sx: {
@@ -2535,13 +2537,13 @@ function GemEstimator() {
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
             <TextField
               label="Brand"
-              value={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.brand || '' : ''}
+              value={selectedItemIndex !== null ? itemDetails.brand || '' : ''}
               onChange={(e) => handleDetailChange('brand', e.target.value)}
               fullWidth
             />
             <TextField
               label="Additional Information/Damages"
-              value={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.additionalInfo || '' : ''}
+              value={selectedItemIndex !== null ? itemDetails.additionalInfo || '' : ''}
               onChange={(e) => handleDetailChange('additionalInfo', e.target.value)}
               multiline
               rows={4}
@@ -2550,7 +2552,7 @@ function GemEstimator() {
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.isVintage || false : false}
+                  checked={selectedItemIndex !== null ? itemDetails.isVintage || false : false}
                   onChange={(e) => handleDetailChange('isVintage', e.target.checked)}
                 />
               }
@@ -2558,7 +2560,7 @@ function GemEstimator() {
             />
             <TextField
               label="Stamps/Engraving"
-              value={selectedItemIndex !== null ? itemDetails[selectedItemIndex]?.stamps || '' : ''}
+              value={selectedItemIndex !== null ? itemDetails.stamps || '' : ''}
               onChange={(e) => handleDetailChange('stamps', e.target.value)}
               multiline
               rows={2}
@@ -2567,7 +2569,10 @@ function GemEstimator() {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDialog}>Close</Button>
+          <Button onClick={handleCloseDialog}>Cancel</Button>
+          <Button onClick={handleDetailSave} variant="contained" color="primary">
+            Save
+          </Button>
         </DialogActions>
       </Dialog>
     </Container>
