@@ -62,6 +62,25 @@ function Checkout() {
     severity: 'success'
   });
 
+  const [transactionTypes, setTransactionTypes] = useState({});
+
+  // Fetch transaction types on component mount
+  useEffect(() => {
+    const fetchTransactionTypes = async () => {
+      try {
+        const response = await axios.get(`${config.apiUrl}/transaction-types`);
+        const typeMap = {};
+        response.data.forEach(type => {
+          typeMap[type.type] = type.id;
+        });
+        setTransactionTypes(typeMap);
+      } catch (error) {
+        console.error('Error fetching transaction types:', error);
+      }
+    };
+    fetchTransactionTypes();
+  }, []);
+
   const calculateTotal = () => {
     return cartItems.reduce((total, item) => {
       return total + parseFloat(item.price);
@@ -77,39 +96,6 @@ function Checkout() {
       ...paymentDetails,
       [field]: event.target.value,
     });
-  };
-
-  // Function to generate unique item ID
-  const generateItemId = async (metalCategory) => {
-    try {
-      // Get first 4 letters of metal category, uppercase and padded with X if needed
-      const prefix = (metalCategory || 'METL').toUpperCase().slice(0, 4).padEnd(4, 'X');
-
-      // Get all existing items with this prefix
-      const response = await axios.get(
-        `${config.apiUrl}/jewelry/prefix/${prefix}`,
-        {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-        }
-      );
-
-      let sequenceNumber = 1;
-      if (response.data && response.data.length > 0) {
-        // Find highest sequence number
-        const maxId = response.data.reduce((max, item) => {
-          const sequence = parseInt(item.item_id.slice(-3));
-          return sequence > max ? sequence : max;
-        }, 0);
-        sequenceNumber = maxId + 1;
-      }
-
-      // Format sequence number to 3 digits with leading zeros
-      const formattedSequence = String(sequenceNumber).padStart(3, '0');
-      return `${prefix}${formattedSequence}`;
-    } catch (error) {
-      console.error('Error generating item ID:', error);
-      throw new Error('Unable to generate unique item ID');
-    }
   };
 
   const handleSubmit = async () => {
@@ -131,22 +117,12 @@ function Checkout() {
       // Get employee ID from token
       const employeeId = JSON.parse(atob(token.split('.')[1])).id;
 
-      // Generate item IDs for all cart items
-      const itemsWithIds = await Promise.all(cartItems.map(async item => ({
-        ...item,
-        item_id: await generateItemId(item.metal_category)
-      })));
-
-      console.log('Generated items with IDs:', itemsWithIds);
-
-      // Create jewelry items for all cart items
+      // Create jewelry items first
       const jewelryResponse = await axios.post(
         `${config.apiUrl}/jewelry`,
         {
-          cartItems: itemsWithIds.map(item => ({
+          cartItems: cartItems.map(item => ({
             ...item,
-            customer_id: selectedCustomer.id,
-            price: parseFloat(item.price),
             images: item.images ? item.images.map((img, index) => ({
               url: img.url,
               is_primary: img.isPrimary || (!item.images.some(i => i.isPrimary) && index === 0)
@@ -159,24 +135,26 @@ function Checkout() {
       );
 
       // Create transactions for each jewelry item
-      const transactionPromises = jewelryResponse.data.map(jewelry => 
-        axios.post(
+      const transactionPromises = jewelryResponse.data.map((jewelry, index) => {
+        const transaction_type_id = transactionTypes[cartItems[index].transaction_type];
+        if (!transaction_type_id) {
+          throw new Error(`Invalid transaction type: ${cartItems[index].transaction_type}`);
+        }
+        return axios.post(
           `${config.apiUrl}/transactions`,
           {
             customer_id: selectedCustomer.id,
             employee_id: employeeId,
-            transaction_type: jewelry.transaction_type,
-            price: parseFloat(jewelry.price),
-            payment_method: paymentMethod,
-            payment_details: paymentDetails,
-            jewelry_id: jewelry.item_id,
-            images: jewelry.images
+            transaction_type_id: transaction_type_id,
+            price: parseFloat(cartItems[index].price),
+            transaction_status: 'PENDING',
+            transaction_date: new Date().toISOString().split('T')[0]
           },
           {
             headers: { Authorization: `Bearer ${token}` }
           }
-        )
-      );
+        );
+      });
 
       const results = await Promise.all(transactionPromises);
       

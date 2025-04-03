@@ -26,7 +26,7 @@ CREATE TABLE jewelry (
     -- Gem details
     -- Primary gem
     primary_gem_type VARCHAR(50),
-    primary_gem_category VARCHAR(20) CHECK (primary_gem_category IN ('diamond', 'stone')),
+    primary_gem_category VARCHAR(20) CHECK (primary_gem_category IS NULL OR primary_gem_category IN ('diamond', 'stone')),
     primary_gem_size DECIMAL(10,2),
     primary_gem_quantity INTEGER,
     primary_gem_shape VARCHAR(50),
@@ -41,7 +41,7 @@ CREATE TABLE jewelry (
     
     -- Secondary gem
     secondary_gem_type VARCHAR(50),
-    secondary_gem_category VARCHAR(20) CHECK (secondary_gem_category IN ('diamond', 'stone')),
+    secondary_gem_category VARCHAR(20) CHECK (secondary_gem_category IS NULL OR secondary_gem_category IN ('diamond', 'stone')),
     secondary_gem_size DECIMAL(10,2),
     secondary_gem_quantity INTEGER,
     secondary_gem_shape VARCHAR(50),

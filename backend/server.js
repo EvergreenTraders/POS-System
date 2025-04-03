@@ -30,43 +30,100 @@ const updateQuoteDaysRemaining = async () => {
 };
 
 // Function to update inventory hold status
-const updateInventoryHoldStatus = async () => {
+async function updateInventoryHoldStatus(holdPeriodDays) {
+  const client = await pool.connect();
   try {
-    // Get the current hold period configuration
-    const configResult = await pool.query('SELECT days FROM inventory_hold_period ORDER BY created_at DESC LIMIT 1');
-    if (configResult.rows.length === 0) {
-      console.log('No inventory hold period configuration found');
-      return;
-    }
-
-    const holdPeriod = configResult.rows[0].days;
-
-    // Update inventory status for items that have exceeded their hold period
+    // Update jewelry status for items that have exceeded their hold period
     const updateQuery = `
-      WITH expired_holds AS (
-        SELECT transaction_id 
-        FROM transactions 
-        WHERE inventory_status = 'HOLD'
-        AND created_at < NOW() - INTERVAL '1 day' * $1
-      )
-      UPDATE transactions t
-      SET 
-        inventory_status = 'AVAILABLE',
-        updated_at = CURRENT_TIMESTAMP
-      FROM expired_holds e
-      WHERE t.transaction_id = e.transaction_id
-      RETURNING t.transaction_id;
-    `;
-    const result = await pool.query(updateQuery, [holdPeriod]);
-    if (result.rows.length > 0) {
-      const formattedIds = result.rows.map(r => r.transaction_id).join(', ');
-      console.log(`[${new Date().toISOString()}] Updated inventory status to AVAILABLE for transactions: ${formattedIds}`);
-      console.log(`Hold period of ${holdPeriod} days exceeded for ${result.rows.length} item(s)`);
-    }
-  } catch (error) {
-    console.error('Error updating inventory hold status:', error);
+      UPDATE jewelry
+      SET status = 'in_stock'
+      WHERE status = 'HOLD'
+      AND updated_at < NOW() - INTERVAL '1 day' * $1
+      RETURNING item_id`;
+
+    const result = await client.query(updateQuery, [holdPeriodDays]);
+  } catch (err) {
+    console.error('Error updating inventory hold status:', err);
+  } finally {
+    client.release();
   }
 };
+
+// Function to generate unique transaction ID
+async function generateTransactionId() {
+  const client = await pool.connect();
+  try {
+    // Get the latest transaction ID
+    const result = await client.query(
+      'SELECT transaction_id FROM transactions ORDER BY created_at DESC LIMIT 1'
+    );
+    
+    let nextNumber = 1; // Start from 1 if no existing transactions
+    
+    if (result.rows.length > 0) {
+      const lastId = result.rows[0].transaction_id;
+      const lastNumber = parseInt(lastId.slice(3)); // Remove 'TSD' prefix
+      nextNumber = lastNumber + 1;
+      
+      // Reset to 1 if we exceed 999999
+      if (nextNumber > 999999) {
+        nextNumber = 1;
+      }
+    }
+    
+    return `TSD${nextNumber.toString().padStart(6, '0')}`;
+  } finally {
+    client.release();
+  }
+}
+
+// Function to generate unique item ID
+async function generateItemId(metalCategory) {
+  const client = await pool.connect();
+  try {
+    // Get first 4 letters of metal category, uppercase and padded with X if needed
+    const prefix = (metalCategory || 'METL').toUpperCase().slice(0, 4).padEnd(4, 'X');
+    
+    // Get the highest sequence number for this prefix
+    const result = await client.query(
+      'SELECT item_id FROM jewelry WHERE item_id LIKE $1 ORDER BY CAST(SUBSTRING(item_id, 5) AS INTEGER) DESC LIMIT 1',
+      [prefix + '%']
+    );
+    
+    let nextNumber = 1;
+    
+    if (result.rows.length > 0) {
+      const lastId = result.rows[0].item_id;
+      const lastNumber = parseInt(lastId.slice(4)); // Remove prefix
+      nextNumber = lastNumber + 1;
+      
+      // Reset to 1 if we exceed 999
+      if (nextNumber > 999) {
+        nextNumber = 1;
+      }
+    }
+
+    // Keep trying until we find an unused ID
+    let newItemId;
+    let exists = true;
+    while (exists) {
+      newItemId = `${prefix}${nextNumber.toString().padStart(3, '0')}`;
+      const checkResult = await client.query(
+        'SELECT EXISTS(SELECT 1 FROM jewelry WHERE item_id = $1)',
+        [newItemId]
+      );
+      exists = checkResult.rows[0].exists;
+      if (exists) {
+        nextNumber++;
+        if (nextNumber > 999) nextNumber = 1;
+      }
+    }
+    
+    return newItemId;
+  } finally {
+    client.release();
+  }
+}
 
 // Schedule daily update of quote days remaining and inventory hold status (runs at midnight)
 setInterval(() => {
@@ -958,6 +1015,140 @@ app.get('/api/jewelry', async (req, res) => {
   }
 });
 
+// Add jewelry item endpoint
+app.post('/api/jewelry', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    const { cartItems } = req.body;
+    
+    // Insert each jewelry item
+    const jewelryPromises = cartItems.map(async item => {
+      // Generate unique item ID
+      const item_id = await generateItemId(item.metal_category);
+      
+      // Insert jewelry record
+      const jewelryQuery = `
+        INSERT INTO jewelry (
+          item_id,
+          long_desc,
+          short_desc,
+          category,
+          brand,
+          damages,
+          vintage,
+          stamps,
+          images,
+          metal_weight,
+          precious_metal_type,
+          non_precious_metal_type,
+          metal_purity,
+          jewelry_color,
+          purity_value,
+          est_metal_value,
+          primary_gem_type,
+          primary_gem_category,
+          primary_gem_size,
+          primary_gem_quantity,
+          primary_gem_shape,
+          primary_gem_weight,
+          primary_gem_color,
+          primary_gem_exact_color,
+          primary_gem_clarity,
+          primary_gem_cut,
+          primary_gem_lab_grown,
+          primary_gem_authentic,
+          primary_gem_value,
+          secondary_gem_type,
+          secondary_gem_category,
+          secondary_gem_size,
+          secondary_gem_quantity,
+          secondary_gem_shape,
+          secondary_gem_weight,
+          secondary_gem_color,
+          secondary_gem_exact_color,
+          secondary_gem_clarity,
+          secondary_gem_cut,
+          secondary_gem_lab_grown,
+          secondary_gem_authentic,
+          secondary_gem_value,
+          buy_price,
+          pawn_value,
+          retail_price,
+          status,
+          location,
+          condition
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48)
+        RETURNING *`;
+
+      const jewelryValues = [
+        item_id,                                              // $1
+        item.long_desc || '',                                    // $2
+        item.short_desc || '',                             // $3
+        item.metal_category || '',                                // $4
+        item.brand || '',                                       // $5
+        item.damages || '',                                     // $6
+        item.vintage || false,                                 // $7
+        item.stamps || '',                                     // $8
+        item.images || [],                                     // $9
+        parseFloat(item.metal_weight) || 0,                       // $10
+        item.precious_metal_type || '',                                    // $11
+        item.non_precious_metal_type || '',                       // $12
+        item.metal_purity || '',                                  // $13
+        item.jewelry_color || '',                                 // $14
+        parseFloat(item.metal_purity_value) || 0,                // $15
+        parseFloat(item.est_metal_value) || 0,                       // $16
+        item.primary_gem_type || null,                             // $17
+        item.primary_gem_category || null,                      // $18
+        parseFloat(item.primary_gem_size) || null,                             // $19
+        parseInt(item.primary_gem_quantity) || 0,                // $20
+        item.primary_gem_shape || null,                            // $21
+        parseFloat(item.primary_gem_weight) || 0,                // $22
+        item.primary_gem_color || null,                            // $23
+        item.primary_gem_exact_color || null,                      // $24
+        item.primary_gem_clarity || null,                          // $25
+        item.primary_gem_cut || null,                              // $26
+        item.primary_gem_lab_grown || false,                     // $27
+        item.primary_gem_authentic || false,                     // $28
+        parseFloat(item.primary_gem_value) || 0,                 // $29
+        item.secondary_gem_type || null,                           // $30
+        item.secondary_gem_category || null,                       // $31
+        parseFloat(item.secondary_gem_size) || null,                           // $32
+        parseInt(item.secondary_gem_quantity) || 0,              // $33
+        item.secondary_gem_shape || null,                          // $34
+        parseFloat(item.secondary_gem_weight) || 0,              // $35
+        item.secondary_gem_color || null,                          // $36
+        item.secondary_gem_exact_color || null,                    // $37
+        item.secondary_gem_clarity || null,                        // $38
+        item.secondary_gem_cut || null,                            // $39
+        item.secondary_gem_lab_grown || false,                   // $40
+        item.secondary_gem_authentic || false,                   // $41
+        parseFloat(item.secondary_gem_value) || 0,               // $42
+        item.buy_price,    // $43
+        item.pawn_price,   // $44
+        item.retail_price, // $45
+        'HOLD',         //46
+        'SOUTH STORE',          // $47
+        'GOOD'          // $48
+      ];
+
+      return client.query(jewelryQuery, jewelryValues);
+    });
+
+    const results = await Promise.all(jewelryPromises);
+    await client.query('COMMIT');
+    
+    res.status(201).json(results.map(r => r.rows[0]));
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error creating jewelry items:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
+  }
+});
+
 // Quote Expiration Configuration API Endpoints
 app.get('/api/quote-expiration/config', async (req, res) => {
   try {
@@ -1096,7 +1287,7 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
 //   }
 // });
 
-app.get('/api/customers/search', authenticateToken, async (req, res) => {
+app.get('/api/customers/search', async (req, res) => {
   const client = await pool.connect();
   try {
     const { firstName, lastName, phone } = req.query;
@@ -1229,18 +1420,19 @@ app.get('/api/transactions', async (req, res) => {
     const query = `
       SELECT 
         t.*,
-        COALESCE(json_agg(
-          json_build_object(
-            'id', ti.id,
-            'image_url', ti.image_url,
-            'is_primary', ti.is_primary
-          )
-        ) FILTER (WHERE ti.id IS NOT NULL), '[]') as images,
-        CAST(t.price AS FLOAT) as price,
+        tt.type as transaction_type_name,
+        c.first_name as customer_first_name,
+        c.last_name as customer_last_name,
+        e.first_name as employee_first_name,
+        e.last_name as employee_last_name,
+        p.payment_id as payment_reference,
         TO_CHAR(t.created_at, 'YYYY-MM-DD') as created_date
       FROM transactions t
-      LEFT JOIN transaction_images ti ON t.id = ti.transaction_id
-      GROUP BY t.id
+      LEFT JOIN transaction_type tt ON t.transaction_type = tt.id
+      LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN employees e ON t.employee_id = e.employee_id
+      LEFT JOIN payments p ON t.payment_id = p.id
+      GROUP BY t.id, tt.type, c.first_name, c.last_name, e.first_name, e.last_name, p.payment_id
       ORDER BY t.created_at DESC
     `;
     
@@ -1256,311 +1448,212 @@ app.get('/api/transactions/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Get transaction details
     const transactionQuery = `
       SELECT 
-        t.id,
-        t.transaction_id,
-        t.customer_id,
-        t.transaction_type,
-        t.estimated_value,
-        t.metal_purity,
-        t.weight,
-        t.category,
-        t.metal_type,
-        t.primary_gem,
-        t.secondary_gem,
-        t.price,
-        t.payment_method,
-        t.inventory_status,
-        t.created_at,
-        c.first_name,
-        c.last_name,
-        c.email,
-        c.phone
+        t.*,
+        tt.type as transaction_type_name,
+        c.first_name as customer_first_name,
+        c.last_name as customer_last_name,
+        c.email as customer_email,
+        c.phone as customer_phone,
+        e.first_name as employee_first_name,
+        e.last_name as employee_last_name,
+        p.payment_id as payment_reference,
+        p.payment_method,
+        p.amount as payment_amount
       FROM transactions t
+      LEFT JOIN transaction_type tt ON t.transaction_type = tt.id
       LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN employees e ON t.employee_id = e.employee_id
+      LEFT JOIN payments p ON t.payment_id = p.id
       WHERE t.id = $1
     `;
-    
-    const imagesQuery = `
-      SELECT id, image_url, is_primary, created_at
-      FROM transaction_images
-      WHERE transaction_id = $1
-      ORDER BY is_primary DESC, created_at ASC
-    `;
 
-    const [transactionResult, imagesResult] = await Promise.all([
-      pool.query(transactionQuery, [id]),
-      pool.query(imagesQuery, [id])
-    ]);
+    const transactionResult = await pool.query(transactionQuery, [id]);
     
     if (transactionResult.rows.length === 0) {
       return res.status(404).json({ error: 'Transaction not found' });
     }
     
-    // Combine transaction with its images
-    const transaction = transactionResult.rows[0];
-    transaction.images = imagesResult.rows;
-    
-    res.json(transaction);
+    res.json(transactionResult.rows[0]);
   } catch (err) {
     console.error('Error fetching transaction:', err);
     res.status(500).json({ error: 'Failed to fetch transaction' });
   }
 });
 
-// Function to generate transaction ID
-async function generateTransactionId(maxAttempts = 10) {
-  const prefix = 'TSD';  
-  let attempts = 0;
-  let isUnique = false;
-  let transactionId;
-
-  while (!isUnique && attempts < maxAttempts) {
-    attempts++;
-    // Generate a random 6-digit number
-    const randomNum = Math.floor(100000 + Math.random() * 900000);
-    transactionId = `${prefix}${randomNum}`;
-
-    try {
-      // Check if this ID already exists in the database
-      const checkQuery = 'SELECT COUNT(*) FROM transactions WHERE transaction_id = $1';
-      const result = await pool.query(checkQuery, [transactionId]);
-      
-      if (result.rows[0].count === '0') {
-        isUnique = true;
-      }
-    } catch (err) {
-      console.error('Error checking transaction ID uniqueness:', err);
-      throw new Error('Failed to generate unique transaction ID');
-    }
-  }
-
-  if (!isUnique) {
-    throw new Error('Failed to generate unique transaction ID after maximum attempts');
-  }
-
-  return transactionId;
-}
-
 app.post('/api/transactions', async (req, res) => {
+  const client = await pool.connect();
   try {
+    console.log("response", req.body);
     const {
       customer_id,
-      transaction_type,
-      estimated_value,
-      metal_purity,
-      weight,
-      category,
-      metal_type,
-      primary_gem,
-      secondary_gem,
+      employee_id,
+      transaction_type_id,
       price,
-      payment_method,
-      inventory_status,
-      images // Array of {url, isPrimary} objects
+      transaction_status,
+      transaction_date
     } = req.body;
 
     // Required fields validation
-    if (!customer_id || !transaction_type || !estimated_value || !price || !payment_method) {
+    if (!customer_id || !employee_id || !transaction_type_id || !price ) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    await client.query('BEGIN');
+
     // Generate unique transaction ID
-    let transactionId;
-    try {
-      transactionId = await generateTransactionId();
-    } catch (err) {
-      console.error('Transaction ID generation error:', err);
-      return res.status(500).json({ error: 'Failed to generate transaction ID', details: err.message });
-    }
+    const transactionId = await generateTransactionId();
 
-    // Begin transaction
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    // Create payment records
+    const paymentQuery = `
+      INSERT INTO payments (transaction_id, amount, payment_method)
+      VALUES ($1, $2, $3)
+      RETURNING id
+    `;
+    const paymentResult = await client.query(paymentQuery, [
+      transactionId,
+      price,
+      payment_method
+    ]);
+    const paymentId = paymentResult.rows[0].id;
 
-      // Insert transaction
-      const transactionQuery = `
-        INSERT INTO transactions (
-          transaction_id,
-          customer_id,
-          transaction_type,
-          estimated_value,
-          metal_purity,
-          weight,
-          category,
-          metal_type,
-          primary_gem,
-          secondary_gem,
-          price,
-          payment_method,
-          inventory_status,
-          created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)
-        RETURNING 
-          id,
-          transaction_id,
-          customer_id,
-          transaction_type,
-          estimated_value,
-          metal_purity,
-          weight,
-          category,
-          metal_type,
-          primary_gem,
-          secondary_gem,
-          price,
-          payment_method,
-          inventory_status,
-          created_at
-      `;
+    // Insert transaction
+    const transactionQuery = `
+      INSERT INTO transactions (
+        transaction_id, customer_id, employee_id, 
+        transaction_type_id, total_amount, 
+        transaction_status, transaction_date
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id
+    `;
 
-      const transactionResult = await client.query(transactionQuery, [
-        transactionId,
-        customer_id,
-        transaction_type,
-        estimated_value,
-        metal_purity,
-        weight,
-        category,
-        metal_type,
-        primary_gem,
-        secondary_gem,
-        price,
-        payment_method,
-        'HOLD'
-      ]);
+    const transactionResult = await client.query(transactionQuery, [
+      transactionId,
+      customer_id,
+      employee_id,
+      transaction_type_id,
+      price,
+      transaction_status,
+      transaction_date
+    ]);
+    const transactionDbId = transactionResult.rows[0].id;
 
-      const transaction = transactionResult.rows[0];
+    await client.query('COMMIT');
 
-      // Save images if provided
-      let savedImages = [];
-      if (images && images.length > 0) {
-        const imageQuery = `
-          INSERT INTO transaction_images (
-            transaction_id, 
-            image_url, 
-            is_primary
-          )
-          VALUES ($1, $2, $3)
-          RETURNING id, image_url, is_primary
-        `;
-
-        // Ensure only one primary image
-        const hasPrimary = images.some(img => img.isPrimary);
-        savedImages = await Promise.all(
-          images.map((img, index) => {
-            // If no primary image was specified, make the first image primary
-            const isPrimary = img.isPrimary || (!hasPrimary && index === 0);
-            return client.query(imageQuery, [
-              transaction.id,
-              img.url,
-              isPrimary
-            ]).then(result => result.rows[0]);
-          })
-        );
-      }
-
-      await client.query('COMMIT');
-
-      // Return transaction with images
-      res.status(201).json({
-        ...transaction,
-        images: savedImages
-      });
-
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    // Fetch and return the complete transaction
+    const getTransactionQuery = `
+      SELECT 
+        t.*,
+        tt.type as transaction_type_name,
+        c.first_name as customer_first_name,
+        c.last_name as customer_last_name,
+        e.first_name as employee_first_name,
+        e.last_name as employee_last_name,
+        p.payment_id as payment_reference,
+        p.payment_method
+      FROM transactions t
+      LEFT JOIN transaction_type tt ON t.transaction_type = tt.id
+      LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN employees e ON t.employee_id = e.employee_id
+      LEFT JOIN payments p ON t.payment_id = p.id
+      WHERE t.id = $1
+      GROUP BY t.id, tt.type, c.first_name, c.last_name, e.first_name, e.last_name, p.payment_id, p.payment_method
+    `;
+    const result = await pool.query(getTransactionQuery, [transactionDbId]);
+    res.status(201).json(result.rows[0]);
 
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('Error creating transaction:', err);
     res.status(500).json({ error: 'Failed to create transaction', details: err.message });
+  } finally {
+    client.release();
   }
 });
 
 app.put('/api/transactions/:id', async (req, res) => {
+  const client = await pool.connect();
   try {
     const { id } = req.params;
     const {
       transaction_type,
-      estimated_value,
-      metal_purity,
-      weight,
-      category,
-      metal_type,
-      primary_gem,
-      secondary_gem,
       price,
-      payment_method,
-      inventory_status
+      payment_method
     } = req.body;
 
-    // First check if transaction exists
-    const checkQuery = 'SELECT * FROM transactions WHERE id = $1';
-    const checkResult = await pool.query(checkQuery, [id]);
+    await client.query('BEGIN');
+
+    // First check if transaction exists and get current payment_id
+    const checkQuery = 'SELECT payment_id FROM transactions WHERE id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
     
     if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Transaction not found' });
     }
 
+    const currentPaymentId = checkResult.rows[0].payment_id;
+
+    // Update payment if payment details changed
+    if (price || payment_method) {
+      const paymentQuery = `
+        UPDATE payments 
+        SET 
+          amount = COALESCE($1, amount),
+          payment_method = COALESCE($2, payment_method)
+        WHERE id = $3
+      `;
+      await client.query(paymentQuery, [price, payment_method, currentPaymentId]);
+    }
+
+    // Update transaction
     const query = `
       UPDATE transactions 
       SET 
         transaction_type = COALESCE($1, transaction_type),
-        estimated_value = COALESCE($2, estimated_value),
-        metal_purity = COALESCE($3, metal_purity),
-        weight = COALESCE($4, weight),
-        category = COALESCE($5, category),
-        metal_type = COALESCE($6, metal_type),
-        primary_gem = COALESCE($7, primary_gem),
-        secondary_gem = COALESCE($8, secondary_gem),
-        price = COALESCE($9, price),
-        payment_method = COALESCE($10, payment_method),
-        inventory_status = COALESCE($11, inventory_status)
-      WHERE id = $12
-      RETURNING 
-        id,
-        transaction_id,
-        customer_id,
-        transaction_type,
-        estimated_value,
-        metal_purity,
-        weight,
-        category,
-        metal_type,
-        primary_gem,
-        secondary_gem,
-        price,
-        payment_method,
-        inventory_status,
-        created_at
+        price = COALESCE($2, price)
+      WHERE id = $3
+      RETURNING id
     `;
     
-    const result = await pool.query(query, [
+    await client.query(query, [
       transaction_type,
-      estimated_value,
-      metal_purity,
-      weight,
-      category,
-      metal_type,
-      primary_gem,
-      secondary_gem,
       price,
-      payment_method,
-      inventory_status,
       id
     ]);
 
-    res.json(result.rows[0]);
+    await client.query('COMMIT');
+
+    // Fetch and return updated transaction with all related data
+    const getTransactionQuery = `
+      SELECT 
+        t.*,
+        tt.type as transaction_type_name,
+        c.first_name as customer_first_name,
+        c.last_name as customer_last_name,
+        e.first_name as employee_first_name,
+        e.last_name as employee_last_name,
+        p.payment_id as payment_reference,
+        p.payment_method
+      FROM transactions t
+      LEFT JOIN transaction_type tt ON t.transaction_type = tt.id
+      LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN employees e ON t.employee_id = e.employee_id
+      LEFT JOIN payments p ON t.payment_id = p.id
+      WHERE t.id = $1
+      GROUP BY t.id, tt.type, c.first_name, c.last_name, e.first_name, e.last_name, p.payment_id, p.payment_method
+    `;
+    const updatedTransaction = await client.query(getTransactionQuery, [id]);
+    res.json(updatedTransaction.rows[0]);
+
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('Error updating transaction:', err);
     res.status(500).json({ error: 'Failed to update transaction', details: err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -1588,141 +1681,6 @@ app.get('/api/jewelry/prefix/:prefix', async (req, res) => {
   } catch (error) {
     console.error('Error fetching jewelry items:', error);
     res.status(500).json({ error: error.message });
-  }
-});
-
-// Add jewelry item endpoint
-app.post('/api/jewelry', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    
-    const { cartItems } = req.body;
-
-    // Process each cart item
-    const jewelryItems = await Promise.all(cartItems.map(async item => {
-      // Insert jewelry record
-      const jewelryQuery = `
-        INSERT INTO jewelry (
-          item_id,
-          long_desc,
-          short_desc,
-          category,
-          brand,
-          damages,
-          vintage,
-          stamps,
-          images,
-          metal_weight,
-          precious_metal_type,
-          non_precious_metal_type,
-          metal_purity,
-          jewelry_color,
-          purity_value,
-          est_metal_value,
-          primary_gem_type,
-          primary_gem_category,
-          primary_gem_size,
-          primary_gem_quantity,
-          primary_gem_shape,
-          primary_gem_weight,
-          primary_gem_color,
-          primary_gem_exact_color,
-          primary_gem_clarity,
-          primary_gem_cut,
-          primary_gem_lab_grown,
-          primary_gem_authentic,
-          primary_gem_value,
-          secondary_gem_type,
-          secondary_gem_category,
-          secondary_gem_size,
-          secondary_gem_quantity,
-          secondary_gem_shape,
-          secondary_gem_weight,
-          secondary_gem_color,
-          secondary_gem_exact_color,
-          secondary_gem_clarity,
-          secondary_gem_cut,
-          secondary_gem_lab_grown,
-          secondary_gem_authentic,
-          secondary_gem_value,
-          buy_price,
-          pawn_value,
-          retail_price,
-          status,
-          location,
-          condition,
-          created_at,
-          updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 
-                 $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, 
-                 $41, $42, $43, $44, $45, $46, $47, $48, NOW(), NOW())
-        RETURNING *`;
-
-      // Map cart item fields to jewelry table fields
-      const jewelryValues = [
-        item.item_id,                                              // $1
-        item.long_desc || '',                                    // $2
-        item.short_desc || '',                             // $3
-        item.metal_category || '',                                // $4
-        item.brand || '',                                         // $5
-        item.damages || '',                                       // $6
-        item.vintage || false,                                    // $7
-        item.stamps || '',                                        // $8
-        JSON.stringify(item.images || []),                        // $9
-        parseFloat(item.metal_weight) || 0,                       // $10
-        item.precious_metal_type || '',                                    // $11
-        item.non_precious_metal_type || '',                       // $12
-        item.metal_purity || '',                                  // $13
-        item.jewelry_color || '',                                 // $14
-        parseFloat(item.metal_purity_value) || 0,                // $15
-        parseFloat(item.est_metal_value) || 0,                       // $16
-        item.primary_gem_type || '',                             // $17
-        item.primary_gem_category || '',                      // $18
-        item.primary_gem_size || 0,                             // $19
-        item.primary_gem_quantity || 0,                // $20
-        item.primary_gem_shape || '',                            // $21
-        parseFloat(item.primary_gem_weight) || 0,                // $22
-        item.primary_gem_color || '',                            // $23
-        item.primary_gem_exact_color || '',                      // $24
-        item.primary_gem_clarity || '',                          // $25
-        item.primary_gem_cut || '',                              // $26
-        item.primary_gem_lab_grown || false,                     // $27
-        item.primary_gem_authentic || false,                     // $28
-        parseFloat(item.primary_gem_value) || 0,                 // $29
-        item.secondary_gem_type || '',                           // $30
-        item.secondary_gem_category || '',                       // $31
-        item.secondary_gem_size || 0,                           // $32
-        item.secondary_gem_quantity || 0,              // $33
-        item.secondary_gem_shape || '',                          // $34
-        parseFloat(item.secondary_gem_weight) || 0,              // $35
-        item.secondary_gem_color || '',                          // $36
-        item.secondary_gem_exact_color || '',                    // $37
-        item.secondary_gem_clarity || '',                        // $38
-        item.secondary_gem_cut || '',                            // $39
-        item.secondary_gem_lab_grown || false,                   // $40
-        item.secondary_gem_authentic || false,                   // $41
-        parseFloat(item.secondary_gem_value) || 0,               // $42
-        item.buy_price,    // $43
-        item.pawn_value,   // $44
-        item.retail_price, // $45
-        'HOLD',                                                // $46
-        'SOUTH STORE',                                                 // $47
-        'GOOD'                                                   // $48
-      ];
-
-      const result = await client.query(jewelryQuery, jewelryValues);
-      return result.rows[0];
-    }));
-
-    await client.query('COMMIT');
-    res.status(201).json(jewelryItems);
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error creating jewelry items:', error);
-    res.status(500).json({ error: error.message });
-  } finally {
-    client.release();
   }
 });
 

@@ -208,9 +208,10 @@ function Jewellery() {
                 {/* Image */}
                 <Box sx={{ width: '120px', height: '120px', flexShrink: 0 }}>
                   <img 
-                    src={selectedItem.images?.find(img => img.is_primary)?.image_url || 
-                         selectedItem.images?.[0]?.image_url || 
-                         'placeholder-image-url.jpg'} 
+                    src={Array.isArray(selectedItem.images) ? 
+                      (selectedItem.images.find(img => img.is_primary)?.image_url || 
+                       selectedItem.images[0]?.image_url) : 
+                      'placeholder-image-url.jpg'} 
                     alt={selectedItem.name || 'Item'}
                     style={{
                       width: '100%',
