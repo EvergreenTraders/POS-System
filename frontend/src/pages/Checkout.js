@@ -114,57 +114,73 @@ function Checkout() {
         throw new Error('Authentication token not found');
       }
 
+      const paymentAmount = parseFloat(paymentDetails.cashAmount) || 0;
+      if (paymentAmount <= 0) {
+        setSnackbar({
+          open: true,
+          message: 'Invalid payment amount',
+          severity: 'error'
+        });
+        return;
+      }
+
       // Get employee ID from token
       const employeeId = JSON.parse(atob(token.split('.')[1])).id;
 
-      // Create jewelry items first
+      // First create the jewelry items
       const jewelryResponse = await axios.post(
         `${config.apiUrl}/jewelry`,
+        { cartItems },
         {
-          cartItems: cartItems.map(item => ({
-            ...item,
-            images: item.images ? item.images.map((img, index) => ({
-              url: img.url,
-              is_primary: img.isPrimary || (!item.images.some(i => i.isPrimary) && index === 0)
-            })) : []
-          }))
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+
+      const createdJewelryItems = jewelryResponse.data; // Array of all created jewelry items
+
+      // Create transactions for all items
+      const transactionResponse = await axios.post(
+        `${config.apiUrl}/transactions`,
+        {
+          customer_id: selectedCustomer.id,
+          employee_id: employeeId,
+          total_amount: calculateTotal(),
+          cartItems: createdJewelryItems.map((item, index) => {
+            const type = cartItems[index].transaction_type.toLowerCase();
+            return {
+              item_id: item.item_id,
+              transaction_type_id: transactionTypes[type],
+              price: cartItems[index].price
+            };
+          }),
+          transaction_status: 'PENDING',
+          transaction_date: new Date().toISOString().split('T')[0]
         },
         {
           headers: { Authorization: `Bearer ${token}` }
         }
       );
 
-      // Create transactions for each jewelry item
-      const transactionPromises = jewelryResponse.data.map((jewelry, index) => {
-        const transaction_type_id = transactionTypes[cartItems[index].transaction_type];
-        if (!transaction_type_id) {
-          throw new Error(`Invalid transaction type: ${cartItems[index].transaction_type}`);
+      // Process payment
+      await axios.post(
+        `${config.apiUrl}/payments`,
+        {
+          transaction_id: transactionResponse.data.transaction.transaction_id,
+          amount: paymentAmount,
+          payment_method: paymentMethod.toUpperCase()
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` }
         }
-        return axios.post(
-          `${config.apiUrl}/transactions`,
-          {
-            customer_id: selectedCustomer.id,
-            employee_id: employeeId,
-            transaction_type_id: transaction_type_id,
-            price: parseFloat(cartItems[index].price),
-            transaction_status: 'PENDING',
-            transaction_date: new Date().toISOString().split('T')[0]
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` }
-          }
-        );
-      });
+      );
 
-      const results = await Promise.all(transactionPromises);
-      
       setSnackbar({
         open: true,
         message: 'Payment processed successfully',
         severity: 'success'
       });
+
       clearCart();
-      // Navigate back to estimation with auth state preserved
       navigate('/gem-estimator', { 
         state: { 
           from: 'checkout'
@@ -172,7 +188,6 @@ function Checkout() {
       });
     } catch (error) {
       if (error.message === 'Authentication token not found') {
-        // Preserve cart state and redirect to login
         sessionStorage.setItem('redirectAfterLogin', '/checkout');
         navigate('/login');
       } else {

@@ -55,73 +55,84 @@ async function generateTransactionId() {
   try {
     // Get the latest transaction ID
     const result = await client.query(
-      'SELECT transaction_id FROM transactions ORDER BY created_at DESC LIMIT 1'
+      'SELECT transaction_id FROM transactions WHERE transaction_id LIKE $1 ORDER BY transaction_id DESC LIMIT 1',
+      ['TSD%']
     );
-    
-    let nextNumber = 1; // Start from 1 if no existing transactions
-    
+
+    let nextNumber = 1; // Start from 1 if no existing IDs
+
     if (result.rows.length > 0) {
+      // Extract number from last ID and increment
       const lastId = result.rows[0].transaction_id;
-      const lastNumber = parseInt(lastId.slice(3)); // Remove 'TSD' prefix
+      const lastNumber = parseInt(lastId.substring(3));
       nextNumber = lastNumber + 1;
-      
-      // Reset to 1 if we exceed 999999
+    }
+
+    // Keep incrementing until we find an unused ID
+    let isUnique = false;
+    let transactionId;
+    
+    while (!isUnique) {
       if (nextNumber > 999999) {
-        nextNumber = 1;
+        nextNumber = 1; // Reset if we exceed 6 digits
+      }
+      
+      transactionId = `TSD${nextNumber.toString().padStart(6, '0')}`;
+      
+      // Check if this ID exists
+      const existingId = await client.query(
+        'SELECT transaction_id FROM transactions WHERE transaction_id = $1',
+        [transactionId]
+      );
+      
+      if (existingId.rows.length === 0) {
+        isUnique = true;
+      } else {
+        nextNumber++;
       }
     }
     
-    return `TSD${nextNumber.toString().padStart(6, '0')}`;
+    return transactionId;
+  } catch (error) {
+    console.error('Error in generateTransactionId:', error);
+    throw error;
   } finally {
     client.release();
   }
 }
 
 // Function to generate unique item ID
-async function generateItemId(metalCategory) {
-  const client = await pool.connect();
+async function generateItemId(metalCategory, client, usedIds = new Set()) {
   try {
     // Get first 4 letters of metal category, uppercase and padded with X if needed
     const prefix = (metalCategory || 'METL').toUpperCase().slice(0, 4).padEnd(4, 'X');
     
-    // Get the highest sequence number for this prefix
-    const result = await client.query(
-      'SELECT item_id FROM jewelry WHERE item_id LIKE $1 ORDER BY CAST(SUBSTRING(item_id, 5) AS INTEGER) DESC LIMIT 1',
+    // Get all existing IDs for this prefix
+    const existingIds = await client.query(
+      'SELECT item_id FROM jewelry WHERE item_id LIKE $1 FOR UPDATE',
       [prefix + '%']
     );
     
+    // Create a set of used sequence numbers from both database and current transaction
+    const allUsedIds = new Set([...existingIds.rows.map(r => r.item_id), ...usedIds]);
+    
+    // Find the first available number
     let nextNumber = 1;
-    
-    if (result.rows.length > 0) {
-      const lastId = result.rows[0].item_id;
-      const lastNumber = parseInt(lastId.slice(4)); // Remove prefix
-      nextNumber = lastNumber + 1;
-      
-      // Reset to 1 if we exceed 999
-      if (nextNumber > 999) {
-        nextNumber = 1;
-      }
-    }
-
-    // Keep trying until we find an unused ID
     let newItemId;
-    let exists = true;
-    while (exists) {
+    
+    while (nextNumber <= 999) {
       newItemId = `${prefix}${nextNumber.toString().padStart(3, '0')}`;
-      const checkResult = await client.query(
-        'SELECT EXISTS(SELECT 1 FROM jewelry WHERE item_id = $1)',
-        [newItemId]
-      );
-      exists = checkResult.rows[0].exists;
-      if (exists) {
-        nextNumber++;
-        if (nextNumber > 999) nextNumber = 1;
+      
+      if (!allUsedIds.has(newItemId)) {
+        return newItemId;
       }
+      nextNumber++;
     }
     
-    return newItemId;
-  } finally {
-    client.release();
+    throw new Error(`No available sequence numbers for prefix ${prefix}`);
+  } catch (error) {
+    console.error('Error in generateItemId:', error);
+    throw error;
   }
 }
 
@@ -833,9 +844,9 @@ app.post('/api/quotes', async (req, res) => {
       details: err.message,
       stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
-  } finally {
-    client.release();
-  }
+    } finally {
+        client.release();
+    }
 });
 
 app.get('/api/quotes', async (req, res) => {
@@ -930,9 +941,9 @@ app.put('/api/quotes/:id', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error updating quote:', err);
     res.status(500).json({ error: 'Failed to update quote', details: err.message });
-  } finally {
-    client.release();
-  }
+    } finally {
+        client.release();
+    }
 });
 
 app.delete('/api/quotes/:id', async (req, res) => {
@@ -991,9 +1002,9 @@ app.put('/api/jewelry/:id', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error updating jewelry prices:', err);
     res.status(500).json({ error: 'Failed to update jewelry prices', details: err.message });
-  } finally {
-    client.release();
-  }
+    } finally {
+        client.release();
+    }
 });
 
 // Get all jewelry items
@@ -1022,11 +1033,14 @@ app.post('/api/jewelry', async (req, res) => {
     await client.query('BEGIN');
     
     const { cartItems } = req.body;
+    const results = [];
+    const usedIds = new Set();
     
-    // Insert each jewelry item
-    const jewelryPromises = cartItems.map(async item => {
-      // Generate unique item ID
-      const item_id = await generateItemId(item.metal_category);
+    // Process each item sequentially
+    for (const item of cartItems) {
+      // Generate unique item ID, passing the set of IDs we've already used in this transaction
+      const item_id = await generateItemId(item.metal_category, client, usedIds);
+      usedIds.add(item_id);
       
       // Insert jewelry record
       const jewelryQuery = `
@@ -1133,20 +1147,19 @@ app.post('/api/jewelry', async (req, res) => {
         'GOOD'          // $48
       ];
 
-      return client.query(jewelryQuery, jewelryValues);
-    });
+      const result = await client.query(jewelryQuery, jewelryValues);
+      results.push(result.rows[0]);
+    }
 
-    const results = await Promise.all(jewelryPromises);
     await client.query('COMMIT');
-    
-    res.status(201).json(results.map(r => r.rows[0]));
+    res.status(201).json(results);
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error creating jewelry items:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  } finally {
-    client.release();
-  }
+    res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
 });
 
 // Quote Expiration Configuration API Endpoints
@@ -1209,9 +1222,9 @@ app.put('/api/quote-expiration/config', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error creating quote expiration config:', err);
     res.status(500).json({ error: 'Failed to create quote expiration configuration' });
-  } finally {
-    client.release();
-  }
+    } finally {
+        client.release();
+    }
 });
 
 // Inventory Hold Period Configuration API Endpoints
@@ -1268,9 +1281,9 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error creating inventory hold period config:', err);
     res.status(500).json({ error: 'Failed to create inventory hold period configuration' });
-  } finally {
-    client.release();
-  }
+    } finally {
+        client.release();
+    }
 });
 
 // Customer routes
@@ -1318,9 +1331,9 @@ app.get('/api/customers/search', async (req, res) => {
   } catch (err) {
     console.error('Error searching customers:', err);
     res.status(500).json({ error: 'Failed to search customers' });
-  } finally {
-    client.release();
-  }
+    } finally {
+        client.release();
+    }
 });
 
 app.get('/api/customers/:id', async (req, res) => {
@@ -1428,7 +1441,7 @@ app.get('/api/transactions', async (req, res) => {
         p.payment_id as payment_reference,
         TO_CHAR(t.created_at, 'YYYY-MM-DD') as created_date
       FROM transactions t
-      LEFT JOIN transaction_type tt ON t.transaction_type = tt.id
+      LEFT JOIN transaction_type tt ON t.transaction_type_id = tt.id
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN employees e ON t.employee_id = e.employee_id
       LEFT JOIN payments p ON t.payment_id = p.id
@@ -1462,7 +1475,7 @@ app.get('/api/transactions/:id', async (req, res) => {
         p.payment_method,
         p.amount as payment_amount
       FROM transactions t
-      LEFT JOIN transaction_type tt ON t.transaction_type = tt.id
+      LEFT JOIN transaction_type tt ON t.transaction_type_id = tt.id
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN employees e ON t.employee_id = e.employee_id
       LEFT JOIN payments p ON t.payment_id = p.id
@@ -1483,94 +1496,81 @@ app.get('/api/transactions/:id', async (req, res) => {
 });
 
 app.post('/api/transactions', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    console.log("response", req.body);
-    const {
-      customer_id,
-      employee_id,
-      transaction_type_id,
-      price,
-      transaction_status,
-      transaction_date
-    } = req.body;
+    const client = await pool.connect();
+    
+    try {
+        const {
+            customer_id,
+            employee_id,
+            total_amount,
+            cartItems,
+            transaction_status = 'PENDING',
+            transaction_date = new Date().toISOString().split('T')[0]
+        } = req.body;
 
-    // Required fields validation
-    if (!customer_id || !employee_id || !transaction_type_id || !price ) {
-      return res.status(400).json({ error: 'Missing required fields' });
+        // Required fields validation
+        if (!customer_id || !employee_id || !total_amount || !cartItems || !cartItems.length) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        await client.query('BEGIN');
+        
+        // Generate unique transaction ID
+        const transactionId = await generateTransactionId();
+
+        // Insert main transaction record
+        const transactionQuery = `
+            INSERT INTO transactions (
+                transaction_id, customer_id, employee_id,
+                total_amount, transaction_status, transaction_date
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
+        `;
+
+        const transactionResult = await client.query(transactionQuery, [
+            transactionId,
+            customer_id,
+            employee_id,
+            total_amount,
+            transaction_status,
+            transaction_date
+        ]);
+
+        // Insert items into transaction_items
+        for (const item of cartItems) {
+            const itemQuery = `
+                INSERT INTO transaction_items (
+                  transaction_id, item_id, transaction_type_id,
+                    item_price
+                )
+                VALUES ($1, $2, $3, $4)
+                RETURNING *
+            `;
+
+            await client.query(itemQuery, [
+                transactionId,
+                item.item_id,
+                item.transaction_type_id,
+                item.price
+            ]);
+        }
+
+        await client.query('COMMIT');
+        
+        res.status(201).json({
+            message: 'Transaction created successfully',
+            transaction: transactionResult.rows[0],
+            items: cartItems
+        });
+
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error creating transaction:', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
     }
-
-    await client.query('BEGIN');
-
-    // Generate unique transaction ID
-    const transactionId = await generateTransactionId();
-
-    // Create payment records
-    const paymentQuery = `
-      INSERT INTO payments (transaction_id, amount, payment_method)
-      VALUES ($1, $2, $3)
-      RETURNING id
-    `;
-    const paymentResult = await client.query(paymentQuery, [
-      transactionId,
-      price,
-      payment_method
-    ]);
-    const paymentId = paymentResult.rows[0].id;
-
-    // Insert transaction
-    const transactionQuery = `
-      INSERT INTO transactions (
-        transaction_id, customer_id, employee_id, 
-        transaction_type_id, total_amount, 
-        transaction_status, transaction_date
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id
-    `;
-
-    const transactionResult = await client.query(transactionQuery, [
-      transactionId,
-      customer_id,
-      employee_id,
-      transaction_type_id,
-      price,
-      transaction_status,
-      transaction_date
-    ]);
-    const transactionDbId = transactionResult.rows[0].id;
-
-    await client.query('COMMIT');
-
-    // Fetch and return the complete transaction
-    const getTransactionQuery = `
-      SELECT 
-        t.*,
-        tt.type as transaction_type_name,
-        c.first_name as customer_first_name,
-        c.last_name as customer_last_name,
-        e.first_name as employee_first_name,
-        e.last_name as employee_last_name,
-        p.payment_id as payment_reference,
-        p.payment_method
-      FROM transactions t
-      LEFT JOIN transaction_type tt ON t.transaction_type = tt.id
-      LEFT JOIN customers c ON t.customer_id = c.id
-      LEFT JOIN employees e ON t.employee_id = e.employee_id
-      LEFT JOIN payments p ON t.payment_id = p.id
-      WHERE t.id = $1
-      GROUP BY t.id, tt.type, c.first_name, c.last_name, e.first_name, e.last_name, p.payment_id, p.payment_method
-    `;
-    const result = await pool.query(getTransactionQuery, [transactionDbId]);
-    res.status(201).json(result.rows[0]);
-
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error creating transaction:', err);
-    res.status(500).json({ error: 'Failed to create transaction', details: err.message });
-  } finally {
-    client.release();
-  }
 });
 
 app.put('/api/transactions/:id', async (req, res) => {
@@ -1608,21 +1608,6 @@ app.put('/api/transactions/:id', async (req, res) => {
       await client.query(paymentQuery, [price, payment_method, currentPaymentId]);
     }
 
-    // Update transaction
-    const query = `
-      UPDATE transactions 
-      SET 
-        transaction_type = COALESCE($1, transaction_type),
-        price = COALESCE($2, price)
-      WHERE id = $3
-      RETURNING id
-    `;
-    
-    await client.query(query, [
-      transaction_type,
-      price,
-      id
-    ]);
 
     await client.query('COMMIT');
 
@@ -1638,7 +1623,7 @@ app.put('/api/transactions/:id', async (req, res) => {
         p.payment_id as payment_reference,
         p.payment_method
       FROM transactions t
-      LEFT JOIN transaction_type tt ON t.transaction_type = tt.id
+      LEFT JOIN transaction_type tt ON t.transaction_type_id = tt.id
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN employees e ON t.employee_id = e.employee_id
       LEFT JOIN payments p ON t.payment_id = p.id
@@ -1652,9 +1637,9 @@ app.put('/api/transactions/:id', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error updating transaction:', err);
     res.status(500).json({ error: 'Failed to update transaction', details: err.message });
-  } finally {
-    client.release();
-  }
+    } finally {
+        client.release();
+    }
 });
 
 // Transaction Types API Endpoints
@@ -1707,3 +1692,69 @@ function authenticateToken(req, res, next) {
     next();
   });
 }
+
+// Create payment endpoint
+app.post('/api/payments', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    const { transaction_id, amount, payment_method } = req.body;
+    console.log(req.body);
+    
+    // Validate payment method
+    if (!['CASH', 'CREDIT_CARD', 'DEBIT_CARD', 'BANK_TRANSFER', 'CHECK'].includes(payment_method)) {
+      throw new Error('Invalid payment method');
+    }
+    
+    // Get transaction and validate amount
+    const transactionResult = await client.query(
+      'SELECT * FROM transactions WHERE transaction_id = $1 FOR UPDATE',
+      [transaction_id]
+    );
+    
+    if (transactionResult.rows.length === 0) {
+      throw new Error('Transaction not found');
+    }
+    
+    const transaction = transactionResult.rows[0];
+    
+    // Get total payments made so far
+    const paymentsResult = await client.query(
+      'SELECT COALESCE(SUM(amount), 0) as paid_amount FROM payments WHERE transaction_id = $1',
+      [transaction_id]
+    );
+    
+    const paidAmount = parseFloat(paymentsResult.rows[0].paid_amount);
+    const newTotalPaid = paidAmount + parseFloat(amount);
+    
+    if (newTotalPaid > transaction.total_amount) {
+      throw new Error('Payment amount exceeds remaining balance');
+    }
+    
+    // Create payment record
+    const paymentResult = await client.query(
+      `INSERT INTO payments (
+        transaction_id, amount, payment_method
+      ) VALUES ($1, $2, $3) RETURNING *`,
+      [transaction_id, amount, payment_method]
+    );
+    
+    // Update transaction status if fully paid
+    if (Math.abs(newTotalPaid - transaction.total_amount) < 0.01) {
+      await client.query(
+        'UPDATE transactions SET transaction_status = $1 WHERE transaction_id = $2',
+        ['COMPLETED', transaction_id]
+      );
+    }
+    
+    await client.query('COMMIT');
+    res.status(201).json(paymentResult.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error processing payment:', error);
+    res.status(500).json({ error: error.message });
+    } finally {
+        client.release();
+    }
+});
