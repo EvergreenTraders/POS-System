@@ -49,10 +49,7 @@ function Checkout() {
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentDetails, setPaymentDetails] = useState({
     cashAmount: '',
-    cardNumber: '',
-    expiryDate: '',
-    cvv: '',
-    cardholderName: '',
+    cardNumber: ''
   });
 
   const [loading, setLoading] = useState(false);
@@ -63,6 +60,18 @@ function Checkout() {
   });
 
   const [transactionTypes, setTransactionTypes] = useState({});
+  const [remainingAmount, setRemainingAmount] = useState(0);
+  const [transactionCreated, setTransactionCreated] = useState(false);
+  const [currentTransactionId, setCurrentTransactionId] = useState(null);
+  const [payments, setPayments] = useState([]);
+
+  // Initialize or update remaining amount when cart changes
+  useEffect(() => {
+    const total = calculateTotal();
+    if (!transactionCreated) {
+      setRemainingAmount(total);
+    }
+  }, [cartItems, transactionCreated]);
 
   // Fetch transaction types on component mount
   useEffect(() => {
@@ -89,14 +98,39 @@ function Checkout() {
 
   const handlePaymentMethodChange = (event) => {
     setPaymentMethod(event.target.value);
+    // Reset cash amount when switching payment methods
+    setPaymentDetails({
+      ...paymentDetails,
+      cashAmount: ''
+    });
   };
 
   const handleInputChange = (field) => (event) => {
+    const value = event.target.value;
+    // Validate amount to not exceed remaining amount
+    if (field === 'cashAmount') {
+      const amount = parseFloat(value) || 0;
+      if (amount > remainingAmount) {
+        setSnackbar({
+          open: true,
+          message: `Amount cannot exceed remaining balance of $${remainingAmount.toFixed(2)}`,
+          severity: 'warning'
+        });
+        return;
+      }
+    }
     setPaymentDetails({
       ...paymentDetails,
-      [field]: event.target.value,
+      [field]: value,
     });
   };
+
+  // Initialize remaining amount when component mounts or cart changes
+  useEffect(() => {
+    if (!transactionCreated) {
+      setRemainingAmount(calculateTotal());
+    }
+  }, [transactionCreated, calculateTotal]);
 
   const handleSubmit = async () => {
     if (!selectedCustomer?.id) {
@@ -114,39 +148,49 @@ function Checkout() {
         throw new Error('Authentication token not found');
       }
 
+      const paymentAmount = parseFloat(paymentDetails.cashAmount) || 0;
+      if (paymentAmount <= 0 || paymentAmount > remainingAmount) {
+        setSnackbar({
+          open: true,
+          message: paymentAmount <= 0 ? 'Invalid payment amount' : 'Payment amount exceeds remaining balance',
+          severity: 'error'
+        });
+        return;
+      }
+
       // Get employee ID from token
       const employeeId = JSON.parse(atob(token.split('.')[1])).id;
 
-      // Create jewelry items first
-      const jewelryResponse = await axios.post(
-        `${config.apiUrl}/jewelry`,
-        {
-          cartItems: cartItems.map(item => ({
-            ...item,
-            images: item.images ? item.images.map((img, index) => ({
-              url: img.url,
-              is_primary: img.isPrimary || (!item.images.some(i => i.isPrimary) && index === 0)
-            })) : []
-          }))
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
+      let transactionId;
 
-      // Create transactions for each jewelry item
-      const transactionPromises = jewelryResponse.data.map((jewelry, index) => {
-        const transaction_type_id = transactionTypes[cartItems[index].transaction_type];
-        if (!transaction_type_id) {
-          throw new Error(`Invalid transaction type: ${cartItems[index].transaction_type}`);
-        }
-        return axios.post(
+      // Only create jewelry items and transaction once
+      if (!transactionCreated) {
+        // First create the jewelry items
+        const jewelryResponse = await axios.post(
+          `${config.apiUrl}/jewelry`,
+          { cartItems },
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+
+        const createdJewelryItems = jewelryResponse.data;
+
+        // Create transactions for all items
+        const transactionResponse = await axios.post(
           `${config.apiUrl}/transactions`,
           {
             customer_id: selectedCustomer.id,
             employee_id: employeeId,
-            transaction_type_id: transaction_type_id,
-            price: parseFloat(cartItems[index].price),
+            total_amount: calculateTotal(),
+            cartItems: createdJewelryItems.map((item, index) => {
+              const type = cartItems[index].transaction_type.toLowerCase();
+              return {
+                item_id: item.item_id,
+                transaction_type_id: transactionTypes[type],
+                price: cartItems[index].price
+              };
+            }),
             transaction_status: 'PENDING',
             transaction_date: new Date().toISOString().split('T')[0]
           },
@@ -154,25 +198,83 @@ function Checkout() {
             headers: { Authorization: `Bearer ${token}` }
           }
         );
+
+        transactionId = transactionResponse.data.transaction.transaction_id;
+        setCurrentTransactionId(transactionId);
+        setTransactionCreated(true);
+      } else {
+        transactionId = currentTransactionId;
+      }
+
+      if (!transactionId) {
+        throw new Error('Transaction ID not found');
+      }
+
+      // Process payment
+      await axios.post(
+        `${config.apiUrl}/payments`,
+        {
+          transaction_id: transactionId,
+          amount: paymentAmount,
+          payment_method: paymentMethod.toUpperCase()
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+
+      // Add payment to list and update remaining amount
+      const newPayment = { 
+        method: paymentMethod, 
+        amount: paymentAmount,
+        timestamp: new Date().toISOString()
+      };
+      setPayments([...payments, newPayment]);
+      
+      const newRemainingAmount = remainingAmount - paymentAmount;
+      setRemainingAmount(newRemainingAmount);
+
+      // Reset payment form but keep card number if using card
+      setPaymentDetails({
+        ...paymentDetails,
+        cashAmount: '',
+        cardNumber: paymentMethod === 'credit_card' ? paymentDetails.cardNumber : ''
       });
 
-      const results = await Promise.all(transactionPromises);
-      
-      setSnackbar({
-        open: true,
-        message: 'Payment processed successfully',
-        severity: 'success'
-      });
-      clearCart();
-      // Navigate back to estimation with auth state preserved
-      navigate('/gem-estimator', { 
-        state: { 
-          from: 'checkout'
-        }
-      });
+      if (newRemainingAmount === 0) {
+        // Update transaction status to COMPLETED when fully paid
+        await axios.put(
+          `${config.apiUrl}/transactions/${transactionId}`,
+          { transaction_status: 'COMPLETED' },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        setSnackbar({
+          open: true,
+          message: 'All payments processed successfully',
+          severity: 'success'
+        });
+
+        // Reset state
+        setTransactionCreated(false);
+        setCurrentTransactionId(null);
+        setPayments([]);
+        clearCart();
+        
+        navigate('/gem-estimator', { 
+          state: { 
+            from: 'checkout'
+          }
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: `Payment of ${paymentAmount} processed. Remaining amount: ${newRemainingAmount}`,
+          severity: 'success'
+        });
+      }
     } catch (error) {
       if (error.message === 'Authentication token not found') {
-        // Preserve cart state and redirect to login
         sessionStorage.setItem('redirectAfterLogin', '/checkout');
         navigate('/login');
       } else {
@@ -379,6 +481,10 @@ function Checkout() {
           {/* Payment Details */}
           <Grid item xs={12} md={4}>
             <Paper elevation={3} sx={{ p: 3 }}>
+                <Typography variant="h6" color="primary" gutterBottom>
+                  Remaining: ${remainingAmount.toFixed(2)}
+                </Typography>
+
               <Typography variant="h6" gutterBottom>
                 Payment Details
               </Typography>
@@ -393,7 +499,7 @@ function Checkout() {
                     label="Cash"
                   />
                   <FormControlLabel
-                    value="card"
+                    value="credit_card"
                     control={<Radio />}
                     label="Credit/Debit Card"
                   />
@@ -418,32 +524,13 @@ function Checkout() {
                     onChange={handleInputChange('cardNumber')}
                     sx={{ mb: 2 }}
                   />
-                  <Grid container spacing={2}>
-                    <Grid item xs={6}>
-                      <TextField
-                        fullWidth
-                        label="Expiry Date"
-                        placeholder="MM/YY"
-                        value={paymentDetails.expiryDate}
-                        onChange={handleInputChange('expiryDate')}
-                      />
-                    </Grid>
-                    <Grid item xs={6}>
-                      <TextField
-                        fullWidth
-                        label="CVV"
-                        type="password"
-                        value={paymentDetails.cvv}
-                        onChange={handleInputChange('cvv')}
-                      />
-                    </Grid>
-                  </Grid>
                   <TextField
                     fullWidth
-                    label="Cardholder Name"
-                    value={paymentDetails.cardholderName}
-                    onChange={handleInputChange('cardholderName')}
-                    sx={{ mt: 2 }}
+                    label="Amount"
+                    type="number"
+                    value={paymentDetails.cashAmount}
+                    onChange={handleInputChange('cashAmount')}
+                    sx={{ mb: 2 }}
                   />
                 </>
               )}

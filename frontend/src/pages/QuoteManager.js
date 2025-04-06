@@ -70,6 +70,26 @@ function QuoteManager() {
     fetchTransactionTypes();
   }, []);
 
+  // Check for and delete expired quotes
+  useEffect(() => {
+    const deleteExpiredQuotes = async () => {
+      const expiredQuotes = quotes.filter(quote => quote.days_remaining === 0);
+      
+      for (const quote of expiredQuotes) {
+        try {
+          await axios.delete(`${API_BASE_URL}/quotes/${quote.id}`);
+          setQuotes(prevQuotes => prevQuotes.filter(q => q.id !== quote.id));
+        } catch (error) {
+          console.error('Error deleting expired quote:', error);
+        }
+      }
+    };
+
+    if (quotes.length > 0) {
+      deleteExpiredQuotes();
+    }
+  }, [quotes]);
+
   const fetchQuotes = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/quotes`);
@@ -115,29 +135,6 @@ function QuoteManager() {
     } catch (error) {
       console.error('Error updating expiration days:', error);
     }
-  };
-
-  const getExpirationDate = (createdAt) => {
-    const date = new Date(createdAt);
-    date.setDate(date.getDate() + expirationDays);
-    return date;
-  };
-
-  const getRemainingDays = (createdAt) => {
-    const expirationDate = getExpirationDate(createdAt);
-    const now = new Date();
-    const diffTime = expirationDate - now;
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  };
-
-  const getStatusColor = (status, createdAt) => {
-    if (status === 'completed') return 'success';
-    if (status === 'cancelled') return 'error';
-    if (status === 'expired') return 'error';
-    
-    const remainingDays = getRemainingDays(createdAt);
-    if (remainingDays <= 3) return 'warning';
-    return 'primary';
   };
 
   const handleViewDetails = (quote) => {
@@ -519,12 +516,6 @@ function QuoteManager() {
                 Customer {sortConfig.key === 'item_description' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
               <TableCell 
-                onClick={() => handleSort('transaction_type')}
-                sx={{ cursor: 'pointer', userSelect: 'none' }}
-              >
-                Type {sortConfig.key === 'transaction_type' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-              </TableCell>
-              <TableCell 
                 onClick={() => handleSort('price')}
                 sx={{ cursor: 'pointer', userSelect: 'none' }}
                 align="right"
@@ -576,7 +567,6 @@ function QuoteManager() {
                       {quote.customer_email}
                     </Typography>
                   </TableCell>
-                  <TableCell>{quote.transaction_type}</TableCell>
                   <TableCell>
                     <Typography variant="body1">
                       ${getDisplayPrice(quote)}
@@ -590,11 +580,7 @@ function QuoteManager() {
                       {quote.expires_in} days
                   </TableCell>
                   <TableCell>
-                    {quote.days_remaining > 0 ? (
-                      `${quote.days_remaining} days`
-                    ) : (
-                      'Expired'
-                    )}
+                    {quote.days_remaining}
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', gap: 1 }}>
