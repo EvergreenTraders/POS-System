@@ -23,7 +23,6 @@ const pool = new Pool({
 const updateQuoteDaysRemaining = async () => {
   try {
     await pool.query('SELECT update_quotes_days_remaining()');
-    console.log('Updated quote days remaining successfully');
   } catch (error) {
     console.error('Error updating quote days remaining:', error);
   }
@@ -1343,7 +1342,6 @@ app.get('/api/customers/:id', async (req, res) => {
 });
 
 app.post('/api/customers', async (req, res) => {
-  console.log("req.body", authenticateToken);
   try {
     const {
       first_name, last_name, email, phone,
