@@ -559,17 +559,6 @@ app.get('/api/diamond_color', async (req, res) => {
   }
 });
 
-// Stone Type API Endpoint
-app.get('/api/stone_type', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT type, image_path FROM stone_type');
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error fetching stone types:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
 // Stone Shape API Endpoint
 app.get('/api/stone_shape', async (req, res) => {
   try {
