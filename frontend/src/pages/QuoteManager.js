@@ -252,19 +252,6 @@ function QuoteManager() {
     }
   };
 
-  const getDisplayPriceLabel = (quote) => {
-    switch (quote.transaction_type) {
-      case 'buy':
-        return 'Buy Price';
-      case 'pawn':
-        return 'Pawn Value';
-      case 'retail':
-        return 'Retail Price';
-      default:
-        return 'Price';
-    }
-  };
-
   const handleTransactionTypeChange = (e) => {
     const newType = e.target.value;
     const relevantPrice = getRelevantPrice(selectedQuote, newType);
@@ -504,12 +491,6 @@ function QuoteManager() {
                 Quote ID {sortConfig.key === 'id' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
               <TableCell 
-                onClick={() => handleSort('customer_name')}
-                sx={{ cursor: 'pointer', userSelect: 'none' }}
-              >
-                Item {sortConfig.key === 'customer_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-              </TableCell>
-              <TableCell 
                 onClick={() => handleSort('item_description')}
                 sx={{ cursor: 'pointer', userSelect: 'none' }}
               >
@@ -558,9 +539,8 @@ function QuoteManager() {
               </TableRow>
             ) : (
               getSortedQuotes().map((quote) => (
-                <TableRow key={quote.id}>
-                  <TableCell>{quote.id}</TableCell>
-                  <TableCell>{quote.item_id}</TableCell>
+                <TableRow key={quote.quote_id}>
+                  <TableCell>{quote.quote_id}</TableCell>
                   <TableCell>
                     <Typography variant="body2">{quote.customer_name}</Typography>
                     <Typography variant="caption" color="textSecondary">
@@ -569,10 +549,7 @@ function QuoteManager() {
                   </TableCell>
                   <TableCell>
                     <Typography variant="body1">
-                      ${getDisplayPrice(quote)}
-                    </Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      {getDisplayPriceLabel(quote)}
+                      ${quote.total_amount}
                     </Typography>
                   </TableCell>
                   <TableCell>{formatDate(quote.created_at)}</TableCell>

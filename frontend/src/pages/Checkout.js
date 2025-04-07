@@ -306,16 +306,17 @@ function Checkout() {
         return;
       }
 
+      // Get employee ID from token
+      const employeeId = JSON.parse(atob(token.split('.')[1])).id;
+
       const response = await axios.post(
         `${config.apiUrl}/quotes`,
         {
           items: cartItems,
-          totalAmount: calculateTotal(),
-          customer_name: selectedCustomer.name,
-          customer_email: selectedCustomer.email,
-          customer_phone: selectedCustomer.phone,
+          customer_id: selectedCustomer.id,
+          employee_id: employeeId,
+          total_amount: calculateTotal(),
           created_at: new Date().toISOString(),
-          status: 'active'
         },
         {
           headers: {
@@ -332,6 +333,18 @@ function Checkout() {
           message: `Quote ${response.data.quote_id} saved successfully. Valid for ${expiresIn} days.`,
           severity: 'success'
         });
+
+        await axios.post(
+          `${config.apiUrl}/jewelry`,
+          { 
+            cartItems,
+            quote_id: response.data.quote_id // Pass the quote_id
+          },
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+
         clearCart();
         setTimeout(() => {
           navigate('/gem-estimator');

@@ -781,62 +781,8 @@ app.put('/api/carat-conversion', async (req, res) => {
 });
 
 // Quote Management API Endpoints
-app.post('/api/quotes', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { item_id, customer_id, employee_id } = req.body;
-    
-    // Validate required fields
-    if (!item_id || !customer_id || !employee_id) {
-      return res.status(400).json({ error: 'item_id, customer_id, and employee_id are required' });
-    }
 
-    await client.query('BEGIN');
-    
-    // Get current expiration configuration
-    const configResult = await client.query(`
-      SELECT days 
-      FROM quote_expiration 
-      ORDER BY created_at DESC 
-      LIMIT 1
-    `);
-    
-    const expires_in = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
-    
-    // Insert into quotes table
-    const quoteQuery = `
-      INSERT INTO quotes (
-        item_id,
-        customer_id,
-        employee_id,
-        expires_in,
-        created_at
-      )
-      VALUES ($1, $2, $3, $5, CURRENT_TIMESTAMP)
-      RETURNING *`;
-    
-    const quoteResult = await client.query(quoteQuery, [
-      item_id,
-      customer_id,
-      employee_id,
-      expires_in
-    ]);
-
-    await client.query('COMMIT');
-    res.status(201).json(quoteResult.rows[0]);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error saving quote:', err);
-    res.status(500).json({ 
-      error: 'Failed to save quote', 
-      details: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
-    } finally {
-        client.release();
-    }
-});
-
+// Get all quotes with customer and employee details
 app.get('/api/quotes', async (req, res) => {
   try {
     const query = `
@@ -845,39 +791,112 @@ app.get('/api/quotes', async (req, res) => {
         c.first_name || ' ' || c.last_name as customer_name,
         c.email as customer_email,
         c.phone as customer_phone,
-        j.short_desc as item_description,
-        j.buy_price,
-        j.pawn_value,
-        j.retail_price
+        e.first_name || ' ' || e.last_name as employee_name
       FROM quotes q
       LEFT JOIN customers c ON q.customer_id = c.id
-      LEFT JOIN jewelry j ON q.item_id = j.item_id
+      LEFT JOIN employees e ON q.employee_id = e.employee_id
       ORDER BY q.created_at DESC
     `;
+    
     const result = await pool.query(query);
     res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching quotes:', err);
-    res.status(500).json({ error: 'Failed to fetch quotes' });
+  } catch (error) {
+    console.error('Error fetching quotes:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/api/quotes/:id', async (req, res) => {
+// Get a specific quote by ID
+app.get('/api/quotes/:quote_id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const result = await pool.query(
-      'SELECT * FROM quotes WHERE id = $1',
-      [id]
-    );
+    const { quote_id } = req.params;
+    
+    const query = `
+      SELECT 
+        q.*,
+        c.first_name || ' ' || c.last_name as customer_name,
+        c.email as customer_email,
+        c.phone as customer_phone,
+        e.first_name || ' ' || e.last_name as employee_name
+      FROM quotes q
+      LEFT JOIN customers c ON q.customer_id = c.id
+      LEFT JOIN employees e ON q.employee_id = e.employee_id
+      WHERE q.quote_id = $1
+    `;
+    
+    const result = await pool.query(query, [quote_id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Quote not found' });
     }
     
     res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error fetching quote:', err);
-    res.status(500).json({ error: 'Failed to fetch quote' });
+  } catch (error) {
+    console.error('Error fetching quote:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create a new quote
+app.post('/api/quotes', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    const { items, customer_id, employee_id, total_amount } = req.body;
+    
+    // Get the latest quote ID to generate the next sequential number
+    const latestQuoteResult = await client.query(
+      "SELECT quote_id FROM quotes WHERE quote_id LIKE 'QT%' ORDER BY quote_id DESC LIMIT 1"
+    );
+    
+    let nextNumber = 1;
+    if (latestQuoteResult.rows.length > 0) {
+      const lastId = latestQuoteResult.rows[0].quote_id;
+      nextNumber = parseInt(lastId.slice(2)) + 1;
+    }
+    
+    // Format quote ID as QT followed by sequential number padded to 3 digits
+    const quoteId = `QT${nextNumber.toString().padStart(3, '0')}`;
+    
+    // Verify uniqueness (just in case)
+    const existingQuote = await client.query(
+      'SELECT quote_id FROM quotes WHERE quote_id = $1',
+      [quoteId]
+    );
+    
+    if (existingQuote.rows.length > 0) {
+      throw new Error('Failed to generate unique quote ID');
+    }
+    
+    // Get expiration period from configuration
+    const configResult = await client.query('SELECT days FROM quote_expiration LIMIT 1');
+    const expiresIn = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
+    
+    // Insert the quote
+    const quoteResult = await client.query(
+      `INSERT INTO quotes (
+        quote_id, customer_id, employee_id, total_amount,
+        expires_in, days_remaining, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $5, CURRENT_TIMESTAMP)
+      RETURNING *`,
+      [quoteId, customer_id, employee_id, total_amount, expiresIn]
+    );
+    
+    await client.query('COMMIT');
+    
+    res.status(201).json({
+      ...quoteResult.rows[0],
+      quote_id: quoteId,
+      expires_in: expiresIn,
+    });
+    
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating quote:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -1020,15 +1039,24 @@ app.post('/api/jewelry', async (req, res) => {
   try {
     await client.query('BEGIN');
     
-    const { cartItems } = req.body;
+    const { cartItems, quote_id } = req.body;
     const results = [];
-    const usedIds = new Set();
     
     // Process each item sequentially
+    let itemCounter = 1; // Counter for sequential numbers
     for (const item of cartItems) {
-      // Generate unique item ID, passing the set of IDs we've already used in this transaction
-      const item_id = await generateItemId(item.metal_category, client, usedIds);
-      usedIds.add(item_id);
+      // Use quote_id as item_id if provided, otherwise generate a new one
+      let item_id;
+      if (quote_id) {
+        // Add sequential number to quote_id (e.g., QT001-01)
+        const sequentialNumber = itemCounter.toString().padStart(2, '0');
+        item_id = `${quote_id}-${sequentialNumber}`;
+        itemCounter++;
+      } else {
+        // Generate unique item ID for non-quote items
+        const usedIds = new Set();
+        item_id = await generateItemId(item.metal_category, client, usedIds);
+      }
       
       // Insert jewelry record
       const jewelryQuery = `
@@ -1080,8 +1108,9 @@ app.post('/api/jewelry', async (req, res) => {
           retail_price,
           status,
           location,
-          condition
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48)
+          condition,
+          metal_spot_price
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49)
         RETURNING *`;
 
       const jewelryValues = [
@@ -1132,7 +1161,8 @@ app.post('/api/jewelry', async (req, res) => {
         item.retail_price, // $45
         'HOLD',         //46
         'SOUTH STORE',          // $47
-        'GOOD'          // $48
+        'GOOD',          // $48
+        item.metal_spot_price
       ];
 
       const result = await client.query(jewelryQuery, jewelryValues);
