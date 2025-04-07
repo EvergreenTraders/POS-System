@@ -628,7 +628,7 @@ function QuoteManager() {
                     Expires In: {selectedQuote.expires_in} days
                     {selectedQuote.days_remaining > 0 && ` (${selectedQuote.days_remaining} days remaining)`}
                   </Typography>
-                  <Typography variant="body2">Total: ${getDisplayPrice(selectedQuote)}</Typography>
+                  <Typography variant="body2">Total: ${selectedQuote.total_amount}</Typography>
                 </Grid>
               </Grid>
 
@@ -658,12 +658,12 @@ function QuoteManager() {
                           >
                             {transactionTypes.map(type => (
                               <MenuItem key={type.type} value={type.type}>
-                                {type.type.charAt(0).toUpperCase() + type.type.slice(1)}
+                                {type.type}
                               </MenuItem>
                             ))}
                           </Select>
                         ) : (
-                          selectedQuote.transaction_type.charAt(0).toUpperCase() + selectedQuote.transaction_type.slice(1)
+                          selectedQuote.transaction_type
                         )}
                       </TableCell>
                       <TableCell align="right">

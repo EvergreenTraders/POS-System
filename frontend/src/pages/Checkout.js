@@ -337,7 +337,10 @@ function Checkout() {
         await axios.post(
           `${config.apiUrl}/jewelry`,
           { 
-            cartItems,
+            cartItems: cartItems.map(item => ({
+              ...item,
+              transaction_type_id: transactionTypes[item.transaction_type],
+            })),
             quote_id: response.data.quote_id // Pass the quote_id
           },
           {
@@ -374,15 +377,7 @@ function Checkout() {
     } else {
       // Save the cart items to session storage before navigating back
       sessionStorage.setItem('estimationState', JSON.stringify({
-        items: cartItems.map(item => ({
-          ...item,
-          price_estimates: {
-            pawn: parseFloat(item.price || 0),
-            buy: parseFloat(item.price || 0),
-            retail: parseFloat(item.price || 0),
-            [item.transaction_type]: parseFloat(item.price || 0)
-          }
-        }))
+        items: cartItems
       }));
       clearCart();
       setCustomer(null);

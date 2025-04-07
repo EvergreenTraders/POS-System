@@ -1046,16 +1046,18 @@ app.post('/api/jewelry', async (req, res) => {
     let itemCounter = 1; // Counter for sequential numbers
     for (const item of cartItems) {
       // Use quote_id as item_id if provided, otherwise generate a new one
-      let item_id;
+      let item_id, status;
       if (quote_id) {
         // Add sequential number to quote_id (e.g., QT001-01)
         const sequentialNumber = itemCounter.toString().padStart(2, '0');
         item_id = `${quote_id}-${sequentialNumber}`;
         itemCounter++;
+        status = 'QUOTED';
       } else {
         // Generate unique item ID for non-quote items
         const usedIds = new Set();
         item_id = await generateItemId(item.metal_category, client, usedIds);
+        status = 'HOLD';
       }
       
       // Insert jewelry record
@@ -1159,7 +1161,7 @@ app.post('/api/jewelry', async (req, res) => {
         item.buy_price,    // $43
         item.pawn_price,   // $44
         item.retail_price, // $45
-        'HOLD',         //46
+        status,         //46
         'SOUTH STORE',          // $47
         'GOOD',          // $48
         item.metal_spot_price
@@ -1167,6 +1169,25 @@ app.post('/api/jewelry', async (req, res) => {
 
       const result = await client.query(jewelryQuery, jewelryValues);
       results.push(result.rows[0]);
+
+      if(quote_id) {
+        const itemQuery = `
+          INSERT INTO quote_items (
+            quote_id, item_id, transaction_type_id,
+            item_price
+          )
+          VALUES ($1, $2, $3, $4)
+          RETURNING *
+        `;
+
+        await client.query(itemQuery, [
+          quote_id,
+          item_id,
+          item.transaction_type_id,
+          item.price
+        ]);
+      }
+      
     }
 
     await client.query('COMMIT');

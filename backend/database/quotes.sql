@@ -1,8 +1,8 @@
 -- Drop existing quotes table
-drop table if exists quotes cascade;
+-- drop table if exists quotes cascade;
 
 -- Create quotes table with new structure
-CREATE TABLE quotes (
+CREATE TABLE IF NOT EXISTS quotes (
     id SERIAL PRIMARY KEY,
     quote_id VARCHAR(20) NOT NULL UNIQUE,
     customer_id INTEGER NOT NULL,
@@ -16,11 +16,28 @@ CREATE TABLE quotes (
     CONSTRAINT fk_quotes_employee FOREIGN KEY (employee_id) REFERENCES employees(employee_id)
 );
 
+-- Create quote_items table to link quotes with items
+CREATE TABLE IF NOT EXISTS quote_items (
+    id SERIAL PRIMARY KEY,
+    quote_id VARCHAR(20) NOT NULL,
+    item_id VARCHAR(50) NOT NULL,
+    transaction_type_id INTEGER NOT NULL,
+    item_price DECIMAL(10,2) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_quote_item UNIQUE (item_id),
+    FOREIGN KEY (quote_id) REFERENCES quotes(quote_id),
+    FOREIGN KEY (item_id) REFERENCES jewelry(item_id),
+    FOREIGN KEY (transaction_type_id) REFERENCES transaction_type(id)
+);
+
 -- Create indexes for better performance
 CREATE INDEX idx_quotes_quote_id ON quotes(quote_id);
 CREATE INDEX idx_quotes_customer_id ON quotes(customer_id);
 CREATE INDEX idx_quotes_employee_id ON quotes(employee_id);
 CREATE INDEX idx_quotes_created_at ON quotes(created_at);
+CREATE INDEX idx_quote_items_quote_id ON quote_items(quote_id);
+CREATE INDEX idx_quote_items_item_id ON quote_items(item_id);
 
 -- Add comments
 COMMENT ON TABLE quotes IS 'Stores customer quotes for future transactions';
@@ -48,6 +65,13 @@ CREATE TRIGGER update_quote_days_remaining_trigger
     BEFORE INSERT OR UPDATE ON quotes
     FOR EACH ROW
     EXECUTE FUNCTION update_quote_days_remaining();
+
+-- Create trigger to update updated_at timestamp for quote_items
+DROP TRIGGER IF EXISTS update_quote_items_timestamp ON quote_items;
+CREATE TRIGGER update_quote_items_timestamp
+    BEFORE UPDATE ON quote_items
+    FOR EACH ROW
+    EXECUTE FUNCTION update_timestamp();
 
 -- Create function to update all quotes days remaining
 CREATE OR REPLACE FUNCTION update_quotes_days_remaining()
