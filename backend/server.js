@@ -953,6 +953,172 @@ app.put('/api/quotes/:id', async (req, res) => {
     }
 });
 
+// Get items for a specific quote
+app.get('/api/quotes/:quote_id/items', async (req, res) => {
+  try {
+    const { quote_id } = req.params;
+    
+    const query = `
+      SELECT 
+        qi.item_id,
+        qi.item_price,
+        tt.type as transaction_type,
+        j.short_desc as description,
+        j.buy_price,
+        j.pawn_value,
+        j.retail_price
+      FROM quote_items qi
+      LEFT JOIN transaction_type tt ON qi.transaction_type_id = tt.id
+      LEFT JOIN jewelry j ON qi.item_id = j.item_id
+      WHERE qi.quote_id = $1
+    `;
+
+    const result = await pool.query(query, [quote_id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching quote items:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update a quote item
+app.delete('/api/quotes/:quote_id/items/:item_id', async (req, res) => {
+  const { quote_id, item_id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // First delete the quote item
+    const deleteItemQuery = 'DELETE FROM quote_items WHERE quote_id = $1 AND item_id = $2';
+    await client.query(deleteItemQuery, [quote_id, item_id]);
+
+    // Then delete from jewelry
+    const deleteJewelryQuery = 'DELETE FROM jewelry WHERE item_id = $1';
+    await client.query(deleteJewelryQuery, [item_id]);
+
+    // Then update the quote's total amount
+    const updateTotalQuery = `
+      UPDATE quotes q
+      SET total_amount = COALESCE(
+        (SELECT SUM(item_price)
+         FROM quote_items
+         WHERE quote_id = $1
+        ), 0
+      )
+      WHERE q.quote_id = $1
+      RETURNING *
+    `;
+    const updateResult = await client.query(updateTotalQuery, [quote_id]);
+
+    await client.query('COMMIT');
+    res.json(updateResult.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting quote item:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/api/quotes/:quote_id', async (req, res) => {
+  const { quote_id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Get all item_ids associated with this quote
+    const itemIdsQuery = 'SELECT item_id FROM quote_items WHERE quote_id = $1';
+    const itemIdsResult = await client.query(itemIdsQuery, [quote_id]);
+    const itemIds = itemIdsResult.rows.map(row => row.item_id);
+
+    // First delete all quote items
+    const deleteItemsQuery = 'DELETE FROM quote_items WHERE quote_id = $1';
+    await client.query(deleteItemsQuery, [quote_id]);
+
+    // Then delete the jewelry items
+    if (itemIds.length > 0) {
+      const deleteJewelryQuery = 'DELETE FROM jewelry WHERE item_id = ANY($1)';
+      await client.query(deleteJewelryQuery, [itemIds]);
+    }
+
+    // Finally delete the quote
+    const deleteQuoteQuery = 'DELETE FROM quotes WHERE quote_id = $1 RETURNING *';
+    const result = await client.query(deleteQuoteQuery, [quote_id]);
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Quote not found' });
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting quote:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/api/quotes/:quote_id/items/:item_id', async (req, res) => {
+  try {
+    const { quote_id, item_id } = req.params;
+    const { transaction_type, item_price } = req.body;
+
+    // Get transaction_type_id
+    const typeQuery = 'SELECT id FROM transaction_type WHERE type = $1';
+    const typeResult = await pool.query(typeQuery, [transaction_type]);
+    
+    if (typeResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid transaction type' });
+    }
+
+    const transaction_type_id = typeResult.rows[0].id;
+
+    // Update quote item
+    const query = `
+      UPDATE quote_items
+      SET transaction_type_id = $1,
+          item_price = $2,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE quote_id = $3 AND item_id = $4
+      RETURNING *
+    `;
+
+    const result = await pool.query(query, [transaction_type_id, item_price, quote_id, item_id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Quote item not found' });
+    }
+
+    // Update quote total_amount
+    const totalQuery = `
+      UPDATE quotes
+      SET total_amount = (
+        SELECT SUM(item_price)
+        FROM quote_items
+        WHERE quote_id = $1
+      )
+      WHERE quote_id = $1
+      RETURNING total_amount
+    `;
+
+    const totalResult = await pool.query(totalQuery, [quote_id]);
+
+    res.json({
+      ...result.rows[0],
+      total_amount: totalResult.rows[0].total_amount
+    });
+  } catch (error) {
+    console.error('Error updating quote item:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.delete('/api/quotes/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -1714,7 +1880,7 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
