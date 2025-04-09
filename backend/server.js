@@ -1137,43 +1137,89 @@ app.delete('/api/quotes/:id', async (req, res) => {
   }
 });
 
-// Jewelry price update endpoint
-app.put('/api/jewelry/:id', async (req, res) => {
+// Jewelry update endpoint for quote conversion
+app.put('/api/jewelry/:quoteId', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const { quoteId } = req.params;
+    const results = [];
 
-    const { id } = req.params;
-    const { buy_price, pawn_value, retail_price } = req.body;
-
-    const updateQuery = `
-      UPDATE jewelry 
-      SET 
-        buy_price = $1,
-        pawn_value = $2,
-        retail_price = $3,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE item_id = $4
-      RETURNING *
+    // Get items from quote_items for this quote
+    const quoteItemsQuery = `
+      SELECT qi.*, tt.type as transaction_type 
+      FROM quote_items qi
+      JOIN transaction_type tt ON qi.transaction_type_id = tt.id
+      WHERE qi.quote_id = $1
     `;
+    const quoteItems = await client.query(quoteItemsQuery, [quoteId]);
+    // Process each quote item
+    for (const quoteItem of quoteItems.rows) {
+      // Find matching jewelry item
+      const jewelryQuery = `
+        SELECT * FROM jewelry
+        WHERE item_id = $1
+      `;
+      const jewelryResult = await client.query(jewelryQuery, [quoteItem.item_id]);
+      
+      if (jewelryResult.rows.length > 0) {
+        const jewelryItem = jewelryResult.rows[0];
+        
+        // Generate new item ID based on metal category
+        const usedIds = new Set();
+        const newItemId = await generateItemId(jewelryItem.category, client, usedIds);
+      
+        // Prepare price update based on transaction type
+        let priceUpdate = '';
+        if (quoteItem.transaction_type === 'buy') {
+          priceUpdate = 'buy_price = $3';
+        } else if (quoteItem.transaction_type === 'pawn') {
+          priceUpdate = 'pawn_value = $3';
+        } else if (quoteItem.transaction_type === 'retail') {
+          priceUpdate = 'retail_price = $3';
+        }
+        
+        const deleteQuoteItemQuery = `
+          DELETE FROM quote_items
+          WHERE quote_id = $1 AND item_id = $2
+        `;
+        await client.query(deleteQuoteItemQuery, [quoteId, quoteItem.item_id]);
 
-    const result = await client.query(updateQuery, [
-      buy_price,
-      pawn_value,
-      retail_price,
-      id
-    ]);
+        // Update jewelry item
+        const updateQuery = `
+          UPDATE jewelry 
+          SET 
+            item_id = $1,
+            status = $2,
+            ${priceUpdate},
+            updated_at = CURRENT_TIMESTAMP
+          WHERE item_id = $4
+          RETURNING *
+        `;
+
+        const result = await client.query(updateQuery, [
+          newItemId,
+          'HOLD',
+          quoteItem.item_price,
+          quoteItem.item_id
+        ]);
+
+        if (result.rows.length > 0) {
+          results.push(result.rows[0]);
+        }
+      }
+    }
+
+    const deleteQuoteQuery = `
+            DELETE FROM quotes WHERE quote_id = $1
+          `;
+          await client.query(deleteQuoteQuery, [quoteId]);
 
     await client.query('COMMIT');
-
-    if (result.rows.length > 0) {
-      res.json(result.rows[0]);
-    } else {
-      res.status(404).json({ error: 'Jewelry item not found' });
-    }
+    res.json(results);
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error updating jewelry prices:', err);
+    console.error('Error converting quote items:', err);
     res.status(500).json({ error: 'Failed to update jewelry prices', details: err.message });
     } finally {
         client.release();
@@ -1292,7 +1338,7 @@ app.post('/api/jewelry', async (req, res) => {
         item.stamps || '',                                     // $8
         item.images || [],                                     // $9
         parseFloat(item.metal_weight) || 0,                       // $10
-        item.precious_metal_type || '',                                    // $11
+        item.precious_metal_type || '',                           // $11
         item.non_precious_metal_type || '',                       // $12
         item.metal_purity || '',                                  // $13
         item.jewelry_color || '',                                 // $14
@@ -1777,73 +1823,38 @@ app.post('/api/transactions', async (req, res) => {
     }
 });
 
-app.put('/api/transactions/:id', async (req, res) => {
+app.put('/api/transactions/:transaction_id', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { id } = req.params;
-    const {
-      transaction_type,
-      price,
-      payment_method
-    } = req.body;
+    const { transaction_id } = req.params;
+    const { transaction_status } = req.body;
 
     await client.query('BEGIN');
 
-    // First check if transaction exists and get current payment_id
-    const checkQuery = 'SELECT payment_id FROM transactions WHERE id = $1';
-    const checkResult = await client.query(checkQuery, [id]);
-    
-    if (checkResult.rows.length === 0) {
+    // Update transaction status
+    const updateQuery = `
+      UPDATE transactions
+      SET 
+        transaction_status = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE transaction_id = $2
+      RETURNING *
+    `;
+    const result = await client.query(updateQuery, [transaction_status, transaction_id]);
+
+    if (result.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Transaction not found' });
     }
-
-    const currentPaymentId = checkResult.rows[0].payment_id;
-
-    // Update payment if payment details changed
-    if (price || payment_method) {
-      const paymentQuery = `
-        UPDATE payments 
-        SET 
-          amount = COALESCE($1, amount),
-          payment_method = COALESCE($2, payment_method)
-        WHERE id = $3
-      `;
-      await client.query(paymentQuery, [price, payment_method, currentPaymentId]);
-    }
-
-
-    await client.query('COMMIT');
-
-    // Fetch and return updated transaction with all related data
-    const getTransactionQuery = `
-      SELECT 
-        t.*,
-        tt.type as transaction_type_name,
-        c.first_name as customer_first_name,
-        c.last_name as customer_last_name,
-        e.first_name as employee_first_name,
-        e.last_name as employee_last_name,
-        p.payment_id as payment_reference,
-        p.payment_method
-      FROM transactions t
-      LEFT JOIN transaction_type tt ON t.transaction_type_id = tt.id
-      LEFT JOIN customers c ON t.customer_id = c.id
-      LEFT JOIN employees e ON t.employee_id = e.employee_id
-      LEFT JOIN payments p ON t.payment_id = p.id
-      WHERE t.id = $1
-      GROUP BY t.id, tt.type, c.first_name, c.last_name, e.first_name, e.last_name, p.payment_id, p.payment_method
-    `;
-    const updatedTransaction = await client.query(getTransactionQuery, [id]);
-    res.json(updatedTransaction.rows[0]);
+    await client.query('COMMIT');    
 
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error updating transaction:', err);
     res.status(500).json({ error: 'Failed to update transaction', details: err.message });
-    } finally {
-        client.release();
-    }
+  } finally {
+    client.release();
+  }
 });
 
 // Transaction Types API Endpoints

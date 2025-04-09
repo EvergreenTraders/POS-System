@@ -161,20 +161,37 @@ function Checkout() {
       // Get employee ID from token
       const employeeId = JSON.parse(atob(token.split('.')[1])).id;
 
+      // Check if we came from quotes
+      const quoteId = location.state?.quoteId;
+      const isFromQuotes = Boolean(quoteId);
+
       let transactionId;
 
-      // Only create jewelry items and transaction once
+      // Only create transaction once
       if (!transactionCreated) {
-        // First create the jewelry items
-        const jewelryResponse = await axios.post(
-          `${config.apiUrl}/jewelry`,
-          { cartItems },
-          {
-            headers: { Authorization: `Bearer ${token}` }
-          }
-        );
+        let createdJewelryItems;
 
-        const createdJewelryItems = jewelryResponse.data;
+        if (isFromQuotes) {
+          // If coming from quotes, update each quote item to a regular item
+          const convertResponse = await axios.put(
+            `${config.apiUrl}/jewelry/${quoteId}`,
+            {},
+            {
+              headers: { Authorization: `Bearer ${token}` }
+            }
+          );
+          createdJewelryItems = convertResponse.data;
+        } else {
+          // If coming from estimator, create new jewelry items
+          const jewelryResponse = await axios.post(
+            `${config.apiUrl}/jewelry`,
+            { cartItems },
+            {
+              headers: { Authorization: `Bearer ${token}` }
+            }
+          );
+          createdJewelryItems = jewelryResponse.data;
+        }
 
         // Create transactions for all items
         const transactionResponse = await axios.post(

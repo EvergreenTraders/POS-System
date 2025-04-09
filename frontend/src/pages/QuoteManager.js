@@ -208,53 +208,6 @@ function QuoteManager() {
     }
   };
 
-  const handleCheckout = async (quote) => {
-    try {
-      // Create a new transaction from the quote
-      const transactionData = {
-        customer_id: quote.customer_id,
-        item_id: quote.item_id,
-        transaction_type: quote.transaction_type,
-        total_amount: quote.total_amount,
-        employee_id: quote.employee_id
-      };
-
-      // Create the transaction
-      const response = await axios.post(`${API_BASE_URL}/transactions`, transactionData);
-      
-      if (response.data) {
-        setSnackbar({
-          open: true,
-          message: 'Transaction created successfully',
-          severity: 'success'
-        });
-        
-        // Close any open dialogs
-        setDetailsDialogOpen(false);
-        
-        // Navigate to the transaction page
-        navigate(`/transactions/${response.data.id}`);
-      }
-    } catch (error) {
-      console.error('Error creating transaction:', error);
-      setSnackbar({
-        open: true,
-        message: 'Error creating transaction: ' + (error.response?.data?.error || error.message),
-        severity: 'error'
-      });
-    }
-  };
-
-  const handleQuoteAction = (quote, action) => {
-    if (action === 'checkout') {
-      handleCheckout(quote);
-    } else if (action === 'view') {
-      handleViewDetails(quote);
-    } else if (action === 'transaction') {
-      // Add logic for transaction action
-    }
-  };
-
   const handleDeleteClick = (quote) => {
     setQuoteToDelete(quote);
     setDeleteDialogOpen(true);
@@ -422,7 +375,7 @@ function QuoteManager() {
           },
           transaction_type: item.transaction_type,
           images: item.images || [],
-          price: getPriceForType(item)
+          price: item.item_price
         });
       });
 
@@ -730,7 +683,7 @@ function QuoteManager() {
                             <TextField
                               type="number"
                               size="small"
-                              value={getPriceForType(editingItem)}
+                              value={editingItem.item_price}
                               onChange={handlePriceChange}
                               inputProps={{ 
                                 step: "0.01",
