@@ -504,7 +504,8 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       jewelryColor: form.jewelryColor,
       weight: form.weight,
       purity: form.purity,
-      estimatedValue: totalValue
+      estimatedValue: totalValue,
+      spotPrice: form.spotPrice
     };
 
     onAddMetal(newItem);

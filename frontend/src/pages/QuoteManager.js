@@ -48,6 +48,7 @@ function QuoteManager() {
   const [quoteToDelete, setQuoteToDelete] = useState(null);
   const [editingItemIndex, setEditingItemIndex] = useState(-1);
   const [editingItem, setEditingItem] = useState(null);
+  const [quoteItems, setQuoteItems] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [expirationDays, setExpirationDays] = useState(30);
@@ -63,11 +64,74 @@ function QuoteManager() {
     key: 'created_at',
     direction: 'desc'
   });
+  const [liveSpotPrices, setLiveSpotPrices] = useState(null);
+
+  // Function to fetch live spot prices
+  const fetchLiveSpotPrices = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/live_spot_prices`);
+      setLiveSpotPrices(response.data[0]);
+    } catch (error) {
+      showMessage('Error fetching live spot prices', 'error');
+    }
+  };
+
+  // API helper functions
+  const api = {
+    quotes: {
+      getAll: async () => {
+        const response = await axios.get(`${API_BASE_URL}/quotes`);
+        return response.data;
+      },
+      delete: async (quoteId) => {
+        const response = await axios.delete(`${API_BASE_URL}/quotes/${quoteId}`);
+        return response.data;
+      },
+      getItems: async (quoteId) => {
+        const response = await axios.get(`${API_BASE_URL}/quotes/${quoteId}/items`);
+        return response.data;
+      },
+      deleteItem: async (quoteId, itemId) => {
+        const response = await axios.delete(`${API_BASE_URL}/quotes/${quoteId}/items/${itemId}`);
+        return response.data;
+      },
+      updateItem: async (quoteId, itemId, data) => {
+        const response = await axios.put(`${API_BASE_URL}/quotes/${quoteId}/items/${itemId}`, data);
+        return response.data;
+      }
+    },
+    config: {
+      getExpirationDays: async () => {
+        const response = await axios.get(`${API_BASE_URL}/quote-expiration/config`);
+        return response.data;
+      },
+      updateExpirationDays: async (days) => {
+        const response = await axios.put(`${API_BASE_URL}/quote-expiration/config`, { days });
+        return response.data;
+      }
+    },
+    transactionTypes: {
+      getAll: async () => {
+        const response = await axios.get(`${API_BASE_URL}/transaction-types`);
+        return response.data;
+      }
+    }
+  };
+
+  // UI helper functions
+  const showMessage = (message, severity = 'success') => {
+    setSnackbar({
+      open: true,
+      message,
+      severity
+    });
+  };
 
   useEffect(() => {
     fetchQuotes();
     fetchExpirationDays();
     fetchTransactionTypes();
+    fetchLiveSpotPrices();
   }, []);
 
   // Check for and delete expired quotes
@@ -92,31 +156,34 @@ function QuoteManager() {
 
   const fetchQuotes = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/quotes`);
-      setQuotes(response.data);
+      const quotes = await api.quotes.getAll();
+      setQuotes(quotes);
       setLoading(false);
     } catch (error) {
       console.error('Error fetching quotes:', error);
       setLoading(false);
+      showMessage('Error fetching quotes', 'error');
     }
   };
 
   const fetchExpirationDays = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/quote-expiration/config`);
-      setExpirationDays(response.data.days);
-      setTempExpirationDays(response.data.days);
+      const config = await api.config.getExpirationDays();
+      setExpirationDays(config.days);
+      setTempExpirationDays(config.days);
     } catch (error) {
       console.error('Error fetching expiration days:', error);
+      showMessage('Error fetching expiration days', 'error');
     }
   };
 
   const fetchTransactionTypes = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/transaction-types`);
-      setTransactionTypes(response.data);
+      const types = await api.transactionTypes.getAll();
+      setTransactionTypes(types);
     } catch (error) {
       console.error('Error fetching transaction types:', error);
+      showMessage('Error fetching transaction types', 'error');
     }
   };
 
@@ -137,66 +204,19 @@ function QuoteManager() {
     }
   };
 
-  const handleViewDetails = (quote) => {
-    setSelectedQuote(quote);
-    setDetailsDialogOpen(true);
-  };
-
-  const handleCheckout = async (quote) => {
+  const handleViewDetails = async (quote) => {
     try {
-      // Create a new transaction from the quote
-      const transactionData = {
-        customer_id: quote.customer_id,
-        item_id: quote.item_id,
-        transaction_type: quote.transaction_type,
-        total_amount: quote.total_amount,
-        employee_id: quote.employee_id
-      };
-
-      // Create the transaction
-      const response = await axios.post(`${API_BASE_URL}/transactions`, transactionData);
-      
-      if (response.data) {
-        setSnackbar({
-          open: true,
-          message: 'Transaction created successfully',
-          severity: 'success'
-        });
-        
-        // Close any open dialogs
-        setDetailsDialogOpen(false);
-        
-        // Navigate to the transaction page
-        navigate(`/transactions/${response.data.id}`);
-      }
+      const response = await axios.get(`${API_BASE_URL}/quotes/${quote.quote_id}/items`);
+      setQuoteItems(response.data);
+      setSelectedQuote(quote);
+      setDetailsDialogOpen(true);
     } catch (error) {
-      console.error('Error creating transaction:', error);
+      console.error('Error fetching quote items:', error);
       setSnackbar({
         open: true,
-        message: 'Error creating transaction: ' + (error.response?.data?.error || error.message),
+        message: 'Error fetching quote items',
         severity: 'error'
       });
-    }
-  };
-
-  const handleQuoteAction = (quote, action) => {
-    if (action === 'checkout') {
-      handleCheckout(quote);
-    } else if (action === 'view') {
-      handleViewDetails(quote);
-    } else if (action === 'transaction') {
-      // Add logic for transaction action
-    }
-  };
-
-  const handleUpdateStatus = async (quoteId, newStatus) => {
-    try {
-      await axios.put(`${API_BASE_URL}/quotes/${quoteId}`, {
-        status: newStatus
-      });
-      fetchQuotes(); // Refresh quotes list
-    } catch (error) {
-      console.error('Error updating quote status:', error);
     }
   };
 
@@ -207,12 +227,18 @@ function QuoteManager() {
 
   const handleDelete = async () => {
     try {
-      await axios.delete(`${API_BASE_URL}/quotes/${quoteToDelete.id}`);
+      await api.quotes.delete(quoteToDelete.quote_id);
       setDeleteDialogOpen(false);
       setQuoteToDelete(null);
-      fetchQuotes(); // Refresh quotes list
+      setDetailsDialogOpen(false);
+      
+      const updatedQuotes = await api.quotes.getAll();
+      setQuotes(updatedQuotes);
+
+      showMessage('Quote deleted successfully');
     } catch (error) {
       console.error('Error deleting quote:', error);
+      showMessage(error.response?.data?.error || 'Error deleting quote', 'error');
     }
   };
 
@@ -226,125 +252,100 @@ function QuoteManager() {
     });
   };
 
-  const getRelevantPrice = (quote, type) => {
+  const getPriceForType = (item, type = item?.transaction_type) => {
+    if (!item) return 0;
+    
     switch (type) {
       case 'buy':
-        return quote.buy_price;
+        return item.buy_price || 0;
       case 'pawn':
-        return quote.pawn_value;
+        return item.pawn_value || 0;
       case 'retail':
-        return quote.retail_price;
+        return item.retail_price || 0;
       default:
-        return quote.total_amount;
-    }
-  };
-
-  const getDisplayPrice = (quote) => {
-    switch (quote.transaction_type) {
-      case 'buy':
-        return quote.buy_price;
-      case 'pawn':
-        return quote.pawn_value;
-      case 'retail':
-        return quote.retail_price;
-      default:
-        return 0;
-    }
-  };
-
-  const getDisplayPriceLabel = (quote) => {
-    switch (quote.transaction_type) {
-      case 'buy':
-        return 'Buy Price';
-      case 'pawn':
-        return 'Pawn Value';
-      case 'retail':
-        return 'Retail Price';
-      default:
-        return 'Price';
+        return item.item_price || 0;
     }
   };
 
   const handleTransactionTypeChange = (e) => {
     const newType = e.target.value;
-    const relevantPrice = getRelevantPrice(selectedQuote, newType);
+    const newPrice = getPriceForType(editingItem, newType);
     
-    setEditingItem(prev => ({
-      ...prev,
+    setEditingItem({
+      ...editingItem,
       transaction_type: newType,
-      buy_price: newType === 'buy' ? relevantPrice : prev.buy_price,
-      pawn_value: newType === 'pawn' ? relevantPrice : prev.pawn_value,
-      retail_price: newType === 'retail' ? relevantPrice : prev.retail_price
-    }));
+      item_price: newPrice
+    });
   };
 
   const handlePriceChange = (e) => {
-    const newPrice = parseFloat(e.target.value) || 0;
-    const type = editingItem.transaction_type;
-    
-    setEditingItem(prev => ({
-      ...prev,
-      buy_price: type === 'buy' ? newPrice : prev.buy_price,
-      pawn_value: type === 'pawn' ? newPrice : prev.pawn_value,
-      retail_price: type === 'retail' ? newPrice : prev.retail_price
-    }));
+    setEditingItem({
+      ...editingItem,
+      item_price: parseFloat(e.target.value) || 0
+    });
   };
 
   const handleSaveItemChanges = async () => {
     try {
-      // First update the quote's transaction type
-      const quoteResponse = await axios.put(`${API_BASE_URL}/quotes/${editingItem.id}`, {
-        transaction_type: editingItem.transaction_type
+      await axios.put(`${API_BASE_URL}/quotes/${selectedQuote.quote_id}/items/${editingItem.item_id}`, {
+        transaction_type: editingItem.transaction_type,
+        item_price: editingItem.item_price
       });
 
-      // Then update the jewelry prices
-      const jewelryResponse = await axios.put(`${API_BASE_URL}/jewelry/${editingItem.item_id}`, {
-        buy_price: editingItem.buy_price,
-        pawn_value: editingItem.pawn_value,
-        retail_price: editingItem.retail_price
-      });
+      // Refresh quote items
+      const itemsResponse = await axios.get(`${API_BASE_URL}/quotes/${selectedQuote.quote_id}/items`);
+      setQuoteItems(itemsResponse.data);
 
-      if (quoteResponse.data && jewelryResponse.data) {
-        const updatedQuote = {
-          ...quoteResponse.data,
-          buy_price: jewelryResponse.data.buy_price,
-          pawn_value: jewelryResponse.data.pawn_value,
-          retail_price: jewelryResponse.data.retail_price
-        };
-        
-        setSelectedQuote(updatedQuote);
-        setQuotes(quotes.map(q => q.id === updatedQuote.id ? updatedQuote : q));
-        
-        setSnackbar({
-          open: true,
-          message: 'Quote and prices updated successfully',
-          severity: 'success'
-        });
-      }
+      // Refresh quote data to get updated total
+      const quoteResponse = await axios.get(`${API_BASE_URL}/quotes/${selectedQuote.quote_id}`);
+      const updatedQuote = quoteResponse.data;
+      
+      // Update both selectedQuote and the quote in the quotes list
+      setSelectedQuote(updatedQuote);
+      setQuotes(prevQuotes => 
+        prevQuotes.map(q => 
+          q.quote_id === updatedQuote.quote_id ? updatedQuote : q
+        )
+      );
       
       setEditingItem(null);
-    } catch (error) {
-      console.error('Error updating quote:', error);
+
       setSnackbar({
         open: true,
-        message: 'Error updating quote: ' + (error.response?.data?.error || error.message),
+        message: 'Quote item updated successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating quote item:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Error updating quote item',
         severity: 'error'
       });
     }
   };
 
-  const handleDeleteItem = async (index) => {
-    const updatedQuote = { ...selectedQuote };
-    updatedQuote.items = updatedQuote.items.filter((_, i) => i !== index);
-    
+  const handleDeleteItem = async (item) => {
     try {
-      await axios.put(`${API_BASE_URL}/quotes/${selectedQuote.id}`, {
-        items: updatedQuote.items
-      });
-      setSelectedQuote(updatedQuote);
-      fetchQuotes(); // Refresh quotes list
+      // Delete the item
+      await api.quotes.deleteItem(selectedQuote.quote_id, item.item_id);
+
+      // Refresh all quotes and find the updated one
+      const updatedQuotes = await api.quotes.getAll();
+      setQuotes(updatedQuotes);
+
+      const updatedQuote = updatedQuotes.find(q => q.quote_id === selectedQuote.quote_id);
+      
+      if (updatedQuote) {
+        setSelectedQuote(updatedQuote);
+        const updatedItems = await api.quotes.getItems(selectedQuote.quote_id);
+        setQuoteItems(updatedItems);
+      }
+
+      showMessage('Quote item deleted successfully');
     } catch (error) {
       console.error('Error deleting quote item:', error);
+      showMessage(error.response?.data?.error || 'Error deleting quote item', 'error');
     }
   };
 
@@ -368,41 +369,51 @@ function QuoteManager() {
     });
   };
 
-  const handleProceedToCheckout = (quoteToUse) => {
-    // Use the passed quote or selectedQuote (for dialog)
-    const quote = quoteToUse || selectedQuote;
-    
-    // Add the quote item to cart first
-    addToCart({
-      id: quote.item_id,
-      short_desc: quote.item_description,
-      itemPriceEstimates: {
-        [quote.transaction_type]: parseFloat(quote.price) || 0
-      },
-      transaction_type: quote.transaction_type,
-      images: quote.images || [],
-      price: getDisplayPrice(quote)
-    });
+  const handleProceedToCheckout = async (quoteToUse) => {
+    try {
+      // Use the passed quote or selectedQuote (for dialog)
+      const quote = quoteToUse || selectedQuote;
+      
+      // Get all items for this quote
+      const items = await api.quotes.getItems(quote.quote_id);
+      
+      // Add each quote item to cart
+      items.forEach(item => {
+        addToCart({
+          id: item.item_id,
+          short_desc: item.description,
+          itemPriceEstimates: {
+            [item.transaction_type]: parseFloat(item.item_price) || 0
+          },
+          transaction_type: item.transaction_type,
+          images: item.images || [],
+          price: item.item_price
+        });
+      });
 
-    // Set the customer information
-    setCustomer({
-      id: quote.customer_id,
-      name: quote.customer_name,
-      email: quote.customer_email,
-      phone: quote.customer_phone
-    });
+      // Set the customer information
+      setCustomer({
+        id: quote.customer_id,
+        name: quote.customer_name,
+        email: quote.customer_email,
+        phone: quote.customer_phone
+      });
 
-    navigate('/checkout', {
-      state: {
-        customerId: quote.customer_id,
-        itemId: quote.item_id,
-        customerName: quote.customer_name,
-        customerEmail: quote.customer_email,
-        customerPhone: quote.customer_phone,
-        returnPath: '/quotes',
-        quoteId: quote.id
-      }
-    });
+      setDetailsDialogOpen(false);
+      navigate('/checkout', {
+        state: {
+          customerId: quote.customer_id,
+          customerName: quote.customer_name,
+          customerEmail: quote.customer_email,
+          customerPhone: quote.customer_phone,
+          returnPath: '/quotes',
+          quoteId: quote.quote_id
+        }
+      });
+    } catch (error) {
+      console.error('Error proceeding to checkout:', error);
+      showMessage(error.response?.data?.error || 'Error proceeding to checkout', 'error');
+    }
   };
 
   const handleSort = (key) => {
@@ -417,8 +428,8 @@ function QuoteManager() {
     const sortedQuotes = [...filteredQuotes].sort((a, b) => {
       // Handle numeric fields
       if (['id', 'price', 'expires_in'].includes(sortConfig.key)) {
-        const aValue = sortConfig.key === 'price' ? getDisplayPrice(a) : parseFloat(a[sortConfig.key]) || 0;
-        const bValue = sortConfig.key === 'price' ? getDisplayPrice(b) : parseFloat(b[sortConfig.key]) || 0;
+        const aValue = sortConfig.key === 'price' ? getPriceForType(a) : parseFloat(a[sortConfig.key]) || 0;
+        const bValue = sortConfig.key === 'price' ? getPriceForType(b) : parseFloat(b[sortConfig.key]) || 0;
         return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
       }
       // Handle date fields
@@ -504,12 +515,6 @@ function QuoteManager() {
                 Quote ID {sortConfig.key === 'id' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
               <TableCell 
-                onClick={() => handleSort('customer_name')}
-                sx={{ cursor: 'pointer', userSelect: 'none' }}
-              >
-                Item {sortConfig.key === 'customer_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-              </TableCell>
-              <TableCell 
                 onClick={() => handleSort('item_description')}
                 sx={{ cursor: 'pointer', userSelect: 'none' }}
               >
@@ -558,9 +563,8 @@ function QuoteManager() {
               </TableRow>
             ) : (
               getSortedQuotes().map((quote) => (
-                <TableRow key={quote.id}>
-                  <TableCell>{quote.id}</TableCell>
-                  <TableCell>{quote.item_id}</TableCell>
+                <TableRow key={quote.quote_id}>
+                  <TableCell>{quote.quote_id}</TableCell>
                   <TableCell>
                     <Typography variant="body2">{quote.customer_name}</Typography>
                     <Typography variant="caption" color="textSecondary">
@@ -569,10 +573,7 @@ function QuoteManager() {
                   </TableCell>
                   <TableCell>
                     <Typography variant="body1">
-                      ${getDisplayPrice(quote)}
-                    </Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      {getDisplayPriceLabel(quote)}
+                      ${quote.total_amount}
                     </Typography>
                   </TableCell>
                   <TableCell>{formatDate(quote.created_at)}</TableCell>
@@ -651,11 +652,10 @@ function QuoteManager() {
                     Expires In: {selectedQuote.expires_in} days
                     {selectedQuote.days_remaining > 0 && ` (${selectedQuote.days_remaining} days remaining)`}
                   </Typography>
-                  <Typography variant="body2">Total: ${getDisplayPrice(selectedQuote)}</Typography>
                 </Grid>
               </Grid>
 
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>Transaction Details</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Quote Items</Typography>
               <TableContainer component={Paper} variant="outlined">
                 <Table size="small">
                   <TableHead>
@@ -664,88 +664,134 @@ function QuoteManager() {
                       <TableCell>Description</TableCell>
                       <TableCell>Transaction Type</TableCell>
                       <TableCell align="right">Price</TableCell>
+                      <TableCell align="right">Live Spot</TableCell>
                       <TableCell align="right">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    <TableRow>
-                      <TableCell>{selectedQuote.item_id}</TableCell>
-                      <TableCell>{selectedQuote.item_description}</TableCell>
-                      <TableCell>
-                        {editingItem ? (
-                          <Select
-                            size="small"
-                            value={editingItem.transaction_type}
-                            onChange={handleTransactionTypeChange}
-                            sx={{ minWidth: 120 }}
-                          >
-                            {transactionTypes.map(type => (
-                              <MenuItem key={type.type} value={type.type}>
-                                {type.type.charAt(0).toUpperCase() + type.type.slice(1)}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        ) : (
-                          selectedQuote.transaction_type.charAt(0).toUpperCase() + selectedQuote.transaction_type.slice(1)
-                        )}
-                      </TableCell>
-                      <TableCell align="right">
-                        {editingItem ? (
-                          <TextField
-                            type="number"
-                            size="small"
-                            value={getDisplayPrice(editingItem)}
-                            onChange={handlePriceChange}
-                            inputProps={{ 
-                              step: "0.01",
-                              min: "0"
-                            }}
-                            sx={{ width: 100 }}
-                          />
-                        ) : (
-                          <>
-                            <Typography variant="body1">
-                              ${getDisplayPrice(selectedQuote)}
-                            </Typography>
-                          </>
-                        )}
-                      </TableCell>
-                      <TableCell align="right">
-                        {editingItem ? (
-                          <IconButton 
-                            onClick={handleSaveItemChanges}
-                            color="primary"
-                            size="small"
-                            title="Save Changes"
-                          >
-                            <SaveIcon />
-                          </IconButton>
-                        ) : (
-                          <>
-                            <IconButton
-                              onClick={() => {
-                                setEditingItem({...selectedQuote});
+                    {quoteItems.map((item) => (
+                      <TableRow key={item.item_id}>
+                        <TableCell>{item.item_id}</TableCell>
+                        <TableCell>{item.description}</TableCell>
+                        <TableCell>
+                          {editingItem?.item_id === item.item_id ? (
+                            <Select
+                              size="small"
+                              value={editingItem.transaction_type}
+                              onChange={handleTransactionTypeChange}
+                              sx={{ minWidth: 120 }}
+                            >
+                              {transactionTypes.map(type => (
+                                <MenuItem key={type.type} value={type.type}>
+                                  {type.type.charAt(0).toUpperCase() + type.type.slice(1)}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          ) : (
+                            item.transaction_type.charAt(0).toUpperCase() + item.transaction_type.slice(1)
+                          )}
+                        </TableCell>
+                        <TableCell align="right">
+                          {editingItem?.item_id === item.item_id ? (
+                            <TextField
+                              type="number"
+                              size="small"
+                              value={editingItem.item_price}
+                              onChange={handlePriceChange}
+                              inputProps={{ 
+                                step: "0.01",
+                                min: "0"
                               }}
+                              sx={{ width: 100 }}
+                            />
+                          ) : (
+                          <>
+                            <Box>
+                              <Typography variant="body1">
+                                ${item.item_price}
+                              </Typography>
+                            </Box>
+                          </>
+                          )}
+                        </TableCell>
+                        <TableCell align="right">
+                        {item.metal_spot_price && (
+                                <Box sx={{ mt: 1, fontSize: '0.875rem' }}>
+                                  <Typography variant="caption" display="block" color="textSecondary">
+                                    Locked Spot: ${item.metal_spot_price}/oz
+                                  </Typography>
+                                  <Typography 
+                                    variant="caption" 
+                                    display="block" 
+                                    color={
+                                      item.precious_metal_type === 'Silver' ? 
+                                        (liveSpotPrices.cadxag > item.metal_spot_price ? 'success.main' : 
+                                         liveSpotPrices.cadxag < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                                      item.precious_metal_type === 'Gold' ? 
+                                        (liveSpotPrices.cadxau > item.metal_spot_price ? 'success.main' : 
+                                         liveSpotPrices.cadxau < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                                      item.precious_metal_type === 'Platinum' ? 
+                                        (liveSpotPrices.cadxpt > item.metal_spot_price ? 'success.main' : 
+                                         liveSpotPrices.cadxpt < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                                      item.precious_metal_type === 'Palladium' ? 
+                                        (liveSpotPrices.cadxpd > item.metal_spot_price ? 'success.main' : 
+                                         liveSpotPrices.cadxpd < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                                      'textSecondary'
+                                    }
+                                  >
+                                    Live Spot: ${item.precious_metal_type && liveSpotPrices ? 
+                                      (item.precious_metal_type === 'Silver' ? liveSpotPrices.cadxag :
+                                       item.precious_metal_type === 'Gold' ? liveSpotPrices.cadxau:
+                                       item.precious_metal_type === 'Platinum' ? liveSpotPrices.cadxpt :
+                                       item.precious_metal_type === 'Palladium' ? liveSpotPrices.cadxpd :
+                                       '0.00')
+                                      : '0.00'}/oz
+                                  </Typography>
+                                </Box>
+                              )}
+                        </TableCell>
+                        <TableCell align="right">
+                          {editingItem?.item_id === item.item_id ? (
+                            <IconButton 
+                              onClick={handleSaveItemChanges}
                               color="primary"
                               size="small"
-                              title="Edit Quote"
-                              disabled={!selectedQuote.days_remaining || selectedQuote.days_remaining <= 0}
+                              title="Save Changes"
                             >
-                              <EditIcon />
+                              <SaveIcon />
                             </IconButton>
-                            <IconButton
-                              onClick={() => {
-                                setQuoteToDelete(selectedQuote);
-                                setDeleteDialogOpen(true);
-                              }}
-                              color="error"
-                              size="small"
-                              title="Delete Quote"
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </>
-                        )}
+                          ) : (
+                            <>
+                              <IconButton
+                                onClick={() => setEditingItem(item)}
+                                color="primary"
+                                size="small"
+                                title="Edit Quote Item"
+                                disabled={!selectedQuote.days_remaining || selectedQuote.days_remaining <= 0}
+                              >
+                                <EditIcon />
+                              </IconButton>
+                              <IconButton
+                                onClick={() => handleDeleteItem(item)}
+                                color="error"
+                                size="small"
+                                title="Delete Quote Item"
+                                disabled={!selectedQuote.days_remaining || selectedQuote.days_remaining <= 0}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </>
+                          )}
+
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow>
+                      <TableCell colSpan={5} align="right">
+                        <strong>Total Amount:</strong>
+                      </TableCell>
+                      <TableCell align="right">
+                        <strong>${selectedQuote.total_amount}</strong>
                       </TableCell>
                     </TableRow>
                   </TableBody>

@@ -781,62 +781,8 @@ app.put('/api/carat-conversion', async (req, res) => {
 });
 
 // Quote Management API Endpoints
-app.post('/api/quotes', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { item_id, customer_id, employee_id } = req.body;
-    
-    // Validate required fields
-    if (!item_id || !customer_id || !employee_id) {
-      return res.status(400).json({ error: 'item_id, customer_id, and employee_id are required' });
-    }
 
-    await client.query('BEGIN');
-    
-    // Get current expiration configuration
-    const configResult = await client.query(`
-      SELECT days 
-      FROM quote_expiration 
-      ORDER BY created_at DESC 
-      LIMIT 1
-    `);
-    
-    const expires_in = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
-    
-    // Insert into quotes table
-    const quoteQuery = `
-      INSERT INTO quotes (
-        item_id,
-        customer_id,
-        employee_id,
-        expires_in,
-        created_at
-      )
-      VALUES ($1, $2, $3, $5, CURRENT_TIMESTAMP)
-      RETURNING *`;
-    
-    const quoteResult = await client.query(quoteQuery, [
-      item_id,
-      customer_id,
-      employee_id,
-      expires_in
-    ]);
-
-    await client.query('COMMIT');
-    res.status(201).json(quoteResult.rows[0]);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error saving quote:', err);
-    res.status(500).json({ 
-      error: 'Failed to save quote', 
-      details: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
-    } finally {
-        client.release();
-    }
-});
-
+// Get all quotes with customer and employee details
 app.get('/api/quotes', async (req, res) => {
   try {
     const query = `
@@ -845,39 +791,112 @@ app.get('/api/quotes', async (req, res) => {
         c.first_name || ' ' || c.last_name as customer_name,
         c.email as customer_email,
         c.phone as customer_phone,
-        j.short_desc as item_description,
-        j.buy_price,
-        j.pawn_value,
-        j.retail_price
+        e.first_name || ' ' || e.last_name as employee_name
       FROM quotes q
       LEFT JOIN customers c ON q.customer_id = c.id
-      LEFT JOIN jewelry j ON q.item_id = j.item_id
+      LEFT JOIN employees e ON q.employee_id = e.employee_id
       ORDER BY q.created_at DESC
     `;
+    
     const result = await pool.query(query);
     res.json(result.rows);
-  } catch (err) {
-    console.error('Error fetching quotes:', err);
-    res.status(500).json({ error: 'Failed to fetch quotes' });
+  } catch (error) {
+    console.error('Error fetching quotes:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/api/quotes/:id', async (req, res) => {
+// Get a specific quote by ID
+app.get('/api/quotes/:quote_id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const result = await pool.query(
-      'SELECT * FROM quotes WHERE id = $1',
-      [id]
-    );
+    const { quote_id } = req.params;
+    
+    const query = `
+      SELECT 
+        q.*,
+        c.first_name || ' ' || c.last_name as customer_name,
+        c.email as customer_email,
+        c.phone as customer_phone,
+        e.first_name || ' ' || e.last_name as employee_name
+      FROM quotes q
+      LEFT JOIN customers c ON q.customer_id = c.id
+      LEFT JOIN employees e ON q.employee_id = e.employee_id
+      WHERE q.quote_id = $1
+    `;
+    
+    const result = await pool.query(query, [quote_id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Quote not found' });
     }
     
     res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error fetching quote:', err);
-    res.status(500).json({ error: 'Failed to fetch quote' });
+  } catch (error) {
+    console.error('Error fetching quote:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create a new quote
+app.post('/api/quotes', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    const { items, customer_id, employee_id, total_amount } = req.body;
+    
+    // Get the latest quote ID to generate the next sequential number
+    const latestQuoteResult = await client.query(
+      "SELECT quote_id FROM quotes WHERE quote_id LIKE 'QT%' ORDER BY quote_id DESC LIMIT 1"
+    );
+    
+    let nextNumber = 1;
+    if (latestQuoteResult.rows.length > 0) {
+      const lastId = latestQuoteResult.rows[0].quote_id;
+      nextNumber = parseInt(lastId.slice(2)) + 1;
+    }
+    
+    // Format quote ID as QT followed by sequential number padded to 3 digits
+    const quoteId = `QT${nextNumber.toString().padStart(3, '0')}`;
+    
+    // Verify uniqueness (just in case)
+    const existingQuote = await client.query(
+      'SELECT quote_id FROM quotes WHERE quote_id = $1',
+      [quoteId]
+    );
+    
+    if (existingQuote.rows.length > 0) {
+      throw new Error('Failed to generate unique quote ID');
+    }
+    
+    // Get expiration period from configuration
+    const configResult = await client.query('SELECT days FROM quote_expiration LIMIT 1');
+    const expiresIn = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
+    
+    // Insert the quote
+    const quoteResult = await client.query(
+      `INSERT INTO quotes (
+        quote_id, customer_id, employee_id, total_amount,
+        expires_in, days_remaining, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $5, CURRENT_TIMESTAMP)
+      RETURNING *`,
+      [quoteId, customer_id, employee_id, total_amount, expiresIn]
+    );
+    
+    await client.query('COMMIT');
+    
+    res.status(201).json({
+      ...quoteResult.rows[0],
+      quote_id: quoteId,
+      expires_in: expiresIn,
+    });
+    
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating quote:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -934,6 +953,174 @@ app.put('/api/quotes/:id', async (req, res) => {
     }
 });
 
+// Get items for a specific quote
+app.get('/api/quotes/:quote_id/items', async (req, res) => {
+  try {
+    const { quote_id } = req.params;
+    
+    const query = `
+      SELECT 
+        qi.item_id,
+        qi.item_price,
+        tt.type as transaction_type,
+        j.short_desc as description,
+        j.buy_price,
+        j.pawn_value,
+        j.retail_price,
+        j.precious_metal_type,
+        j.metal_spot_price
+      FROM quote_items qi
+      LEFT JOIN transaction_type tt ON qi.transaction_type_id = tt.id
+      LEFT JOIN jewelry j ON qi.item_id = j.item_id
+      WHERE qi.quote_id = $1
+    `;
+
+    const result = await pool.query(query, [quote_id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching quote items:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update a quote item
+app.delete('/api/quotes/:quote_id/items/:item_id', async (req, res) => {
+  const { quote_id, item_id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // First delete the quote item
+    const deleteItemQuery = 'DELETE FROM quote_items WHERE quote_id = $1 AND item_id = $2';
+    await client.query(deleteItemQuery, [quote_id, item_id]);
+
+    // Then delete from jewelry
+    const deleteJewelryQuery = 'DELETE FROM jewelry WHERE item_id = $1';
+    await client.query(deleteJewelryQuery, [item_id]);
+
+    // Then update the quote's total amount
+    const updateTotalQuery = `
+      UPDATE quotes q
+      SET total_amount = COALESCE(
+        (SELECT SUM(item_price)
+         FROM quote_items
+         WHERE quote_id = $1
+        ), 0
+      )
+      WHERE q.quote_id = $1
+      RETURNING *
+    `;
+    const updateResult = await client.query(updateTotalQuery, [quote_id]);
+
+    await client.query('COMMIT');
+    res.json(updateResult.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting quote item:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/api/quotes/:quote_id', async (req, res) => {
+  const { quote_id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Get all item_ids associated with this quote
+    const itemIdsQuery = 'SELECT item_id FROM quote_items WHERE quote_id = $1';
+    const itemIdsResult = await client.query(itemIdsQuery, [quote_id]);
+    const itemIds = itemIdsResult.rows.map(row => row.item_id);
+
+    // First delete all quote items
+    const deleteItemsQuery = 'DELETE FROM quote_items WHERE quote_id = $1';
+    await client.query(deleteItemsQuery, [quote_id]);
+
+    // Then delete the jewelry items
+    if (itemIds.length > 0) {
+      const deleteJewelryQuery = 'DELETE FROM jewelry WHERE item_id = ANY($1)';
+      await client.query(deleteJewelryQuery, [itemIds]);
+    }
+
+    // Finally delete the quote
+    const deleteQuoteQuery = 'DELETE FROM quotes WHERE quote_id = $1 RETURNING *';
+    const result = await client.query(deleteQuoteQuery, [quote_id]);
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Quote not found' });
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting quote:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/api/quotes/:quote_id/items/:item_id', async (req, res) => {
+  try {
+    const { quote_id, item_id } = req.params;
+    const { transaction_type, item_price } = req.body;
+
+    // Get transaction_type_id
+    const typeQuery = 'SELECT id FROM transaction_type WHERE type = $1';
+    const typeResult = await pool.query(typeQuery, [transaction_type]);
+    
+    if (typeResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid transaction type' });
+    }
+
+    const transaction_type_id = typeResult.rows[0].id;
+
+    // Update quote item
+    const query = `
+      UPDATE quote_items
+      SET transaction_type_id = $1,
+          item_price = $2,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE quote_id = $3 AND item_id = $4
+      RETURNING *
+    `;
+
+    const result = await pool.query(query, [transaction_type_id, item_price, quote_id, item_id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Quote item not found' });
+    }
+
+    // Update quote total_amount
+    const totalQuery = `
+      UPDATE quotes
+      SET total_amount = (
+        SELECT SUM(item_price)
+        FROM quote_items
+        WHERE quote_id = $1
+      )
+      WHERE quote_id = $1
+      RETURNING total_amount
+    `;
+
+    const totalResult = await pool.query(totalQuery, [quote_id]);
+
+    res.json({
+      ...result.rows[0],
+      total_amount: totalResult.rows[0].total_amount
+    });
+  } catch (error) {
+    console.error('Error updating quote item:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.delete('/api/quotes/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -952,43 +1139,89 @@ app.delete('/api/quotes/:id', async (req, res) => {
   }
 });
 
-// Jewelry price update endpoint
-app.put('/api/jewelry/:id', async (req, res) => {
+// Jewelry update endpoint for quote conversion
+app.put('/api/jewelry/:quoteId', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const { quoteId } = req.params;
+    const results = [];
 
-    const { id } = req.params;
-    const { buy_price, pawn_value, retail_price } = req.body;
-
-    const updateQuery = `
-      UPDATE jewelry 
-      SET 
-        buy_price = $1,
-        pawn_value = $2,
-        retail_price = $3,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE item_id = $4
-      RETURNING *
+    // Get items from quote_items for this quote
+    const quoteItemsQuery = `
+      SELECT qi.*, tt.type as transaction_type 
+      FROM quote_items qi
+      JOIN transaction_type tt ON qi.transaction_type_id = tt.id
+      WHERE qi.quote_id = $1
     `;
+    const quoteItems = await client.query(quoteItemsQuery, [quoteId]);
+    // Process each quote item
+    for (const quoteItem of quoteItems.rows) {
+      // Find matching jewelry item
+      const jewelryQuery = `
+        SELECT * FROM jewelry
+        WHERE item_id = $1
+      `;
+      const jewelryResult = await client.query(jewelryQuery, [quoteItem.item_id]);
+      
+      if (jewelryResult.rows.length > 0) {
+        const jewelryItem = jewelryResult.rows[0];
+        
+        // Generate new item ID based on metal category
+        const usedIds = new Set();
+        const newItemId = await generateItemId(jewelryItem.category, client, usedIds);
+      
+        // Prepare price update based on transaction type
+        let priceUpdate = '';
+        if (quoteItem.transaction_type === 'buy') {
+          priceUpdate = 'buy_price = $3';
+        } else if (quoteItem.transaction_type === 'pawn') {
+          priceUpdate = 'pawn_value = $3';
+        } else if (quoteItem.transaction_type === 'retail') {
+          priceUpdate = 'retail_price = $3';
+        }
+        
+        const deleteQuoteItemQuery = `
+          DELETE FROM quote_items
+          WHERE quote_id = $1 AND item_id = $2
+        `;
+        await client.query(deleteQuoteItemQuery, [quoteId, quoteItem.item_id]);
 
-    const result = await client.query(updateQuery, [
-      buy_price,
-      pawn_value,
-      retail_price,
-      id
-    ]);
+        // Update jewelry item
+        const updateQuery = `
+          UPDATE jewelry 
+          SET 
+            item_id = $1,
+            status = $2,
+            ${priceUpdate},
+            updated_at = CURRENT_TIMESTAMP
+          WHERE item_id = $4
+          RETURNING *
+        `;
+
+        const result = await client.query(updateQuery, [
+          newItemId,
+          'HOLD',
+          quoteItem.item_price,
+          quoteItem.item_id
+        ]);
+
+        if (result.rows.length > 0) {
+          results.push(result.rows[0]);
+        }
+      }
+    }
+
+    const deleteQuoteQuery = `
+            DELETE FROM quotes WHERE quote_id = $1
+          `;
+          await client.query(deleteQuoteQuery, [quoteId]);
 
     await client.query('COMMIT');
-
-    if (result.rows.length > 0) {
-      res.json(result.rows[0]);
-    } else {
-      res.status(404).json({ error: 'Jewelry item not found' });
-    }
+    res.json(results);
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error updating jewelry prices:', err);
+    console.error('Error converting quote items:', err);
     res.status(500).json({ error: 'Failed to update jewelry prices', details: err.message });
     } finally {
         client.release();
@@ -1020,15 +1253,26 @@ app.post('/api/jewelry', async (req, res) => {
   try {
     await client.query('BEGIN');
     
-    const { cartItems } = req.body;
+    const { cartItems, quote_id } = req.body;
     const results = [];
-    const usedIds = new Set();
     
     // Process each item sequentially
+    let itemCounter = 1; // Counter for sequential numbers
     for (const item of cartItems) {
-      // Generate unique item ID, passing the set of IDs we've already used in this transaction
-      const item_id = await generateItemId(item.metal_category, client, usedIds);
-      usedIds.add(item_id);
+      // Use quote_id as item_id if provided, otherwise generate a new one
+      let item_id, status;
+      if (quote_id) {
+        // Add sequential number to quote_id (e.g., QT001-01)
+        const sequentialNumber = itemCounter.toString().padStart(2, '0');
+        item_id = `${quote_id}-${sequentialNumber}`;
+        itemCounter++;
+        status = 'QUOTED';
+      } else {
+        // Generate unique item ID for non-quote items
+        const usedIds = new Set();
+        item_id = await generateItemId(item.metal_category, client, usedIds);
+        status = 'HOLD';
+      }
       
       // Insert jewelry record
       const jewelryQuery = `
@@ -1080,8 +1324,9 @@ app.post('/api/jewelry', async (req, res) => {
           retail_price,
           status,
           location,
-          condition
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48)
+          condition,
+          metal_spot_price
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49)
         RETURNING *`;
 
       const jewelryValues = [
@@ -1095,7 +1340,7 @@ app.post('/api/jewelry', async (req, res) => {
         item.stamps || '',                                     // $8
         item.images || [],                                     // $9
         parseFloat(item.metal_weight) || 0,                       // $10
-        item.precious_metal_type || '',                                    // $11
+        item.precious_metal_type || '',                           // $11
         item.non_precious_metal_type || '',                       // $12
         item.metal_purity || '',                                  // $13
         item.jewelry_color || '',                                 // $14
@@ -1130,13 +1375,33 @@ app.post('/api/jewelry', async (req, res) => {
         item.buy_price,    // $43
         item.pawn_price,   // $44
         item.retail_price, // $45
-        'HOLD',         //46
+        status,         //46
         'SOUTH STORE',          // $47
-        'GOOD'          // $48
+        'GOOD',          // $48
+        item.metal_spot_price
       ];
 
       const result = await client.query(jewelryQuery, jewelryValues);
       results.push(result.rows[0]);
+
+      if(quote_id) {
+        const itemQuery = `
+          INSERT INTO quote_items (
+            quote_id, item_id, transaction_type_id,
+            item_price
+          )
+          VALUES ($1, $2, $3, $4)
+          RETURNING *
+        `;
+
+        await client.query(itemQuery, [
+          quote_id,
+          item_id,
+          item.transaction_type_id,
+          item.price
+        ]);
+      }
+      
     }
 
     await client.query('COMMIT');
@@ -1560,73 +1825,38 @@ app.post('/api/transactions', async (req, res) => {
     }
 });
 
-app.put('/api/transactions/:id', async (req, res) => {
+app.put('/api/transactions/:transaction_id', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { id } = req.params;
-    const {
-      transaction_type,
-      price,
-      payment_method
-    } = req.body;
+    const { transaction_id } = req.params;
+    const { transaction_status } = req.body;
 
     await client.query('BEGIN');
 
-    // First check if transaction exists and get current payment_id
-    const checkQuery = 'SELECT payment_id FROM transactions WHERE id = $1';
-    const checkResult = await client.query(checkQuery, [id]);
-    
-    if (checkResult.rows.length === 0) {
+    // Update transaction status
+    const updateQuery = `
+      UPDATE transactions
+      SET 
+        transaction_status = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE transaction_id = $2
+      RETURNING *
+    `;
+    const result = await client.query(updateQuery, [transaction_status, transaction_id]);
+
+    if (result.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Transaction not found' });
     }
-
-    const currentPaymentId = checkResult.rows[0].payment_id;
-
-    // Update payment if payment details changed
-    if (price || payment_method) {
-      const paymentQuery = `
-        UPDATE payments 
-        SET 
-          amount = COALESCE($1, amount),
-          payment_method = COALESCE($2, payment_method)
-        WHERE id = $3
-      `;
-      await client.query(paymentQuery, [price, payment_method, currentPaymentId]);
-    }
-
-
-    await client.query('COMMIT');
-
-    // Fetch and return updated transaction with all related data
-    const getTransactionQuery = `
-      SELECT 
-        t.*,
-        tt.type as transaction_type_name,
-        c.first_name as customer_first_name,
-        c.last_name as customer_last_name,
-        e.first_name as employee_first_name,
-        e.last_name as employee_last_name,
-        p.payment_id as payment_reference,
-        p.payment_method
-      FROM transactions t
-      LEFT JOIN transaction_type tt ON t.transaction_type_id = tt.id
-      LEFT JOIN customers c ON t.customer_id = c.id
-      LEFT JOIN employees e ON t.employee_id = e.employee_id
-      LEFT JOIN payments p ON t.payment_id = p.id
-      WHERE t.id = $1
-      GROUP BY t.id, tt.type, c.first_name, c.last_name, e.first_name, e.last_name, p.payment_id, p.payment_method
-    `;
-    const updatedTransaction = await client.query(getTransactionQuery, [id]);
-    res.json(updatedTransaction.rows[0]);
+    await client.query('COMMIT');    
 
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error updating transaction:', err);
     res.status(500).json({ error: 'Failed to update transaction', details: err.message });
-    } finally {
-        client.release();
-    }
+  } finally {
+    client.release();
+  }
 });
 
 // Transaction Types API Endpoints
@@ -1663,7 +1893,7 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);
 });
 

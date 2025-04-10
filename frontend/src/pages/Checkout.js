@@ -161,20 +161,37 @@ function Checkout() {
       // Get employee ID from token
       const employeeId = JSON.parse(atob(token.split('.')[1])).id;
 
+      // Check if we came from quotes
+      const quoteId = location.state?.quoteId;
+      const isFromQuotes = Boolean(quoteId);
+
       let transactionId;
 
-      // Only create jewelry items and transaction once
+      // Only create transaction once
       if (!transactionCreated) {
-        // First create the jewelry items
-        const jewelryResponse = await axios.post(
-          `${config.apiUrl}/jewelry`,
-          { cartItems },
-          {
-            headers: { Authorization: `Bearer ${token}` }
-          }
-        );
+        let createdJewelryItems;
 
-        const createdJewelryItems = jewelryResponse.data;
+        if (isFromQuotes) {
+          // If coming from quotes, update each quote item to a regular item
+          const convertResponse = await axios.put(
+            `${config.apiUrl}/jewelry/${quoteId}`,
+            {},
+            {
+              headers: { Authorization: `Bearer ${token}` }
+            }
+          );
+          createdJewelryItems = convertResponse.data;
+        } else {
+          // If coming from estimator, create new jewelry items
+          const jewelryResponse = await axios.post(
+            `${config.apiUrl}/jewelry`,
+            { cartItems },
+            {
+              headers: { Authorization: `Bearer ${token}` }
+            }
+          );
+          createdJewelryItems = jewelryResponse.data;
+        }
 
         // Create transactions for all items
         const transactionResponse = await axios.post(
@@ -306,16 +323,17 @@ function Checkout() {
         return;
       }
 
+      // Get employee ID from token
+      const employeeId = JSON.parse(atob(token.split('.')[1])).id;
+
       const response = await axios.post(
         `${config.apiUrl}/quotes`,
         {
           items: cartItems,
-          totalAmount: calculateTotal(),
-          customer_name: selectedCustomer.name,
-          customer_email: selectedCustomer.email,
-          customer_phone: selectedCustomer.phone,
+          customer_id: selectedCustomer.id,
+          employee_id: employeeId,
+          total_amount: calculateTotal(),
           created_at: new Date().toISOString(),
-          status: 'active'
         },
         {
           headers: {
@@ -332,6 +350,21 @@ function Checkout() {
           message: `Quote ${response.data.quote_id} saved successfully. Valid for ${expiresIn} days.`,
           severity: 'success'
         });
+
+        await axios.post(
+          `${config.apiUrl}/jewelry`,
+          { 
+            cartItems: cartItems.map(item => ({
+              ...item,
+              transaction_type_id: transactionTypes[item.transaction_type],
+            })),
+            quote_id: response.data.quote_id // Pass the quote_id
+          },
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+
         clearCart();
         setTimeout(() => {
           navigate('/gem-estimator');
@@ -361,15 +394,7 @@ function Checkout() {
     } else {
       // Save the cart items to session storage before navigating back
       sessionStorage.setItem('estimationState', JSON.stringify({
-        items: cartItems.map(item => ({
-          ...item,
-          price_estimates: {
-            pawn: parseFloat(item.price || 0),
-            buy: parseFloat(item.price || 0),
-            retail: parseFloat(item.price || 0),
-            [item.transaction_type]: parseFloat(item.price || 0)
-          }
-        }))
+        items: cartItems
       }));
       clearCart();
       setCustomer(null);
