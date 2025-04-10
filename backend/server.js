@@ -966,7 +966,9 @@ app.get('/api/quotes/:quote_id/items', async (req, res) => {
         j.short_desc as description,
         j.buy_price,
         j.pawn_value,
-        j.retail_price
+        j.retail_price,
+        j.precious_metal_type,
+        j.metal_spot_price
       FROM quote_items qi
       LEFT JOIN transaction_type tt ON qi.transaction_type_id = tt.id
       LEFT JOIN jewelry j ON qi.item_id = j.item_id

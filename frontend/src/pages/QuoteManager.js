@@ -64,6 +64,17 @@ function QuoteManager() {
     key: 'created_at',
     direction: 'desc'
   });
+  const [liveSpotPrices, setLiveSpotPrices] = useState(null);
+
+  // Function to fetch live spot prices
+  const fetchLiveSpotPrices = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/live_spot_prices`);
+      setLiveSpotPrices(response.data[0]);
+    } catch (error) {
+      showMessage('Error fetching live spot prices', 'error');
+    }
+  };
 
   // API helper functions
   const api = {
@@ -120,6 +131,7 @@ function QuoteManager() {
     fetchQuotes();
     fetchExpirationDays();
     fetchTransactionTypes();
+    fetchLiveSpotPrices();
   }, []);
 
   // Check for and delete expired quotes
@@ -652,6 +664,7 @@ function QuoteManager() {
                       <TableCell>Description</TableCell>
                       <TableCell>Transaction Type</TableCell>
                       <TableCell align="right">Price</TableCell>
+                      <TableCell align="right">Live Spot</TableCell>
                       <TableCell align="right">Actions</TableCell>
                     </TableRow>
                   </TableHead>
@@ -693,11 +706,49 @@ function QuoteManager() {
                             />
                           ) : (
                           <>
-                            <Typography variant="body1">
-                              ${item.item_price}
-                            </Typography>
+                            <Box>
+                              <Typography variant="body1">
+                                ${item.item_price}
+                              </Typography>
+                            </Box>
                           </>
                           )}
+                        </TableCell>
+                        <TableCell align="right">
+                        {item.metal_spot_price && (
+                                <Box sx={{ mt: 1, fontSize: '0.875rem' }}>
+                                  <Typography variant="caption" display="block" color="textSecondary">
+                                    Locked Spot: ${item.metal_spot_price}/oz
+                                  </Typography>
+                                  <Typography 
+                                    variant="caption" 
+                                    display="block" 
+                                    color={
+                                      item.precious_metal_type === 'Silver' ? 
+                                        (liveSpotPrices.cadxag > item.metal_spot_price ? 'success.main' : 
+                                         liveSpotPrices.cadxag < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                                      item.precious_metal_type === 'Gold' ? 
+                                        (liveSpotPrices.cadxau > item.metal_spot_price ? 'success.main' : 
+                                         liveSpotPrices.cadxau < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                                      item.precious_metal_type === 'Platinum' ? 
+                                        (liveSpotPrices.cadxpt > item.metal_spot_price ? 'success.main' : 
+                                         liveSpotPrices.cadxpt < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                                      item.precious_metal_type === 'Palladium' ? 
+                                        (liveSpotPrices.cadxpd > item.metal_spot_price ? 'success.main' : 
+                                         liveSpotPrices.cadxpd < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                                      'textSecondary'
+                                    }
+                                  >
+                                    Live Spot: ${item.precious_metal_type && liveSpotPrices ? 
+                                      (item.precious_metal_type === 'Silver' ? liveSpotPrices.cadxag :
+                                       item.precious_metal_type === 'Gold' ? liveSpotPrices.cadxau:
+                                       item.precious_metal_type === 'Platinum' ? liveSpotPrices.cadxpt :
+                                       item.precious_metal_type === 'Palladium' ? liveSpotPrices.cadxpd :
+                                       '0.00')
+                                      : '0.00'}/oz
+                                  </Typography>
+                                </Box>
+                              )}
                         </TableCell>
                         <TableCell align="right">
                           {editingItem?.item_id === item.item_id ? (
@@ -736,7 +787,7 @@ function QuoteManager() {
                       </TableRow>
                     ))}
                     <TableRow>
-                      <TableCell colSpan={4} align="right">
+                      <TableCell colSpan={5} align="right">
                         <strong>Total Amount:</strong>
                       </TableCell>
                       <TableCell align="right">
