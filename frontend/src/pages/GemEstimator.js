@@ -197,6 +197,7 @@ function GemEstimator() {
         pawn: jewelryItem.pawn_price,
         retail: jewelryItem.retail_price
       }
+
     };
     setEstimatedItems(prev => [...prev, itemWithPrices]);
 
@@ -1507,7 +1508,8 @@ function GemEstimator() {
     // Save the current state in session storage before navigating
     const updatedItems = estimatedItems.map((item) => ({
       ...item,
-      price: item.price_estimates[item.transaction_type]
+      price: item.price_estimates[item.transaction_type],
+      free_text: item.free_text
     }));
     
     sessionStorage.setItem('estimationState', JSON.stringify({
@@ -2375,9 +2377,7 @@ function GemEstimator() {
                   {estimatedItems.map((item, index) => (
                     <TableRow 
                       key={index}
-                      onClick={() => handleOpenDialog(index)}
                       sx={{ 
-                        cursor: 'pointer',
                         transition: 'all 0.2s',
                         '&:hover': {
                           bgcolor: 'action.hover',
@@ -2397,12 +2397,33 @@ function GemEstimator() {
                       <TableCell>
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Box>
-                            <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
-                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''}
+                            <Typography sx={{ fontWeight: 500, mb: 0.2 }}>
+                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.metal_category}
                             </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              {item.metal_category}
-                            </Typography>
+                            <TextField
+                              variant="standard"
+                              size="small"
+                              placeholder="Add description"
+                              onChange={async (e) => {
+                                const newValue = e.target.value;
+                                
+                                // Update local state
+                                setEstimatedItems(prevItems => {
+                                  const updatedItems = [...prevItems];
+                                  const itemIndex = updatedItems.findIndex(i => i.item_id === item.item_id);
+                                  if (itemIndex !== -1) {
+                                    updatedItems[itemIndex] = {
+                                      ...updatedItems[itemIndex],
+                                      free_text: newValue
+                                    };
+                                  }
+                                  return updatedItems;
+                                });
+                              }}
+                              value={item.free_text || ''}
+                              sx={{ mt: 0.2, '& .MuiInputBase-input': { fontSize: '0.875rem' } }}
+                              fullWidth
+                            />
                           </Box>
                         </Box>
                       </TableCell>
