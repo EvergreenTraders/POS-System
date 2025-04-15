@@ -1325,8 +1325,9 @@ app.post('/api/jewelry', async (req, res) => {
           status,
           location,
           condition,
-          metal_spot_price
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49)
+          metal_spot_price,
+          free_text
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50)
         RETURNING *`;
 
       const jewelryValues = [
@@ -1378,7 +1379,8 @@ app.post('/api/jewelry', async (req, res) => {
         status,         //46
         'SOUTH STORE',          // $47
         'GOOD',          // $48
-        item.metal_spot_price
+        item.metal_spot_price,
+        item.free_text
       ];
 
       const result = await client.query(jewelryQuery, jewelryValues);

@@ -484,7 +484,14 @@ function Checkout() {
                     {cartItems.map((item, index) => (
                       <TableRow key={item.id || index}>
                         <TableCell>
-                          {item.short_desc} 
+                          <Box>
+                            <Typography>{item.short_desc}</Typography>
+                            {item.free_text && (
+                              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                {item.free_text}
+                              </Typography>
+                            )}
+                          </Box>
                         </TableCell>
                         <TableCell>{item.transaction_type}</TableCell>
                         <TableCell align="right">

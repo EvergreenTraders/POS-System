@@ -128,6 +128,7 @@ function GemEstimator() {
       jewelry_color: addMetal[0].jewelryColor,
       metal_spot_price: addMetal[0].spotPrice,
       est_metal_value: addMetal[0].estimatedValue.toFixed(2),
+      purity_value: addMetal[0].purity.value,
 
       // Primary gem details
       primary_gem_category: addedGemTypes.primary || null,
@@ -197,6 +198,7 @@ function GemEstimator() {
         pawn: jewelryItem.pawn_price,
         retail: jewelryItem.retail_price
       }
+
     };
     setEstimatedItems(prev => [...prev, itemWithPrices]);
 
@@ -283,7 +285,6 @@ function GemEstimator() {
     retail: 0
   });
   const [priceEstimatePercentages, setPriceEstimatePercentages] = useState({});
-  const [itemPriceEstimates, setItemPriceEstimates] = useState({ pawn: 0, buy: 0, retail: 0 });
 
   const [diamondValuationType, setDiamondValuationType] = useState('each');
 
@@ -797,11 +798,11 @@ function GemEstimator() {
     const pawnPercent = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
     const buyPercent = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
     const retailPercent = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
-
+    console.log("estimtes", pawnPercent, Number((value * pawnPercent/100).toFixed(2)));
     return {
-      pawn: value * (pawnPercent / 100),
-      buy: value * (buyPercent / 100),
-      retail: value * (retailPercent / 100)
+      pawn: Number((value * pawnPercent / 100).toFixed(2)),
+      buy: Number((value * buyPercent / 100).toFixed(2)),
+      retail: Number((value * retailPercent / 100).toFixed(2))
     };
   };
 
@@ -1507,7 +1508,8 @@ function GemEstimator() {
     // Save the current state in session storage before navigating
     const updatedItems = estimatedItems.map((item) => ({
       ...item,
-      price: item.price_estimates[item.transaction_type]
+      price: item.price_estimates[item.transaction_type],
+      free_text: item.free_text
     }));
     
     sessionStorage.setItem('estimationState', JSON.stringify({
@@ -2155,7 +2157,7 @@ function GemEstimator() {
                   <TextField
                     size="small"
                     type="decimal"
-                    value={priceEstimates.pawn.toFixed(1)}
+                    value={priceEstimates.pawn}
                     variant="standard"
                     onChange={(e) => {
                       const newValue = parseFloat(e.target.value);
@@ -2190,7 +2192,7 @@ function GemEstimator() {
                   <TextField 
                     size="small"
                     type="decimal"
-                    value={priceEstimates.buy.toFixed(1)}
+                    value={priceEstimates.buy}
                     variant="standard"
                     onChange={(e) => {
                       const newValue = parseFloat(e.target.value);
@@ -2224,7 +2226,7 @@ function GemEstimator() {
                   <TextField 
                     size="small"
                     type="decimal"
-                    value={priceEstimates.retail.toFixed(1)}
+                    value={priceEstimates.retail}
                     variant="standard"
                     onChange={(e) => {
                       const newValue = parseFloat(e.target.value);
@@ -2375,9 +2377,7 @@ function GemEstimator() {
                   {estimatedItems.map((item, index) => (
                     <TableRow 
                       key={index}
-                      onClick={() => handleOpenDialog(index)}
                       sx={{ 
-                        cursor: 'pointer',
                         transition: 'all 0.2s',
                         '&:hover': {
                           bgcolor: 'action.hover',
@@ -2397,12 +2397,33 @@ function GemEstimator() {
                       <TableCell>
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Box>
-                            <Typography sx={{ fontWeight: 500, mb: 0.5 }}>
-                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''}
+                            <Typography sx={{ fontWeight: 500, mb: 0.2 }}>
+                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.metal_category}
                             </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              {item.metal_category}
-                            </Typography>
+                            <TextField
+                              variant="standard"
+                              size="small"
+                              placeholder="Add description"
+                              onChange={async (e) => {
+                                const newValue = e.target.value;
+                                
+                                // Update local state
+                                setEstimatedItems(prevItems => {
+                                  const updatedItems = [...prevItems];
+                                  const itemIndex = updatedItems.findIndex(i => i.item_id === item.item_id);
+                                  if (itemIndex !== -1) {
+                                    updatedItems[itemIndex] = {
+                                      ...updatedItems[itemIndex],
+                                      free_text: newValue
+                                    };
+                                  }
+                                  return updatedItems;
+                                });
+                              }}
+                              value={item.free_text || ''}
+                              sx={{ mt: 0.2, '& .MuiInputBase-input': { fontSize: '0.875rem' } }}
+                              fullWidth
+                            />
                           </Box>
                         </Box>
                       </TableCell>
@@ -2422,7 +2443,7 @@ function GemEstimator() {
                             <Box>
                               <Typography variant="body2">Pawn</Typography>
                               <Typography variant="caption" color="text.secondary">
-                                ${(item.price_estimates?.["pawn"] || 0).toFixed(2)}
+                                ${(item.price_estimates?.["pawn"] || 0)}
                               </Typography>
                             </Box>
                           </MenuItem>
@@ -2430,7 +2451,7 @@ function GemEstimator() {
                             <Box>
                               <Typography variant="body2">Buy</Typography>
                               <Typography variant="caption" color="text.secondary">
-                                ${(item.price_estimates?.["buy"] || 0).toFixed(2)}
+                                ${(item.price_estimates?.["buy"] || 0)}
                               </Typography>
                             </Box>
                           </MenuItem>
@@ -2438,7 +2459,7 @@ function GemEstimator() {
                             <Box>
                               <Typography variant="body2">Retail</Typography>
                               <Typography variant="caption" color="text.secondary">
-                                ${(item.price_estimates?.["retail"] || 0).toFixed(2)}
+                                ${(item.price_estimates?.["retail"] || 0)}
                               </Typography>
                             </Box>
                           </MenuItem>
@@ -2448,10 +2469,10 @@ function GemEstimator() {
                         <TextField 
                           type="number"
                           value={
-                            item.transaction_type === 'pawn' ? (item.price_estimates?.["pawn"] || 0).toFixed(2) :
-                            item.transaction_type === 'buy' ? (item.price_estimates?.["buy"] || 0).toFixed(2) :
-                            item.transaction_type === 'retail' ? (item.price_estimates?.["retail"] || 0).toFixed(2) :
-                            (0).toFixed(2)
+                            item.transaction_type === 'pawn' ? (item.price_estimates?.["pawn"] || 0) :
+                            item.transaction_type === 'buy' ? (item.price_estimates?.["buy"] || 0):
+                            item.transaction_type === 'retail' ? (item.price_estimates?.["retail"] || 0) :
+                            0
                           }
                           onChange={(e) => handlePriceChange(index, e.target.value)}
                           InputProps={{

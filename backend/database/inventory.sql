@@ -1,16 +1,16 @@
 -- Drop existing table and its dependencies
 -- Add metal_spot_price to existing jewelry table if it exists
--- DO $$ 
--- BEGIN
---     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'jewelry') THEN
---         ALTER TABLE jewelry ADD COLUMN IF NOT EXISTS metal_spot_price DECIMAL(10,2) DEFAULT 0.00;
---     END IF;
--- END $$;
+DO $$ 
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'jewelry') THEN
+        ALTER TABLE jewelry ADD COLUMN IF NOT EXISTS free_text VARCHAR(255);
+    END IF;
+END $$;
 
     -- Drop status constraint if it exists
-    DO $$ BEGIN
-        ALTER TABLE jewelry DROP CONSTRAINT IF EXISTS valid_status;
-    END $$;
+    -- DO $$ BEGIN
+    --     ALTER TABLE jewelry DROP CONSTRAINT IF EXISTS valid_status;
+    -- END $$;
 
 -- Create jewelry table for inventory
 CREATE TABLE IF NOT EXISTS jewelry (
