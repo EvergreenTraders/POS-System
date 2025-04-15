@@ -74,19 +74,19 @@ function GemEstimator() {
     // Calculate price estimates when metal is added
     const estimates = calculatePriceEstimates(newItem.estimatedValue, newItem.preciousMetalTypeId);
     
-    // Add new estimates to existing ones
-    setPriceEstimates(prev => ({
-      pawn: prev.pawn + estimates.pawn,
-      buy: prev.buy + estimates.buy,
-      retail: prev.retail + estimates.retail
-    }));
-    
     // Add the metal with its price estimates
     const metalWithEstimates = {
       ...newItem,
       priceEstimates: estimates
     };
     setAddMetal(prev => [...prev, metalWithEstimates]);
+    
+    // Set the price estimates directly (not adding to previous)
+    setPriceEstimates({
+      pawn: estimates.pawn,
+      buy: estimates.buy,
+      retail: estimates.retail
+    });
   };
 
   const handleDeleteMetal = (index) => {
@@ -2523,7 +2523,15 @@ function GemEstimator() {
                 </TableBody>
               </Table>
             </TableContainer>
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
+              <Typography variant="h6">
+                Total Price: ${estimatedItems.reduce((total, item) => {
+                  const price = item.transaction_type === 'pawn' ? (item.price_estimates?.['pawn'] || 0) :
+                               item.transaction_type === 'buy' ? (item.price_estimates?.['buy'] || 0) :
+                               item.transaction_type === 'retail' ? (item.price_estimates?.['retail'] || 0) : 0;
+                  return total + parseFloat(price);
+                }, 0).toFixed(2)}
+              </Typography>
               <Button
                 variant="contained"
                 color="primary"
