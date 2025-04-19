@@ -19,8 +19,8 @@ const CustomerManager = () => {
   const [customers, setCustomers] = useState([]);
   const [quoteExpirationConfig, setQuoteExpirationConfig] = useState({ days: 30 });
   const [searchForm, setSearchForm] = useState({
-    firstName: '',
-    lastName: '',
+    name: '',
+    id_number: '',
     phone: ''
   });
   const [formData, setFormData] = useState({
@@ -41,7 +41,10 @@ const CustomerManager = () => {
     date_of_birth: '',
     status: 'active',
     risk_level: 'normal',
-    notes: ''
+    notes: '',
+    gender: '',
+    height: '',
+    weight: ''
   });
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
@@ -76,18 +79,21 @@ const CustomerManager = () => {
 
   const handleSearch = async (e) => {
     e.preventDefault();
-    if (!searchForm.firstName && !searchForm.lastName && !searchForm.phone) {
+    if (!searchForm.name && !searchForm.id_number && !searchForm.phone) {
       showSnackbar('Please enter at least one search criteria', 'warning');
       return;
     }
 
     setLoading(true);
     try {
-      const queryParams = new URLSearchParams({
-        firstName: searchForm.firstName.trim(),
-        lastName: searchForm.lastName.trim(),
-        phone: searchForm.phone.trim()
-      }).toString();
+      // If name is provided, send as 'name' param; backend should split for first/last
+      // Only include non-empty fields in query params
+      const params = {};
+      // Always trim and allow partial id_number search
+      if (searchForm.name && searchForm.name.trim()) params.name = searchForm.name.trim();
+      if (searchForm.id_number && searchForm.id_number.trim()) params.id_number = searchForm.id_number.trim();
+      if (searchForm.phone && searchForm.phone.trim()) params.phone = searchForm.phone.trim();
+      const queryParams = new URLSearchParams(params).toString();
       
       const response = await fetch(`${config.apiUrl}/customers/search?${queryParams}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
@@ -173,6 +179,14 @@ const CustomerManager = () => {
 
   const handleEdit = (customer) => {
     setSelectedCustomer(customer);
+    // Ensure date fields are formatted as YYYY-MM-DD for date input
+    const formatDate = (date) => {
+      if (!date) return '';
+      if (typeof date === 'string' && date.match(/^\d{4}-\d{2}-\d{2}$/)) return date;
+      const d = new Date(date);
+      if (isNaN(d)) return '';
+      return d.toISOString().substring(0, 10);
+    };
     setFormData({
       first_name: customer.first_name || '',
       last_name: customer.last_name || '',
@@ -186,12 +200,14 @@ const CustomerManager = () => {
       country: customer.country || '',
       id_type: customer.id_type || '',
       id_number: customer.id_number || '',
-      id_expiry_date: customer.id_expiry_date || '',
-      id_issuing_authority: customer.id_issuing_authority || '',
-      date_of_birth: customer.date_of_birth || '',
+      id_expiry_date: formatDate(customer.id_expiry_date),
+      date_of_birth: formatDate(customer.date_of_birth),
       status: customer.status || 'active',
       risk_level: customer.risk_level || 'normal',
-      notes: customer.notes || ''
+      notes: customer.notes || '',
+      gender: customer.gender || '',
+      height: customer.height || '',
+      weight: customer.weight || ''
     });
     setOpenDialog(true);
   };
@@ -329,18 +345,18 @@ const CustomerManager = () => {
         <Grid container spacing={2} direction="column">
           <Grid item xs={12}>
             <TextField
-              name="firstName"
-              label="First Name"
-              value={searchForm.firstName}
+              name="name"
+              label="Name"
+              value={searchForm.name}
               onChange={handleInputChange}
               fullWidth
             />
           </Grid>
           <Grid item xs={12}>
             <TextField
-              name="lastName"
-              label="Last Name"
-              value={searchForm.lastName}
+              name="id_number"
+              label="ID Number"
+              value={searchForm.id_number}
               onChange={handleInputChange}
               fullWidth
             />
@@ -360,7 +376,7 @@ const CustomerManager = () => {
               color="primary"
               onClick={handleSearch}
               fullWidth
-              disabled={loading || (!searchForm.firstName && !searchForm.lastName && !searchForm.phone)}
+              disabled={loading || (!searchForm.name && !searchForm.id_number && !searchForm.phone)}
               sx={{ height: '48px' }}
             >
               {loading ? (
@@ -441,6 +457,14 @@ const CustomerManager = () => {
                         </React.Fragment>
                       }
                     />
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      sx={{ ml: 2 }}
+                      onClick={() => handleEdit(customer)}
+                    >
+                      Edit
+                    </Button>
                   </ListItem>
                 </React.Fragment>
               ))}
@@ -681,6 +705,49 @@ const CustomerManager = () => {
                     margin="dense"
                   />
                 </Grid>
+              </Grid>
+              {/* New fields: Gender, Height, Weight */}
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  select
+                  name="gender"
+                  label="Gender"
+                  value={formData.gender || ''}
+                  onChange={handleFormChange}
+                  fullWidth
+                  margin="dense"
+                  SelectProps={{ native: true }}
+                >
+                  <option value=""></option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                  <option value="Prefer not to say">Prefer not to say</option>
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  name="height"
+                  label="Height (cm)"
+                  type="number"
+                  value={formData.height || ''}
+                  onChange={handleFormChange}
+                  fullWidth
+                  margin="dense"
+                  inputProps={{ min: 0, step: 0.1 }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  name="weight"
+                  label="Weight (kg)"
+                  type="number"
+                  value={formData.weight || ''}
+                  onChange={handleFormChange}
+                  fullWidth
+                  margin="dense"
+                  inputProps={{ min: 0, step: 0.1 }}
+                />
               </Grid>
             </Box>
           </Box>
