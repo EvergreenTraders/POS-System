@@ -1558,25 +1558,33 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
 app.get('/api/customers/search', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { firstName, lastName, phone } = req.query;
+    const { name, phone, id_number } = req.query;
     let query = 'SELECT * FROM customers WHERE 1=1';
     const params = [];
     let paramCount = 1;
 
-    if (firstName) {
-      query += ` AND LOWER(first_name) LIKE $${paramCount}`;
-      params.push(`%${firstName.toLowerCase()}%`);
+    if (name) {
+      // Allow searching by full name, first name, or last name (case-insensitive)
+      query += ` AND (
+        LOWER(first_name) LIKE $${paramCount}
+        OR LOWER(last_name) LIKE $${paramCount}
+        OR LOWER(first_name || ' ' || last_name) LIKE $${paramCount}
+      )`;
+      params.push(`%${name.toLowerCase()}%`);
       paramCount++;
     }
 
-    if (lastName) {
-      query += ` AND LOWER(last_name) LIKE $${paramCount}`;
-      params.push(`%${lastName.toLowerCase()}%`);
+    if (id_number) {
+      // Allow partial and case-insensitive search for id_number
+      query += ` AND CAST(id_number AS TEXT) ILIKE $${paramCount}`;
+      params.push(`%${id_number}%`);
+      paramCount++;
     }
 
     if (phone) {
       query += ` AND LOWER(phone) LIKE $${paramCount}`;
       params.push(`%${phone}%`);
+      paramCount++;
     }
 
     query += ' ORDER BY created_at DESC';
@@ -1613,22 +1621,22 @@ app.post('/api/customers', async (req, res) => {
     const {
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
-      id_type, id_number, id_expiry_date, id_issuing_authority,
-      date_of_birth, status, risk_level, notes
+      id_type, id_number, id_expiry_date,
+      date_of_birth, status, risk_level, notes, gender, height, weight
     } = req.body;
 
     const result = await pool.query(
       `INSERT INTO customers (
         first_name, last_name, email, phone,
         address_line1, address_line2, city, state, postal_code, country,
-        id_type, id_number, id_expiry_date, id_issuing_authority,
-        date_of_birth, status, risk_level, notes
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        id_type, id_number, id_expiry_date,
+        date_of_birth, status, risk_level, notes, gender, height, weight
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
       [first_name, last_name, email, phone,
        address_line1, address_line2, city, state, postal_code, country,
-       id_type, id_number, id_expiry_date, id_issuing_authority,
-       date_of_birth, status, risk_level, notes]
+       id_type, id_number, id_expiry_date,
+       date_of_birth, status, risk_level, notes, gender, height, weight]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1647,8 +1655,8 @@ app.put('/api/customers/:id', async (req, res) => {
     const {
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
-      id_type, id_number, id_expiry_date, id_issuing_authority,
-      date_of_birth, status, risk_level, notes
+      id_type, id_number, id_expiry_date,
+      date_of_birth, status, risk_level, notes, gender, height, weight
     } = req.body;
 
     const result = await pool.query(
@@ -1656,14 +1664,14 @@ app.put('/api/customers/:id', async (req, res) => {
         first_name = $1, last_name = $2, email = $3, phone = $4,
         address_line1 = $5, address_line2 = $6, city = $7, state = $8,
         postal_code = $9, country = $10, id_type = $11, id_number = $12,
-        id_expiry_date = $13, id_issuing_authority = $14, date_of_birth = $15,
-        status = $16, risk_level = $17, notes = $18
-      WHERE id = $19
+        id_expiry_date = $13, date_of_birth = $14,
+        status = $15, risk_level = $16, notes = $17, gender = $18, height = $19, weight = $20
+      WHERE id = $21
       RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
       [first_name, last_name, email, phone,
        address_line1, address_line2, city, state, postal_code, country,
-       id_type, id_number, id_expiry_date, id_issuing_authority,
-       date_of_birth, status, risk_level, notes, id]
+       id_type, id_number, id_expiry_date,
+       date_of_birth, status, risk_level, notes, gender, height, weight, id]
     );
 
     if (result.rows.length === 0) {
