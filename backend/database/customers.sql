@@ -73,3 +73,6 @@ ALTER TABLE customers DROP COLUMN IF EXISTS id_issuing_authority;
 ALTER TABLE customers DROP COLUMN IF EXISTS id_scan_path;
 
 COMMENT ON COLUMN customers.notes IS 'Additional notes or comments about the customer';
+
+-- Add image column for customer picture (binary data)
+ALTER TABLE customers ADD COLUMN image BYTEA;

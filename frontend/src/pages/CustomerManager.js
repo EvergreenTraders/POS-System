@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Container, Typography, Box, Button, TextField, Dialog, DialogTitle,
   DialogContent, DialogActions, Table, TableBody, TableCell,
@@ -11,7 +11,76 @@ import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
 
+// Converts a Buffer-like object (from backend) to a base64 data URL for image preview
+function bufferToDataUrl(bufferObj) {
+  if (!bufferObj || !bufferObj.data) return null;
+  const base64 = btoa(
+    new Uint8Array(bufferObj.data).reduce((data, byte) => data + String.fromCharCode(byte), '')
+  );
+  // Default to jpeg, you may adjust if your backend provides type info
+  return `data:image/jpeg;base64,${base64}`;
+}
+
 const CustomerManager = () => {
+  // Camera state
+  const [showCamera, setShowCamera] = useState(false);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+
+  // Start camera when dialog opens
+  useEffect(() => {
+    if (showCamera) {
+      startCamera();
+    } else {
+      stopCamera();
+    }
+    // Cleanup on unmount
+    return () => {
+      stopCamera();
+    };
+    // eslint-disable-next-line
+  }, [showCamera]);
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      alert('Unable to access camera.');
+      setShowCamera(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  };
+
+  const captureImage = () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 320;
+    canvas.height = video.videoHeight || 240;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(blob => {
+      if (blob) {
+        const file = new File([blob], `customer-photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        setFormData(prev => ({ ...prev, image: file }));
+        setShowCamera(false);
+      }
+    }, 'image/jpeg', 0.9);
+  };
+
   const navigate = useNavigate();
   const location = useLocation();
   const { setCustomer, addToCart, cartItems } = useCart();
@@ -28,6 +97,7 @@ const CustomerManager = () => {
     last_name: '',
     email: '',
     phone: '',
+    image: null, // Add image to formData
     address_line1: '',
     address_line2: '',
     city: '',
@@ -137,17 +207,26 @@ const CustomerManager = () => {
         ? `${config.apiUrl}/customers/${selectedCustomer.id}`
         : `${config.apiUrl}/customers`;
 
+      // Prepare FormData for multipart upload
+      const data = new FormData();
+      Object.entries(formData).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          // For image, always append the File object
+          if (key === 'image' && value instanceof File) {
+            data.append('image', value);
+          } else {
+            data.append(key, value);
+          }
+        }
+      });
+
       const response = await fetch(url, {
         method,
         headers: {
-          'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`
+          // Note: Do NOT set Content-Type, browser will set it for FormData
         },
-        body: JSON.stringify({
-          ...formData,
-          status: 'active',
-          created_at: new Date().toISOString()
-        })
+        body: data
       });
 
       if (!response.ok) {
@@ -177,7 +256,7 @@ const CustomerManager = () => {
     }
   };
 
-  const handleEdit = (customer) => {
+  const handleEdit = async (customer) => {
     setSelectedCustomer(customer);
     // Ensure date fields are formatted as YYYY-MM-DD for date input
     const formatDate = (date) => {
@@ -187,6 +266,30 @@ const CustomerManager = () => {
       if (isNaN(d)) return '';
       return d.toISOString().substring(0, 10);
     };
+
+    // Utility to fetch image as File
+    const urlToFile = async (url, filename = 'customer-photo.jpg') => {
+      try {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        // Try to infer mime type from blob or fallback
+        const mime = blob.type || 'image/jpeg';
+        return new File([blob], filename, { type: mime });
+      } catch (e) {
+        return null;
+      }
+    };
+
+    let imageValue = null;
+    if (customer.image && typeof customer.image === 'object' && customer.image.type === 'Buffer') {
+      imageValue = bufferToDataUrl(customer.image);
+    } else if (typeof customer.image === 'string' && customer.image.startsWith('http')) {
+      // Download image and convert to File
+      imageValue = await urlToFile(customer.image, `customer-photo-${customer.id || Date.now()}.jpg`);
+    } else {
+      imageValue = customer.image || null;
+    }
+
     setFormData({
       first_name: customer.first_name || '',
       last_name: customer.last_name || '',
@@ -207,32 +310,8 @@ const CustomerManager = () => {
       notes: customer.notes || '',
       gender: customer.gender || '',
       height: customer.height || '',
-      weight: customer.weight || ''
-    });
-    setOpenDialog(true);
-  };
-
-  const handleAdd = () => {
-    setSelectedCustomer(null);
-    setFormData({
-      first_name: '',
-      last_name: '',
-      email: '',
-      phone: '',
-      address_line1: '',
-      address_line2: '',
-      city: '',
-      state: '',
-      postal_code: '',
-      country: '',
-      id_type: '',
-      id_number: '',
-      id_expiry_date: '',
-      id_issuing_authority: '',
-      date_of_birth: '',
-      status: 'active',
-      risk_level: 'normal',
-      notes: ''
+      weight: customer.weight || '',
+      image: imageValue
     });
     setOpenDialog(true);
   };
@@ -298,7 +377,8 @@ const CustomerManager = () => {
       email: '',
       phone: '',
       status: 'active',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      image: '' // New image field
     };
     
     setCustomer(newCustomer); // Save to CartContext
@@ -516,56 +596,171 @@ const CustomerManager = () => {
         <DialogContent>
           <Box sx={{ mt: 2 }}>
             <Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}>
-              <Grid container>
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    name="first_name"
-                    label="First Name"
-                    value={formData.first_name || ''}
-                    onChange={handleFormChange}
-                    fullWidth
-                    required
-                    error={!formData.first_name}
-                    helperText={!formData.first_name ? 'First name is required' : ''}
-                    margin="dense"
-                  />
+               <Grid container spacing={2}>
+                {/* Image Capture/Upload on the left, spans 2 rows */}
+                <Grid item xs={12} sm={3} md={3} sx={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'flex-start' }}>
+                  {formData.image ? (
+  <Box sx={{ position: 'relative', width: '100%' }}>
+    <img
+      src={
+        formData.image instanceof File || formData.image instanceof Blob
+          ? URL.createObjectURL(formData.image)
+          : typeof formData.image === 'string'
+            ? formData.image
+            : undefined
+      }
+      alt="Preview"
+      style={{
+        maxWidth: '100%',
+        maxHeight: 180,
+        objectFit: 'cover',
+        width: '100%',
+        height: 180,
+        display: 'block',
+        borderRadius: 8,
+        border: '1px solid #e0e0e0',
+      }}
+    />
+    <Button
+      variant="text"
+      sx={{
+        position: 'absolute',
+        bottom: 14,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 2,
+        width: '70%',
+        minWidth: 140,
+        minHeight: 36,
+        padding: '5px 0',
+        background: 'rgba(255,255,255,0.80)',
+        color: '#222',
+        fontWeight: 600,
+        fontSize: 16,
+        lineHeight: 1.2,
+        textTransform: 'none',
+        border: '1.5px solid #e0e0e0',
+        borderRadius: 10,
+        boxShadow: '0 2px 12px 0 rgba(0,0,0,0.08)',
+        transition: 'background 0.2s, color 0.2s',
+        '&:hover': {
+          background: 'rgba(255,255,255,0.95)',
+          color: '#111',
+        },
+        '&:active': {
+          background: 'rgba(240,240,240,1)',
+          color: '#1976d2',
+        },
+      }}
+      onClick={() => setShowCamera(true)}
+    >
+      Retake Photo
+    </Button>
+  </Box>
+) : (
+  <Button
+    variant="outlined"
+    fullWidth
+    sx={{
+      mt: 1, mb: 1,
+      minHeight: 180,
+      fontSize: 20,
+      py: 3,
+      px: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      textTransform: 'none',
+      position: 'relative',
+      overflow: 'hidden',
+    }}
+    onClick={() => setShowCamera(true)}
+  >
+    Capture Photo
+  </Button>
+)}
+
+{/* Camera Dialog */}
+<Dialog open={showCamera} onClose={() => { stopCamera(); setShowCamera(false); }} maxWidth="xs" fullWidth>
+  <DialogTitle>Capture Photo</DialogTitle>
+  <DialogContent>
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        style={{ width: '100%', maxHeight: 240, background: '#222', borderRadius: 8 }}
+      />
+      <Button
+        variant="contained"
+        color="primary"
+        sx={{ mt: 2 }}
+        onClick={captureImage}
+      >
+        Capture
+      </Button>
+    </Box>
+  </DialogContent>
+  <DialogActions>
+    <Button onClick={() => { stopCamera(); setShowCamera(false); }}>Cancel</Button>
+  </DialogActions>
+</Dialog>
                 </Grid>
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    name="last_name"
-                    label="Last Name"
-                    value={formData.last_name || ''}
-                    onChange={handleFormChange}
-                    fullWidth
-                    required
-                    error={!formData.last_name}
-                    helperText={!formData.last_name ? 'Last name is required' : ''}
-                    margin="dense"
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    name="email"
-                    label="Email"
-                    type="email"
-                    value={formData.email || ''}
-                    onChange={handleFormChange}
-                    fullWidth
-                    required={!formData.isGuest}
-                    error={!formData.isGuest && !formData.email}
-                    helperText={!formData.isGuest && !formData.email ? 'Email is required for registered customers' : ''}
-                    margin="dense"
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    name="phone"
-                    label="Phone Number"
-                    value={formData.phone || ''}
-                    onChange={handleFormChange}
-                    fullWidth
-                    margin="dense"
-                  />
+                {/* Main Fields on the right */}
+                <Grid item xs={12} sm={9} md={9}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        name="first_name"
+                        label="First Name"
+                        value={formData.first_name || ''}
+                        onChange={handleFormChange}
+                        fullWidth
+                        required
+                        error={!formData.first_name}
+                        helperText={!formData.first_name ? 'First name is required' : ''}
+                        margin="dense"
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        name="last_name"
+                        label="Last Name"
+                        value={formData.last_name || ''}
+                        onChange={handleFormChange}
+                        fullWidth
+                        required
+                        error={!formData.last_name}
+                        helperText={!formData.last_name ? 'Last name is required' : ''}
+                        margin="dense"
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        name="email"
+                        label="Email"
+                        type="email"
+                        value={formData.email || ''}
+                        onChange={handleFormChange}
+                        fullWidth
+                        required={!formData.isGuest}
+                        error={!formData.isGuest && !formData.email}
+                        helperText={!formData.isGuest && !formData.email ? 'Email is required' : ''}
+                        margin="dense"
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        name="phone"
+                        label="Phone Number"
+                        value={formData.phone || ''}
+                        onChange={handleFormChange}
+                        fullWidth
+                        margin="dense"
+                      />
+                    </Grid>
+                  </Grid>
                 </Grid>
                 {/* Address Fields */}
                 <Grid item xs={12}>
