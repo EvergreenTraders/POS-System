@@ -968,7 +968,10 @@ app.get('/api/quotes/:quote_id/items', async (req, res) => {
         j.pawn_value,
         j.retail_price,
         j.precious_metal_type,
-        j.metal_spot_price
+        j.metal_spot_price,
+        j.metal_weight,
+        j.metal_purity,
+        j.purity_value
       FROM quote_items qi
       LEFT JOIN transaction_type tt ON qi.transaction_type_id = tt.id
       LEFT JOIN jewelry j ON qi.item_id = j.item_id
@@ -1273,7 +1276,6 @@ app.post('/api/jewelry', async (req, res) => {
         item_id = await generateItemId(item.metal_category, client, usedIds);
         status = 'HOLD';
       }
-      
       // Insert jewelry record
       const jewelryQuery = `
         INSERT INTO jewelry (
@@ -1345,7 +1347,7 @@ app.post('/api/jewelry', async (req, res) => {
         item.non_precious_metal_type || '',                       // $12
         item.metal_purity || '',                                  // $13
         item.jewelry_color || '',                                 // $14
-        parseFloat(item.metal_purity_value) || 0,                // $15
+        parseFloat(item.purity_value) || 0,                // $15
         parseFloat(item.est_metal_value) || 0,                       // $16
         item.primary_gem_type || null,                             // $17
         item.primary_gem_category || null,                      // $18

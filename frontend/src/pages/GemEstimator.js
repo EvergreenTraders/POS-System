@@ -798,7 +798,6 @@ function GemEstimator() {
     const pawnPercent = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
     const buyPercent = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
     const retailPercent = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
-    console.log("estimtes", pawnPercent, Number((value * pawnPercent/100).toFixed(2)));
     return {
       pawn: Number((value * pawnPercent / 100).toFixed(2)),
       buy: Number((value * buyPercent / 100).toFixed(2)),
