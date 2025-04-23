@@ -968,7 +968,10 @@ app.get('/api/quotes/:quote_id/items', async (req, res) => {
         j.pawn_value,
         j.retail_price,
         j.precious_metal_type,
-        j.metal_spot_price
+        j.metal_spot_price,
+        j.metal_weight,
+        j.metal_purity,
+        j.purity_value
       FROM quote_items qi
       LEFT JOIN transaction_type tt ON qi.transaction_type_id = tt.id
       LEFT JOIN jewelry j ON qi.item_id = j.item_id
@@ -1273,7 +1276,6 @@ app.post('/api/jewelry', async (req, res) => {
         item_id = await generateItemId(item.metal_category, client, usedIds);
         status = 'HOLD';
       }
-      
       // Insert jewelry record
       const jewelryQuery = `
         INSERT INTO jewelry (
@@ -1345,7 +1347,7 @@ app.post('/api/jewelry', async (req, res) => {
         item.non_precious_metal_type || '',                       // $12
         item.metal_purity || '',                                  // $13
         item.jewelry_color || '',                                 // $14
-        parseFloat(item.metal_purity_value) || 0,                // $15
+        parseFloat(item.purity_value) || 0,                // $15
         parseFloat(item.est_metal_value) || 0,                       // $16
         item.primary_gem_type || null,                             // $17
         item.primary_gem_category || null,                      // $18
@@ -1558,25 +1560,33 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
 app.get('/api/customers/search', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { firstName, lastName, phone } = req.query;
+    const { name, phone, id_number } = req.query;
     let query = 'SELECT * FROM customers WHERE 1=1';
     const params = [];
     let paramCount = 1;
 
-    if (firstName) {
-      query += ` AND LOWER(first_name) LIKE $${paramCount}`;
-      params.push(`%${firstName.toLowerCase()}%`);
+    if (name) {
+      // Allow searching by full name, first name, or last name (case-insensitive)
+      query += ` AND (
+        LOWER(first_name) LIKE $${paramCount}
+        OR LOWER(last_name) LIKE $${paramCount}
+        OR LOWER(first_name || ' ' || last_name) LIKE $${paramCount}
+      )`;
+      params.push(`%${name.toLowerCase()}%`);
       paramCount++;
     }
 
-    if (lastName) {
-      query += ` AND LOWER(last_name) LIKE $${paramCount}`;
-      params.push(`%${lastName.toLowerCase()}%`);
+    if (id_number) {
+      // Allow partial and case-insensitive search for id_number
+      query += ` AND CAST(id_number AS TEXT) ILIKE $${paramCount}`;
+      params.push(`%${id_number}%`);
+      paramCount++;
     }
 
     if (phone) {
       query += ` AND LOWER(phone) LIKE $${paramCount}`;
       params.push(`%${phone}%`);
+      paramCount++;
     }
 
     query += ' ORDER BY created_at DESC';
@@ -1608,27 +1618,45 @@ app.get('/api/customers/:id', async (req, res) => {
   }
 });
 
-app.post('/api/customers', async (req, res) => {
+const multer = require('multer');
+const path = require('path');
+
+// Multer setup for customer image uploads
+// Use memory storage for multer to store image as buffer
+const uploadCustomerImage = multer({ storage: multer.memoryStorage() });
+
+// Ensure upload directory exists
+const fs = require('fs');
+const uploadDir = 'uploads/customers/';
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+app.post('/api/customers', uploadCustomerImage.single('image'), async (req, res) => {
   try {
     const {
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
-      id_type, id_number, id_expiry_date, id_issuing_authority,
-      date_of_birth, status, risk_level, notes
+      id_type, id_number, id_expiry_date,
+      date_of_birth, status, risk_level, notes, gender, height, weight
     } = req.body;
-
+    // Store image as binary data (buffer)
+    let image = null;
+    if (req.file && req.file.buffer) {
+      image = req.file.buffer;
+    }
     const result = await pool.query(
       `INSERT INTO customers (
         first_name, last_name, email, phone,
         address_line1, address_line2, city, state, postal_code, country,
-        id_type, id_number, id_expiry_date, id_issuing_authority,
-        date_of_birth, status, risk_level, notes
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        id_type, id_number, id_expiry_date,
+        date_of_birth, status, risk_level, notes, gender, height, weight, image
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
       RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
-      [first_name, last_name, email, phone,
+      [first_name, last_name, email, phone || '',
        address_line1, address_line2, city, state, postal_code, country,
-       id_type, id_number, id_expiry_date, id_issuing_authority,
-       date_of_birth, status, risk_level, notes]
+       id_type, id_number, id_expiry_date || null,
+       date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null, image]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1641,35 +1669,57 @@ app.post('/api/customers', async (req, res) => {
   }
 });
 
-app.put('/api/customers/:id', async (req, res) => {
+app.put('/api/customers/:id', uploadCustomerImage.single('image'), async (req, res) => {
   try {
     const { id } = req.params;
     const {
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
-      id_type, id_number, id_expiry_date, id_issuing_authority,
-      date_of_birth, status, risk_level, notes
+      id_type, id_number, id_expiry_date,
+      date_of_birth, status, risk_level, notes, gender, height, weight
     } = req.body;
 
-    const result = await pool.query(
-      `UPDATE customers SET
-        first_name = $1, last_name = $2, email = $3, phone = $4,
-        address_line1 = $5, address_line2 = $6, city = $7, state = $8,
-        postal_code = $9, country = $10, id_type = $11, id_number = $12,
-        id_expiry_date = $13, id_issuing_authority = $14, date_of_birth = $15,
-        status = $16, risk_level = $17, notes = $18
-      WHERE id = $19
-      RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
-      [first_name, last_name, email, phone,
-       address_line1, address_line2, city, state, postal_code, country,
-       id_type, id_number, id_expiry_date, id_issuing_authority,
-       date_of_birth, status, risk_level, notes, id]
-    );
+    let query, values;
+    if (req.file && req.file.buffer) {
+      // If a new image is uploaded, update the image column
+      query = `
+        UPDATE customers SET
+          first_name = $1, last_name = $2, email = $3, phone = $4,
+          address_line1 = $5, address_line2 = $6, city = $7, state = $8,
+          postal_code = $9, country = $10, id_type = $11, id_number = $12,
+          id_expiry_date = $13, date_of_birth = $14,
+          status = $15, risk_level = $16, notes = $17, gender = $18, height = $19, weight = $20,
+          image = $21
+        WHERE id = $22
+        RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`;
+      values = [first_name, last_name, email, phone,
+        address_line1, address_line2, city, state, postal_code, country,
+        id_type, id_number, id_expiry_date,
+        date_of_birth, status, risk_level, notes, gender, height, weight,
+        req.file.buffer, id];
+    } else {
+      // No new image, don't update the image column
+      query = `
+        UPDATE customers SET
+          first_name = $1, last_name = $2, email = $3, phone = $4,
+          address_line1 = $5, address_line2 = $6, city = $7, state = $8,
+          postal_code = $9, country = $10, id_type = $11, id_number = $12,
+          id_expiry_date = $13, date_of_birth = $14,
+          status = $15, risk_level = $16, notes = $17, gender = $18, height = $19, weight = $20
+        WHERE id = $21
+        RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`;
+      values = [first_name, last_name, email, phone,
+        address_line1, address_line2, city, state, postal_code, country,
+        id_type, id_number, id_expiry_date,
+        date_of_birth, status, risk_level, notes, gender, height, weight, id];
+    }
+
+    const result = await pool.query(query, values);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Customer not found' });
     }
-    
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error updating customer:', err);

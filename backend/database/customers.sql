@@ -59,4 +59,20 @@ COMMENT ON COLUMN customers.id_type IS 'Type of identification document provided
 COMMENT ON COLUMN customers.id_number IS 'Unique number of the identification document';
 COMMENT ON COLUMN customers.risk_level IS 'Risk assessment level of the customer';
 COMMENT ON COLUMN customers.status IS 'Current status of the customer account';
+
+-- Add gender, height, and weight columns
+-- ALTER TABLE customers
+--   ADD COLUMN IF NOT EXISTS gender VARCHAR(10),
+--   ADD COLUMN IF NOT EXISTS height NUMERIC(5,2),
+--   ADD COLUMN IF NOT EXISTS weight NUMERIC(5,2);
+
+-- Remove obsolete columns
+ALTER TABLE customers DROP COLUMN IF EXISTS last_visit_date;
+ALTER TABLE customers DROP COLUMN IF EXISTS total_transactions;
+ALTER TABLE customers DROP COLUMN IF EXISTS id_issuing_authority;
+ALTER TABLE customers DROP COLUMN IF EXISTS id_scan_path;
+
 COMMENT ON COLUMN customers.notes IS 'Additional notes or comments about the customer';
+
+-- Add image column for customer picture (binary data)
+ALTER TABLE customers ADD COLUMN image BYTEA;

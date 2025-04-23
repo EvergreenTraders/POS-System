@@ -26,7 +26,10 @@ import {
   Snackbar,
   Select,
   MenuItem,
-  CircularProgress
+  CircularProgress,
+  Radio,
+  RadioGroup,
+  FormControlLabel
 } from '@mui/material';
 import config from '../config';
 import SearchIcon from '@mui/icons-material/Search';
@@ -268,15 +271,15 @@ function QuoteManager() {
   };
 
   const handleTransactionTypeChange = (e) => {
-    const newType = e.target.value;
-    const newPrice = getPriceForType(editingItem, newType);
-    
-    setEditingItem({
-      ...editingItem,
-      transaction_type: newType,
-      item_price: newPrice
-    });
-  };
+  const newType = e.target.value;
+  let newPrice = getPriceForType(editingItem, newType);
+
+  setEditingItem({
+    ...editingItem,
+    transaction_type: newType,
+    item_price: newPrice
+  });
+};
 
   const handlePriceChange = (e) => {
     setEditingItem({
@@ -664,7 +667,7 @@ function QuoteManager() {
                       <TableCell>Description</TableCell>
                       <TableCell>Transaction Type</TableCell>
                       <TableCell align="right">Price</TableCell>
-                      <TableCell align="right">Live Spot</TableCell>
+                      <TableCell align="right">Spot Price</TableCell>
                       <TableCell align="right">Actions</TableCell>
                     </TableRow>
                   </TableHead>
@@ -715,41 +718,128 @@ function QuoteManager() {
                           )}
                         </TableCell>
                         <TableCell align="right">
-                        {item.metal_spot_price && (
-                                <Box sx={{ mt: 1, fontSize: '0.875rem' }}>
-                                  <Typography variant="caption" display="block" color="textSecondary">
-                                    Locked Spot: ${item.metal_spot_price}/oz
-                                  </Typography>
-                                  <Typography 
-                                    variant="caption" 
-                                    display="block" 
-                                    color={
-                                      item.precious_metal_type === 'Silver' ? 
-                                        (liveSpotPrices.cadxag > item.metal_spot_price ? 'success.main' : 
-                                         liveSpotPrices.cadxag < item.metal_spot_price ? 'error.main' : 'textSecondary') :
-                                      item.precious_metal_type === 'Gold' ? 
-                                        (liveSpotPrices.cadxau > item.metal_spot_price ? 'success.main' : 
-                                         liveSpotPrices.cadxau < item.metal_spot_price ? 'error.main' : 'textSecondary') :
-                                      item.precious_metal_type === 'Platinum' ? 
-                                        (liveSpotPrices.cadxpt > item.metal_spot_price ? 'success.main' : 
-                                         liveSpotPrices.cadxpt < item.metal_spot_price ? 'error.main' : 'textSecondary') :
-                                      item.precious_metal_type === 'Palladium' ? 
-                                        (liveSpotPrices.cadxpd > item.metal_spot_price ? 'success.main' : 
-                                         liveSpotPrices.cadxpd < item.metal_spot_price ? 'error.main' : 'textSecondary') :
-                                      'textSecondary'
-                                    }
-                                  >
-                                    Live Spot: ${item.precious_metal_type && liveSpotPrices ? 
-                                      (item.precious_metal_type === 'Silver' ? liveSpotPrices.cadxag :
-                                       item.precious_metal_type === 'Gold' ? liveSpotPrices.cadxau:
-                                       item.precious_metal_type === 'Platinum' ? liveSpotPrices.cadxpt :
-                                       item.precious_metal_type === 'Palladium' ? liveSpotPrices.cadxpd :
-                                       '0.00')
-                                      : '0.00'}/oz
-                                  </Typography>
-                                </Box>
-                              )}
-                        </TableCell>
+  {editingItem?.item_id === item.item_id ? (
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+      <RadioGroup
+        row
+        value={editingItem.spot_type || 'locked'}
+        onChange={e => {
+  const newSpotType = e.target.value;
+  let updatedItem = { ...editingItem, spot_type: newSpotType };
+  if (
+    newSpotType === 'live' 
+  ) {
+    // Map metal to spot price key and label
+    const metalMap = {
+      Gold: { key: 'cadxau', label: 'Gold', factor: 0.7},
+      Silver: { key: 'cadxag', label: 'Silver', factor: 0.7 },
+      Platinum: { key: 'cadxpt', label: 'Platinum', factor: 0.7 },
+      Palladium: { key: 'cadxpd', label: 'Palladium', factor: 0.7 }
+    };
+    const metalType = editingItem.precious_metal_type;
+    const meta = metalMap[metalType];
+    if (meta) {
+      const spot = liveSpotPrices[meta.key] || liveSpotPrices[meta.key.toUpperCase()];
+      const purity = editingItem.purity_value;
+      const weight = editingItem.metal_weight;
+      const price = spot * purity * weight * meta.factor;
+      updatedItem = {
+        ...updatedItem,
+        item_price: Number(price.toFixed(2))
+      };
+    }
+  }
+  setEditingItem(updatedItem);
+}}
+        name="spotType"
+      >
+                <FormControlLabel
+          value="locked"
+          control={<Radio size="small" />}
+          label={
+            <Typography
+              variant="caption"
+              display="block"
+              sx={{ fontSize: '0.875rem' }}
+              color="textSecondary"
+            >
+              Locked Spot: ${item.metal_spot_price}/oz
+            </Typography>
+          }
+        />
+        <FormControlLabel
+          value="live"
+          control={<Radio size="small" />}
+          label={
+            <Typography
+              variant="caption"
+              display="block"
+              sx={{ fontSize: '0.875rem' }}
+              color={
+                item.precious_metal_type === 'Silver' ?
+                  (liveSpotPrices.cadxag > item.metal_spot_price ? 'success.main' :
+                    liveSpotPrices.cadxag < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                item.precious_metal_type === 'Gold' ?
+                  (liveSpotPrices.cadxau > item.metal_spot_price ? 'success.main' :
+                    liveSpotPrices.cadxau < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                item.precious_metal_type === 'Platinum' ?
+                  (liveSpotPrices.cadxpt > item.metal_spot_price ? 'success.main' :
+                    liveSpotPrices.cadxpt < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                item.precious_metal_type === 'Palladium' ?
+                  (liveSpotPrices.cadxpd > item.metal_spot_price ? 'success.main' :
+                    liveSpotPrices.cadxpd < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+                'textSecondary'
+              }
+            >
+              Live Spot: ${item.precious_metal_type && liveSpotPrices ? (
+                item.precious_metal_type === 'Silver' ? liveSpotPrices.cadxag :
+                item.precious_metal_type === 'Gold' ? liveSpotPrices.cadxau :
+                item.precious_metal_type === 'Platinum' ? liveSpotPrices.cadxpt :
+                item.precious_metal_type === 'Palladium' ? liveSpotPrices.cadxpd :
+                '0.00'
+              ) : '0.00'}/oz
+            </Typography>
+          }
+        />
+      </RadioGroup>
+    </Box>
+  ) : (
+    item.metal_spot_price && (
+      <Box sx={{ mt: 1, fontSize: '0.875rem' }}>
+        <Typography variant="caption" display="block" color="textSecondary">
+          Locked Spot: ${item.metal_spot_price}/oz
+        </Typography>
+        <Typography
+          variant="caption"
+          display="block"
+          color={
+            item.precious_metal_type === 'Silver' ?
+              (liveSpotPrices.cadxag > item.metal_spot_price ? 'success.main' :
+                liveSpotPrices.cadxag < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+              item.precious_metal_type === 'Gold' ?
+                (liveSpotPrices.cadxau > item.metal_spot_price ? 'success.main' :
+                  liveSpotPrices.cadxau < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+              item.precious_metal_type === 'Platinum' ?
+                (liveSpotPrices.cadxpt > item.metal_spot_price ? 'success.main' :
+                  liveSpotPrices.cadxpt < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+              item.precious_metal_type === 'Palladium' ?
+                (liveSpotPrices.cadxpd > item.metal_spot_price ? 'success.main' :
+                  liveSpotPrices.cadxpd < item.metal_spot_price ? 'error.main' : 'textSecondary') :
+              'textSecondary'
+          }
+        >
+          Live Spot: ${item.precious_metal_type && liveSpotPrices ?
+            (item.precious_metal_type === 'Silver' ? liveSpotPrices.cadxag :
+              item.precious_metal_type === 'Gold' ? liveSpotPrices.cadxau :
+                item.precious_metal_type === 'Platinum' ? liveSpotPrices.cadxpt :
+                  item.precious_metal_type === 'Palladium' ? liveSpotPrices.cadxpd :
+                    '0.00')
+            : '0.00'}/oz
+        </Typography>
+      </Box>
+    )
+  )}
+</TableCell>
                         <TableCell align="right">
                           {editingItem?.item_id === item.item_id ? (
                             <IconButton 
