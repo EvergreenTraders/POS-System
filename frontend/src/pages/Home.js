@@ -51,8 +51,21 @@ function bufferToDataUrl(bufferObj) {
 const Home = () => {
   // Camera state
   const [showCamera, setShowCamera] = useState(false);
+  const [currentCaptureMode, setCurrentCaptureMode] = useState('customer'); // 'customer', 'id_front', or 'id_back'
+  // Hover state for search results dialog
+  const [hoveredCustomerIdx, setHoveredCustomerIdx] = useState(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  
+  // Helper function to convert dataURL to File object (moved from handleEdit scope to component scope)
+  const urlToFile = async (url, filename = 'customer-photo.jpg') => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const mime = blob.type || 'image/jpeg';
+      return new File([blob], filename, { type: mime });
+    } catch (e) { return null; }
+  };
 
   // Start camera when dialog opens
   useEffect(() => {
@@ -96,8 +109,19 @@ const Home = () => {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(blob => {
       if (blob) {
-        const file = new File([blob], `customer-photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
-        setFormData(prev => ({ ...prev, image: file }));
+        // Create different filenames based on capture mode
+        const filename = `${currentCaptureMode}-${Date.now()}.jpg`;
+        const file = new File([blob], filename, { type: 'image/jpeg' });
+        
+        // Update the appropriate form field based on capture mode
+        if (currentCaptureMode === 'id_front') {
+          setFormData(prev => ({ ...prev, id_image_front: file }));
+        } else if (currentCaptureMode === 'id_back') {
+          setFormData(prev => ({ ...prev, id_image_back: file }));
+        } else {
+          // Default to customer photo
+          setFormData(prev => ({ ...prev, image: file }));
+        }
         setShowCamera(false);
       }
     }, 'image/jpeg', 0.9);
@@ -117,6 +141,7 @@ const Home = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [openSearchDialog, setOpenSearchDialog] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
+const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dialog customer selection
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
@@ -152,6 +177,7 @@ const Home = () => {
       const data = await response.json();
       setSearchResults(data);
       setOpenSearchDialog(true);
+      setSelectedSearchIdx(data.length > 0 ? 0 : -1); // auto-select first
       if (data.length === 0) {
         showSnackbar('No customers found. You can register a new customer or proceed as guest.', 'info');
       }
@@ -176,10 +202,40 @@ const Home = () => {
       const method = selectedCustomer?.id ? 'PUT' : 'POST';
       const url = selectedCustomer?.id ? `${config.apiUrl}/customers/${selectedCustomer.id}` : `${config.apiUrl}/customers`;
       const data = new FormData();
+      
+      // Ensure we preserve existing images when only updating one of them
+      if (method === 'PUT' && selectedCustomer) {
+        // Check if image fields exist in formData
+        const hasImage = formData.image !== undefined;
+        const hasIdFront = formData.id_image_front !== undefined;
+        const hasIdBack = formData.id_image_back !== undefined;
+        
+        // If one image is being updated but others aren't in formData, we need to include the existing ones
+        if (hasImage || hasIdFront || hasIdBack) {
+          // For each image field not being updated, get the existing image from selectedCustomer if available
+          if (!hasImage && selectedCustomer.image) {
+            const existingImage = await urlToFile(bufferToDataUrl(selectedCustomer.image), 'existing-customer-photo.jpg');
+            if (existingImage) formData.image = existingImage;
+          }
+          
+          if (!hasIdFront && selectedCustomer.id_image_front) {
+            const existingIdFront = await urlToFile(bufferToDataUrl(selectedCustomer.id_image_front), 'existing-id-front.jpg');
+            if (existingIdFront) formData.id_image_front = existingIdFront;
+          }
+          
+          if (!hasIdBack && selectedCustomer.id_image_back) {
+            const existingIdBack = await urlToFile(bufferToDataUrl(selectedCustomer.id_image_back), 'existing-id-back.jpg');
+            if (existingIdBack) formData.id_image_back = existingIdBack;
+          }
+        }
+      }
+      
+      // Now process all form data including the preserved images
       Object.entries(formData).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
-          if (key === 'image' && value instanceof File) {
-            data.append('image', value);
+          if ((key === 'image' || key === 'id_image_front' || key === 'id_image_back') && value instanceof File) {
+            // Handle image files properly by appending them with their original key names
+            data.append(key, value);
           } else {
             data.append(key, value);
           }
@@ -194,6 +250,15 @@ const Home = () => {
       const savedCustomer = await response.json();
       setSelectedCustomer(savedCustomer);
       setCustomer(savedCustomer);
+      
+      // Update the customer in searchResults if it exists there
+      if (method === 'PUT' && searchResults.length > 0) {
+        const updatedSearchResults = searchResults.map(customer => 
+          customer.id === savedCustomer.id ? savedCustomer : customer
+        );
+        setSearchResults(updatedSearchResults);
+      }
+      
       if (location.state?.items?.length > 0) {
         navigate('/checkout', { state: { from: location.state.from || 'customer' } });
       }
@@ -204,6 +269,7 @@ const Home = () => {
       setLoading(false);
     }
   };
+  
   const handleEdit = async (customer) => {
     setSelectedCustomer(customer);
     const formatDate = (date) => {
@@ -213,14 +279,8 @@ const Home = () => {
       if (isNaN(d)) return '';
       return d.toISOString().substring(0, 10);
     };
-    const urlToFile = async (url, filename = 'customer-photo.jpg') => {
-      try {
-        const res = await fetch(url);
-        const blob = await res.blob();
-        const mime = blob.type || 'image/jpeg';
-        return new File([blob], filename, { type: mime });
-      } catch (e) { return null; }
-    };
+    
+    // Process main customer photo
     let imageValue = null;
     if (customer.image && typeof customer.image === 'object' && customer.image.type === 'Buffer') {
       imageValue = bufferToDataUrl(customer.image);
@@ -229,14 +289,63 @@ const Home = () => {
     } else {
       imageValue = customer.image || null;
     }
+    // Process ID front image
+    let idImageFront = null;
+    if (customer.id_image_front && typeof customer.id_image_front === 'object') {
+      // Handle Buffer type from database
+      if (customer.id_image_front.type === 'Buffer' || customer.id_image_front.data) {
+        idImageFront = bufferToDataUrl(customer.id_image_front);
+      } else {
+        idImageFront = customer.id_image_front;
+      }
+    }
+    // Process ID back image
+    let idImageBack = null;
+    if (customer.id_image_back && typeof customer.id_image_back === 'object') {
+      // Handle Buffer type from database
+      if (customer.id_image_back.type === 'Buffer' || customer.id_image_back.data) {
+        idImageBack = bufferToDataUrl(customer.id_image_back);
+      } else {
+        idImageBack = customer.id_image_back;
+      }
+    }
     setFormData({
-      first_name: customer.first_name || '', last_name: customer.last_name || '', email: customer.email || '', phone: customer.phone || '', address_line1: customer.address_line1 || '', address_line2: customer.address_line2 || '', city: customer.city || '', state: customer.state || '', postal_code: customer.postal_code || '', country: customer.country || '', id_type: customer.id_type || '', id_number: customer.id_number || '', id_expiry_date: formatDate(customer.id_expiry_date), date_of_birth: formatDate(customer.date_of_birth), status: customer.status || 'active', risk_level: customer.risk_level || 'normal', notes: customer.notes || '', gender: customer.gender || '', height: customer.height || '', weight: customer.weight || '', image: imageValue
+      first_name: customer.first_name || '', 
+      last_name: customer.last_name || '', 
+      email: customer.email || '', 
+      phone: customer.phone || '', 
+      address_line1: customer.address_line1 || '', 
+      address_line2: customer.address_line2 || '', 
+      city: customer.city || '', 
+      state: customer.state || '', 
+      postal_code: customer.postal_code || '', 
+      country: customer.country || '', 
+      id_type: customer.id_type || '', 
+      id_number: customer.id_number || '', 
+      id_expiry_date: formatDate(customer.id_expiry_date), 
+      date_of_birth: formatDate(customer.date_of_birth), 
+      status: customer.status || 'active', 
+      risk_level: customer.risk_level || 'normal', 
+      notes: customer.notes || '', 
+      gender: customer.gender || '', 
+      height: customer.height || '', 
+      weight: customer.weight || '', 
+      image: imageValue,
+      id_image_front: idImageFront,
+      id_image_back: idImageBack
     });
     setOpenDialog(true);
   };
   const handleCloseDialog = () => {
     setOpenDialog(false);
-    setSelectedCustomer(null);
+    
+    // Keep the search dialog open if a customer was just edited
+    // and we have search results to show
+    if (searchResults.length === 0) {
+      // If there are no search results, we can close everything
+      setSelectedCustomer(null);
+    }
+    
     setFormData({});
   };
   const handleCloseSearchDialog = () => {
@@ -263,6 +372,10 @@ const Home = () => {
     }
     showSnackbar(`Selected ${customer.first_name} ${customer.last_name}`, 'success');
     handleCloseSearchDialog();
+  };
+  const handleQuickSale = (customer) => {
+    const quickSaleCustomer = {
+    }
   };
   const handleRegisterNew = () => {
     const newCustomer = { first_name: '', last_name: '', email: '', phone: '', status: 'active', created_at: new Date().toISOString(), image: '' };
@@ -421,67 +534,184 @@ const Home = () => {
         <Dialog
           open={openSearchDialog}
           onClose={handleCloseSearchDialog}
-          maxWidth="sm"
+          aria-labelledby="customer-search-dialog-title"
+          maxWidth={false}
           fullWidth
+          PaperProps={{
+            sx: {
+              width: 800,
+              height: 380,
+              maxWidth: '100vw',
+              maxHeight: '100vh',
+              overflow: 'visible',
+              position: 'relative'
+            }
+          }}
         >
+          {/* Extreme top-right action bar */}
+          {searchResults.length > 0 && (
+            <Box sx={{ position: 'absolute', top: 12, right: 20, zIndex: 10, display: 'flex', gap: 1 }}>
+              <Button
+                variant="contained"
+                color="primary"
+                size="small"
+                onClick={handleRegisterNew}
+                sx={{ minWidth: 160 }}
+              >
+                Register New Customer
+              </Button>
+              <Button
+                variant="outlined"
+                color="secondary"
+                size="small"
+                onClick={handleCloseSearchDialog}
+                sx={{ minWidth: 44, px: 1, ml: 1, fontWeight: 700, borderRadius: 2, fontSize: 18, lineHeight: 1, minHeight: 36 }}
+              >
+                ×
+              </Button>
+            </Box>
+          )}
           <DialogTitle>
             {searchResults.length > 0 ? 'Search Results' : 'No Customers Found'}
           </DialogTitle>
-          <DialogContent>
-            {searchResults.length > 0 ? (
-              <List>
-                {searchResults.map((customer, index) => (
-                  <React.Fragment key={customer.id}>
-                    <ListItem 
-                      button 
-                      onClick={() => handleSelectCustomer(customer)}
-                      sx={{
-                        border: '1px solid #e0e0e0',
-                        borderRadius: 1,
-                        mb: 1,
-                        '&:hover': { backgroundColor: '#f5f5f5' }
-                      }}
-                    >
-                      <ListItemText
-                        primary={`${customer.first_name} ${customer.last_name}`}
-                        secondary={
-                          <React.Fragment>
-                            <Typography component="div" variant="body2" color="text.primary">
-                              {customer.email && `Email: ${customer.email}`}
-                              {customer.phone && customer.email && ' • '}
-                              {customer.phone && `Phone: ${customer.phone}`}
-                            </Typography>
-                          </React.Fragment>
-                        }
-                      />
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        sx={{ ml: 2 }}
-                        onClick={() => handleEdit(customer)}
-                      >
-                        Edit
-                      </Button>
-                    </ListItem>
-                  </React.Fragment>
-                ))}
-              </List>
-            ) : (
+          <DialogContent sx={{ overflow: 'visible' }}>
+  {searchResults.length > 0 ? (
+  <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', minWidth: 700, gap: 0 }}>
+    {/* Image previews to the left */}
+    <Box sx={{ minWidth: 140, maxWidth: 180, mr: 0, pl: 0, ml: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', pt: 1, gap: 2 }}>
+      {/* Customer Photo */}
+      {searchResults[selectedSearchIdx]?.image && (
+        <Box>
+          <img
+            src={
+              typeof searchResults[selectedSearchIdx].image === 'string'
+                ? searchResults[selectedSearchIdx].image
+                : searchResults[selectedSearchIdx].image instanceof File || searchResults[selectedSearchIdx].image instanceof Blob
+                ? URL.createObjectURL(searchResults[selectedSearchIdx].image)
+                : searchResults[selectedSearchIdx].image && searchResults[selectedSearchIdx].image.data
+                ? bufferToDataUrl(searchResults[selectedSearchIdx].image)
+                : undefined
+            }
+            alt="Customer"
+            style={{
+              width: 120,
+              height: 120,
+              objectFit: 'cover',
+              borderRadius: 8,
+              margin: '0 auto',
+              border: '2px solid #4caf50',
+              background: '#fafafa',
+              boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+              display: 'block'
+            }}
+          />
+        </Box>
+      )}
+      
+      {/* ID Image Front */}
+      {searchResults[selectedSearchIdx]?.id_image_front && (
+        <Box>
+          <img
+            src={
+              typeof searchResults[selectedSearchIdx].id_image_front === 'string'
+                ? searchResults[selectedSearchIdx].id_image_front
+                : searchResults[selectedSearchIdx].id_image_front instanceof File || searchResults[selectedSearchIdx].id_image_front instanceof Blob
+                ? URL.createObjectURL(searchResults[selectedSearchIdx].id_image_front)
+                : searchResults[selectedSearchIdx].id_image_front && searchResults[selectedSearchIdx].id_image_front.data
+                ? bufferToDataUrl(searchResults[selectedSearchIdx].id_image_front)
+                : undefined
+            }
+            alt="ID Front"
+            style={{
+              width: 120,
+              height: 100,
+              objectFit: 'cover',
+              borderRadius: 8,
+              margin: '0 auto',
+              border: '2px solid #ff9800',
+              background: '#fafafa',
+              boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+              display: 'block'
+            }}
+          />
+        </Box>
+      )}
+    </Box>
+    {/* Table and top bar to the right */}
+    <Box sx={{ flex: 1, position: 'relative', display: 'flex' }}>
+      
+      <TableContainer component={Paper} sx={{ mb: 0, maxHeight: 300, overflowY: 'auto', p: 0, m: 0, flex: '1 1 auto' }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Name</TableCell>
+              <TableCell sx={{ width: 200, maxWidth: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Address</TableCell>
+              <TableCell>Phone</TableCell>
+              <TableCell>ID</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {searchResults.map((customer, index) => (
+              <TableRow
+                key={customer.id}
+                hover
+                selected={selectedSearchIdx === index}
+                sx={{ cursor: 'pointer' }}
+                onClick={() => setSelectedSearchIdx(index)}
+              >
+                <TableCell sx={{ width: 140, maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.first_name} {customer.last_name}</TableCell>
+                <TableCell sx={{ width: 200, maxWidth: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.address || customer.address_line1 || ''}</TableCell>
+                <TableCell>{customer.phone || ''}</TableCell>
+                <TableCell>{customer.id_number || ''}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      
+      {/* Action buttons beside the table */}
+      <Box sx={{ ml: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', pt: 4 }}>
+        {selectedSearchIdx !== null && selectedSearchIdx >= 0 && searchResults[selectedSearchIdx] && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, ml: 1 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={e => { e.stopPropagation(); handleEdit(searchResults[selectedSearchIdx]); }}
+              sx={{ minWidth: 70, minHeight: 20, height: 30, fontSize: 11 }}
+            >
+              Edit
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={e => { e.stopPropagation(); handleSelectCustomer(searchResults[selectedSearchIdx]); }}
+              sx={{ minWidth: 70, minHeight: 20, height: 30, fontSize: 11 }}
+            >
+              Select
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={e => { e.stopPropagation(); handleQuickSale(searchResults[selectedSearchIdx]); }}
+              sx={{ minWidth: 70, minHeight: 20, height: 30, fontSize: 11 }}
+            >
+              <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1, padding: 0 }}>
+                <span>Quick</span>
+                <span>Sale</span>
+              </span>
+            </Button>
+          </Box>
+        )}
+      </Box>
+    </Box>
+  </Box>
+) : (
               <Box sx={{ p: 2 }}>
                 <Typography variant="body1" color="text.secondary" gutterBottom>
                   No customers found matching your search criteria.
                 </Typography>
                 <Box sx={{ mt: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <Box>
-                    <Button
-                      variant="contained"
-                      color="primary"
-                      onClick={handleRegisterNew}
-                      fullWidth
-                      sx={{ height: '48px' }}
-                    >
-                      Register New Customer
-                    </Button>
                     <Typography variant="caption" color="text.secondary" align="center" sx={{ display: 'block', mt: 1 }}>
                       Registered customer quotes are managed by database triggers based on system configuration
                     </Typography>
@@ -500,9 +730,6 @@ const Home = () => {
               </Box>
             )}
           </DialogContent>
-          <DialogActions>
-            <Button onClick={handleCloseSearchDialog}>Close</Button>
-          </DialogActions>
         </Dialog>
 
         {/* Customer Form Dialog */}
@@ -563,7 +790,10 @@ const Home = () => {
                             '&:hover': { background: 'rgba(255,255,255,0.95)', color: '#111' },
                             '&:active': { background: 'rgba(240,240,240,1)', color: '#1976d2' },
                           }}
-                          onClick={() => setShowCamera(true)}
+                          onClick={() => {
+                            setShowCamera(true);
+                            setCurrentCaptureMode('customer');
+                          }}
                         >
                           Retake Photo
                         </Button>
@@ -573,14 +803,21 @@ const Home = () => {
                         variant="outlined"
                         fullWidth
                         sx={{ mt: 1, mb: 1, minHeight: 180, fontSize: 20, py: 3, px: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textTransform: 'none', position: 'relative', overflow: 'hidden' }}
-                        onClick={() => setShowCamera(true)}
+                        onClick={() => {
+                          setShowCamera(true);
+                          setCurrentCaptureMode('customer');
+                        }}
                       >
                         Capture Photo
                       </Button>
                     )}
                     {/* Camera Dialog */}
                     <Dialog open={showCamera} onClose={() => { stopCamera(); setShowCamera(false); }} maxWidth="xs" fullWidth>
-                      <DialogTitle>Capture Photo</DialogTitle>
+                       <DialogTitle>
+                         {currentCaptureMode === 'id_front' ? 'Capture ID Front' : 
+                          currentCaptureMode === 'id_back' ? 'Capture ID Back' : 
+                          'Capture Customer Photo'}
+                       </DialogTitle>
                       <DialogContent>
                         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                           <video
@@ -725,49 +962,218 @@ const Home = () => {
                       margin="dense"
                     />
                   </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      name="id_type"
-                      label="ID Type"
-                      value={formData.id_type || ''}
-                      onChange={handleFormChange}
-                      fullWidth
-                      margin="dense"
-                    />
+                  
+                  {/* ID Section - Images and Details Side by Side */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1, mb: 1 }}>
+                      ID Information
+                    </Typography>
                   </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      name="id_number"
-                      label="ID Number"
-                      value={formData.id_number || ''}
-                      onChange={handleFormChange}
-                      fullWidth
-                      margin="dense"
-                    />
+                  
+                  {/* Container to hold ID images and details in the same row */}
+                  <Grid item xs={12}>
+                    <Grid container spacing={2}>
+                      {/* Left side: ID images */}
+                      <Grid item xs={12} md={6}>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12} sm={6}>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                              {formData.id_image_front ? (
+                                <Box sx={{ position: 'relative', width: '100%' }}>
+                                  <img
+                                    src={
+                                      formData.id_image_front instanceof File || formData.id_image_front instanceof Blob
+                                        ? URL.createObjectURL(formData.id_image_front)
+                                        : typeof formData.id_image_front === 'string'
+                                          ? formData.id_image_front
+                                          : formData.id_image_front && formData.id_image_front.data
+                                            ? bufferToDataUrl(formData.id_image_front)
+                                            : undefined
+                                    }
+                                    alt="ID Front"
+                                    style={{
+                                      maxWidth: '100%',
+                                      height: 150,
+                                      objectFit: 'contain',
+                                      display: 'block',
+                                      borderRadius: 4,
+                                      border: '1px solid #e0e0e0',
+                                    }}
+                                  />
+                                  <Button
+                                    variant="text"
+                                    sx={{
+                                      position: 'absolute',
+                                      bottom: 8,
+                                      left: '50%',
+                                      transform: 'translateX(-50%)',
+                                      zIndex: 2,
+                                      width: '60%',
+                                      minWidth: 80,
+                                      minHeight: 32,
+                                      padding: '4px 0',
+                                      background: 'rgba(255,255,255,0.80)',
+                                      color: '#222',
+                                      fontWeight: 600,
+                                      fontSize: 13,
+                                      lineHeight: 1.2,
+                                      textTransform: 'none',
+                                      border: '1.5px solid #e0e0e0',
+                                      borderRadius: 8,
+                                      boxShadow: '0 2px 12px 0 rgba(0,0,0,0.08)',
+                                      transition: 'background 0.2s, color 0.2s',
+                                      '&:hover': { background: 'rgba(255,255,255,0.95)', color: '#111' },
+                                      '&:active': { background: 'rgba(240,240,240,1)', color: '#1976d2' },
+                                    }}
+                                    onClick={() => {
+                                      setShowCamera(true);
+                                      setCurrentCaptureMode('id_front');
+                                    }}
+                                  >
+                                    Retake Front
+                                  </Button>
+                                </Box>
+                              ) : (
+                                <Button
+                                  variant="outlined"
+                                  fullWidth
+                                  sx={{ height: 150 }}
+                                  onClick={() => {
+                                    setShowCamera(true);
+                                    setCurrentCaptureMode('id_front');
+                                  }}
+                                >
+                                  Capture Front
+                                </Button>
+                              )}
+                            </Box>
+                          </Grid>
+                          <Grid item xs={12} sm={6}>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                              {formData.id_image_back ? (
+                                <Box sx={{ position: 'relative', width: '100%' }}>
+                                  <img
+                                    src={
+                                      formData.id_image_back instanceof File || formData.id_image_back instanceof Blob
+                                        ? URL.createObjectURL(formData.id_image_back)
+                                        : typeof formData.id_image_back === 'string'
+                                          ? formData.id_image_back
+                                          : formData.id_image_back && formData.id_image_back.data
+                                            ? bufferToDataUrl(formData.id_image_back)
+                                            : undefined
+                                    }
+                                    alt="ID Back"
+                                    style={{
+                                      maxWidth: '100%',
+                                      height: 150,
+                                      objectFit: 'contain',
+                                      display: 'block',
+                                      borderRadius: 4,
+                                      border: '1px solid #e0e0e0',
+                                    }}
+                                  />
+                                  <Button
+                                    variant="text"
+                                    sx={{
+                                      position: 'absolute',
+                                      bottom: 8,
+                                      left: '50%',
+                                      transform: 'translateX(-50%)',
+                                      zIndex: 2,
+                                      width: '60%',
+                                      minWidth: 80,
+                                      minHeight: 32,
+                                      padding: '2px 0',
+                                      background: 'rgba(255,255,255,0.80)',
+                                      color: '#222',
+                                      fontWeight: 600,
+                                      fontSize: 13,
+                                      lineHeight: 1.2,
+                                      textTransform: 'none',
+                                      border: '1.5px solid #e0e0e0',
+                                      borderRadius: 8,
+                                      boxShadow: '0 2px 12px 0 rgba(0,0,0,0.08)',
+                                      transition: 'background 0.2s, color 0.2s',
+                                      '&:hover': { background: 'rgba(255,255,255,0.95)', color: '#111' },
+                                      '&:active': { background: 'rgba(240,240,240,1)', color: '#1976d2' },
+                                    }}
+                                    onClick={() => {
+                                      setShowCamera(true);
+                                      setCurrentCaptureMode('id_back');
+                                    }}
+                                  >
+                                    Retake Back
+                                  </Button>
+                                </Box>
+                              ) : (
+                                <Button
+                                  variant="outlined"
+                                  fullWidth
+                                  sx={{ height: 150 }}
+                                  onClick={() => {
+                                    setShowCamera(true);
+                                    setCurrentCaptureMode('id_back');
+                                  }}
+                                >
+                                  Capture Back
+                                </Button>
+                              )}
+                            </Box>
+                          </Grid>
+                        </Grid>
+                      </Grid>
+                      
+                      {/* Right side: ID details */}
+                      <Grid item xs={12} md={6}>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12} sm={6}>
+                            <TextField
+                              name="id_type"
+                              label="ID Type"
+                              value={formData.id_type || ''}
+                              onChange={handleFormChange}
+                              fullWidth
+                              margin="dense"
+                            />
+                          </Grid>
+                          <Grid item xs={12} sm={6}>
+                            <TextField
+                              name="id_number"
+                              label="ID Number"
+                              value={formData.id_number || ''}
+                              onChange={handleFormChange}
+                              fullWidth
+                              margin="dense"
+                            />
+                          </Grid>
+                          <Grid item xs={12} sm={6}>
+                            <TextField
+                              name="id_expiry_date"
+                              label="ID Expiry Date"
+                              type="date"
+                              value={formData.id_expiry_date || ''}
+                              onChange={handleFormChange}
+                              fullWidth
+                              margin="dense"
+                              InputLabelProps={{ shrink: true }}
+                            />
+                          </Grid>
+                          <Grid item xs={12} sm={6}>
+                            <TextField
+                              name="id_issuing_authority"
+                              label="ID Issuing Authority"
+                              value={formData.id_issuing_authority || ''}
+                              onChange={handleFormChange}
+                              fullWidth
+                              margin="dense"
+                            />
+                          </Grid>
+                        </Grid>
+                      </Grid>
+                    </Grid>
                   </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      name="id_expiry_date"
-                      label="ID Expiry Date"
-                      type="date"
-                      value={formData.id_expiry_date || ''}
-                      onChange={handleFormChange}
-                      fullWidth
-                      margin="dense"
-                      InputLabelProps={{ shrink: true }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      name="id_issuing_authority"
-                      label="ID Issuing Authority"
-                      value={formData.id_issuing_authority || ''}
-                      onChange={handleFormChange}
-                      fullWidth
-                      margin="dense"
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
+                  {/* Date of birth and physical characteristics in one row */}
+                  <Grid item xs={12} sm={3}>
                     <TextField
                       name="date_of_birth"
                       label="Date of Birth"
@@ -779,20 +1185,7 @@ const Home = () => {
                       InputLabelProps={{ shrink: true }}
                     />
                   </Grid>
-                  <Grid item xs={12}>
-                    <TextField
-                      name="notes"
-                      label="Notes"
-                      value={formData.notes || ''}
-                      onChange={handleFormChange}
-                      fullWidth
-                      multiline
-                      rows={4}
-                      margin="dense"
-                    />
-                  </Grid>
-                  {/* New fields: Gender, Height, Weight */}
-                  <Grid item xs={12} sm={4}>
+                  <Grid item xs={12} sm={3}>
                     <TextField
                       select
                       name="gender"
@@ -810,7 +1203,7 @@ const Home = () => {
                       <option value="Prefer not to say">Prefer not to say</option>
                     </TextField>
                   </Grid>
-                  <Grid item xs={12} sm={4}>
+                  <Grid item xs={12} sm={3}>
                     <TextField
                       name="height"
                       label="Height (cm)"
@@ -822,7 +1215,7 @@ const Home = () => {
                       inputProps={{ min: 0, step: 0.1 }}
                     />
                   </Grid>
-                  <Grid item xs={12} sm={4}>
+                  <Grid item xs={12} sm={3}>
                     <TextField
                       name="weight"
                       label="Weight (kg)"
@@ -832,6 +1225,18 @@ const Home = () => {
                       fullWidth
                       margin="dense"
                       inputProps={{ min: 0, step: 0.1 }}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      name="notes"
+                      label="Notes"
+                      value={formData.notes || ''}
+                      onChange={handleFormChange}
+                      fullWidth
+                      multiline
+                      rows={4}
+                      margin="dense"
                     />
                   </Grid>
                 </Grid>

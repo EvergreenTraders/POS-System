@@ -1625,6 +1625,16 @@ const path = require('path');
 // Use memory storage for multer to store image as buffer
 const uploadCustomerImage = multer({ storage: multer.memoryStorage() });
 
+// Configure multer for multiple image uploads (customer photo, ID front and back)
+const uploadCustomerImages = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10 MB limit per file
+}).fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'id_image_front', maxCount: 1 },
+  { name: 'id_image_back', maxCount: 1 }
+]);
+
 // Ensure upload directory exists
 const fs = require('fs');
 const uploadDir = 'uploads/customers/';
@@ -1632,7 +1642,7 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-app.post('/api/customers', uploadCustomerImage.single('image'), async (req, res) => {
+app.post('/api/customers', uploadCustomerImages, async (req, res) => {
   try {
     const {
       first_name, last_name, email, phone,
@@ -1640,23 +1650,44 @@ app.post('/api/customers', uploadCustomerImage.single('image'), async (req, res)
       id_type, id_number, id_expiry_date,
       date_of_birth, status, risk_level, notes, gender, height, weight
     } = req.body;
-    // Store image as binary data (buffer)
+    
+    // Handle multiple image uploads
     let image = null;
-    if (req.file && req.file.buffer) {
-      image = req.file.buffer;
+    let id_image_front = null;
+    let id_image_back = null;
+    
+    // Get files from req.files
+    if (req.files) {
+      // Main customer photo
+      if (req.files.image && req.files.image[0] && req.files.image[0].buffer) {
+        image = req.files.image[0].buffer;
+      }
+      
+      // ID front image
+      if (req.files.id_image_front && req.files.id_image_front[0] && req.files.id_image_front[0].buffer) {
+        id_image_front = req.files.id_image_front[0].buffer;
+      }
+      
+      // ID back image
+      if (req.files.id_image_back && req.files.id_image_back[0] && req.files.id_image_back[0].buffer) {
+        id_image_back = req.files.id_image_back[0].buffer;
+      }
     }
+    
     const result = await pool.query(
       `INSERT INTO customers (
-        first_name, last_name, email, phone,
+        first_name, last_name, email, phone, 
         address_line1, address_line2, city, state, postal_code, country,
-        id_type, id_number, id_expiry_date,
-        date_of_birth, status, risk_level, notes, gender, height, weight, image
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        id_type, id_number, id_expiry_date, 
+        date_of_birth, status, risk_level, notes, gender, height, weight, 
+        image, id_image_front, id_image_back)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
       RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
       [first_name, last_name, email, phone || '',
        address_line1, address_line2, city, state, postal_code, country,
        id_type, id_number, id_expiry_date || null,
-       date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null, image]
+       date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null, 
+       image, id_image_front, id_image_back]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1669,7 +1700,7 @@ app.post('/api/customers', uploadCustomerImage.single('image'), async (req, res)
   }
 });
 
-app.put('/api/customers/:id', uploadCustomerImage.single('image'), async (req, res) => {
+app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -1680,39 +1711,98 @@ app.put('/api/customers/:id', uploadCustomerImage.single('image'), async (req, r
     } = req.body;
 
     let query, values;
-    if (req.file && req.file.buffer) {
-      // If a new image is uploaded, update the image column
-      query = `
-        UPDATE customers SET
-          first_name = $1, last_name = $2, email = $3, phone = $4,
-          address_line1 = $5, address_line2 = $6, city = $7, state = $8,
-          postal_code = $9, country = $10, id_type = $11, id_number = $12,
-          id_expiry_date = $13, date_of_birth = $14,
-          status = $15, risk_level = $16, notes = $17, gender = $18, height = $19, weight = $20,
-          image = $21
-        WHERE id = $22
-        RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`;
-      values = [first_name, last_name, email, phone,
-        address_line1, address_line2, city, state, postal_code, country,
-        id_type, id_number, id_expiry_date,
-        date_of_birth, status, risk_level, notes, gender, height, weight,
-        req.file.buffer, id];
-    } else {
-      // No new image, don't update the image column
-      query = `
-        UPDATE customers SET
-          first_name = $1, last_name = $2, email = $3, phone = $4,
-          address_line1 = $5, address_line2 = $6, city = $7, state = $8,
-          postal_code = $9, country = $10, id_type = $11, id_number = $12,
-          id_expiry_date = $13, date_of_birth = $14,
-          status = $15, risk_level = $16, notes = $17, gender = $18, height = $19, weight = $20
-        WHERE id = $21
-        RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`;
-      values = [first_name, last_name, email, phone,
-        address_line1, address_line2, city, state, postal_code, country,
-        id_type, id_number, id_expiry_date,
-        date_of_birth, status, risk_level, notes, gender, height, weight, id];
+    
+    // Initialize image variables
+    let image = null;
+    let id_image_front = null;
+    let id_image_back = null;
+    
+    // Get files from req.files
+    if (req.files) {
+      // Main customer photo
+      if (req.files.image && req.files.image[0] && req.files.image[0].buffer) {
+        image = req.files.image[0].buffer;
+      }
+      
+      // ID front image
+      if (req.files.id_image_front && req.files.id_image_front[0] && req.files.id_image_front[0].buffer) {
+        id_image_front = req.files.id_image_front[0].buffer;
+      }
+      
+      // ID back image
+      if (req.files.id_image_back && req.files.id_image_back[0] && req.files.id_image_back[0].buffer) {
+        id_image_back = req.files.id_image_back[0].buffer;
+      }
     }
+     
+    // Check if the form includes image file fields - use a safer way to check properties
+    const hasImageField = (req.body && 'image' in req.body) || (req.files && req.files.image);
+    const hasIdFrontField = (req.body && 'id_image_front' in req.body) || (req.files && req.files.id_image_front);
+    const hasIdBackField = (req.body && 'id_image_back' in req.body) || (req.files && req.files.id_image_back);
+    
+    // Define arrays to track which fields to update and their values
+    const updateFields = [];
+    const updateValues = [];
+    let paramCount = 1;
+    
+    // Add basic customer information fields
+    updateFields.push(
+      `first_name = $${paramCount++}`,
+      `last_name = $${paramCount++}`,
+      `email = $${paramCount++}`,
+      `phone = $${paramCount++}`,
+      `address_line1 = $${paramCount++}`,
+      `address_line2 = $${paramCount++}`,
+      `city = $${paramCount++}`,
+      `state = $${paramCount++}`,
+      `postal_code = $${paramCount++}`,
+      `country = $${paramCount++}`,
+      `id_type = $${paramCount++}`,
+      `id_number = $${paramCount++}`,
+      `id_expiry_date = $${paramCount++}`,
+      `date_of_birth = $${paramCount++}`,
+      `status = $${paramCount++}`,
+      `risk_level = $${paramCount++}`,
+      `notes = $${paramCount++}`,
+      `gender = $${paramCount++}`,
+      `height = $${paramCount++}`,
+      `weight = $${paramCount++}`
+    );
+    
+    updateValues.push(
+      first_name, last_name, email, phone,
+      address_line1, address_line2, city, state, postal_code, country,
+      id_type, id_number, id_expiry_date || null,
+      date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null
+    );
+    
+    // Add image fields if provided in the request, either as buffer or null
+    // We always update the image fields if they are included in the form submission
+    if (hasImageField) {
+      updateFields.push(`image = $${paramCount++}`);
+      updateValues.push(image); // Will be null if image was removed or not present
+    }
+    
+    if (hasIdFrontField) {
+      updateFields.push(`id_image_front = $${paramCount++}`);
+      updateValues.push(id_image_front); // Will be null if image was removed or not present
+    }
+    
+    if (hasIdBackField) {
+      updateFields.push(`id_image_back = $${paramCount++}`);
+      updateValues.push(id_image_back); // Will be null if image was removed or not present
+    }
+    
+    // Add id as the last parameter
+    updateValues.push(id);
+    
+    query = `
+      UPDATE customers SET
+        ${updateFields.join(', ')}
+      WHERE id = $${paramCount}
+      RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`;
+    values = updateValues;
+    // Since we're now handling image updating more dynamically, this else condition is no longer needed
 
     const result = await pool.query(query, values);
 

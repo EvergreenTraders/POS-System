@@ -67,12 +67,14 @@ COMMENT ON COLUMN customers.status IS 'Current status of the customer account';
 --   ADD COLUMN IF NOT EXISTS weight NUMERIC(5,2);
 
 -- Remove obsolete columns
-ALTER TABLE customers DROP COLUMN IF EXISTS last_visit_date;
-ALTER TABLE customers DROP COLUMN IF EXISTS total_transactions;
-ALTER TABLE customers DROP COLUMN IF EXISTS id_issuing_authority;
-ALTER TABLE customers DROP COLUMN IF EXISTS id_scan_path;
+-- ALTER TABLE customers DROP COLUMN IF EXISTS last_visit_date;
+-- ALTER TABLE customers DROP COLUMN IF EXISTS total_transactions;
+-- ALTER TABLE customers DROP COLUMN IF EXISTS id_issuing_authority;
+ALTER TABLE customers DROP COLUMN IF EXISTS id_image;
 
-COMMENT ON COLUMN customers.notes IS 'Additional notes or comments about the customer';
+-- COMMENT ON COLUMN customers.notes IS 'Additional notes or comments about the customer';
 
--- Add image column for customer picture (binary data)
-ALTER TABLE customers ADD COLUMN image BYTEA;
+-- -- Add image column for customer picture (binary data)
+-- ALTER TABLE customers ADD COLUMN image BYTEA;
+ALTER TABLE customers ADD COLUMN id_image_front BYTEA;
+ALTER TABLE customers ADD COLUMN id_image_back BYTEA;
