@@ -1735,10 +1735,11 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
       }
     }
      
-    // Check if the form includes image file fields - use a safer way to check properties
-    const hasImageField = (req.body && 'image' in req.body) || (req.files && req.files.image);
-    const hasIdFrontField = (req.body && 'id_image_front' in req.body) || (req.files && req.files.id_image_front);
-    const hasIdBackField = (req.body && 'id_image_back' in req.body) || (req.files && req.files.id_image_back);
+    // Check if the form includes image file fields by only looking at req.files
+    // This ensures we only update an image field if a new file was actually uploaded
+    const hasImageField = req.files && req.files.image;
+    const hasIdFrontField = req.files && req.files.id_image_front;
+    const hasIdBackField = req.files && req.files.id_image_back;
     
     // Define arrays to track which fields to update and their values
     const updateFields = [];
@@ -1777,20 +1778,20 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
     );
     
     // Add image fields if provided in the request, either as buffer or null
-    // We always update the image fields if they are included in the form submission
+    // Only update image fields if new files were actually uploaded
     if (hasImageField) {
       updateFields.push(`image = $${paramCount++}`);
-      updateValues.push(image); // Will be null if image was removed or not present
+      updateValues.push(image);
     }
     
     if (hasIdFrontField) {
       updateFields.push(`id_image_front = $${paramCount++}`);
-      updateValues.push(id_image_front); // Will be null if image was removed or not present
+      updateValues.push(id_image_front);
     }
     
     if (hasIdBackField) {
       updateFields.push(`id_image_back = $${paramCount++}`);
-      updateValues.push(id_image_back); // Will be null if image was removed or not present
+      updateValues.push(id_image_back);
     }
     
     // Add id as the last parameter
