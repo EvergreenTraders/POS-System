@@ -10,6 +10,8 @@ import {
   styled,
   IconButton,
 } from '@mui/material';
+import StorefrontIcon from '@mui/icons-material/Storefront';
+
 import {
   Dashboard as DashboardIcon,
   ShoppingCart,
@@ -98,7 +100,16 @@ function Sidebar() {
         </ListItem>
 
         <StyledLink to="/">
-          <StyledListItem active={isActive('/')}>
+          <StyledListItem active={isActive('/')}> 
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+            <StorefrontIcon />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Home" />}
+          </StyledListItem>
+        </StyledLink>
+
+        <StyledLink to="/dashboard">
+          <StyledListItem active={isActive('/dashboard')}>
             <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
               <DashboardIcon />
             </ListItemIcon>

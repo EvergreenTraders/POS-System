@@ -9,6 +9,7 @@ import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import Login from './components/Login';
 import Dashboard from './pages/Dashboard';
+import Home from './pages/Home';
 import Products from './pages/Products';
 import Orders from './pages/Orders';
 import Jewellery from './pages/Jewellery';
@@ -139,6 +140,16 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route
                 path="/"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <Home />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard"
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
