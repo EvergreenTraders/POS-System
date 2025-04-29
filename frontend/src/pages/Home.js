@@ -540,7 +540,7 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
           PaperProps={{
             sx: {
               width: 800,
-              height: 380,
+              height: 420,
               maxWidth: '100vw',
               maxHeight: '100vh',
               overflow: 'visible',
@@ -575,137 +575,133 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
             {searchResults.length > 0 ? 'Search Results' : 'No Customers Found'}
           </DialogTitle>
           <DialogContent sx={{ overflow: 'visible' }}>
-  {searchResults.length > 0 ? (
-  <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', minWidth: 700, gap: 0 }}>
-    {/* Image previews to the left */}
-    <Box sx={{ minWidth: 140, maxWidth: 180, mr: 0, pl: 0, ml: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', pt: 1, gap: 2 }}>
-      {/* Customer Photo */}
-      {searchResults[selectedSearchIdx]?.image && (
-        <Box>
-          <img
-            src={
-              typeof searchResults[selectedSearchIdx].image === 'string'
-                ? searchResults[selectedSearchIdx].image
-                : searchResults[selectedSearchIdx].image instanceof File || searchResults[selectedSearchIdx].image instanceof Blob
-                ? URL.createObjectURL(searchResults[selectedSearchIdx].image)
-                : searchResults[selectedSearchIdx].image && searchResults[selectedSearchIdx].image.data
-                ? bufferToDataUrl(searchResults[selectedSearchIdx].image)
-                : undefined
-            }
-            alt="Customer"
-            style={{
-              width: 120,
-              height: 120,
-              objectFit: 'cover',
-              borderRadius: 8,
-              margin: '0 auto',
-              border: '2px solid #4caf50',
-              background: '#fafafa',
-              boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
-              display: 'block'
-            }}
-          />
-        </Box>
-      )}
-      
-      {/* ID Image Front */}
-      {searchResults[selectedSearchIdx]?.id_image_front && (
-        <Box>
-          <img
-            src={
-              typeof searchResults[selectedSearchIdx].id_image_front === 'string'
-                ? searchResults[selectedSearchIdx].id_image_front
-                : searchResults[selectedSearchIdx].id_image_front instanceof File || searchResults[selectedSearchIdx].id_image_front instanceof Blob
-                ? URL.createObjectURL(searchResults[selectedSearchIdx].id_image_front)
-                : searchResults[selectedSearchIdx].id_image_front && searchResults[selectedSearchIdx].id_image_front.data
-                ? bufferToDataUrl(searchResults[selectedSearchIdx].id_image_front)
-                : undefined
-            }
-            alt="ID Front"
-            style={{
-              width: 120,
-              height: 100,
-              objectFit: 'cover',
-              borderRadius: 8,
-              margin: '0 auto',
-              border: '2px solid #ff9800',
-              background: '#fafafa',
-              boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
-              display: 'block'
-            }}
-          />
-        </Box>
-      )}
-    </Box>
-    {/* Table and top bar to the right */}
-    <Box sx={{ flex: 1, position: 'relative', display: 'flex' }}>
-      
-      <TableContainer component={Paper} sx={{ mb: 0, maxHeight: 300, overflowY: 'auto', p: 0, m: 0, flex: '1 1 auto' }}>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Name</TableCell>
-              <TableCell sx={{ width: 200, maxWidth: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Address</TableCell>
-              <TableCell>Phone</TableCell>
-              <TableCell>ID</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {searchResults.map((customer, index) => (
-              <TableRow
-                key={customer.id}
-                hover
-                selected={selectedSearchIdx === index}
-                sx={{ cursor: 'pointer' }}
-                onClick={() => setSelectedSearchIdx(index)}
-              >
-                <TableCell sx={{ width: 140, maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.first_name} {customer.last_name}</TableCell>
-                <TableCell sx={{ width: 200, maxWidth: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.address || customer.address_line1 || ''}</TableCell>
-                <TableCell>{customer.phone || ''}</TableCell>
-                <TableCell>{customer.id_number || ''}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-      
-      {/* Action buttons beside the table */}
-      <Box sx={{ ml: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', pt: 4 }}>
-        {selectedSearchIdx !== null && selectedSearchIdx >= 0 && searchResults[selectedSearchIdx] && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, ml: 1 }}>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={e => { e.stopPropagation(); handleEdit(searchResults[selectedSearchIdx]); }}
-              sx={{ minWidth: 70, minHeight: 20, height: 30, fontSize: 11 }}
-            >
-              Edit
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={e => { e.stopPropagation(); handleSelectCustomer(searchResults[selectedSearchIdx]); }}
-              sx={{ minWidth: 70, minHeight: 20, height: 30, fontSize: 11 }}
-            >
-              Select
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={e => { e.stopPropagation(); handleQuickSale(searchResults[selectedSearchIdx]); }}
-              sx={{ minWidth: 70, minHeight: 20, height: 30, fontSize: 11 }}
-            >
-              <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1, padding: 0 }}>
-                <span>Quick</span>
-                <span>Sale</span>
-              </span>
-            </Button>
-          </Box>
-        )}
-      </Box>
-    </Box>
-  </Box>
-) : (
+            {searchResults.length > 0 ? (
+              <>
+                <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', minWidth: 700, gap: 0 }}>
+                  {/* Image previews to the left */}
+                  <Box sx={{ minWidth: 140, maxWidth: 180, mr: 0, pl: 0, ml: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', pt: 1, gap: 2 }}>
+                    {/* Customer Photo */}
+                    {searchResults[selectedSearchIdx]?.image && (
+                      <Box>
+                        <img
+                          src={
+                            typeof searchResults[selectedSearchIdx].image === 'string'
+                              ? searchResults[selectedSearchIdx].image
+                              : searchResults[selectedSearchIdx].image instanceof File || searchResults[selectedSearchIdx].image instanceof Blob
+                              ? URL.createObjectURL(searchResults[selectedSearchIdx].image)
+                              : searchResults[selectedSearchIdx].image && searchResults[selectedSearchIdx].image.data
+                              ? bufferToDataUrl(searchResults[selectedSearchIdx].image)
+                              : undefined
+                          }
+                          alt="Customer"
+                          style={{
+                            width: 120,
+                            height: 120,
+                            objectFit: 'cover',
+                            borderRadius: 8,
+                            margin: '0 auto',
+                            border: '2px solid #4caf50',
+                            background: '#fafafa',
+                            boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                            display: 'block'
+                          }}
+                        />
+                      </Box>
+                    )}
+                    
+                    {/* ID Image Front */}
+                    {searchResults[selectedSearchIdx]?.id_image_front && (
+                      <Box>
+                        <img
+                          src={
+                            typeof searchResults[selectedSearchIdx].id_image_front === 'string'
+                              ? searchResults[selectedSearchIdx].id_image_front
+                              : searchResults[selectedSearchIdx].id_image_front instanceof File || searchResults[selectedSearchIdx].id_image_front instanceof Blob
+                              ? URL.createObjectURL(searchResults[selectedSearchIdx].id_image_front)
+                              : searchResults[selectedSearchIdx].id_image_front && searchResults[selectedSearchIdx].id_image_front.data
+                              ? bufferToDataUrl(searchResults[selectedSearchIdx].id_image_front)
+                              : undefined
+                          }
+                          alt="ID Front"
+                          style={{
+                            width: 120,
+                            height: 100,
+                            objectFit: 'cover',
+                            borderRadius: 8,
+                            margin: '0 auto',
+                            border: '2px solid #ff9800',
+                            background: '#fafafa',
+                            boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                            display: 'block'
+                          }}
+                        />
+                      </Box>
+                    )}
+                  </Box>
+                  {/* Table to the right */}
+                  <Box sx={{ flex: 1, position: 'relative', display: 'flex' }}>
+                    <TableContainer component={Paper} sx={{ mb: 0, maxHeight: 300, overflowY: 'auto', p: 0, m: 0, flex: '1 1 auto' }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Name</TableCell>
+                            <TableCell sx={{ width: 200, maxWidth: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Address</TableCell>
+                            <TableCell>Phone</TableCell>
+                            <TableCell>ID</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {searchResults.map((customer, index) => (
+                            <TableRow
+                              key={customer.id}
+                              hover
+                              selected={selectedSearchIdx === index}
+                              sx={{ cursor: 'pointer' }}
+                              onClick={() => setSelectedSearchIdx(index)}
+                            >
+                              <TableCell sx={{ width: 140, maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.first_name} {customer.last_name}</TableCell>
+                              <TableCell sx={{ width: 200, maxWidth: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.address || customer.address_line1 || ''}</TableCell>
+                              <TableCell>{customer.phone || ''}</TableCell>
+                              <TableCell>{customer.id_number || ''}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Box>
+                </Box>
+                
+                {/* Action buttons at the bottom of the dialog */}
+                {selectedSearchIdx !== null && selectedSearchIdx >= 0 && searchResults[selectedSearchIdx] && (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', gap: 3, mt: 2, mb: 1 }}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={e => { e.stopPropagation(); handleEdit(searchResults[selectedSearchIdx]); }}
+                      sx={{ minWidth: 70 }}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={e => { e.stopPropagation(); handleSelectCustomer(searchResults[selectedSearchIdx]); }}
+                      sx={{ minWidth: 70 }}
+                    >
+                      Select
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={e => { e.stopPropagation(); handleQuickSale(searchResults[selectedSearchIdx]); }}
+                      sx={{ minWidth: 70 }}
+                    >
+                      Quick Sale
+                    </Button>
+                  </Box>
+                )}
+              </>
+            ) : (
               <Box sx={{ p: 2 }}>
                 <Typography variant="body1" color="text.secondary" gutterBottom>
                   No customers found matching your search criteria.
