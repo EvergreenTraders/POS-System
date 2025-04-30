@@ -68,12 +68,38 @@ function QuoteManager() {
     direction: 'desc'
   });
   const [liveSpotPrices, setLiveSpotPrices] = useState(null);
+  const [priceEstimatePercentages, setPriceEstimatePercentages] = useState({});
+  const [metalTypes, setMetalTypes] = useState([]);
+
+  // Function to fetch metal types
+  const fetchMetalTypes = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/precious_metal_type`);
+      setMetalTypes(response.data);
+    } catch (error) {
+      console.error('Error fetching metal types:', error);
+      showMessage('Error fetching metal types', 'error');
+    }
+  };
 
   // Function to fetch live spot prices
   const fetchLiveSpotPrices = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/live_spot_prices`);
       setLiveSpotPrices(response.data[0]);
+      
+      // Fetch price estimate percentages when live spot prices are fetched
+      const priceEstimatePercentagesResponse = await axios.get(`${API_BASE_URL}/price_estimates`);
+      const data = priceEstimatePercentagesResponse.data;
+      const estimates = {};
+      data.forEach((estimate) => {     
+        const metalType = estimate.precious_metal_type_id;
+        if (!estimates[metalType]) {
+          estimates[metalType] = [];
+        }
+        estimates[metalType].push(estimate);
+      });
+      setPriceEstimatePercentages(estimates);
     } catch (error) {
       showMessage('Error fetching live spot prices', 'error');
     }
@@ -135,6 +161,7 @@ function QuoteManager() {
     fetchExpirationDays();
     fetchTransactionTypes();
     fetchLiveSpotPrices();
+    fetchMetalTypes();
   }, []);
 
   // Check for and delete expired quotes
@@ -271,15 +298,36 @@ function QuoteManager() {
   };
 
   const handleTransactionTypeChange = (e) => {
-  const newType = e.target.value;
-  let newPrice = getPriceForType(editingItem, newType);
+    const newType = e.target.value;
+    let newPrice = 0;
+    
+    // Check if using live spot price
+    if (editingItem.spot_type === 'live') {
+      // For live spot price, use the pre-calculated price for the selected type
+      switch (newType) {
+        case 'buy':
+          newPrice = editingItem.buy_price || 0;
+          break;
+        case 'pawn':
+          newPrice = editingItem.pawn_value || 0;
+          break;
+        case 'retail':
+          newPrice = editingItem.retail_price || 0;
+          break;
+        default:
+          newPrice = getPriceForType(editingItem, newType);
+      }
+    } else {
+      // For locked spot price, use the original method
+      newPrice = getPriceForType(editingItem, newType);
+    }
 
-  setEditingItem({
-    ...editingItem,
-    transaction_type: newType,
-    item_price: newPrice
-  });
-};
+    setEditingItem({
+      ...editingItem,
+      transaction_type: newType,
+      item_price: newPrice
+    });
+  };
 
   const handlePriceChange = (e) => {
     setEditingItem({
@@ -743,9 +791,46 @@ function QuoteManager() {
       const purity = editingItem.purity_value;
       const weight = editingItem.metal_weight;
       const price = spot * purity * weight * meta.factor;
+      // Get the metal type ID from the API data
+      const metalTypeId = metalTypes.find(mt => mt.type === metalType).id;
+      
+      // Get price estimates based on metal type id and transaction type
+      const estimates = priceEstimatePercentages[metalTypeId] || [];
+      let finalPrice = Number(price.toFixed(2)); // Default price if no estimates
+      
+      // Object to store all price estimates
+      const priceEstimates = {
+        pawn: 0,
+        buy: 0,
+        retail: 0
+      };
+      
+      if (estimates.length > 0) {
+        // Get percentages for each transaction type, default to 0 if not found
+        const pawnPercent = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
+        const buyPercent = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
+        const retailPercent = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
+        
+        // Calculate prices for each transaction type
+        priceEstimates.pawn = Number((price * pawnPercent / 100).toFixed(2));
+        priceEstimates.buy = Number((price * buyPercent / 100).toFixed(2));
+        priceEstimates.retail = Number((price * retailPercent / 100).toFixed(2));
+        
+        // Get the price for the current transaction type
+        const currentType = editingItem.transaction_type || 'buy';
+        if (priceEstimates[currentType]) {
+          finalPrice = priceEstimates[currentType];
+        }
+        
+      }
+      
       updatedItem = {
         ...updatedItem,
-        item_price: Number(price.toFixed(2))
+        item_price: finalPrice,
+        buy_price: priceEstimates.buy,
+        pawn_value: priceEstimates.pawn,
+        retail_price: priceEstimates.retail,
+        precious_metal_type_id: metalTypeId
       };
     }
   }
