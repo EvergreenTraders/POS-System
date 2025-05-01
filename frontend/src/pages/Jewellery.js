@@ -47,7 +47,7 @@ function Jewellery() {
         setSelectedItem(response.data[0]);
       }
     } catch (error) {
-      console.error('Error fetching jewelry items:', error);
+      console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
     }
@@ -68,8 +68,11 @@ function Jewellery() {
     return price.toFixed(2);
   };
 
-  // Filter jewelry items based on search queries
+  // Filter jewelry items based on search queries and status
   const filteredItems = jewelryItems.filter(item => {
+    // Exclude items with 'quoted' status
+    const notQuoted = item.status?.toLowerCase() !== 'quoted';
+    
     const matchesSearch = searchQuery === '' || 
       item.short_desc?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.metal_category?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -77,7 +80,7 @@ function Jewellery() {
     const matchesSerial = serialQuery === '' || 
       item.item_id?.toLowerCase().includes(serialQuery.toLowerCase());
 
-    return matchesSearch && matchesSerial;
+    return matchesSearch && matchesSerial && notQuoted;
   });
 
   return (
