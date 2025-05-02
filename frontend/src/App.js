@@ -21,6 +21,7 @@ import Pawns from './pages/Pawns';
 import Checkout from './pages/Checkout';
 import QuoteManager from './pages/QuoteManager';
 import CustomerManager from './pages/CustomerManager';
+import CustomerEditor from './pages/CustomerEditor';
 
 const theme = createTheme({
   palette: {
@@ -294,6 +295,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <CustomerManager />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/customer-editor"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CustomerEditor />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

@@ -309,7 +309,10 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
         idImageBack = customer.id_image_back;
       }
     }
-    setFormData({
+    
+    // Prepare customer data
+    const preparedCustomer = {
+      ...customer,
       first_name: customer.first_name || '', 
       last_name: customer.last_name || '', 
       email: customer.email || '', 
@@ -333,8 +336,18 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
       image: imageValue,
       id_image_front: idImageFront,
       id_image_back: idImageBack
+    };
+    
+    // Navigate to the CustomerEditor page
+    navigate('/customer-editor', { 
+      state: { 
+        customer: preparedCustomer,
+        mode: customer.id ? 'edit' : 'create',
+        returnTo: location.pathname
+      }
     });
-    setOpenDialog(true);
+    
+    handleCloseSearchDialog();
   };
   const handleCloseDialog = () => {
     setOpenDialog(false);
@@ -380,8 +393,16 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
   const handleRegisterNew = () => {
     const newCustomer = { first_name: '', last_name: '', email: '', phone: '', status: 'active', created_at: new Date().toISOString(), image: '' };
     setCustomer(newCustomer);
-    setSelectedCustomer(newCustomer);
-    handleEdit(newCustomer);
+    
+    // Navigate to the CustomerEditor page for a new customer
+    navigate('/customer-editor', { 
+      state: { 
+        customer: newCustomer,
+        mode: 'create',
+        returnTo: location.pathname
+      }
+    });
+    
     handleCloseSearchDialog();
   };
   const handleProceedAsGuest = () => {
@@ -552,15 +573,6 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
           {searchResults.length > 0 && (
             <Box sx={{ position: 'absolute', top: 12, right: 20, zIndex: 10, display: 'flex', gap: 1 }}>
               <Button
-                variant="contained"
-                color="primary"
-                size="small"
-                onClick={handleRegisterNew}
-                sx={{ minWidth: 160 }}
-              >
-                Register New Customer
-              </Button>
-              <Button
                 variant="outlined"
                 color="secondary"
                 size="small"
@@ -645,7 +657,7 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                         <TableHead>
                           <TableRow>
                             <TableCell>Name</TableCell>
-                            <TableCell sx={{ width: 200, maxWidth: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Address</TableCell>
+                            <TableCell>DOB</TableCell>
                             <TableCell>Phone</TableCell>
                             <TableCell>ID</TableCell>
                           </TableRow>
@@ -660,7 +672,7 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                               onClick={() => setSelectedSearchIdx(index)}
                             >
                               <TableCell sx={{ width: 140, maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.first_name} {customer.last_name}</TableCell>
-                              <TableCell sx={{ width: 200, maxWidth: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customer.address || customer.address_line1 || ''}</TableCell>
+                              <TableCell>{customer.date_of_birth ? customer.date_of_birth.substring(0, 10) : ''}</TableCell>
                               <TableCell>{customer.phone || ''}</TableCell>
                               <TableCell>{customer.id_number || ''}</TableCell>
                             </TableRow>
@@ -673,32 +685,51 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                 
                 {/* Action buttons at the bottom of the dialog */}
                 {selectedSearchIdx !== null && selectedSearchIdx >= 0 && searchResults[selectedSearchIdx] && (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', gap: 3, mt: 2, mb: 1 }}>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      onClick={e => { e.stopPropagation(); handleEdit(searchResults[selectedSearchIdx]); }}
-                      sx={{ minWidth: 70 }}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      onClick={e => { e.stopPropagation(); handleSelectCustomer(searchResults[selectedSearchIdx]); }}
-                      sx={{ minWidth: 70 }}
-                    >
-                      Select
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      onClick={e => { e.stopPropagation(); handleQuickSale(searchResults[selectedSearchIdx]); }}
-                      sx={{ minWidth: 70 }}
-                    >
-                      Quick Sale
-                    </Button>
-                  </Box>
+                  <>
+                    {/* Two separate sections: centered action buttons and right-aligned register button */}
+                    <Box sx={{ position: 'relative', mt: 2, mb: 1 }}>
+                      {/* Centered Edit, Select, Quick Sale buttons */}
+                      <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, width: '100%' }}>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={e => { e.stopPropagation(); handleEdit(searchResults[selectedSearchIdx]); }}
+                          sx={{ minWidth: 70 }}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={e => { e.stopPropagation(); handleSelectCustomer(searchResults[selectedSearchIdx]); }}
+                          sx={{ minWidth: 70 }}
+                        >
+                          Select
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={e => { e.stopPropagation(); handleQuickSale(searchResults[selectedSearchIdx]); }}
+                          sx={{ minWidth: 70 }}
+                        >
+                          Quick Sale
+                        </Button>
+                      </Box>
+                      
+                      {/* Right-aligned Register New Customer button */}
+                      <Box sx={{ position: 'absolute', right: 0, top: 0 }}>
+                        <Button
+                          variant="contained"
+                          color="primary"
+                          size="small"
+                          onClick={e => { e.stopPropagation(); handleRegisterNew(); }}
+                          sx={{ minWidth: 160 }}
+                        >
+                          Register New Customer
+                        </Button>
+                      </Box>
+                    </Box>
+                  </>
                 )}
               </>
             ) : (
