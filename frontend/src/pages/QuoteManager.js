@@ -503,42 +503,8 @@ function QuoteManager() {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Quote Manager
-        </Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          {editingExpiration ? (
-            <>
-              <TextField
-                type="number"
-                size="small"
-                value={tempExpirationDays}
-                onChange={(e) => setTempExpirationDays(parseInt(e.target.value) || 0)}
-                sx={{ width: 100 }}
-              />
-              <Button variant="contained" onClick={handleUpdateExpirationDays}>
-                Save
-              </Button>
-              <Button onClick={() => setEditingExpiration(false)}>
-                Cancel
-              </Button>
-            </>
-          ) : (
-            <Tooltip title="Click to edit expiration days">
-              <Button 
-                variant="outlined" 
-                onClick={() => setEditingExpiration(true)}
-              >
-                Quotes expire in {expirationDays} days
-              </Button>
-            </Tooltip>
-          )}
-        </Box>
-      </Box>
-
       {/* Search Bar */}
-      <Paper sx={{ p: 2, mb: 3 }}>
+      <Box sx={{ mb: 3 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs>
             <TextField
@@ -551,55 +517,84 @@ function QuoteManager() {
               }}
             />
           </Grid>
+          <Grid item>
+            {editingExpiration ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <TextField
+                  type="number"
+                  size="small"
+                  value={tempExpirationDays}
+                  onChange={(e) => setTempExpirationDays(parseInt(e.target.value) || 0)}
+                  sx={{ width: 80 }}
+                />
+                <Button size="small" variant="contained" onClick={handleUpdateExpirationDays}>
+                  Save
+                </Button>
+                <Button size="small" onClick={() => setEditingExpiration(false)}>
+                  Cancel
+                </Button>
+              </Box>
+            ) : (
+              <Tooltip title="Click to edit expiration days">
+                <Button 
+                  variant="outlined" 
+                  onClick={() => setEditingExpiration(true)}
+                  size="medium"
+                >
+                  Quotes expire in {expirationDays} days
+                </Button>
+              </Tooltip>
+            )}
+          </Grid>
         </Grid>
-      </Paper>
+      </Box>
 
       {/* Quotes Table */}
-      <TableContainer component={Paper} sx={{ flex: 1, overflow: 'auto' }}>
+      <TableContainer sx={{ flex: 1, overflow: 'auto', border: '1px solid rgba(224, 224, 224, 1)', borderRadius: '4px' }}>
         <Table stickyHeader>
-          <TableHead>
-            <TableRow>
+          <TableHead sx={{ bgcolor: 'white'}}>
+            <TableRow sx={{ bgcolor: 'white' }}>
               <TableCell 
                 onClick={() => handleSort('id')}
-                sx={{ cursor: 'pointer', userSelect: 'none' }}
+                sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
               >
                 Quote ID {sortConfig.key === 'id' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
               <TableCell 
                 onClick={() => handleSort('item_description')}
-                sx={{ cursor: 'pointer', userSelect: 'none' }}
+                sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
               >
                 Customer {sortConfig.key === 'item_description' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
               <TableCell 
                 onClick={() => handleSort('price')}
-                sx={{ cursor: 'pointer', userSelect: 'none' }}
+                sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
                 align="right"
               >
                 Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
               <TableCell 
                 onClick={() => handleSort('created_at')}
-                sx={{ cursor: 'pointer', userSelect: 'none' }}
+                sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
               >
                 Created {sortConfig.key === 'created_at' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
               <TableCell 
                 onClick={() => handleSort('expires_in')}
-                sx={{ cursor: 'pointer', userSelect: 'none' }}
+                sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
               >
                 Expires In {sortConfig.key === 'expires_in' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
               <TableCell 
                 onClick={() => handleSort('expires_in')}
-                sx={{ cursor: 'pointer', userSelect: 'none' }}
+                sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
               >
                 Days Remaining {sortConfig.key === 'days_remaining' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
-              <TableCell>Actions</TableCell>
+              <TableCell sx={{ bgcolor: 'white', fontWeight: 'bold' }}>Actions</TableCell>
             </TableRow>
           </TableHead>
-          <TableBody>
+          <TableBody sx={{ bgcolor: 'white' }}>
             {loading ? (
               <TableRow>
                 <TableCell colSpan={8} align="center">
@@ -614,7 +609,7 @@ function QuoteManager() {
               </TableRow>
             ) : (
               getSortedQuotes().map((quote) => (
-                <TableRow key={quote.quote_id}>
+                <TableRow key={quote.quote_id} sx={{ bgcolor: 'transparent', '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.04)' } }}>
                   <TableCell>{quote.quote_id}</TableCell>
                   <TableCell>
                     <Typography variant="body2">{quote.customer_name}</Typography>
