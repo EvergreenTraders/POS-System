@@ -116,7 +116,7 @@ const AuthenticatedLayout = ({ children }) => {
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
+          p: 0,
           mt: 8,
           transition: theme => theme.transitions.create('margin', {
             easing: theme.transitions.easing.sharp,
