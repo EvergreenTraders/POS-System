@@ -235,14 +235,10 @@ const CustomerEditor = () => {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Paper sx={{ p: 3, borderRadius: 2 }}>
-        <Typography variant="h4" gutterBottom>
-          {formData.id ? 'Edit Customer' : 'Register New Customer'}
-        </Typography>
-        
-        <Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}>
-          <Grid container spacing={3}>
+    <Container maxWidth="lg" sx={{ mt: 2, mb: 2 }}>
+      <Paper sx={{ p: 2, borderRadius: 2 }}>
+        <Box component="form" onSubmit={handleSubmit} sx={{ mt: 1 }}>
+          <Grid container spacing={2}>
             {/* Image Capture/Upload on the left */}
             <Grid item xs={12} sm={3} md={3} sx={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'flex-start' }}>
               {formData.image ? (
@@ -258,10 +254,10 @@ const CustomerEditor = () => {
                     alt="Preview"
                     style={{
                       maxWidth: '100%',
-                      maxHeight: 180,
+                      maxHeight: 140,
                       objectFit: 'cover',
                       width: '100%',
-                      height: 180,
+                      height: 140,
                       display: 'block',
                       borderRadius: 8,
                       border: '1px solid #e0e0e0',
@@ -315,9 +311,9 @@ const CustomerEditor = () => {
               )}
 
               {/* ID Document Images */}
-              <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>ID Images</Typography>
+              <Typography variant="subtitle2" sx={{ mt: 1.5, mb: 0.5 }}>ID Images</Typography>
               {formData.id_image_front ? (
-                <Box sx={{ position: 'relative', width: '100%', mb: 2 }}>
+                <Box sx={{ position: 'relative', width: '100%', mb: 1 }}>
                   <img
                     src={
                       formData.id_image_front instanceof File || formData.id_image_front instanceof Blob
@@ -442,7 +438,7 @@ const CustomerEditor = () => {
                 <Button
                   variant="outlined"
                   fullWidth
-                  sx={{ mt: 1, minHeight: 180, fontSize: 20, py: 3, px: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textTransform: 'none', position: 'relative', overflow: 'hidden' }}
+                  sx={{ mt: 1, minHeight: 140, fontSize: 18, py: 2, px: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textTransform: 'none', position: 'relative', overflow: 'hidden' }}
                   onClick={() => {
                     setShowCamera(true);
                     setCurrentCaptureMode('id_back');
@@ -454,8 +450,8 @@ const CustomerEditor = () => {
             </Grid>
 
             {/* Main Fields on the right */}
-            <Grid item xs={12} sm={9} md={9}>
-              <Grid container spacing={2}>
+            <Grid item xs={12} md={9}>
+              <Grid container spacing={1}>
                 <Grid item xs={12} sm={6}>
                   <TextField
                     name="first_name"
@@ -465,7 +461,6 @@ const CustomerEditor = () => {
                     fullWidth
                     required
                     error={!formData.first_name}
-                    helperText={!formData.first_name ? 'First name is required' : ''}
                     margin="dense"
                   />
                 </Grid>
@@ -478,7 +473,6 @@ const CustomerEditor = () => {
                     fullWidth
                     required
                     error={!formData.last_name}
-                    helperText={!formData.last_name ? 'Last name is required' : ''}
                     margin="dense"
                   />
                 </Grid>
@@ -492,7 +486,6 @@ const CustomerEditor = () => {
                     fullWidth
                     required={!formData.isGuest}
                     error={!formData.isGuest && !formData.email}
-                    helperText={!formData.isGuest && !formData.email ? 'Email is required' : ''}
                     margin="dense"
                   />
                 </Grid>
@@ -539,10 +532,10 @@ const CustomerEditor = () => {
               </Grid>
 
               {/* Address Fields */}
-              <Typography variant="subtitle1" sx={{ mt: 3, mb: 1 }}>
+              <Typography variant="subtitle1" sx={{ mt: 1.5, mb: 0.5 }}>
                 Address Information
               </Typography>
-              <Grid container spacing={2}>
+              <Grid container spacing={1}>
                 <Grid item xs={12}>
                   <TextField
                     name="address_line1"
@@ -606,10 +599,10 @@ const CustomerEditor = () => {
               </Grid>
 
               {/* ID Information */}
-              <Typography variant="subtitle1" sx={{ mt: 3, mb: 1 }}>
+              <Typography variant="subtitle1" sx={{ mt: 1.5, mb: 0.5 }}>
                 ID Information
               </Typography>
-              <Grid container spacing={2}>
+              <Grid container spacing={1}>
                 <Grid item xs={12} sm={6}>
                   <TextField
                     name="id_type"
@@ -659,10 +652,10 @@ const CustomerEditor = () => {
               </Grid>
 
               {/* Additional Information */}
-              <Typography variant="subtitle1" sx={{ mt: 3, mb: 1 }}>
+              <Typography variant="subtitle1" sx={{ mt: 1.5, mb: 0.5 }}>
                 Additional Information
               </Typography>
-              <Grid container spacing={2}>
+              <Grid container spacing={1}>
                 <Grid item xs={12} sm={6}>
                   <TextField
                     name="height"
@@ -691,7 +684,7 @@ const CustomerEditor = () => {
                     onChange={handleFormChange}
                     fullWidth
                     multiline
-                    rows={4}
+                    rows={3}
                     margin="dense"
                   />
                 </Grid>
@@ -700,11 +693,12 @@ const CustomerEditor = () => {
           </Grid>
 
           {/* Action Buttons */}
-          <Box sx={{ mt: 4, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+          <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end', gap: 1.5 }}>
             <Button 
               variant="outlined" 
               onClick={handleCancel}
-              sx={{ minWidth: 100 }}
+              size="small"
+              sx={{ minWidth: 90 }}
             >
               Cancel
             </Button>
@@ -713,11 +707,12 @@ const CustomerEditor = () => {
               color="primary"
               type="submit"
               disabled={loading || !formData.first_name || !formData.last_name || (!formData.isGuest && !formData.email)}
-              sx={{ minWidth: 150 }}
+              size="small"
+              sx={{ minWidth: 130 }}
             >
               {loading ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <CircularProgress size={20} color="inherit" />
+                  <CircularProgress size={16} color="inherit" />
                   <span>{formData.id ? 'Saving...' : 'Creating...'}</span>
                 </Box>
               ) : (
@@ -741,7 +736,7 @@ const CustomerEditor = () => {
               ref={videoRef}
               autoPlay
               playsInline
-              style={{ width: '100%', maxHeight: 240, background: '#222', borderRadius: 8 }}
+              style={{ width: '100%', maxHeight: 200, background: '#222', borderRadius: 8 }}
             />
             <Button
               variant="contained"
