@@ -34,7 +34,29 @@ const CustomerTicket = () => {
   };
   const location = useLocation();
   const navigate = useNavigate();
-  const customer = location.state?.customer;
+  
+  // Get customer from location state or session storage
+  const [customer, setCustomer] = React.useState(() => {
+    // First try to get customer from navigation state
+    if (location.state?.customer) {
+      // Save to session storage for persistence
+      sessionStorage.setItem('selectedCustomer', JSON.stringify(location.state.customer));
+      return location.state.customer;
+    }
+    
+    // If not in navigation state, try session storage
+    const savedCustomer = sessionStorage.getItem('selectedCustomer');
+    if (savedCustomer) {
+      return JSON.parse(savedCustomer);
+    }
+    
+    // No customer found
+    return null;
+  });
+  
+  const estimatedItems = location.state?.estimatedItems || [];
+  const from = location.state?.from || '';
+  
   const [activeTab, setActiveTab] = React.useState(0);
   
   // State for managing items in each tab
@@ -44,6 +66,72 @@ const CustomerTicket = () => {
   const [saleItems, setSaleItems] = React.useState([{ id: 1, description: '', category: '', price: '', paymentMethod: '' }]);
   const [repairItems, setRepairItems] = React.useState([{ id: 1, description: '', issue: '', fee: '', completion: '' }]);
   const [paymentItems, setPaymentItems] = React.useState([{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
+  
+  // Process estimated items from GemEstimator.js when component mounts
+  React.useEffect(() => {
+    // If we have estimated items and they're from gemEstimator
+    if (estimatedItems.length > 0 && from === 'gemEstimator') {
+      // Clear initial empty items
+      setPawnItems([]);
+      setBuyItems([]);
+      setSaleItems([]);
+      
+      // Process items by transaction type
+      const pawn = [];
+      const buy = [];
+      const sale = [];
+      
+      estimatedItems.forEach((item, index) => {
+        // Create a base item with common properties
+        const baseItem = {
+          id: index + 1,
+          description: `${item.metal_weight}g ${item.metal_purity} ${item.precious_metal_type} ${item.metal_category}${item.free_text ? ` - ${item.free_text}` : ''}`,
+          category: item.metal_category || 'Jewelry'
+        };
+        
+        // Add to appropriate array based on transaction type
+        switch (item.transaction_type) {
+          case 'pawn':
+            pawn.push({
+              ...baseItem,
+              value: item.price || item.price_estimates?.pawn || 0
+            });
+            break;
+          case 'buy':
+            buy.push({
+              ...baseItem,
+              price: item.price || item.price_estimates?.buy || 0
+            });
+            break;
+          case 'retail':
+            sale.push({
+              ...baseItem,
+              price: item.price || item.price_estimates?.retail || 0,
+              paymentMethod: ''
+            });
+            break;
+          default:
+            // Default to buy if transaction type is not specified
+            buy.push({
+              ...baseItem,
+              price: item.price || item.price_estimates?.buy || 0
+            });
+        }
+      });
+      
+      // Update state with new items
+      if (pawn.length > 0) {
+        setPawnItems(pawn);
+        setActiveTab(0); // Set active tab to Pawn
+      } else if (buy.length > 0) {
+        setBuyItems(buy);
+        setActiveTab(1); // Set active tab to Buy
+      } else if (sale.length > 0) {
+        setSaleItems(sale);
+        setActiveTab(3); // Set active tab to Sale
+      }
+    }
+  }, [estimatedItems, from]);
   
   // Function to get current items based on active tab
   const getCurrentItems = () => {
@@ -243,23 +331,6 @@ const CustomerTicket = () => {
     alert('Proceeding to checkout with all items');
   };
 
-  if (!customer) {
-    return (
-      <Container maxWidth="md" sx={{ mt: 2, mb: 2, textAlign: 'center' }}>
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="h5" color="error">Customer information not available</Typography>
-          <Button 
-            variant="contained" 
-            onClick={() => navigate('/')} 
-            sx={{ mt: 2 }}
-          >
-            Return to Home
-          </Button>
-        </Paper>
-      </Container>
-    );
-  }
-
   // Format date for display
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
@@ -273,7 +344,8 @@ const CustomerTicket = () => {
 
   // Determine image source
   const getImageSource = () => {
-    if (!customer.image) return '/placeholder-profile.png';
+    // Handle case where customer is undefined
+    if (!customer || !customer.image) return '/placeholder-profile.png';
     
     if (customer.image instanceof File || customer.image instanceof Blob) {
       return URL.createObjectURL(customer.image);
@@ -314,7 +386,7 @@ const CustomerTicket = () => {
                   <Avatar
                     sx={{ width: 100, height: 100 }}
                     src={getImageSource()}
-                    alt={`${customer.first_name} ${customer.last_name}`}
+                    alt={customer ? `${customer.first_name} ${customer.last_name}` : 'Customer'}
                   />
                 </Box>
               </Grid>
@@ -327,26 +399,28 @@ const CustomerTicket = () => {
                 }}>
                   <Box sx={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', mb: 1 }}>
                     <Typography variant="h6" sx={{ fontWeight: 'bold', mr: 5 }}>
-                      {`${customer.first_name} ${customer.last_name}`}
+                      {customer ? `${customer.first_name} ${customer.last_name}` : 'No Customer Selected'}
                     </Typography>
-                    <Button 
-                      variant="outlined" 
-                      size="small" 
-                      startIcon={<EditIcon />}
-                      onClick={() => navigate(`/customers/${customer.id}/edit`, { state: { customer } })}
-                    >
-                      Edit
-                    </Button>
+                      <Button 
+                        variant="outlined" 
+                        size="small" 
+                        startIcon={<EditIcon />}
+                        onClick={() => navigate(`/customers/${customer.id}/edit`, { state: { customer } })}
+                      >
+                        Edit
+                      </Button>
                   </Box>
                   <Typography variant="body2">
-                    <strong>Phone:</strong> {customer.phone || 'Not provided'}
+                    <strong>Phone:</strong> {customer ? (customer.phone || 'Not provided') : 'N/A'}
                   </Typography>
                   <Typography variant="body2">
-                    <strong>Address:</strong> {customer.address_line1 ? 
-                      `${customer.address_line1}${customer.address_line2 ? ', ' + customer.address_line2 : ''}, 
-                      ${customer.city || ''} ${customer.state || ''} ${customer.postal_code || ''}`.replace(/\s+/g, ' ').trim() 
-                      : 
-                      'Not provided'
+                    <strong>Address:</strong> {customer ? (
+                      customer.address_line1 ? 
+                        `${customer.address_line1}${customer.address_line2 ? ', ' + customer.address_line2 : ''}, 
+                        ${customer.city || ''} ${customer.state || ''} ${customer.postal_code || ''}`.replace(/\s+/g, ' ').trim() 
+                        : 
+                        'Not provided'
+                      ) : 'N/A'
                     }
                   </Typography>
                 </Box>

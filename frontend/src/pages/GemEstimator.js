@@ -1503,6 +1503,27 @@ function GemEstimator() {
     return totalCarats * parseFloat(caratConversion.grams);
   };
 
+  const handleAddToTicket = () => {
+    // Get customer data from Home.js (if it was passed)
+    const customerData = location.state?.customer;
+    
+    // Prepare items with proper price for the selected transaction type
+    const processedItems = estimatedItems.map((item) => ({
+      ...item,
+      price: item.price_estimates[item.transaction_type],
+      free_text: item.free_text
+    }));
+    
+    // Navigate to CustomerTicket.js with the customer data and estimated items
+    navigate('/customer-ticket', {
+      state: {
+        customer: customerData, // Pass customer data to CustomerTicket.js
+        estimatedItems: processedItems,
+        from: 'gemEstimator'
+      }
+    });
+  };
+
   const handleCheckout = () => {
     // Save the current state in session storage before navigating
     const updatedItems = estimatedItems.map((item) => ({
@@ -2531,15 +2552,25 @@ function GemEstimator() {
                   return total + parseFloat(price);
                 }, 0).toFixed(2)}
               </Typography>
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={handleCheckout}
-                disabled={estimatedItems.length === 0}
-                startIcon={<ArrowForwardIcon />}
-              >
-                Proceed to Checkout
-              </Button>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  onClick={handleAddToTicket}
+                  disabled={estimatedItems.length === 0}
+                >
+                  Add to Ticket
+                </Button>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={handleCheckout}
+                  disabled={estimatedItems.length === 0}
+                  startIcon={<ArrowForwardIcon />}
+                >
+                  Proceed to Checkout
+                </Button>
+              </Box>
             </Box>
           </Paper>
         </Grid>
