@@ -5,6 +5,7 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Tooltip
 } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import InventoryIcon from '@mui/icons-material/Inventory';
@@ -34,6 +35,7 @@ const CustomerTicket = () => {
   };
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth(); // Get user at component level
   
   // Get customer from location state or session storage
   const [customer, setCustomer] = React.useState(() => {
@@ -317,9 +319,90 @@ const CustomerTicket = () => {
     // Calculate totals before adding to cart
     calculateTotal();
     
-    // Here we would add the current transaction to a shopping cart
-    // This is a placeholder for future implementation
-    alert('Items added to cart');
+    // Get current items based on active tab
+    const { items } = getCurrentItems();
+    
+    // Only add items that have content
+    const filteredItems = items.filter(item => {
+      if (activeTab === 0) { // Pawn items
+        return item.description || item.value;
+      } else if (activeTab === 1) { // Buy items
+        return item.description || item.price;
+      } else if (activeTab === 2) { // Trade items
+        return item.tradeItem || item.storeItem;
+      } else if (activeTab === 3) { // Sale items
+        return item.description || item.price;
+      } else if (activeTab === 4) { // Repair items
+        return item.description || item.issue || item.fee;
+      } else if (activeTab === 5) { // Payment items
+        return item.amount || item.method;
+      }
+      return false;
+    });
+    
+    if (filteredItems.length === 0) {
+      alert('No valid items to add to cart');
+      return;
+    }
+    
+    // Determine item type based on active tab
+    let itemType;
+    switch(activeTab) {
+      case 0: itemType = 'pawn'; break;
+      case 1: itemType = 'buy'; break;
+      case 2: itemType = 'trade'; break;
+      case 3: itemType = 'sale'; break;
+      case 4: itemType = 'repair'; break;
+      case 5: itemType = 'payment'; break;
+      default: itemType = 'unknown';
+    }
+    
+    // Instead of navigating, save to session storage first
+    try {
+      // Add item type, customer, and employee data to each item
+      // Using user from component scope instead of calling useAuth() here
+      const itemsWithMetadata = filteredItems.map(item => ({
+        ...item,
+        itemType: itemType,
+        customer: customer ? {
+          id: customer.id,
+          name: `${customer.first_name} ${customer.last_name}`,
+          phone: customer.phone || 'N/A',
+          email: customer.email || 'N/A'
+        } : null,
+        employee: user ? {
+          id: user.id,
+          name: user.name,
+          role: user.role || 'Employee'
+        } : null
+      }));
+      
+      // Get existing cart items from session storage
+      const existingCartItems = sessionStorage.getItem('cartItems');
+      let cartItems = [];
+      
+      if (existingCartItems) {
+        cartItems = JSON.parse(existingCartItems);
+      }
+      
+      // Add new items to cart
+      cartItems = [...cartItems, ...itemsWithMetadata];
+      
+      // Save to session storage
+      sessionStorage.setItem('cartItems', JSON.stringify(cartItems));
+      
+      // Save customer data to session storage if it exists
+      if (customer) {
+        sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
+      }
+      
+      // Then navigate to cart page
+      navigate('/cart');
+      
+    } catch (error) {
+      console.error('Error adding items to cart:', error);
+      alert('There was an error adding items to cart. Please try again.');
+    }
   };
   
   const handleCheckout = () => {
