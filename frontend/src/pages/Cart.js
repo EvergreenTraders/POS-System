@@ -23,12 +23,19 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  Chip
+  Chip,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  Checkbox
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import PersonIcon from '@mui/icons-material/Person';
 import { useAuth } from '../context/AuthContext';
 
 // Helper function to convert buffer to data URL for image preview
@@ -47,6 +54,10 @@ const Cart = () => {
   
   // State for cart items, customer data
   const [cartItems, setCartItems] = useState([]);
+  const [customerFilter, setCustomerFilter] = useState('all');
+  const [filteredItems, setFilteredItems] = useState([]);
+  const [uniqueCustomers, setUniqueCustomers] = useState([]);
+  const [selectedItems, setSelectedItems] = useState([]);
   const [confirmDialog, setConfirmDialog] = useState({
     open: false,
     itemIndex: null
@@ -82,6 +93,78 @@ const Cart = () => {
       }
     }
   }, []);
+
+  // Extract unique customers from cart items
+  useEffect(() => {
+    if (cartItems.length > 0) {
+      // Get unique customers
+      const customersSet = new Set();
+      const customers = [];
+      
+      cartItems.forEach(item => {
+        if (item.customer && item.customer.name) {
+          // Use customer ID or name as unique identifier
+          const customerId = item.customer.id || item.customer.name;
+          if (!customersSet.has(customerId)) {
+            customersSet.add(customerId);
+            customers.push(item.customer);
+          }
+        }
+      });
+      
+      setUniqueCustomers(customers);
+    } else {
+      setUniqueCustomers([]);
+    }
+  }, [cartItems]);
+
+  // Filter cart items based on selected customer
+  useEffect(() => {
+    if (customerFilter === 'all') {
+      setFilteredItems(cartItems);
+    } else {
+      const filtered = cartItems.filter(item => 
+        item.customer && 
+        (item.customer.id === customerFilter || item.customer.name === customerFilter)
+      );
+      setFilteredItems(filtered);
+    }
+    
+    // Reset selected items when filter changes
+    setSelectedItems([]);
+  }, [cartItems, customerFilter]);
+
+  // Handle customer filter change
+  const handleCustomerFilterChange = (e) => {
+    setCustomerFilter(e.target.value);
+  };
+  
+  // Handle individual item selection toggle
+  const handleItemSelect = (index) => {
+    setSelectedItems(prev => {
+      if (prev.includes(index)) {
+        return prev.filter(i => i !== index);
+      } else {
+        return [...prev, index];
+      }
+    });
+  };
+  
+  // Check if all filtered items are selected
+  const isAllSelected = filteredItems.length > 0 && 
+    filteredItems.every((_, index) => selectedItems.includes(index));
+  
+  // Handle select/deselect all filtered items
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      // Deselect all items
+      setSelectedItems([]);
+    } else {
+      // Select all currently filtered items
+      const allIndices = filteredItems.map((_, index) => index);
+      setSelectedItems(allIndices);
+    }
+  };
 
   // Helper function to determine item type based on its structure
   const getItemTypeFromStructure = (item) => {
@@ -164,9 +247,20 @@ const Cart = () => {
   };
 
   // Calculate total value of cart
-  const calculateTotal = () => {
-    return cartItems.reduce((sum, item) => {
-      return sum + getItemValue(item, item.itemType);
+  const calculateTotal = (items = cartItems) => {
+    return items.reduce((total, item) => {
+      return total + parseFloat(getItemValue(item, getItemTypeFromStructure(item)) || 0);
+    }, 0);
+  };
+  
+  // Calculate total for selected items only
+  const calculateSelectedTotal = () => {
+    if (selectedItems.length === 0) return 0;
+    
+    return selectedItems.reduce((total, index) => {
+      const item = filteredItems[index];
+      if (!item) return total; // Skip if item doesn't exist
+      return total + parseFloat(getItemValue(item, item.itemType || getItemTypeFromStructure(item)) || 0);
     }, 0);
   };
 
@@ -251,62 +345,105 @@ const Cart = () => {
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Paper elevation={3} sx={{ p: 3, borderRadius: 2 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h4" gutterBottom sx={{ mb: 0, display: 'flex', alignItems: 'center' }}>
-            <ShoppingCartIcon sx={{ mr: 1 }} />
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+          <ShoppingCartIcon sx={{ mr: 1, color: 'primary.main' }} />
+          <Typography variant="h5" component="h1">
             Cart
           </Typography>
-          <Button 
-            variant="outlined" 
-            color="primary" 
+          <Box sx={{ flexGrow: 1 }} />
+          <Button
             startIcon={<ArrowBackIcon />}
+            variant="outlined"
             onClick={handleBackToTicket}
+            sx={{ mr: 1 }}
           >
             Back to Ticket
           </Button>
+          <Button
+            startIcon={<DeleteIcon />}
+            variant="outlined"
+            color="error"
+            onClick={handleClearCart}
+            disabled={cartItems.length === 0}
+          >
+            Clear Cart
+          </Button>
         </Box>
+        
+
 
         {/* Cart Items */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="h6">
-            Cart Items ({cartItems.length})
+            Items ({filteredItems.length})
           </Typography>
-          {cartItems.length > 0 && (
-            <Button 
-              variant="outlined" 
-              color="error" 
-              size="small"
-              onClick={handleClearCart}
-            >
-              Clear Cart
-            </Button>
+          {customer && (
+            <Typography variant="body2" color="text.secondary">
+              Customer: <strong>{customer.name}</strong>
+            </Typography>
           )}
         </Box>
 
-        {cartItems.length > 0 ? (
+        {filteredItems.length > 0 ? (
           <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
             <Table size="small">
               <TableHead>
                 <TableRow sx={{ bgcolor: 'grey.100' }}>
-                  <TableCell width="10%">Type</TableCell>
-                  <TableCell width="25%">Description</TableCell>
-                  <TableCell width="15%">Customer</TableCell>
-                  <TableCell width="15%">Employee</TableCell>
-                  <TableCell width="15%" align="right">Price</TableCell>
-                  <TableCell width="10%" align="center">Actions</TableCell>
+                  <TableCell padding="checkbox" width="5%">
+                    <Checkbox
+                      indeterminate={selectedItems.length > 0 && !isAllSelected}
+                      checked={isAllSelected}
+                      onChange={handleSelectAll}
+                    />
+                  </TableCell>
+                  <TableCell width="10%"><strong>Type</strong></TableCell>
+                  <TableCell width="20%"><strong>Description</strong></TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <strong>Customer</strong>
+                      <FormControl size="small" sx={{ ml: 1, minWidth: 120 }}>
+                        <Select
+                          value={customerFilter}
+                          onChange={handleCustomerFilterChange}
+                          displayEmpty
+                          variant="standard"
+                          startAdornment={<FilterListIcon fontSize="small" sx={{ mr: 0.5 }} />}
+                        >
+                          <MenuItem value="all">All Customers</MenuItem>
+                          {uniqueCustomers.map((customer) => (
+                            <MenuItem 
+                              key={customer.id || customer.name} 
+                              value={customer.id || customer.name}
+                            >
+                              {customer.name}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Box>
+                  </TableCell>
+                  <TableCell><strong>Employee</strong></TableCell>
+                  <TableCell align="right"><strong>Price</strong></TableCell>
+                  <TableCell align="center"><strong>Actions</strong></TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {cartItems.map((item, index) => (
+                {filteredItems.map((item, index) => (
                   <TableRow key={index} hover>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        checked={selectedItems.includes(index)}
+                        onChange={() => handleItemSelect(index)}
+                      />
+                    </TableCell>
                     <TableCell>
                       <Chip 
-                        label={getItemTypeLabel(item.itemType)} 
-                        color={getItemTypeColor(item.itemType)}
+                        label={getItemTypeLabel(item.itemType || getItemTypeFromStructure(item))}
+                        color={getItemTypeColor(item.itemType || getItemTypeFromStructure(item))}
                         size="small"
                       />
                     </TableCell>
-                    <TableCell>{getItemDescription(item, item.itemType)}</TableCell>
+                    <TableCell>{getItemDescription(item, item.itemType || getItemTypeFromStructure(item))}</TableCell>
                     <TableCell>
                       {item.customer ? (
                         <Typography variant="body2">
@@ -322,7 +459,7 @@ const Cart = () => {
                     <TableCell>
                       {item.employee ? (
                         <Typography variant="body2">
-                          <strong>{item.employee.name}</strong><br />
+                          <strong>{item.employee.name} </strong><br />
                           {item.employee.role}
                         </Typography>
                       ) : (
@@ -331,7 +468,7 @@ const Cart = () => {
                         </Typography>
                       )}
                     </TableCell>
-                    <TableCell align="right">{formatCurrency(getItemValue(item, item.itemType))}</TableCell>
+                    <TableCell align="right">{formatCurrency(getItemValue(item, item.itemType || getItemTypeFromStructure(item)))}</TableCell>
                     <TableCell align="center">
                       <IconButton 
                         color="primary" 
@@ -353,10 +490,14 @@ const Cart = () => {
                 ))}
                 {/* Total Row */}
                 <TableRow sx={{ bgcolor: 'grey.50' }}>
-                  <TableCell colSpan={4} /> {/* Empty cells for Type, Description, Customer, Employee */}
+                  <TableCell colSpan={5} /> {/* Empty cells for Checkbox, Type, Description, Customer, Employee */}
                   <TableCell align="right">
                     <Typography fontWeight="bold">
-                      Total: {formatCurrency(calculateTotal())}
+                      {selectedItems.length > 0 ? (
+                        `Selected Total: ${formatCurrency(calculateSelectedTotal())}`
+                      ) : (
+                        `Total: ${formatCurrency(calculateTotal(filteredItems))}`
+                      )}
                     </Typography>
                   </TableCell>
                   <TableCell />
@@ -373,14 +514,34 @@ const Cart = () => {
         )}
 
         {/* Action Buttons */}
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
+          <Box>
+            <Typography variant="body2" color="text.secondary">
+              {customerFilter !== 'all' && 
+               `Showing ${filteredItems.length} of ${cartItems.length} items`}
+              {selectedItems.length > 0 && 
+               ` • ${selectedItems.length} item${selectedItems.length === 1 ? '' : 's'} selected`}
+            </Typography>
+            {selectedItems.length > 0 && (
+              <Button 
+                variant="outlined" 
+                size="small"
+                onClick={() => setSelectedItems([])}
+                sx={{ mt: 1 }}
+              >
+                Clear Selection
+              </Button>
+            )}
+          </Box>
           <Button 
             variant="contained" 
             color="primary" 
-            disabled={cartItems.length === 0}
+            disabled={cartItems.length === 0 || (selectedItems.length > 0 && calculateSelectedTotal() === 0)}
             onClick={handleProceedToCheckout}
           >
-            Proceed to Checkout
+            {selectedItems.length > 0 ? 
+              `Checkout Selected (${formatCurrency(calculateSelectedTotal())})` : 
+              'Proceed to Checkout'}
           </Button>
         </Box>
       </Paper>

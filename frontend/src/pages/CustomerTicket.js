@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, Container, Card, CardContent, 
   CardMedia, Divider, Chip, Button, Avatar, Stack, Tabs, Tab, TextField,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Tooltip
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Tooltip,
+  Dialog, DialogTitle, DialogContent, DialogActions, Snackbar, Alert, CircularProgress,
+  List, ListItem, ListItemText, ListItemAvatar
 } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
+import config from '../config';
 import { useAuth } from '../context/AuthContext';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
@@ -27,6 +30,100 @@ function bufferToDataUrl(bufferObj) {
 }
 
 const CustomerTicket = () => {
+  // State for customer lookup mode
+  const [showLookupForm, setShowLookupForm] = useState(false);
+  const [searchForm, setSearchForm] = useState({
+    name: '',
+    id_number: '',
+    phone: ''
+  });
+  const [searchResults, setSearchResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [openSearchDialog, setOpenSearchDialog] = useState(false);
+  const [selectedSearchIdx, setSelectedSearchIdx] = useState(0);
+  const [snackbarMessage, setSnackbarMessage] = useState({ open: false, message: '', severity: 'info' });
+  
+  // Handle input change for search form
+  const handleLookupInputChange = (e) => {
+    const { name, value } = e.target;
+    setSearchForm(prev => ({ ...prev, [name]: value }));
+  };
+  
+  // Show snackbar message
+  const showSnackbar = (message, severity = 'info') => {
+    setSnackbarMessage({ open: true, message, severity });
+    setTimeout(() => {
+      setSnackbarMessage(prev => ({ ...prev, open: false }));
+    }, 6000);
+  };
+
+  // Handle search customer
+  const handleSearchCustomer = async () => {
+    if (!searchForm.name && !searchForm.id_number && !searchForm.phone) {
+      showSnackbar('Please enter at least one search criteria', 'warning');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const params = {};
+      if (searchForm.name && searchForm.name.trim()) params.name = searchForm.name.trim();
+      if (searchForm.id_number && searchForm.id_number.trim()) params.id_number = searchForm.id_number.trim();
+      if (searchForm.phone && searchForm.phone.trim()) params.phone = searchForm.phone.trim();
+      
+      const queryParams = new URLSearchParams(params).toString();
+      const response = await fetch(`${config.apiUrl}/customers/search?${queryParams}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      
+      if (!response.ok) throw new Error('Failed to search customers');
+      const data = await response.json();
+      
+      setSearchResults(data);
+      
+      if (data.length === 0) {
+        showSnackbar('No customers found. You can register a new customer.', 'info');
+      } else if (data.length === 1) {
+        // If only one customer found, select them automatically
+        handleSelectCustomer(data[0]);
+      } else {
+        // If multiple customers, open dialog
+        setOpenSearchDialog(true);
+        setSelectedSearchIdx(0); // auto-select first
+      }
+    } catch (error) {
+      showSnackbar(`Error searching customers: ${error.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Handle customer selection from search results
+  const handleSelectCustomer = (customerData) => {
+    // Format the selected customer for the ticket
+    const selectedCustomer = {
+      ...customerData,
+      name: `${customerData.first_name || ''} ${customerData.last_name || ''}`.trim(),
+      image: customerData.image && typeof customerData.image === 'object' && customerData.image.type === 'Buffer' ? bufferToDataUrl(customerData.image) : customerData.image
+    };
+    
+    // Update the customer state and save to session storage
+    setCustomer(selectedCustomer);
+    sessionStorage.setItem('selectedCustomer', JSON.stringify(selectedCustomer));
+    
+    // Close dialogs and clear search form
+    setShowLookupForm(false);
+    setOpenSearchDialog(false);
+    setSearchForm({ name: '', id_number: '', phone: '' });
+    
+    // Show success message
+    showSnackbar(`Customer ${selectedCustomer.name} selected`, 'success');
+  };
+  
+  // Toggle back to customer details
+  const handleCancelLookup = () => {
+    setShowLookupForm(false);
+  };
   // Mocked portfolio KPI data (would be fetched from API in production)
   const portfolioData = {
     totalValue: Math.floor(Math.random() * 10000) + 500,
@@ -372,7 +469,7 @@ const CustomerTicket = () => {
         } : null,
         employee: user ? {
           id: user.id,
-          name: user.name,
+          name: `${user.firstName} ${user.lastName}`,
           role: user.role || 'Employee'
         } : null
       }));
@@ -451,64 +548,124 @@ const CustomerTicket = () => {
           flexDirection: 'row',
           justifyContent: 'space-between'
         }}>
-          {/* Left side - Customer Info */}
+          {/* Left side - Customer Info or Lookup */}
           <Box sx={{ 
             display: 'flex', 
             width: '40%', 
             borderRight: '1px solid #e0e0e0'
           }}>
-            <Grid container spacing={0} sx={{ width: '100%'}}>
-              {/* Column 1: Customer Image */}
-              <Grid item xs={3}>
-                <Box sx={{ 
-                  display: 'flex',
-                  m: 0,
-                  p: 0,
-                  alignItems: 'flex-start'
-                }}>
-                  <Avatar
-                    sx={{ width: 100, height: 100 }}
-                    src={getImageSource()}
-                    alt={customer ? `${customer.first_name} ${customer.last_name}` : 'Customer'}
-                  />
-                </Box>
-              </Grid>
-              
-              {/* Column 2: Customer Details */}
-              <Grid item xs={9} sx={{ pl: 0, ml: 0 }}>
-                <Box sx={{ 
-                  display: 'flex',
-                  flexDirection: 'column'
-                }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', mb: 1 }}>
-                    <Typography variant="h6" sx={{ fontWeight: 'bold', mr: 5 }}>
-                      {customer ? `${customer.first_name} ${customer.last_name}` : 'No Customer Selected'}
-                    </Typography>
-                      <Button 
-                        variant="outlined" 
-                        size="small" 
-                        startIcon={<EditIcon />}
-                        onClick={() => navigate(`/customers/${customer.id}/edit`, { state: { customer } })}
-                      >
-                        Edit
-                      </Button>
+            {!showLookupForm ? (
+              /* Customer info view */
+              <Grid container spacing={0} sx={{ width: '100%'}}>
+                {/* Column 1: Customer Image */}
+                <Grid item xs={3}>
+                  <Box sx={{ 
+                    display: 'flex',
+                    m: 0,
+                    p: 0,
+                    alignItems: 'flex-start'
+                  }}>
+                    <Avatar
+                      sx={{ width: 100, height: 100 }}
+                      src={getImageSource()}
+                      alt={customer ? `${customer.first_name} ${customer.last_name}` : 'Customer'}
+                    />
                   </Box>
-                  <Typography variant="body2">
-                    <strong>Phone:</strong> {customer ? (customer.phone || 'Not provided') : 'N/A'}
-                  </Typography>
-                  <Typography variant="body2">
-                    <strong>Address:</strong> {customer ? (
-                      customer.address_line1 ? 
-                        `${customer.address_line1}${customer.address_line2 ? ', ' + customer.address_line2 : ''}, 
-                        ${customer.city || ''} ${customer.state || ''} ${customer.postal_code || ''}`.replace(/\s+/g, ' ').trim() 
-                        : 
-                        'Not provided'
-                      ) : 'N/A'
-                    }
-                  </Typography>
-                </Box>
+                </Grid>
+                
+                {/* Column 2: Customer Details */}
+                <Grid item xs={9} sx={{ pl: 0, ml: 0 }}>
+                  <Box sx={{ 
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', mb: 1 }}>
+                      <Typography variant="h6" sx={{ fontWeight: 'bold', mr: 5 }}>
+                        {customer ? `${customer.first_name} ${customer.last_name}` : 'No Customer Selected'}
+                      </Typography>
+                        <Button 
+                          variant="outlined" 
+                          size="small" 
+                          startIcon={<EditIcon />}
+                          onClick={() => setShowLookupForm(true)}
+                        >
+                          Edit
+                        </Button>
+                    </Box>
+                    <Typography variant="body2">
+                      <strong>Phone:</strong> {customer ? (customer.phone || 'Not provided') : 'N/A'}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>Address:</strong> {customer ? (
+                        customer.address_line1 ? 
+                          `${customer.address_line1}${customer.address_line2 ? ', ' + customer.address_line2 : ''}, 
+                          ${customer.city || ''} ${customer.state || ''} ${customer.postal_code || ''}`.replace(/\s+/g, ' ').trim() 
+                          : 
+                          'Not provided'
+                        ) : 'N/A'
+                      }
+                    </Typography>
+                  </Box>
+                </Grid>
               </Grid>
-            </Grid>
+            ) : (
+              /* Customer lookup form - takes the entire space */
+              <Box sx={{ width: '100%' }}>
+                <Grid container spacing={1} direction="column">
+                  <Grid item xs={12}>
+                    <TextField
+                      name="name"
+                      label="Name"
+                      value={searchForm.name}
+                      onChange={handleLookupInputChange}
+                      size="small"
+                      sx={{ width: '90%' }}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      name="id_number"
+                      label="ID Number"
+                      value={searchForm.id_number}
+                      onChange={handleLookupInputChange}
+                      size="small"
+                      sx={{ width: '90%' }}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      name="phone"
+                      label="Phone Number"
+                      value={searchForm.phone}
+                      onChange={handleLookupInputChange}
+                      size="small"
+                      sx={{ width: '90%' }}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '90%' }}>
+                      <Box>
+                        <Button
+                          variant="outlined"
+                          onClick={handleCancelLookup}
+                          size="small"
+                        >
+                          Cancel
+                        </Button>
+                      </Box>
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        onClick={handleSearchCustomer}
+                        size="small"
+                      >
+                        Search
+                      </Button>
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Box>
+            )}
           </Box>
           {/* Right side - Portfolio KPI */}
           <Box sx={{ 
@@ -547,17 +704,7 @@ const CustomerTicket = () => {
         </Box>
 
         {/* Navigation Buttons */}
-        <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Box>
-            <Button 
-              variant="outlined" 
-              onClick={() => navigate('/')}
-              size="small"
-              sx={{ mr: 1 }}
-            >
-              Back
-            </Button>
-          </Box>
+        <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
         </Box>
 
         <Grid container spacing={2}>
@@ -1214,6 +1361,160 @@ const CustomerTicket = () => {
           </Grid>
         </Grid>
       </Paper>
+      
+      {/* Customer Search Results Dialog */}
+      <Dialog
+        open={openSearchDialog}
+        onClose={() => setOpenSearchDialog(false)}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>Search Results</DialogTitle>
+        <DialogContent>
+          {loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : searchResults.length > 0 ? (
+            <>
+              <Box sx={{ display: 'flex', flexDirection: 'row', gap: 2, mb: 2 }}>
+                {/* Left side - Customer and ID Images */}
+                <Box sx={{ width: 160, height: 230, display: 'flex', flexDirection: 'column', gap: 2, justifyContent: 'flex-start', alignItems: 'center' }}>
+                  {selectedSearchIdx !== null && selectedSearchIdx >= 0 && searchResults[selectedSearchIdx] && (
+                    <>
+                      {/* Customer Photo */}
+                      {searchResults[selectedSearchIdx]?.image && (
+                        <Box>
+                          <img
+                            src={
+                              typeof searchResults[selectedSearchIdx].image === 'string'
+                                ? searchResults[selectedSearchIdx].image
+                                : searchResults[selectedSearchIdx].image instanceof File || searchResults[selectedSearchIdx].image instanceof Blob
+                                ? URL.createObjectURL(searchResults[selectedSearchIdx].image)
+                                : searchResults[selectedSearchIdx].image && searchResults[selectedSearchIdx].image.data
+                                ? bufferToDataUrl(searchResults[selectedSearchIdx].image)
+                                : undefined
+                            }
+                            alt="Customer"
+                            style={{
+                              width: 120,
+                              height: 120,
+                              objectFit: 'cover',
+                              borderRadius: 8,
+                              margin: '0 auto',
+                              border: '2px solid #4caf50',
+                              background: '#fafafa',
+                              boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                              display: 'block'
+                            }}
+                          />
+                        </Box>
+                      )}
+                      
+                      {/* ID Image Front */}
+                      {searchResults[selectedSearchIdx]?.id_image_front && (
+                        <Box>
+                          <img
+                            src={
+                              typeof searchResults[selectedSearchIdx].id_image_front === 'string'
+                                ? searchResults[selectedSearchIdx].id_image_front
+                                : searchResults[selectedSearchIdx].id_image_front instanceof File || searchResults[selectedSearchIdx].id_image_front instanceof Blob
+                                ? URL.createObjectURL(searchResults[selectedSearchIdx].id_image_front)
+                                : searchResults[selectedSearchIdx].id_image_front && searchResults[selectedSearchIdx].id_image_front.data
+                                ? bufferToDataUrl(searchResults[selectedSearchIdx].id_image_front)
+                                : undefined
+                            }
+                            alt="ID Front"
+                            style={{
+                              width: 120,
+                              height: 100,
+                              objectFit: 'cover',
+                              borderRadius: 8,
+                              margin: '0 auto',
+                              border: '2px solid #ff9800',
+                              background: '#fafafa',
+                              boxShadow: '0 2px 8px 0 rgba(0,0,0,0.08)',
+                              display: 'block'
+                            }}
+                          />
+                        </Box>
+                      )}
+                    </>
+                  )}
+                </Box>
+                {/* Right side - Table */}
+                <Box sx={{ flex: 1, position: 'relative', display: 'flex' }}>
+                  <TableContainer component={Paper} sx={{ mb: 0, maxHeight: 300, overflowY: 'auto', p: 0, m: 0, flex: '1 1 auto' }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Name</TableCell>
+                          <TableCell>DOB</TableCell>
+                          <TableCell>Phone</TableCell>
+                          <TableCell>ID</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {searchResults.map((customer, index) => (
+                          <TableRow
+                            key={customer.id || index}
+                            hover
+                            selected={selectedSearchIdx === index}
+                            sx={{ cursor: 'pointer' }}
+                            onClick={() => setSelectedSearchIdx(index)}
+                          >
+                            <TableCell sx={{ width: 140, maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {customer.first_name} {customer.last_name}
+                            </TableCell>
+                            <TableCell>{customer.date_of_birth ? customer.date_of_birth.substring(0, 10) : ''}</TableCell>
+                            <TableCell>{customer.phone || ''}</TableCell>
+                            <TableCell>{customer.id_number || ''}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Box>
+              </Box>
+              
+              {/* Action buttons at the bottom */}
+              {selectedSearchIdx !== null && selectedSearchIdx >= 0 && searchResults[selectedSearchIdx] && (
+                <Box sx={{ position: 'relative', mt: 2, mb: 1 }}>
+                  {/* Centered action buttons */}
+                  <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, width: '100%' }}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => handleSelectCustomer(searchResults[selectedSearchIdx])}
+                      sx={{ minWidth: 70 }}
+                    >
+                      Select
+                    </Button>
+                  </Box>
+                </Box>
+              )}
+            </>
+          ) : (
+            <Box sx={{ p: 2 }}>
+              <Typography>No customers found matching your search criteria.</Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenSearchDialog(false)}>Cancel</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar for messages */}
+      <Snackbar 
+        open={snackbarMessage.open} 
+        autoHideDuration={6000} 
+        onClose={() => setSnackbarMessage(prev => ({ ...prev, open: false }))}
+      >
+        <Alert severity={snackbarMessage.severity} sx={{ width: '100%' }}>
+          {snackbarMessage.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 };
