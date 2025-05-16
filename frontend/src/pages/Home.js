@@ -370,19 +370,25 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
   };
   const handleCloseSnackbar = () => setSnackbar({ ...snackbar, open: false });
   const handleSelectCustomer = (customer) => {
+    // Pass all customer data including image for display in ticket
     const selectedCustomer = {
-      id: customer.id,
+      ...customer, // Include all original customer properties
       name: `${customer.first_name} ${customer.last_name}`,
-      email: customer.email,
-      phone: customer.phone,
-      created_at: new Date().toISOString(),
-      status: 'active'
+      created_at: customer.created_at || new Date().toISOString(),
+      status: customer.status || 'active'
     };
+    
     setCustomer(selectedCustomer);
     setSelectedCustomer(selectedCustomer);
+    
+    // If there are items in the cart, navigate to checkout
+    // Otherwise, navigate to the customer ticket page
     if (location.state?.items?.length > 0) {
       navigate('/checkout', { state: { from: location.state.from || 'customer' } });
+    } else {
+      navigate('/customer-ticket', { state: { customer: selectedCustomer } });
     }
+    
     showSnackbar(`Selected ${customer.first_name} ${customer.last_name}`, 'success');
     handleCloseSearchDialog();
   };

@@ -22,6 +22,8 @@ import Checkout from './pages/Checkout';
 import QuoteManager from './pages/QuoteManager';
 import CustomerManager from './pages/CustomerManager';
 import CustomerEditor from './pages/CustomerEditor';
+import CustomerTicket from './pages/CustomerTicket';
+import Cart from './pages/Cart';
 
 const theme = createTheme({
   palette: {
@@ -305,6 +307,26 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <CustomerEditor />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/customer-ticket"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CustomerTicket />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/cart"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <Cart />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
