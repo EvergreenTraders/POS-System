@@ -1518,5 +1518,5 @@ const CustomerTicket = () => {
     </Container>
   );
 };
-
+                      
 export default CustomerTicket;
