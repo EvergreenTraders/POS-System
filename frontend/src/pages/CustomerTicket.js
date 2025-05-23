@@ -13,6 +13,7 @@ import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import InventoryIcon from '@mui/icons-material/Inventory';
 import EditIcon from '@mui/icons-material/Edit';
+import SearchIcon from '@mui/icons-material/Search';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import AddIcon from '@mui/icons-material/Add';
@@ -33,7 +34,8 @@ const CustomerTicket = () => {
   // State for customer lookup mode
   const [showLookupForm, setShowLookupForm] = useState(false);
   const [searchForm, setSearchForm] = useState({
-    name: '',
+    first_name: '',
+    last_name: '',
     id_number: '',
     phone: ''
   });
@@ -59,7 +61,7 @@ const CustomerTicket = () => {
 
   // Handle search customer
   const handleSearchCustomer = async () => {
-    if (!searchForm.name && !searchForm.id_number && !searchForm.phone) {
+    if (!searchForm.first_name && !searchForm.last_name && !searchForm.id_number && !searchForm.phone) {
       showSnackbar('Please enter at least one search criteria', 'warning');
       return;
     }
@@ -67,7 +69,8 @@ const CustomerTicket = () => {
     setLoading(true);
     try {
       const params = {};
-      if (searchForm.name && searchForm.name.trim()) params.name = searchForm.name.trim();
+      if (searchForm.first_name && searchForm.first_name.trim()) params.first_name = searchForm.first_name.trim();
+      if (searchForm.last_name && searchForm.last_name.trim()) params.last_name = searchForm.last_name.trim();
       if (searchForm.id_number && searchForm.id_number.trim()) params.id_number = searchForm.id_number.trim();
       if (searchForm.phone && searchForm.phone.trim()) params.phone = searchForm.phone.trim();
       
@@ -98,6 +101,102 @@ const CustomerTicket = () => {
     }
   };
   
+  // Handle editing customer
+  const handleEditCustomer = async () => {
+    if (!customer) {
+      showSnackbar('No customer selected to edit', 'warning');
+      return;
+    }
+    
+    // Format date function
+    const formatDate = (date) => {
+      if (!date) return '';
+      if (typeof date === 'string' && date.match(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)) return date;
+      const d = new Date(date);
+      if (isNaN(d)) return '';
+      return d.toISOString().substring(0, 10);
+    };
+    
+    // Helper function to convert dataURL to File object
+    const urlToFile = async (url, filename = 'customer-photo.jpg') => {
+      try {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        const mime = blob.type || 'image/jpeg';
+        return new File([blob], filename, { type: mime });
+      } catch (e) { return null; }
+    };
+    
+    // Process main customer photo
+    let imageValue = null;
+    if (customer.image && typeof customer.image === 'object' && customer.image.type === 'Buffer') {
+      imageValue = bufferToDataUrl(customer.image);
+    } else if (typeof customer.image === 'string' && customer.image.startsWith('http')) {
+      imageValue = await urlToFile(customer.image, `customer-photo-${customer.id || Date.now()}.jpg`);
+    } else {
+      imageValue = customer.image || null;
+    }
+    
+    // Process ID front image
+    let idImageFront = null;
+    if (customer.id_image_front && typeof customer.id_image_front === 'object') {
+      // Handle Buffer type from database
+      if (customer.id_image_front.type === 'Buffer' || customer.id_image_front.data) {
+        idImageFront = bufferToDataUrl(customer.id_image_front);
+      } else {
+        idImageFront = customer.id_image_front;
+      }
+    }
+    
+    // Process ID back image
+    let idImageBack = null;
+    if (customer.id_image_back && typeof customer.id_image_back === 'object') {
+      // Handle Buffer type from database
+      if (customer.id_image_back.type === 'Buffer' || customer.id_image_back.data) {
+        idImageBack = bufferToDataUrl(customer.id_image_back);
+      } else {
+        idImageBack = customer.id_image_back;
+      }
+    }
+    
+    // Prepare customer data with all fields
+    const preparedCustomer = {
+      ...customer,
+      first_name: customer.first_name || '', 
+      last_name: customer.last_name || '', 
+      email: customer.email || '', 
+      phone: customer.phone || '', 
+      address_line1: customer.address_line1 || '', 
+      address_line2: customer.address_line2 || '', 
+      city: customer.city || '', 
+      state: customer.state || '', 
+      postal_code: customer.postal_code || '', 
+      country: customer.country || '', 
+      id_type: customer.id_type || '', 
+      id_number: customer.id_number || '', 
+      id_expiry_date: formatDate(customer.id_expiry_date), 
+      date_of_birth: formatDate(customer.date_of_birth), 
+      status: customer.status || 'active', 
+      risk_level: customer.risk_level || 'normal', 
+      notes: customer.notes || '', 
+      gender: customer.gender || '', 
+      height: customer.height || '', 
+      weight: customer.weight || '', 
+      image: imageValue,
+      id_image_front: idImageFront,
+      id_image_back: idImageBack
+    };
+    
+    // Navigate to the CustomerEditor page with the prepared customer data
+    navigate('/customer-editor', { 
+      state: { 
+        customer: preparedCustomer,
+        mode: 'edit',
+        returnTo: '/customer-ticket'
+      }
+    });
+  };
+
   // Handle customer selection from search results
   const handleSelectCustomer = (customerData) => {
     // Format the selected customer for the ticket
@@ -165,6 +264,7 @@ const CustomerTicket = () => {
   const [saleItems, setSaleItems] = React.useState([{ id: 1, description: '', category: '', price: '', paymentMethod: '' }]);
   const [repairItems, setRepairItems] = React.useState([{ id: 1, description: '', issue: '', fee: '', completion: '' }]);
   const [paymentItems, setPaymentItems] = React.useState([{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
+  const [refundItems, setRefundItems] = React.useState([{ id: 1, amount: '', method: '', reference: '', reason: '' }]);
   
   // Process estimated items from GemEstimator.js when component mounts
   React.useEffect(() => {
@@ -241,6 +341,7 @@ const CustomerTicket = () => {
       case 3: return { items: saleItems, setItems: setSaleItems };
       case 4: return { items: repairItems, setItems: setRepairItems };
       case 5: return { items: paymentItems, setItems: setPaymentItems };
+      case 6: return { items: refundItems, setItems: setRefundItems };
       default: return { items: [], setItems: () => {} };
     }
   };
@@ -270,6 +371,9 @@ const CustomerTicket = () => {
         break;
       case 5:
         newItem = { id: newId, amount: '', method: '', reference: '', notes: '' };
+        break;
+      case 6:
+        newItem = { id: newId, amount: '', method: '', reference: '', reason: '' };
         break;
       default:
         return;
@@ -330,7 +434,8 @@ const CustomerTicket = () => {
     trade: 0,
     sale: 0,
     repair: 0,
-    payment: 0
+    payment: 0,
+    refund: 0
   });
   
   // Helper function to get the current tab's total
@@ -342,6 +447,7 @@ const CustomerTicket = () => {
       case 3: return totals.sale;
       case 4: return totals.repair;
       case 5: return totals.payment;
+      case 6: return totals.refund;
       default: return 0;
     }
   };
@@ -375,6 +481,10 @@ const CustomerTicket = () => {
         total = items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
         setTotals({ ...totals, payment: total });
         break;
+      case 6: // Refund
+        total = items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+        setTotals({ ...totals, refund: total });
+        break;
       default:
         break;
     }
@@ -405,6 +515,9 @@ const CustomerTicket = () => {
       case 5: // Payment items
         setItems([{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
         break;
+      case 6: // Refund items
+        setItems([{ id: 1, amount: '', method: '', reference: '', reason: '' }]);
+        break;
       default:
         break;
     }
@@ -433,6 +546,8 @@ const CustomerTicket = () => {
         return item.description || item.issue || item.fee;
       } else if (activeTab === 5) { // Payment items
         return item.amount || item.method;
+      } else if (activeTab === 6) { // Refund items
+        return item.amount || item.method || item.reason;
       }
       return false;
     });
@@ -451,6 +566,7 @@ const CustomerTicket = () => {
       case 3: itemType = 'sale'; break;
       case 4: itemType = 'repair'; break;
       case 5: itemType = 'payment'; break;
+      case 6: itemType = 'refund'; break;
       default: itemType = 'unknown';
     }
     
@@ -583,14 +699,25 @@ const CustomerTicket = () => {
                       <Typography variant="h6" sx={{ fontWeight: 'bold', mr: 5 }}>
                         {customer ? `${customer.first_name} ${customer.last_name}` : 'No Customer Selected'}
                       </Typography>
-                        <Button 
-                          variant="outlined" 
-                          size="small" 
-                          startIcon={<EditIcon />}
-                          onClick={() => setShowLookupForm(true)}
-                        >
-                          Edit
-                        </Button>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Button 
+                            variant="outlined" 
+                            size="small" 
+                            startIcon={<SearchIcon />}
+                            onClick={() => setShowLookupForm(true)}
+                          >
+                            Search
+                          </Button>
+                          <Button 
+                            variant="outlined" 
+                            size="small" 
+                            startIcon={<EditIcon />}
+                            onClick={handleEditCustomer}
+                            disabled={!customer}
+                          >
+                            Edit
+                          </Button>
+                        </Box>
                     </Box>
                     <Typography variant="body2">
                       <strong>Phone:</strong> {customer ? (customer.phone || 'Not provided') : 'N/A'}
@@ -613,14 +740,24 @@ const CustomerTicket = () => {
               <Box sx={{ width: '100%' }}>
                 <Grid container spacing={1} direction="column">
                   <Grid item xs={12}>
-                    <TextField
-                      name="name"
-                      label="Name"
-                      value={searchForm.name}
-                      onChange={handleLookupInputChange}
-                      size="small"
-                      sx={{ width: '90%' }}
-                    />
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '90%' }}>
+                      <TextField
+                        name="first_name"
+                        label="First Name"
+                        value={searchForm.first_name}
+                        onChange={handleLookupInputChange}
+                        size="small"
+                        sx={{ width: '48%' }}
+                      />
+                      <TextField
+                        name="last_name"
+                        label="Last Name"
+                        value={searchForm.last_name}
+                        onChange={handleLookupInputChange}
+                        size="small"
+                        sx={{ width: '48%' }}
+                      />
+                    </Box>
                   </Grid>
                   <Grid item xs={12}>
                     <TextField
@@ -727,6 +864,7 @@ const CustomerTicket = () => {
                       <Tab label="Sale" />
                       <Tab label="Repair" />
                       <Tab label="Payment" />
+                      <Tab label="Refund" />
                     </Tabs>
                   </Box>
                   
@@ -1236,8 +1374,7 @@ const CustomerTicket = () => {
                       </Box>
                     </Box>
                   )}
-                  
-                  {/* Payment Tab */}
+                                    {/* Payment Tab */}
                   {activeTab === 5 && (
                     <Box sx={{ p: 1 }}>
                       <TableContainer>
@@ -1310,6 +1447,111 @@ const CustomerTicket = () => {
                                     fullWidth 
                                     value={item.notes}
                                     onChange={(e) => handleItemChange(item.id, 'notes', e.target.value)}
+                                  />
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Tooltip title="Edit">
+                                    <IconButton size="small">
+                                      <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Duplicate">
+                                    <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
+                                      <ContentCopyIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Delete">
+                                    <IconButton size="small" onClick={() => handleDeleteItem(item.id)}>
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                        <Typography variant="h6" color="primary">
+                          Total: ${getCurrentTabTotal().toFixed(2)}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+                  
+                  {/* Refund Tab */}
+                  {activeTab === 6 && (
+                    <Box sx={{ p: 1 }}>
+                      <TableContainer>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell width="15%" align="center">Type</TableCell>
+                              <TableCell width="10%">Amount</TableCell>
+                              <TableCell width="15%">Refund Method</TableCell>
+                              <TableCell width="15%">Reference</TableCell>
+                              <TableCell width="20%">Reason</TableCell>
+                              <TableCell width="20%" align="right" padding="none">
+                                <Tooltip title="Add Item">
+                                  <IconButton size="small" color="primary" onClick={handleAddRow}>
+                                    <AddIcon />
+                                  </IconButton>
+                                </Tooltip>
+                              </TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {refundItems.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell align="center" padding="normal">
+                                  <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
+                                    <Tooltip title="Jewelry Estimator">
+                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                        <DiamondIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                    <Tooltip title="Bullion Estimator">
+                                      <IconButton size="small" color="primary" onClick={handleBullionEstimatorClick}>
+                                        <MonetizationOnIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                    <Tooltip title="Misc Estimator">
+                                      <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
+                                        <WatchIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                  </Box>
+                                </TableCell>
+                                <TableCell>
+                                  <TextField 
+                                    variant="standard" 
+                                    fullWidth 
+                                    value={item.amount}
+                                    onChange={(e) => handleItemChange(item.id, 'amount', e.target.value)}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField 
+                                    variant="standard" 
+                                    fullWidth 
+                                    value={item.method}
+                                    onChange={(e) => handleItemChange(item.id, 'method', e.target.value)}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField 
+                                    variant="standard" 
+                                    fullWidth 
+                                    value={item.reference}
+                                    onChange={(e) => handleItemChange(item.id, 'reference', e.target.value)}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField 
+                                    variant="standard" 
+                                    fullWidth 
+                                    value={item.reason}
+                                    onChange={(e) => handleItemChange(item.id, 'reason', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell align="right">
