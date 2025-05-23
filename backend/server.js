@@ -1560,19 +1560,22 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
 app.get('/api/customers/search', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { name, phone, id_number } = req.query;
+    const { first_name, last_name, phone, id_number } = req.query;
     let query = 'SELECT * FROM customers WHERE 1=1';
     const params = [];
     let paramCount = 1;
-
-    if (name) {
-      // Allow searching by full name, first name, or last name (case-insensitive)
-      query += ` AND (
-        LOWER(first_name) LIKE $${paramCount}
-        OR LOWER(last_name) LIKE $${paramCount}
-        OR LOWER(first_name || ' ' || last_name) LIKE $${paramCount}
-      )`;
-      params.push(`%${name.toLowerCase()}%`);
+    
+    // Handle case when first_name is provided separately
+    if (first_name) {
+      query += ` AND LOWER(first_name) LIKE $${paramCount}`;
+      params.push(`${first_name.toLowerCase()}%`); // Changed to only match beginning of first_name
+      paramCount++;
+    }
+    
+    // Handle case when last_name is provided separately
+    if (last_name) {
+      query += ` AND LOWER(last_name) LIKE $${paramCount}`;
+      params.push(`${last_name.toLowerCase()}%`); // Changed to only match beginning of last_name
       paramCount++;
     }
 

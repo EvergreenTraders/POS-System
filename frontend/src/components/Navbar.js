@@ -17,6 +17,7 @@ import {
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import Cart from './Cart';
 
 const StyledAppBar = styled(AppBar)({
@@ -28,6 +29,7 @@ function Navbar() {
   const [anchorEl, setAnchorEl] = useState(null);
   const { cartItems } = useCart();
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
 
   const cartItemCount = cartItems.reduce((total, item) => total + item.quantity, 0);
 
@@ -48,7 +50,14 @@ function Navbar() {
     <>
       <StyledAppBar position="fixed">
         <Toolbar>
-          <Typography variant="h6" sx={{ flexGrow: 1 }}>
+          <Typography 
+            variant="h6" 
+            sx={{ 
+              flexGrow: 1, 
+              cursor: 'pointer' 
+            }}
+            onClick={() => navigate('/')}
+          >
             POS System
           </Typography>
           {user && (
