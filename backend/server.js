@@ -1544,18 +1544,17 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
 });
 
 // Customer routes
-// app.get('api/customers', async (req, res) => {
-//   const client = await pool.connect();
-//   try {
-//     const result = await pool.query(
-//       'SELECT *, TO_CHAR(date_of_birth, \'YYYY-MM-DD\') as date_of_birth, TO_CHAR(id_expiry_date, \'YYYY-MM-DD\') as id_expiry_date FROM customers ORDER BY created_at DESC'
-//     );
-//     res.json(result.rows);
-//   } catch (err) {
-//     console.error('Error fetching customers:', err);
-//     res.status(500).json({ error: 'Failed to fetch customers' });
-//   }
-// });
+app.get('/api/customers', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT *, TO_CHAR(date_of_birth, \'YYYY-MM-DD\') as date_of_birth, TO_CHAR(id_expiry_date, \'YYYY-MM-DD\') as id_expiry_date FROM customers ORDER BY created_at DESC'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching customers:', err);
+    res.status(500).json({ error: 'Failed to fetch customers' });
+  }
+});
 
 app.get('/api/customers/search', async (req, res) => {
   const client = await pool.connect();

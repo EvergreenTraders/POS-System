@@ -3,7 +3,8 @@ import {
   Container, Typography, Box, Button, TextField, Dialog, DialogTitle,
   DialogContent, DialogActions, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Paper, Grid, Snackbar,
-  Alert, IconButton, List, ListItem, ListItemText, Divider, CircularProgress
+  Alert, IconButton, List, ListItem, ListItemText, Divider, CircularProgress,
+  Chip
 } from '@mui/material';
 import { Add as AddIcon, Edit as EditIcon } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -27,7 +28,7 @@ const CustomerManager = () => {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
 
-  // Start camera when dialog opens
+  // State for customer lookup mode
   useEffect(() => {
     if (showCamera) {
       startCamera();
@@ -40,6 +41,11 @@ const CustomerManager = () => {
     };
     // eslint-disable-next-line
   }, [showCamera]);
+
+  // Fetch customers on component mount
+  useEffect(() => {
+    fetchCustomers();
+  }, []);
 
   const startCamera = async () => {
     try {
@@ -121,6 +127,7 @@ const CustomerManager = () => {
   const [openSearchDialog, setOpenSearchDialog] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
@@ -129,13 +136,18 @@ const CustomerManager = () => {
 
   const fetchCustomers = async () => {
     try {
+      setLoading(true);
+      setError(null);
       const response = await fetch(`${config.apiUrl}/customers`);
       console.log('Response:', response);
       if (!response.ok) throw new Error('Failed to fetch customers');
       const data = await response.json();
       setCustomers(data);
     } catch (error) {
+      setError('Failed to load customers. Please try again.');
       showSnackbar(error.message, 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -417,85 +429,169 @@ const CustomerManager = () => {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      {/* Search Form */}
-      <Paper sx={{ p: 2, mb: 3, maxWidth: 400, mx: 'auto' }}>
-        <Typography variant="h6" gutterBottom align="center">
-          Customer Lookup
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5" component="h1" gutterBottom>
+          Customer Management
         </Typography>
-        <Grid container spacing={2} direction="column">
-          <Grid item xs={12}>
-            <TextField
-              name="name"
-              label="Name"
-              value={searchForm.name}
-              onChange={handleInputChange}
-              fullWidth
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              name="id_number"
-              label="ID Number"
-              value={searchForm.id_number}
-              onChange={handleInputChange}
-              fullWidth
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              name="phone"
-              label="Phone Number"
-              value={searchForm.phone}
-              onChange={handleInputChange}
-              fullWidth
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={handleSearch}
-              fullWidth
-              disabled={loading || (!searchForm.name && !searchForm.id_number && !searchForm.phone)}
-              sx={{ height: '48px' }}
-            >
-              {loading ? (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'center' }}>
-                  <CircularProgress size={20} color="inherit" />
-                  <span>Searching...</span>
-                </Box>
-              ) : (
-                'Search Customer'
-              )}
-            </Button>
-          </Grid>
-        </Grid>
-        <Grid container direction="column">
-          <Grid item xs={12}>
-            <Divider>OR</Divider>
-          </Grid>
-          <Grid item xs={12}>
-            <Button
-              variant="outlined"
-              color="primary"
-              onClick={handleRegisterNew}
-              fullWidth
-              sx={{ height: '48px' }}
-            >
-              Register New Customer
-            </Button>
-          </Grid>
-          <Grid item xs={12}>
-            <Button
-              variant="text"
-              onClick={handleProceedAsGuest}
-              fullWidth
-              sx={{ height: '48px' }}
-            >
-              Continue as Guest
-            </Button>
-          </Grid>
-        </Grid>
+        <Box>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={handleRegisterNew}
+            sx={{ mr: 1 }}
+          >
+            Add New Customer
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={handleProceedAsGuest}
+          >
+            Continue as Guest
+          </Button>
+        </Box>
+      </Box>
+
+      <Paper sx={{ p: 2, mb: 3 }}>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+            <CircularProgress />
+          </Box>
+        ) : error ? (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        ) : (
+          <TableContainer sx={{ maxHeight: 'calc(100vh - 250px)', overflowY: 'auto' }}>
+            <Table stickyHeader aria-label="customers table" size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Contact Info</TableCell>
+                  <TableCell>ID Information</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell align="center">Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {customers.length > 0 ? (
+                  customers.map((customer) => (
+                    <TableRow key={customer.id} hover>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          {customer.image ? (
+                            <Box
+                              component="img"
+                              src={typeof customer.image === 'object' && customer.image.type === 'Buffer' 
+                                ? bufferToDataUrl(customer.image) 
+                                : customer.image}
+                              alt={`${customer.first_name} ${customer.last_name}`}
+                              sx={{ width: 40, height: 40, borderRadius: '50%', mr: 1.5, objectFit: 'cover' }}
+                              onError={(e) => { e.target.src = 'https://via.placeholder.com/40'; }}
+                            />
+                          ) : (
+                            <Box
+                              sx={{ 
+                                width: 40, 
+                                height: 40, 
+                                borderRadius: '50%', 
+                                mr: 1.5, 
+                                bgcolor: 'primary.main', 
+                                color: 'white', 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'center',
+                                fontSize: '1rem',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              {customer.first_name?.[0]}{customer.last_name?.[0]}
+                            </Box>
+                          )}
+                          <Box>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
+                              {customer.first_name} {customer.last_name}
+                            </Typography>
+                            {customer.risk_level && customer.risk_level !== 'normal' && (
+                              <Chip 
+                                label={customer.risk_level.toUpperCase()} 
+                                size="small" 
+                                color={customer.risk_level === 'high' ? 'error' : 'warning'}
+                                sx={{ height: 20, fontSize: '0.7rem' }}
+                              />
+                            )}
+                          </Box>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {customer.phone ? (
+                            <Box component="span" sx={{ display: 'block' }}>
+                              <strong>Phone:</strong> {customer.phone}
+                            </Box>
+                          ) : null}
+                          {customer.email ? (
+                            <Box component="span" sx={{ display: 'block' }}>
+                              <strong>Email:</strong> {customer.email}
+                            </Box>
+                          ) : null}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">
+                          {customer.id_number ? (
+                            <Box component="span" sx={{ display: 'block' }}>
+                              <strong>ID:</strong> {customer.id_number}
+                            </Box>
+                          ) : null}
+                          {customer.date_of_birth ? (
+                            <Box component="span" sx={{ display: 'block' }}>
+                              <strong>DOB:</strong> {new Date(customer.date_of_birth).toLocaleDateString()}
+                            </Box>
+                          ) : null}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={customer.status ? customer.status.toUpperCase() : 'ACTIVE'}
+                          size="small"
+                          color={customer.status === 'inactive' ? 'error' : 'success'}
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          onClick={() => handleEdit(customer)}
+                          title="Edit customer"
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                        <Button 
+                          size="small" 
+                          variant="contained" 
+                          color="primary"
+                          sx={{ ml: 1 }}
+                          onClick={() => handleSelectCustomer(customer)}
+                        >
+                          Select
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center">
+                      <Typography variant="body1" color="text.secondary">
+                        No customers found. Add a new customer to get started.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
       </Paper>
 
       {/* Search Results Dialog */}
