@@ -443,12 +443,6 @@ const CustomerManager = () => {
           >
             Add New Customer
           </Button>
-          <Button
-            variant="outlined"
-            onClick={handleProceedAsGuest}
-          >
-            Continue as Guest
-          </Button>
         </Box>
       </Box>
 

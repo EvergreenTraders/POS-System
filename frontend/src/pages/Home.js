@@ -4,6 +4,9 @@ import {
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import { Add as AddIcon, Edit as EditIcon } from '@mui/icons-material';
+import DiamondIcon from '@mui/icons-material/Diamond';
+import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
+import WatchIcon from '@mui/icons-material/Watch';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -394,9 +397,9 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
     handleCloseSearchDialog();
   };
   const handleQuickSale = (customer) => {
-    const quickSaleCustomer = {
-    }
+    navigate('/customer-ticket', { state: { customer } });
   };
+
   const handleRegisterNew = () => {
     const newCustomer = { first_name: '', last_name: '', email: '', phone: '', status: 'active', created_at: new Date().toISOString(), image: '' };
     setCustomer(newCustomer);
@@ -558,6 +561,53 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
           <Paper sx={{ p: 1.2, borderRadius: 2, boxShadow: 1, textAlign: 'center', bgcolor: '#fff' }}>
             <Typography variant="subtitle2" sx={{ color: 'primary.main', fontWeight: 700 }}>Today's Sales</Typography>
             <Typography variant="h6">$3,245</Typography>
+          </Paper>
+        </Grid>
+      </Grid>
+      
+      {/* Quick Tools Section - Added beside stats */}
+      <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
+        <Grid item xs={12}>
+          <Paper sx={{ p: 1.2, borderRadius: 2, boxShadow: 1 }}>
+            <Typography variant="subtitle2" sx={{ color: 'primary.main', fontWeight: 700, mb: 1 }}>Quick Tools</Typography>
+            <Grid container spacing={1}>
+              <Grid item xs={6} sm={3} md={2}>
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  fullWidth
+                  startIcon={<DiamondIcon />}
+                  onClick={() => navigate('/gem-estimator')}
+                  sx={{ py: 1 }}
+                >
+                  Jewelry Estimator
+                </Button>
+              </Grid>
+              <Grid item xs={6} sm={3} md={2}>
+                <Button
+                  variant="contained"
+                  color="warning"
+                  fullWidth
+                  startIcon={<MonetizationOnIcon />}
+                  onClick={() => navigate('/bullion-estimator')}
+                  sx={{ py: 1 }}
+                >
+                  Bullion Estimator
+                </Button>
+              </Grid>
+              <Grid item xs={6} sm={4} md={3}>
+                <Button
+                  variant="contained"
+                  color="info"
+                  fullWidth
+                  startIcon={<WatchIcon />}
+                  onClick={() => navigate('/manufacturing-estimator')}
+                  sx={{ py: 1, fontSize: { xs: '0.75rem', sm: '0.8rem', md: '0.875rem' } }}
+                >
+                  Misc. Goods Estimator
+                </Button>
+              </Grid>
+            </Grid>
           </Paper>
         </Grid>
       </Grid>
@@ -1330,6 +1380,8 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
           </Alert>
         </Snackbar>
 
+
+      
       <Grid item xs={12}>
         <Grid container spacing={2}>
         {/* Messages Section */}
