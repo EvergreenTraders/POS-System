@@ -61,6 +61,14 @@ function GemEstimator() {
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [from, setFrom] = useState(location.state?.from || '');
+  const [editMode, setEditMode] = useState(location.state?.editMode || false);
+  const [returnToTicket, setReturnToTicket] = useState(location.state?.returnToTicket || false);
+  const [ticketItemId, setTicketItemId] = useState(location.state?.ticketItemId || null);
+  const [priceEstimates, setPriceEstimates] = useState({ pawn: 0, buy: 0, retail: 0 });
+  const [transactionType, setTransactionType] = useState(location.state?.itemToEdit?.transaction_type || 'buy');
+  const [freeText, setFreeText] = useState(location.state?.itemToEdit?.free_text || '');
+  const [diamondSummary, setDiamondSummary] = useState([]);
+  const [stoneSummary, setStoneSummary] = useState([]);
 
   const handleMetalFormChange = (formState) => {
       setMetalFormState(formState);
@@ -113,26 +121,34 @@ function GemEstimator() {
     return str.split(' ').map(word => word.charAt(0).toUpperCase()).join('');
   };
 
+  // Update button text based on edit mode
+  const getFinishButtonText = () => {
+    if (editMode && returnToTicket) {
+      return 'Update Item';
+    }
+    return 'Finish Estimation';
+  };
+
   const handleFinishEstimation = () => {
     const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
-    const totalWeight = parseFloat(addMetal[0].weight || 0) + gemWeightInGrams;
+    const totalWeight = parseFloat(addMetal[0]?.weight || 0) + gemWeightInGrams;
 
     // Create new item with all required jewelry fields
     const jewelryItem = {
       // Basic item details
-      metal_weight: addMetal[0].weight,
-      precious_metal_type: addMetal[0].preciousMetalType,
-      non_precious_metal_type: addMetal[0].nonPreciousMetalType || null,
-      metal_purity: addMetal[0].purity?.purity || addMetal[0].purity.value,
-      metal_category: addMetal[0].metalCategory,
-      jewelry_color: addMetal[0].jewelryColor,
-      metal_spot_price: addMetal[0].spotPrice,
-      est_metal_value: addMetal[0].estimatedValue.toFixed(2),
-      purity_value: addMetal[0].purity.value,
+      metal_weight: addMetal[0]?.weight,
+      precious_metal_type: addMetal[0]?.preciousMetalType,
+      non_precious_metal_type: addMetal[0]?.nonPreciousMetalType || null,
+      metal_purity: addMetal[0]?.purity?.purity || addMetal[0]?.purity?.value,
+      metal_category: addMetal[0]?.metalCategory,
+      jewelry_color: addMetal[0]?.jewelryColor,
+      metal_spot_price: addMetal[0]?.spotPrice,
+      est_metal_value: addMetal[0]?.estimatedValue?.toFixed(2),
+      purity_value: addMetal[0]?.purity?.value,
 
       // Primary gem details
       primary_gem_category: addedGemTypes.primary || null,
-      ...(addedGemTypes.primary === 'diamond' ? {
+      ...(addedGemTypes.primary === 'diamond' && diamondSummary?.[0] ? {
         primary_gem_shape: diamondSummary[0].shape,
         primary_gem_clarity: diamondSummary[0].clarity,
         primary_gem_color: diamondSummary[0].color,
@@ -143,14 +159,14 @@ function GemEstimator() {
         primary_gem_quantity: diamondSummary[0].quantity,
         primary_gem_lab_grown: diamondSummary[0].labGrown,
         primary_gem_value: diamondSummary[0].estimatedValue
-      } : addedGemTypes.primary === 'stone' ? {
-        primary_gem_shape: stoneSummary?.[0]?.shape || '',
-        primary_gem_quantity: stoneSummary?.[0]?.quantity || 0,
-        primary_gem_authentic: stoneSummary?.[0]?.authentic || false,
-        primary_gem_type: stoneSummary?.[0]?.type || '',
-        primary_gem_color: stoneSummary?.[0]?.color || '',
-        primary_gem_weight: stoneSummary?.[0]?.weight || 0,
-        primary_gem_value: stoneSummary?.[0]?.estimatedValue || 0
+      } : addedGemTypes.primary === 'stone' && stoneSummary?.[0] ? {
+        primary_gem_shape: stoneSummary[0]?.shape || '',
+        primary_gem_quantity: stoneSummary[0]?.quantity || 0,
+        primary_gem_authentic: stoneSummary[0]?.authentic || false,
+        primary_gem_type: stoneSummary[0]?.type || '',
+        primary_gem_color: stoneSummary[0]?.color || '',
+        primary_gem_weight: stoneSummary[0]?.weight || 0,
+        primary_gem_value: stoneSummary[0]?.estimatedValue || 0
       } : {}),
 
       // Secondary gem details
@@ -175,19 +191,25 @@ function GemEstimator() {
         secondary_gem_weight: stoneSummary[1].weight || 0,
         secondary_gem_value: stoneSummary[1].estimatedValue || 0
       } : {}),
-      // Price estimates
-      transaction_type: 'pawn',
+      
+      // Price estimates - use selected transaction type instead of hardcoded 'pawn'
+      transaction_type: transactionType || 'buy',
       buy_price: priceEstimates.buy,
       pawn_price: priceEstimates.pawn,
       retail_price: priceEstimates.retail,
+      
       // Images
       images: images.map(img => ({
         url: img.url,
         isPrimary: img.isPrimary || false
       })),
-       // Additional jewelry details
-       short_desc: `${addMetal[0].weight}g ${addMetal[0].purity.purity || addMetal[0].purity.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' ? diamondSummary?.[0]?.shape : stoneSummary?.[0]?.type}` : ''}${addedGemTypes.secondary ? ` ${addedGemTypes.secondary === 'diamond' ? diamondSummary?.[1]?.shape : stoneSummary?.[1]?.type}` : ''}`,
-       long_desc: `${addMetal[0].purity?.purity || addMetal[0].purity.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}`
+      
+      // Free text description if available
+      free_text: freeText || '',
+      
+      // Additional jewelry details
+      short_desc: addMetal[0] ? `${addMetal[0].weight}g ${addMetal[0].purity?.purity || addMetal[0].purity?.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && diamondSummary[0] ? diamondSummary[0]?.shape : stoneSummary[0]?.type}` : ''}${addedGemTypes.secondary ? ` ${addedGemTypes.secondary === 'diamond' && diamondSummary[1] ? diamondSummary[1]?.shape : stoneSummary[1]?.type}` : ''}` : '',
+      long_desc: addMetal[0] ? `${addMetal[0].purity?.purity || addMetal[0].purity?.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}` : ''
     };
 
     // Add the item to estimated items array with all price information
@@ -197,9 +219,28 @@ function GemEstimator() {
         buy: jewelryItem.buy_price,
         pawn: jewelryItem.pawn_price,
         retail: jewelryItem.retail_price
-      }
-
+      },
+      // Flag to identify this as coming from the jewelry estimator
+      sourceEstimator: 'jewelry',
+      // Store original data for future edits
+      originalData: { ...jewelryItem }
     };
+
+    // If we're in edit mode and need to return to the ticket
+    if (editMode && returnToTicket && location.state?.customer) {
+      console.log('Returning to ticket with updated item', itemWithPrices);
+      navigate('/customer-ticket', { 
+        state: { 
+          customer: location.state.customer,
+          updatedItem: itemWithPrices,
+          ticketItemId: ticketItemId,
+          fromEstimator: 'jewelry'
+        } 
+      });
+      return;
+    }
+    
+    // Add to estimated items if not in edit mode
     setEstimatedItems(prev => [...prev, itemWithPrices]);
 
     // Reset form state
@@ -210,6 +251,7 @@ function GemEstimator() {
       primary: null,
       secondary: null
     });
+    setFreeText('');
     setTimeout(() => {
       setImages([]);
     }, 1000);
@@ -219,10 +261,6 @@ function GemEstimator() {
     primary: null,  // can be 'diamond' or 'stone'
     secondary: null // can be 'diamond' or 'stone'
   });
-
-  const [diamondSummary, setDiamondSummary] = useState([]);
-
-  const [stoneSummary, setStoneSummary] = useState([]);
 
   // Primary gem form
   const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
@@ -279,11 +317,6 @@ function GemEstimator() {
   });
 
   const [totalDiamondValue, setTotalDiamondValue] = useState(0);
-  const [priceEstimates, setPriceEstimates] = useState({
-    pawn: 0,
-    buy: 0,
-    retail: 0
-  });
   const [priceEstimatePercentages, setPriceEstimatePercentages] = useState({});
 
   const [diamondValuationType, setDiamondValuationType] = useState('each');
@@ -315,6 +348,67 @@ function GemEstimator() {
   const [caratConversion, setCaratConversion] = useState(null);
 
   const [diamondEstimates, setDiamondEstimates] = useState([]);
+
+  // Effect to handle edit mode data when component mounts
+  useEffect(() => {
+    // Check if we're in edit mode and have an item to edit
+    if (location.state?.editMode && location.state?.itemToEdit) {
+      const itemToEdit = location.state.itemToEdit;
+      console.log('Edit mode active. Item to edit:', itemToEdit);
+      
+      // Set form values based on the item being edited
+      if (itemToEdit.metal_weight) {
+        // This is likely a metal item with jewelry properties
+        // Pre-fill metal form with item data
+        setMetalFormState({
+          metalCategory: itemToEdit.metal_category || '',
+          weight: itemToEdit.metal_weight || '',
+          preciousMetalType: itemToEdit.precious_metal_type || '',
+          purity: { value: itemToEdit.metal_purity || '' },
+          estimatedValue: itemToEdit.price || 0
+        });
+        
+        // If there are price estimates, set them
+        if (itemToEdit.price_estimates) {
+          setPriceEstimates({
+            pawn: itemToEdit.price_estimates.pawn || 0,
+            buy: itemToEdit.price_estimates.buy || 0,
+            retail: itemToEdit.price_estimates.retail || 0
+          });
+        }
+        
+        // Set transaction type if available
+        if (itemToEdit.transaction_type) {
+          setTransactionType(itemToEdit.transaction_type);
+        }
+        
+        // If there's free text, set it
+        if (itemToEdit.free_text) {
+          setFreeText(itemToEdit.free_text);
+        }
+        
+        // Add item to the addMetal state to display it
+        const metalItem = {
+          metalCategory: itemToEdit.metal_category || '',
+          weight: itemToEdit.metal_weight || '',
+          preciousMetalType: itemToEdit.precious_metal_type || '',
+          purity: { value: itemToEdit.metal_purity || '', purity: itemToEdit.metal_purity || '' },
+          estimatedValue: itemToEdit.price || 0,
+          priceEstimates: itemToEdit.price_estimates || {}
+        };
+        setAddMetal([metalItem]);
+      }
+      
+      // If there are stones/gems, handle them
+      if (itemToEdit.diamonds && itemToEdit.diamonds.length > 0) {
+        setDiamondSummary(itemToEdit.diamonds);
+      }
+      
+      if (itemToEdit.stones && itemToEdit.stones.length > 0) {
+        setStoneSummary(itemToEdit.stones);
+      }
+    }
+  }, [location.state]);
 
   useEffect(() => {
     const fetchAllData = async () => {

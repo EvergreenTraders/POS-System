@@ -4,7 +4,7 @@ import {
   CardMedia, Divider, Chip, Button, Avatar, Stack, Tabs, Tab, TextField,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogActions, Snackbar, Alert, CircularProgress,
-  List, ListItem, ListItemText, ListItemAvatar
+  List, ListItem, ListItemText, ListItemAvatar, Menu, MenuItem
 } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import config from '../config';
@@ -13,12 +13,15 @@ import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import InventoryIcon from '@mui/icons-material/Inventory';
 import EditIcon from '@mui/icons-material/Edit';
+import SearchIcon from '@mui/icons-material/Search';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import AddIcon from '@mui/icons-material/Add';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import DiamondIcon from '@mui/icons-material/Diamond';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import WatchIcon from '@mui/icons-material/Watch';
+import PhotoCamera from '@mui/icons-material/PhotoCamera';
 
 // Helper function to convert buffer to data URL for image preview
 function bufferToDataUrl(bufferObj) {
@@ -33,7 +36,8 @@ const CustomerTicket = () => {
   // State for customer lookup mode
   const [showLookupForm, setShowLookupForm] = useState(false);
   const [searchForm, setSearchForm] = useState({
-    name: '',
+    first_name: '',
+    last_name: '',
     id_number: '',
     phone: ''
   });
@@ -59,7 +63,7 @@ const CustomerTicket = () => {
 
   // Handle search customer
   const handleSearchCustomer = async () => {
-    if (!searchForm.name && !searchForm.id_number && !searchForm.phone) {
+    if (!searchForm.first_name && !searchForm.last_name && !searchForm.id_number && !searchForm.phone) {
       showSnackbar('Please enter at least one search criteria', 'warning');
       return;
     }
@@ -67,7 +71,8 @@ const CustomerTicket = () => {
     setLoading(true);
     try {
       const params = {};
-      if (searchForm.name && searchForm.name.trim()) params.name = searchForm.name.trim();
+      if (searchForm.first_name && searchForm.first_name.trim()) params.first_name = searchForm.first_name.trim();
+      if (searchForm.last_name && searchForm.last_name.trim()) params.last_name = searchForm.last_name.trim();
       if (searchForm.id_number && searchForm.id_number.trim()) params.id_number = searchForm.id_number.trim();
       if (searchForm.phone && searchForm.phone.trim()) params.phone = searchForm.phone.trim();
       
@@ -98,6 +103,102 @@ const CustomerTicket = () => {
     }
   };
   
+  // Handle editing customer
+  const handleEditCustomer = async () => {
+    if (!customer) {
+      showSnackbar('No customer selected to edit', 'warning');
+      return;
+    }
+    
+    // Format date function
+    const formatDate = (date) => {
+      if (!date) return '';
+      if (typeof date === 'string' && date.match(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)) return date;
+      const d = new Date(date);
+      if (isNaN(d)) return '';
+      return d.toISOString().substring(0, 10);
+    };
+    
+    // Helper function to convert dataURL to File object
+    const urlToFile = async (url, filename = 'customer-photo.jpg') => {
+      try {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        const mime = blob.type || 'image/jpeg';
+        return new File([blob], filename, { type: mime });
+      } catch (e) { return null; }
+    };
+    
+    // Process main customer photo
+    let imageValue = null;
+    if (customer.image && typeof customer.image === 'object' && customer.image.type === 'Buffer') {
+      imageValue = bufferToDataUrl(customer.image);
+    } else if (typeof customer.image === 'string' && customer.image.startsWith('http')) {
+      imageValue = await urlToFile(customer.image, `customer-photo-${customer.id || Date.now()}.jpg`);
+    } else {
+      imageValue = customer.image || null;
+    }
+    
+    // Process ID front image
+    let idImageFront = null;
+    if (customer.id_image_front && typeof customer.id_image_front === 'object') {
+      // Handle Buffer type from database
+      if (customer.id_image_front.type === 'Buffer' || customer.id_image_front.data) {
+        idImageFront = bufferToDataUrl(customer.id_image_front);
+      } else {
+        idImageFront = customer.id_image_front;
+      }
+    }
+    
+    // Process ID back image
+    let idImageBack = null;
+    if (customer.id_image_back && typeof customer.id_image_back === 'object') {
+      // Handle Buffer type from database
+      if (customer.id_image_back.type === 'Buffer' || customer.id_image_back.data) {
+        idImageBack = bufferToDataUrl(customer.id_image_back);
+      } else {
+        idImageBack = customer.id_image_back;
+      }
+    }
+    
+    // Prepare customer data with all fields
+    const preparedCustomer = {
+      ...customer,
+      first_name: customer.first_name || '', 
+      last_name: customer.last_name || '', 
+      email: customer.email || '', 
+      phone: customer.phone || '', 
+      address_line1: customer.address_line1 || '', 
+      address_line2: customer.address_line2 || '', 
+      city: customer.city || '', 
+      state: customer.state || '', 
+      postal_code: customer.postal_code || '', 
+      country: customer.country || '', 
+      id_type: customer.id_type || '', 
+      id_number: customer.id_number || '', 
+      id_expiry_date: formatDate(customer.id_expiry_date), 
+      date_of_birth: formatDate(customer.date_of_birth), 
+      status: customer.status || 'active', 
+      risk_level: customer.risk_level || 'normal', 
+      notes: customer.notes || '', 
+      gender: customer.gender || '', 
+      height: customer.height || '', 
+      weight: customer.weight || '', 
+      image: imageValue,
+      id_image_front: idImageFront,
+      id_image_back: idImageBack
+    };
+    
+    // Navigate to the CustomerEditor page with the prepared customer data
+    navigate('/customer-editor', { 
+      state: { 
+        customer: preparedCustomer,
+        mode: 'edit',
+        returnTo: '/customer-ticket'
+      }
+    });
+  };
+
   // Handle customer selection from search results
   const handleSelectCustomer = (customerData) => {
     // Format the selected customer for the ticket
@@ -158,6 +259,10 @@ const CustomerTicket = () => {
   
   const [activeTab, setActiveTab] = React.useState(0);
   
+  // State for convert dropdown menu
+  const [convertMenuAnchor, setConvertMenuAnchor] = React.useState(null);
+  const [convertItemId, setConvertItemId] = React.useState(null);
+  
   // State for managing items in each tab
   const [pawnItems, setPawnItems] = React.useState([{ id: 1, description: '', category: '', value: '' }]);
   const [buyItems, setBuyItems] = React.useState([{ id: 1, description: '', category: '', price: '' }]);
@@ -165,11 +270,88 @@ const CustomerTicket = () => {
   const [saleItems, setSaleItems] = React.useState([{ id: 1, description: '', category: '', price: '', paymentMethod: '' }]);
   const [repairItems, setRepairItems] = React.useState([{ id: 1, description: '', issue: '', fee: '', completion: '' }]);
   const [paymentItems, setPaymentItems] = React.useState([{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
+  const [refundItems, setRefundItems] = React.useState([{ id: 1, amount: '', method: '', reference: '', reason: '' }]);
   
   // Process estimated items from GemEstimator.js when component mounts
   React.useEffect(() => {
+    // Handle updated item from jewelry estimator when in edit mode
+    if (location.state?.updatedItem && location.state?.ticketItemId && location.state?.fromEstimator === 'jewelry') {
+      const updatedItem = location.state.updatedItem;
+      const ticketItemId = location.state.ticketItemId;
+      
+      // Create a base item with common properties from the updated item
+      const baseItem = {
+        id: ticketItemId,
+        description: `${updatedItem.metal_weight}g ${updatedItem.metal_purity} ${updatedItem.precious_metal_type} ${updatedItem.metal_category}${updatedItem.free_text ? ` - ${updatedItem.free_text}` : ''}`,
+        category: updatedItem.metal_category || 'Jewelry',
+        // Store the original estimator data for editing
+        originalData: { ...updatedItem },
+        sourceEstimator: 'jewelry'
+      };
+      
+      // Update the appropriate item array based on transaction type
+      const transactionType = updatedItem.transaction_type || 'buy';
+      
+      switch (transactionType) {
+        case 'pawn':
+          setPawnItems(prevItems => {
+            const updatedItems = [...prevItems];
+            const itemIndex = updatedItems.findIndex(item => item.id === ticketItemId);
+            
+            if (itemIndex !== -1) {
+              updatedItems[itemIndex] = {
+                ...baseItem,
+                value: updatedItem.price || updatedItem.price_estimates?.pawn || 0
+              };
+            }
+            
+            return updatedItems;
+          });
+          break;
+          
+        case 'buy':
+          setBuyItems(prevItems => {
+            const updatedItems = [...prevItems];
+            const itemIndex = updatedItems.findIndex(item => item.id === ticketItemId);
+            
+            if (itemIndex !== -1) {
+              updatedItems[itemIndex] = {
+                ...baseItem,
+                price: updatedItem.price || updatedItem.price_estimates?.buy || 0
+              };
+            }
+            
+            return updatedItems;
+          });
+          break;
+          
+        case 'sale':
+          setSaleItems(prevItems => {
+            const updatedItems = [...prevItems];
+            const itemIndex = updatedItems.findIndex(item => item.id === ticketItemId);
+            
+            if (itemIndex !== -1) {
+              updatedItems[itemIndex] = {
+                ...baseItem,
+                price: updatedItem.price || updatedItem.price_estimates?.retail || 0,
+                paymentMethod: prevItems[itemIndex].paymentMethod || ''
+              };
+            }
+            
+            return updatedItems;
+          });
+          break;
+          
+        default:
+          console.log('Unknown transaction type for updated item:', transactionType);
+      }
+      
+      // Clear the location state to prevent reapplying the update
+      window.history.replaceState({}, document.title);
+    }
+    
     // If we have estimated items and they're from gemEstimator
-    if (estimatedItems.length > 0 && from === 'gemEstimator') {
+    else if (estimatedItems.length > 0 && from === 'gemEstimator') {
       // Clear initial empty items
       setPawnItems([]);
       setBuyItems([]);
@@ -185,7 +367,10 @@ const CustomerTicket = () => {
         const baseItem = {
           id: index + 1,
           description: `${item.metal_weight}g ${item.metal_purity} ${item.precious_metal_type} ${item.metal_category}${item.free_text ? ` - ${item.free_text}` : ''}`,
-          category: item.metal_category || 'Jewelry'
+          category: item.metal_category || 'Jewelry',
+          // Store the original estimator data for editing
+          originalData: { ...item },
+          sourceEstimator: 'jewelry'
         };
         
         // Add to appropriate array based on transaction type
@@ -241,6 +426,7 @@ const CustomerTicket = () => {
       case 3: return { items: saleItems, setItems: setSaleItems };
       case 4: return { items: repairItems, setItems: setRepairItems };
       case 5: return { items: paymentItems, setItems: setPaymentItems };
+      case 6: return { items: refundItems, setItems: setRefundItems };
       default: return { items: [], setItems: () => {} };
     }
   };
@@ -270,6 +456,9 @@ const CustomerTicket = () => {
         break;
       case 5:
         newItem = { id: newId, amount: '', method: '', reference: '', notes: '' };
+        break;
+      case 6:
+        newItem = { id: newId, amount: '', method: '', reference: '', reason: '' };
         break;
       default:
         return;
@@ -310,9 +499,173 @@ const CustomerTicket = () => {
     setActiveTab(newValue);
   };
   
+  // Handle opening the convert dropdown menu
+  const handleConvertClick = (event, itemId) => {
+    setConvertMenuAnchor(event.currentTarget);
+    setConvertItemId(itemId);
+  };
+  
+  // Handle closing the convert dropdown menu
+  const handleConvertClose = () => {
+    setConvertMenuAnchor(null);
+    setConvertItemId(null);
+  };
+  
+  // Handle converting an item to another tab
+  const handleConvertItem = (targetTabIndex) => {
+    if (convertItemId === null) return;
+    
+    // Get current item details
+    const { items } = getCurrentItems();
+    const itemToConvert = items.find(item => item.id === convertItemId);
+    
+    if (!itemToConvert) return;
+    
+    // Remove item from current tab
+    const { setItems } = getCurrentItems();
+    setItems(items.filter(item => item.id !== convertItemId));
+    
+    // Prepare item for target tab
+    let newItem;
+    switch(targetTabIndex) {
+      case 0: // Pawn
+        newItem = {
+          id: Math.max(...pawnItems.map(i => i.id), 0) + 1,
+          description: itemToConvert.description || '',
+          category: itemToConvert.category || '',
+          value: itemToConvert.price || itemToConvert.value || ''
+        };
+        setPawnItems([...pawnItems, newItem]);
+        break;
+      case 1: // Buy
+        newItem = {
+          id: Math.max(...buyItems.map(i => i.id), 0) + 1,
+          description: itemToConvert.description || '',
+          category: itemToConvert.category || '',
+          price: itemToConvert.price || itemToConvert.value || ''
+        };
+        setBuyItems([...buyItems, newItem]);
+        break;
+      case 2: // Trade
+        newItem = {
+          id: Math.max(...tradeItems.map(i => i.id), 0) + 1,
+          tradeItem: itemToConvert.description || '',
+          tradeValue: itemToConvert.price || itemToConvert.value || '',
+          storeItem: '',
+          priceDiff: ''
+        };
+        setTradeItems([...tradeItems, newItem]);
+        break;
+      case 3: // Sale
+        newItem = {
+          id: Math.max(...saleItems.map(i => i.id), 0) + 1,
+          description: itemToConvert.description || '',
+          category: itemToConvert.category || '',
+          price: itemToConvert.price || itemToConvert.value || '',
+          paymentMethod: ''
+        };
+        setSaleItems([...saleItems, newItem]);
+        break;
+      case 4: // Repair
+        newItem = {
+          id: Math.max(...repairItems.map(i => i.id), 0) + 1,
+          description: itemToConvert.description || '',
+          issue: '',
+          fee: itemToConvert.price || itemToConvert.value || '',
+          completion: ''
+        };
+        setRepairItems([...repairItems, newItem]);
+        break;
+      case 5: // Payment
+        newItem = {
+          id: Math.max(...paymentItems.map(i => i.id), 0) + 1,
+          amount: itemToConvert.price || itemToConvert.value || '',
+          method: '',
+          reference: '',
+          notes: itemToConvert.description || ''
+        };
+        setPaymentItems([...paymentItems, newItem]);
+        break;
+      case 6: // Refund
+        newItem = {
+          id: Math.max(...refundItems.map(i => i.id), 0) + 1,
+          amount: itemToConvert.price || itemToConvert.value || '',
+          method: '',
+          reference: '',
+          reason: itemToConvert.description || ''
+        };
+        setRefundItems([...refundItems, newItem]);
+        break;
+    }
+    
+    // Close the menu and switch to the target tab
+    handleConvertClose();
+    setActiveTab(targetTabIndex);
+    
+    // Show a success message
+    showSnackbar(`Item converted to ${getTabName(targetTabIndex)}`, 'success');
+  };
+  
+  // Helper function to get tab name by index
+  const getTabName = (index) => {
+    switch(index) {
+      case 0: return 'Pawn';
+      case 1: return 'Buy';
+      case 2: return 'Trade';
+      case 3: return 'Sale';
+      case 4: return 'Repair';
+      case 5: return 'Payment';
+      case 6: return 'Refund';
+      default: return '';
+    }
+  };
+  
   // Handlers for item type buttons - navigate to respective estimator pages
   const handleJewelryEstimatorClick = () => {
-    navigate('/inventory/jewellery', { state: { customer } });
+    navigate('/gem-estimator', { state: { customer } });
+  };
+  
+  // Handler for editing an item in the jewelry estimator
+  const handleEditItem = (itemId) => {
+    const { items } = getCurrentItems();
+    const itemToEdit = items.find(item => item.id === itemId);
+    
+    if (!itemToEdit) return;
+    
+    // If the item came from the jewelry estimator, navigate there with the original data
+    if (itemToEdit.sourceEstimator === 'jewelry' && itemToEdit.originalData) {
+      navigate('/gem-estimator', { 
+        state: { 
+          customer,
+          editMode: true,
+          itemToEdit: itemToEdit.originalData,
+          returnToTicket: true,
+          ticketItemId: itemId
+        } 
+      });
+    } else if (itemToEdit.category?.toLowerCase().includes('jewelry') || 
+               itemToEdit.category?.toLowerCase().includes('jewellery')) {
+      // If it's jewelry but not from estimator, still go to jewelry estimator
+      // Try to parse data from the description
+      const description = itemToEdit.description || '';
+      navigate('/gem-estimator', { 
+        state: { 
+          customer,
+          editMode: true,
+          itemToEdit: {
+            free_text: description,
+            metal_category: itemToEdit.category,
+            price: itemToEdit.price || itemToEdit.value,
+            transaction_type: activeTab === 0 ? 'pawn' : 
+                            activeTab === 1 ? 'buy' : 
+                            activeTab === 3 ? 'retail' : 'buy'
+          },
+          returnToTicket: true,
+          ticketItemId: itemId
+        }
+      });
+    }
+    // For other item types, we could implement different estimators in the future
   };
   
   const handleBullionEstimatorClick = () => {
@@ -330,7 +683,8 @@ const CustomerTicket = () => {
     trade: 0,
     sale: 0,
     repair: 0,
-    payment: 0
+    payment: 0,
+    refund: 0
   });
   
   // Helper function to get the current tab's total
@@ -342,6 +696,7 @@ const CustomerTicket = () => {
       case 3: return totals.sale;
       case 4: return totals.repair;
       case 5: return totals.payment;
+      case 6: return totals.refund;
       default: return 0;
     }
   };
@@ -375,6 +730,10 @@ const CustomerTicket = () => {
         total = items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
         setTotals({ ...totals, payment: total });
         break;
+      case 6: // Refund
+        total = items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+        setTotals({ ...totals, refund: total });
+        break;
       default:
         break;
     }
@@ -405,6 +764,9 @@ const CustomerTicket = () => {
       case 5: // Payment items
         setItems([{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
         break;
+      case 6: // Refund items
+        setItems([{ id: 1, amount: '', method: '', reference: '', reason: '' }]);
+        break;
       default:
         break;
     }
@@ -433,6 +795,8 @@ const CustomerTicket = () => {
         return item.description || item.issue || item.fee;
       } else if (activeTab === 5) { // Payment items
         return item.amount || item.method;
+      } else if (activeTab === 6) { // Refund items
+        return item.amount || item.method || item.reason;
       }
       return false;
     });
@@ -451,6 +815,7 @@ const CustomerTicket = () => {
       case 3: itemType = 'sale'; break;
       case 4: itemType = 'repair'; break;
       case 5: itemType = 'payment'; break;
+      case 6: itemType = 'refund'; break;
       default: itemType = 'unknown';
     }
     
@@ -583,14 +948,25 @@ const CustomerTicket = () => {
                       <Typography variant="h6" sx={{ fontWeight: 'bold', mr: 5 }}>
                         {customer ? `${customer.first_name} ${customer.last_name}` : 'No Customer Selected'}
                       </Typography>
-                        <Button 
-                          variant="outlined" 
-                          size="small" 
-                          startIcon={<EditIcon />}
-                          onClick={() => setShowLookupForm(true)}
-                        >
-                          Edit
-                        </Button>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Button 
+                            variant="outlined" 
+                            size="small" 
+                            startIcon={<SearchIcon />}
+                            onClick={() => setShowLookupForm(true)}
+                          >
+                            Search
+                          </Button>
+                          <Button 
+                            variant="outlined" 
+                            size="small" 
+                            startIcon={<EditIcon />}
+                            onClick={handleEditCustomer}
+                            disabled={!customer}
+                          >
+                            Edit
+                          </Button>
+                        </Box>
                     </Box>
                     <Typography variant="body2">
                       <strong>Phone:</strong> {customer ? (customer.phone || 'Not provided') : 'N/A'}
@@ -613,14 +989,24 @@ const CustomerTicket = () => {
               <Box sx={{ width: '100%' }}>
                 <Grid container spacing={1} direction="column">
                   <Grid item xs={12}>
-                    <TextField
-                      name="name"
-                      label="Name"
-                      value={searchForm.name}
-                      onChange={handleLookupInputChange}
-                      size="small"
-                      sx={{ width: '90%' }}
-                    />
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '90%' }}>
+                      <TextField
+                        name="first_name"
+                        label="First Name"
+                        value={searchForm.first_name}
+                        onChange={handleLookupInputChange}
+                        size="small"
+                        sx={{ width: '48%' }}
+                      />
+                      <TextField
+                        name="last_name"
+                        label="Last Name"
+                        value={searchForm.last_name}
+                        onChange={handleLookupInputChange}
+                        size="small"
+                        sx={{ width: '48%' }}
+                      />
+                    </Box>
                   </Grid>
                   <Grid item xs={12}>
                     <TextField
@@ -727,6 +1113,7 @@ const CustomerTicket = () => {
                       <Tab label="Sale" />
                       <Tab label="Repair" />
                       <Tab label="Payment" />
+                      <Tab label="Refund" />
                     </Tabs>
                   </Box>
                   
@@ -737,8 +1124,9 @@ const CustomerTicket = () => {
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="15%" align="center">Type</TableCell>
-                              <TableCell width="45%">Item Description</TableCell>
+                              <TableCell width="15%" align="center">Estimator</TableCell>
+                              <TableCell width="10%" align="center">Image</TableCell>
+                              <TableCell width="35%">Item Description</TableCell>
                               <TableCell width="15%">Category</TableCell>
                               <TableCell width="10%">Est. Value</TableCell>
                               <TableCell width="20%" align="right" padding="none">
@@ -772,6 +1160,30 @@ const CustomerTicket = () => {
                                     </Tooltip>
                                   </Box>
                                 </TableCell>
+                                <TableCell align="center">
+                                  {item.images && item.images.length > 0 ? (
+                                    <img 
+                                      src={item.images[0].url} 
+                                      alt="Item" 
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
+                                    />
+                                  ) : (
+                                    <Box 
+                                      sx={{ 
+                                        width: '50px', 
+                                        height: '50px', 
+                                        bgcolor: 'grey.200', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        justifyContent: 'center',
+                                        borderRadius: '4px',
+                                        margin: '0 auto'
+                                      }}
+                                    >
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
+                                </TableCell>
                                 <TableCell>
                                   <TextField 
                                     variant="standard" 
@@ -798,8 +1210,13 @@ const CustomerTicket = () => {
                                 </TableCell>
                                 <TableCell align="right">
                                   <Tooltip title="Edit">
-                                    <IconButton size="small">
+                                    <IconButton size="small" onClick={() => handleEditItem(item.id)}>
                                       <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Convert">
+                                    <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
+                                      <SwapHorizIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
                                   <Tooltip title="Duplicate">
@@ -833,11 +1250,12 @@ const CustomerTicket = () => {
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="15%" align="center">Type</TableCell>
-                              <TableCell width="45%">Item Description</TableCell>
+                              <TableCell width="15%" align="center">Estimator</TableCell>
+                              <TableCell width="10%" align="center">Image</TableCell>
+                              <TableCell width="35%">Item Description</TableCell>
                               <TableCell width="15%">Category</TableCell>
                               <TableCell width="10%">Price</TableCell>
-                              <TableCell width="20%" align="right" padding="none">
+                              <TableCell width="15%" align="right" padding="none">
                                 <Tooltip title="Add Item">
                                   <IconButton size="small" color="primary" onClick={handleAddRow}>
                                     <AddIcon />
@@ -868,6 +1286,30 @@ const CustomerTicket = () => {
                                     </Tooltip>
                                   </Box>
                                 </TableCell>
+                                <TableCell align="center">
+                                  {item.images && item.images.length > 0 ? (
+                                    <img 
+                                      src={item.images[0].url} 
+                                      alt="Item" 
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
+                                    />
+                                  ) : (
+                                    <Box 
+                                      sx={{ 
+                                        width: '50px', 
+                                        height: '50px', 
+                                        bgcolor: 'grey.200', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        justifyContent: 'center',
+                                        borderRadius: '4px',
+                                        margin: '0 auto'
+                                      }}
+                                    >
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
+                                </TableCell>
                                 <TableCell>
                                   <TextField 
                                     variant="standard" 
@@ -894,8 +1336,13 @@ const CustomerTicket = () => {
                                 </TableCell>
                                 <TableCell align="right">
                                   <Tooltip title="Edit">
-                                    <IconButton size="small">
+                                    <IconButton size="small" onClick={() => handleEditItem(item.id)}>
                                       <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Convert">
+                                    <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
+                                      <SwapHorizIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
                                   <Tooltip title="Duplicate">
@@ -929,10 +1376,11 @@ const CustomerTicket = () => {
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="15%" align="center">Type</TableCell>
-                              <TableCell width="30%">Trade In Item</TableCell>
+                              <TableCell width="15%" align="center">Estimator</TableCell>
+                              <TableCell width="10%" align="center">Image</TableCell>
+                              <TableCell width="20%">Trade In Item</TableCell>
                               <TableCell width="10%">Trade Value</TableCell>
-                              <TableCell width="25%">Store Item</TableCell>
+                              <TableCell width="20%">Store Item</TableCell>
                               <TableCell width="5%">Price Diff</TableCell>
                               <TableCell width="20%" align="right" padding="none">
                                 <Tooltip title="Add Item">
@@ -964,6 +1412,30 @@ const CustomerTicket = () => {
                                       </IconButton>
                                     </Tooltip>
                                   </Box>
+                                </TableCell>
+                                <TableCell align="center">
+                                  {item.images && item.images.length > 0 ? (
+                                    <img 
+                                      src={item.images[0].url} 
+                                      alt="Item" 
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
+                                    />
+                                  ) : (
+                                    <Box 
+                                      sx={{ 
+                                        width: '50px', 
+                                        height: '50px', 
+                                        bgcolor: 'grey.200', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        justifyContent: 'center',
+                                        borderRadius: '4px',
+                                        margin: '0 auto'
+                                      }}
+                                    >
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField 
@@ -999,8 +1471,13 @@ const CustomerTicket = () => {
                                 </TableCell>
                                 <TableCell align="right">
                                   <Tooltip title="Edit">
-                                    <IconButton size="small">
+                                    <IconButton size="small" onClick={() => handleEditItem(item.id)}>
                                       <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Convert">
+                                    <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
+                                      <SwapHorizIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
                                   <Tooltip title="Duplicate">
@@ -1034,8 +1511,9 @@ const CustomerTicket = () => {
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="15%" align="center">Type</TableCell>
-                              <TableCell width="35%">Item Description</TableCell>
+                              <TableCell width="15%" align="center">Estimator</TableCell>
+                              <TableCell width="10%" align="center">Image</TableCell>
+                              <TableCell width="25%">Item Description</TableCell>
                               <TableCell width="15%">Category</TableCell>
                               <TableCell width="10%">Sale Price</TableCell>
                               <TableCell width="10%">Payment Method</TableCell>
@@ -1069,6 +1547,30 @@ const CustomerTicket = () => {
                                       </IconButton>
                                     </Tooltip>
                                   </Box>
+                                </TableCell>
+                                <TableCell align="center">
+                                  {item.images && item.images.length > 0 ? (
+                                    <img 
+                                      src={item.images[0].url} 
+                                      alt="Item" 
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
+                                    />
+                                  ) : (
+                                    <Box 
+                                      sx={{ 
+                                        width: '50px', 
+                                        height: '50px', 
+                                        bgcolor: 'grey.200', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        justifyContent: 'center',
+                                        borderRadius: '4px',
+                                        margin: '0 auto'
+                                      }}
+                                    >
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField 
@@ -1104,8 +1606,13 @@ const CustomerTicket = () => {
                                 </TableCell>
                                 <TableCell align="right">
                                   <Tooltip title="Edit">
-                                    <IconButton size="small">
+                                    <IconButton size="small" onClick={() => handleEditItem(item.id)}>
                                       <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Convert">
+                                    <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
+                                      <SwapHorizIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
                                   <Tooltip title="Duplicate">
@@ -1139,8 +1646,9 @@ const CustomerTicket = () => {
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="15%" align="center">Type</TableCell>
-                              <TableCell width="30%">Item Description</TableCell>
+                              <TableCell width="15%" align="center">Estimator</TableCell>
+                              <TableCell width="10%" align="center">Image</TableCell>
+                              <TableCell width="20%">Item Description</TableCell>
                               <TableCell width="20%">Issue</TableCell>
                               <TableCell width="10%">Service Fee</TableCell>
                               <TableCell width="10%">Est. Completion</TableCell>
@@ -1174,6 +1682,30 @@ const CustomerTicket = () => {
                                       </IconButton>
                                     </Tooltip>
                                   </Box>
+                                </TableCell>
+                                <TableCell align="center">
+                                  {item.images && item.images.length > 0 ? (
+                                    <img 
+                                      src={item.images[0].url} 
+                                      alt="Item" 
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
+                                    />
+                                  ) : (
+                                    <Box 
+                                      sx={{ 
+                                        width: '50px', 
+                                        height: '50px', 
+                                        bgcolor: 'grey.200', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        justifyContent: 'center',
+                                        borderRadius: '4px',
+                                        margin: '0 auto'
+                                      }}
+                                    >
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField 
@@ -1209,8 +1741,13 @@ const CustomerTicket = () => {
                                 </TableCell>
                                 <TableCell align="right">
                                   <Tooltip title="Edit">
-                                    <IconButton size="small">
+                                    <IconButton size="small" onClick={() => handleEditItem(item.id)}>
                                       <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Convert">
+                                    <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
+                                      <SwapHorizIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
                                   <Tooltip title="Duplicate">
@@ -1236,15 +1773,15 @@ const CustomerTicket = () => {
                       </Box>
                     </Box>
                   )}
-                  
-                  {/* Payment Tab */}
+                                    {/* Payment Tab */}
                   {activeTab === 5 && (
                     <Box sx={{ p: 1 }}>
                       <TableContainer>
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="15%" align="center">Type</TableCell>
+                              <TableCell width="15%" align="center">Estimator</TableCell>
+                              <TableCell width="10%" align="center">Image</TableCell>
                               <TableCell width="10%">Amount</TableCell>
                               <TableCell width="15%">Payment Method</TableCell>
                               <TableCell width="15%">Reference</TableCell>
@@ -1280,6 +1817,30 @@ const CustomerTicket = () => {
                                     </Tooltip>
                                   </Box>
                                 </TableCell>
+                                <TableCell align="center">
+                                  {item.images && item.images.length > 0 ? (
+                                    <img 
+                                      src={item.images[0].url} 
+                                      alt="Item" 
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
+                                    />
+                                  ) : (
+                                    <Box 
+                                      sx={{ 
+                                        width: '50px', 
+                                        height: '50px', 
+                                        bgcolor: 'grey.200', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        justifyContent: 'center',
+                                        borderRadius: '4px',
+                                        margin: '0 auto'
+                                      }}
+                                    >
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
+                                </TableCell>
                                 <TableCell>
                                   <TextField 
                                     variant="standard" 
@@ -1314,8 +1875,148 @@ const CustomerTicket = () => {
                                 </TableCell>
                                 <TableCell align="right">
                                   <Tooltip title="Edit">
-                                    <IconButton size="small">
+                                    <IconButton size="small" onClick={() => handleEditItem(item.id)}>
                                       <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Convert">
+                                    <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
+                                      <SwapHorizIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Duplicate">
+                                    <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
+                                      <ContentCopyIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Delete">
+                                    <IconButton size="small" onClick={() => handleDeleteItem(item.id)}>
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                        <Typography variant="h6" color="primary">
+                          Total: ${getCurrentTabTotal().toFixed(2)}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+                  
+                  {/* Refund Tab */}
+                  {activeTab === 6 && (
+                    <Box sx={{ p: 1 }}>
+                      <TableContainer>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell width="15%" align="center">Estimator</TableCell>
+                              <TableCell width="10%" align="center">Image</TableCell>
+                              <TableCell width="10%">Amount</TableCell>
+                              <TableCell width="15%">Refund Method</TableCell>
+                              <TableCell width="15%">Reference</TableCell>
+                              <TableCell width="20%">Reason</TableCell>
+                              <TableCell width="20%" align="right" padding="none">
+                                <Tooltip title="Add Item">
+                                  <IconButton size="small" color="primary" onClick={handleAddRow}>
+                                    <AddIcon />
+                                  </IconButton>
+                                </Tooltip>
+                              </TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {refundItems.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell align="center" padding="normal">
+                                  <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
+                                    <Tooltip title="Jewelry Estimator">
+                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                        <DiamondIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                    <Tooltip title="Bullion Estimator">
+                                      <IconButton size="small" color="primary" onClick={handleBullionEstimatorClick}>
+                                        <MonetizationOnIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                    <Tooltip title="Misc Estimator">
+                                      <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
+                                        <WatchIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                  </Box>
+                                </TableCell>
+                                <TableCell align="center">
+                                  {item.images && item.images.length > 0 ? (
+                                    <img 
+                                      src={item.images[0].url} 
+                                      alt="Item" 
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
+                                    />
+                                  ) : (
+                                    <Box 
+                                      sx={{ 
+                                        width: '50px', 
+                                        height: '50px', 
+                                        bgcolor: 'grey.200', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        justifyContent: 'center',
+                                        borderRadius: '4px',
+                                        margin: '0 auto'
+                                      }}
+                                    >
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <TextField 
+                                    variant="standard" 
+                                    fullWidth 
+                                    value={item.amount}
+                                    onChange={(e) => handleItemChange(item.id, 'amount', e.target.value)}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField 
+                                    variant="standard" 
+                                    fullWidth 
+                                    value={item.method}
+                                    onChange={(e) => handleItemChange(item.id, 'method', e.target.value)}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField 
+                                    variant="standard" 
+                                    fullWidth 
+                                    value={item.reference}
+                                    onChange={(e) => handleItemChange(item.id, 'reference', e.target.value)}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField 
+                                    variant="standard" 
+                                    fullWidth 
+                                    value={item.reason}
+                                    onChange={(e) => handleItemChange(item.id, 'reason', e.target.value)}
+                                  />
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Tooltip title="Edit">
+                                    <IconButton size="small" onClick={() => handleEditItem(item.id)}>
+                                      <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Convert">
+                                    <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
+                                      <SwapHorizIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
                                   <Tooltip title="Duplicate">
@@ -1515,8 +2216,21 @@ const CustomerTicket = () => {
           {snackbarMessage.message}
         </Alert>
       </Snackbar>
+      
+      {/* Convert Menu */}
+      <Menu
+        anchorEl={convertMenuAnchor}
+        open={Boolean(convertMenuAnchor)}
+        onClose={handleConvertClose}
+      >
+        {[0, 1, 2, 3, 4, 5, 6].filter(tabIndex => tabIndex !== activeTab).map(tabIndex => (
+          <MenuItem key={tabIndex} onClick={() => handleConvertItem(tabIndex)}>
+            {getTabName(tabIndex)}
+          </MenuItem>
+        ))}
+      </Menu>
     </Container>
   );
 };
-
+                      
 export default CustomerTicket;

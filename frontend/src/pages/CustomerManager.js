@@ -3,13 +3,19 @@ import {
   Container, Typography, Box, Button, TextField, Dialog, DialogTitle,
   DialogContent, DialogActions, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Paper, Grid, Snackbar,
-  Alert, IconButton, List, ListItem, ListItemText, Divider, CircularProgress
+  Alert, IconButton, List, ListItem, ListItemText, Divider, CircularProgress,
+  Chip, FormControl, InputLabel, Select, MenuItem, Accordion, AccordionSummary,
+  AccordionDetails, Pagination, FormControlLabel, Checkbox
 } from '@mui/material';
-import { Add as AddIcon, Edit as EditIcon } from '@mui/icons-material';
+import { Add as AddIcon, Edit as EditIcon, FilterList as FilterListIcon, 
+  ExpandMore as ExpandMoreIcon, Clear as ClearIcon } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
+import axios from 'axios';
+
+const API_BASE_URL = config.apiUrl;
 
 // Converts a Buffer-like object (from backend) to a base64 data URL for image preview
 function bufferToDataUrl(bufferObj) {
@@ -22,12 +28,75 @@ function bufferToDataUrl(bufferObj) {
 }
 
 const CustomerManager = () => {
-  // Camera state
+  // Define all state variables first
   const [showCamera, setShowCamera] = useState(false);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { setCustomer, addToCart, cartItems } = useCart();
+  const { user } = useAuth();
+  const [customers, setCustomers] = useState([]);
+  const [filteredCustomers, setFilteredCustomers] = useState([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10); // Showing 10 customers per page
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filters, setFilters] = useState({
+    status: '',
+    risk_level: '',
+    date_created_from: '',
+    date_created_to: '',
+    id_type: '',
+    sort_by: 'created_at',
+    sort_order: 'desc'
+  });
+  const [quoteExpirationConfig, setQuoteExpirationConfig] = useState({ days: 30 });
+  const [searchForm, setSearchForm] = useState({
+    name: '',
+    id_number: '',
+    phone: ''
+  });
+  const [formData, setFormData] = useState({
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone: '',
+    image: null, // Add image to formData
+    address_line1: '',
+    address_line2: '',
+    city: '',
+    state: '',
+    postal_code: '',
+    country: '',
+    id_type: '',
+    id_number: '',
+    id_expiry_date: '',
+    id_issuing_authority: '',
+    date_of_birth: '',
+    status: 'active',
+    risk_level: 'normal',
+    notes: '',
+    gender: '',
+    height: '',
+    weight: ''
+  });
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [openDialog, setOpenDialog] = useState(false);
+  const [openSearchDialog, setOpenSearchDialog] = useState(false);
+  const [searchResults, setSearchResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'success'
+  });
+  
+  // State for column preferences
+  const [columnPreferences, setColumnPreferences] = useState({});
 
-  // Start camera when dialog opens
+  // Camera effect
   useEffect(() => {
     if (showCamera) {
       startCamera();
@@ -40,6 +109,108 @@ const CustomerManager = () => {
     };
     // eslint-disable-next-line
   }, [showCamera]);
+
+  // Fetch customers on component mount or when page/filters change
+  useEffect(() => {
+    fetchCustomers(filters);
+  }, [page, rowsPerPage]);
+  
+  // Fetch column preferences on component mount
+  useEffect(() => {
+    fetchColumnPreferences();
+  }, []);
+  
+  // Apply client-side filtering when filters change but not on initial load
+  useEffect(() => {
+    if (customers.length > 0) {
+      applyLocalFilters();
+    }
+  }, [filters, customers]);
+
+  // Fetch column preferences from customer_headers_preferences table
+  const fetchColumnPreferences = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch the customer preferences directly - same approach as SystemConfig.js
+      const prefsResponse = await axios.get(`${API_BASE_URL}/customer-preferences/config`);
+      const preferences = prefsResponse.data || {};
+      
+      // Extract all fields that start with 'show_' from the preferences object
+      const showFields = Object.keys(preferences).filter(field => field.startsWith('show_'));
+      
+      // Create mappings between database fields and UI fields
+      const dbToUiMapping = {};
+      const uiToDbMapping = {};
+      
+      showFields.forEach(dbField => {
+        // Convert show_field_name to field_name for UI
+        const uiField = dbField.replace('show_', '');
+        dbToUiMapping[dbField] = uiField;
+        uiToDbMapping[uiField] = dbField;
+      });
+      
+      // Create preferences object for UI state
+      const columnPreferences = {};
+      
+      // Map database preferences to UI fields
+      Object.keys(dbToUiMapping).forEach(dbField => {
+        if (preferences[dbField] !== undefined) {
+          const uiField = dbToUiMapping[dbField];
+          columnPreferences[uiField] = preferences[dbField];
+        }
+      });
+      
+      // Log the preferences for debugging
+      console.log('Fetched column preferences:', columnPreferences);
+      
+      // Update state with the processed preferences
+      setColumnPreferences(columnPreferences);
+      
+    } catch (error) {
+      console.error('Error fetching customer header preferences:', error);
+      
+      try {
+        // Fallback: fetch the database table structure directly
+        console.log('Attempting fallback: fetching schema info');
+        const tableInfoResponse = await axios.get(`${API_BASE_URL}/database/table-info?table=customer_headers_preferences`);
+        
+        if (tableInfoResponse.data && tableInfoResponse.data.columns) {
+          // Extract all fields that start with 'show_'
+          const columns = tableInfoResponse.data.columns
+            .filter(col => col.name.startsWith('show_'))
+            .map(col => ({
+              dbField: col.name,
+              uiField: col.name.replace('show_', ''),
+              defaultValue: col.default_value === 'true' || col.default_value === 't'
+            }));
+          
+          // Create preferences object based on schema defaults
+          const schemaPrefs = {};
+          columns.forEach(col => {
+            schemaPrefs[col.uiField] = col.defaultValue;
+          });
+          
+          console.log('Fallback column preferences from schema:', schemaPrefs);
+          setColumnPreferences(schemaPrefs);
+        } else {
+          throw new Error('Failed to retrieve table structure');
+        }
+      } catch (fallbackError) {
+        console.error('Fallback error fetching schema:', fallbackError);
+        // Set minimal default preferences in case of complete failure
+        setColumnPreferences({
+          id: true,
+          first_name: true,
+          last_name: true, 
+          email: true,
+          phone: true
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const startCamera = async () => {
     try {
@@ -81,62 +252,170 @@ const CustomerManager = () => {
     }, 'image/jpeg', 0.9);
   };
 
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { setCustomer, addToCart, cartItems } = useCart();
-  const { user } = useAuth();
-  const [customers, setCustomers] = useState([]);
-  const [quoteExpirationConfig, setQuoteExpirationConfig] = useState({ days: 30 });
-  const [searchForm, setSearchForm] = useState({
-    name: '',
-    id_number: '',
-    phone: ''
-  });
-  const [formData, setFormData] = useState({
-    first_name: '',
-    last_name: '',
-    email: '',
-    phone: '',
-    image: null, // Add image to formData
-    address_line1: '',
-    address_line2: '',
-    city: '',
-    state: '',
-    postal_code: '',
-    country: '',
-    id_type: '',
-    id_number: '',
-    id_expiry_date: '',
-    id_issuing_authority: '',
-    date_of_birth: '',
-    status: 'active',
-    risk_level: 'normal',
-    notes: '',
-    gender: '',
-    height: '',
-    weight: ''
-  });
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [openDialog, setOpenDialog] = useState(false);
-  const [openSearchDialog, setOpenSearchDialog] = useState(false);
-  const [searchResults, setSearchResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [snackbar, setSnackbar] = useState({
-    open: false,
-    message: '',
-    severity: 'success'
-  });
+  // State declarations have been moved to the beginning of the component
 
-  const fetchCustomers = async () => {
+  const fetchCustomers = async (filterParams = {}) => {
     try {
-      const response = await fetch(`${config.apiUrl}/customers`);
+      setLoading(true);
+      setError(null);
+      
+      // Build query parameters from filters
+      const params = new URLSearchParams();
+      
+      // Add filter parameters if they have values
+      if (filterParams.status) params.append('status', filterParams.status);
+      if (filterParams.risk_level) params.append('risk_level', filterParams.risk_level);
+      if (filterParams.date_created_from) params.append('created_from', filterParams.date_created_from);
+      if (filterParams.date_created_to) params.append('created_to', filterParams.date_created_to);
+      if (filterParams.id_type) params.append('id_type', filterParams.id_type);
+      
+      // Add sorting parameters
+      if (filterParams.sort_by) params.append('sort_by', filterParams.sort_by);
+      if (filterParams.sort_order) params.append('sort_order', filterParams.sort_order);
+      
+      // Add pagination parameters
+      params.append('page', page);
+      params.append('limit', rowsPerPage);
+      
+      const queryString = params.toString();
+      const url = queryString ? `${config.apiUrl}/customers?${queryString}` : `${config.apiUrl}/customers`;
+      
+      const response = await fetch(url);
       console.log('Response:', response);
       if (!response.ok) throw new Error('Failed to fetch customers');
+      
       const data = await response.json();
-      setCustomers(data);
+      
+      // Check if response contains pagination info
+      if (data.customers && data.total_pages) {
+        setCustomers(data.customers);
+        setFilteredCustomers(data.customers);
+        setTotalPages(data.total_pages);
+      } else {
+        // Handle response without pagination (for backward compatibility)
+        setCustomers(data);
+        setFilteredCustomers(data);
+        setTotalPages(Math.ceil(data.length / rowsPerPage));
+      }
     } catch (error) {
+      setError('Failed to load customers. Please try again.');
       showSnackbar(error.message, 'error');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  // Apply client-side filtering if backend filtering is not available
+  const applyLocalFilters = () => {
+    let result = [...customers];
+    
+    // Apply status filter
+    if (filters.status) {
+      result = result.filter(customer => customer.status === filters.status);
+    }
+    
+    // Apply risk level filter
+    if (filters.risk_level) {
+      result = result.filter(customer => customer.risk_level === filters.risk_level);
+    }
+    
+    // Apply date range filters
+    if (filters.date_created_from) {
+      const fromDate = new Date(filters.date_created_from);
+      result = result.filter(customer => new Date(customer.created_at) >= fromDate);
+    }
+    
+    if (filters.date_created_to) {
+      const toDate = new Date(filters.date_created_to);
+      toDate.setHours(23, 59, 59, 999); // End of day
+      result = result.filter(customer => new Date(customer.created_at) <= toDate);
+    }
+    
+    // Apply ID type filter
+    if (filters.id_type) {
+      result = result.filter(customer => customer.id_type === filters.id_type);
+    }
+    
+    // Apply sorting
+    if (filters.sort_by) {
+      result.sort((a, b) => {
+        let aValue = a[filters.sort_by];
+        let bValue = b[filters.sort_by];
+        
+        // Handle dates
+        if (filters.sort_by === 'created_at' || filters.sort_by === 'updated_at') {
+          aValue = new Date(aValue || 0).getTime();
+          bValue = new Date(bValue || 0).getTime();
+        }
+        
+        // Handle strings
+        if (typeof aValue === 'string' && typeof bValue === 'string') {
+          return filters.sort_order === 'asc' 
+            ? aValue.localeCompare(bValue)
+            : bValue.localeCompare(aValue);
+        }
+        
+        // Handle numbers and dates
+        return filters.sort_order === 'asc' ? aValue - bValue : bValue - aValue;
+      });
+    }
+    
+    // Set filtered customers with all matching results
+    setFilteredCustomers(result);
+    
+    // Calculate total pages
+    setTotalPages(Math.ceil(result.length / rowsPerPage));
+    
+    // Reset to first page when filters change
+    if (page > 1 && Math.ceil(result.length / rowsPerPage) < page) {
+      setPage(1);
+    }
+  };
+
+  // Handle filter changes
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target;
+    setFilters(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  // Clear all filters
+  const clearFilters = () => {
+    setFilters({
+      status: '',
+      risk_level: '',
+      date_created_from: '',
+      date_created_to: '',
+      id_type: '',
+      sort_by: 'created_at',
+      sort_order: 'desc'
+    });
+  };
+
+  // Handle pagination change
+  const handlePageChange = (event, newPage) => {
+    setPage(newPage);
+  };
+  
+  // Handle rows per page change
+  const handleRowsPerPageChange = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(1); // Reset to first page when changing rows per page
+  };
+  
+  // Get current page of customers
+  const getCurrentPageCustomers = () => {
+    const startIndex = (page - 1) * rowsPerPage;
+    const endIndex = startIndex + rowsPerPage;
+    return filteredCustomers.slice(startIndex, endIndex);
+  };
+
+  // Apply filters - determine whether to use server-side or client-side filtering
+  const applyFilters = () => {
+    // Try to use server-side filtering first
+    fetchCustomers(filters);
   };
 
   const handleInputChange = (e) => {
@@ -417,86 +696,336 @@ const CustomerManager = () => {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      {/* Search Form */}
-      <Paper sx={{ p: 2, mb: 3, maxWidth: 400, mx: 'auto' }}>
-        <Typography variant="h6" gutterBottom align="center">
-          Customer Lookup
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5" component="h1" gutterBottom>
+          Customer Management
         </Typography>
-        <Grid container spacing={2} direction="column">
-          <Grid item xs={12}>
-            <TextField
-              name="name"
-              label="Name"
-              value={searchForm.name}
-              onChange={handleInputChange}
-              fullWidth
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              name="id_number"
-              label="ID Number"
-              value={searchForm.id_number}
-              onChange={handleInputChange}
-              fullWidth
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              name="phone"
-              label="Phone Number"
-              value={searchForm.phone}
-              onChange={handleInputChange}
-              fullWidth
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={handleSearch}
-              fullWidth
-              disabled={loading || (!searchForm.name && !searchForm.id_number && !searchForm.phone)}
-              sx={{ height: '48px' }}
+        <Box>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={handleRegisterNew}
+            sx={{ mr: 1 }}
+          >
+            Add New Customer
+          </Button>
+        </Box>
+      </Box>
+
+      {/* Filter Panel */}
+      <Box sx={{ mt: 2, mb: 2 }}>
+        <Accordion expanded={filterOpen} onChange={() => setFilterOpen(!filterOpen)}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <FilterListIcon sx={{ mr: 1 }} />
+              <Typography variant="subtitle1">Customer Filters</Typography>
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth variant="outlined" size="small">
+                  <InputLabel id="status-filter-label">Status</InputLabel>
+                  <Select
+                    labelId="status-filter-label"
+                    name="status"
+                    value={filters.status}
+                    onChange={handleFilterChange}
+                    label="Status"
+                  >
+                    <MenuItem value="">All</MenuItem>
+                    <MenuItem value="active">Active</MenuItem>
+                    <MenuItem value="inactive">Inactive</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth variant="outlined" size="small">
+                  <InputLabel id="risk-level-filter-label">Risk Level</InputLabel>
+                  <Select
+                    labelId="risk-level-filter-label"
+                    name="risk_level"
+                    value={filters.risk_level}
+                    onChange={handleFilterChange}
+                    label="Risk Level"
+                  >
+                    <MenuItem value="">All</MenuItem>
+                    <MenuItem value="low">Low</MenuItem>
+                    <MenuItem value="normal">Normal</MenuItem>
+                    <MenuItem value="high">High</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth variant="outlined" size="small">
+                  <InputLabel id="id-type-filter-label">ID Type</InputLabel>
+                  <Select
+                    labelId="id-type-filter-label"
+                    name="id_type"
+                    value={filters.id_type}
+                    onChange={handleFilterChange}
+                    label="ID Type"
+                  >
+                    <MenuItem value="">All</MenuItem>
+                    <MenuItem value="Passport">Passport</MenuItem>
+                    <MenuItem value="Driver's License">Driver's License</MenuItem>
+                    <MenuItem value="National ID">National ID</MenuItem>
+                    <MenuItem value="Other">Other</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth variant="outlined" size="small">
+                  <InputLabel id="sort-by-filter-label">Sort By</InputLabel>
+                  <Select
+                    labelId="sort-by-filter-label"
+                    name="sort_by"
+                    value={filters.sort_by}
+                    onChange={handleFilterChange}
+                    label="Sort By"
+                  >
+                    <MenuItem value="created_at">Date Created</MenuItem>
+                    <MenuItem value="last_name">Last Name</MenuItem>
+                    <MenuItem value="first_name">First Name</MenuItem>
+                    <MenuItem value="status">Status</MenuItem>
+                    <MenuItem value="risk_level">Risk Level</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth variant="outlined" size="small">
+                  <InputLabel id="sort-order-filter-label">Sort Order</InputLabel>
+                  <Select
+                    labelId="sort-order-filter-label"
+                    name="sort_order"
+                    value={filters.sort_order}
+                    onChange={handleFilterChange}
+                    label="Sort Order"
+                  >
+                    <MenuItem value="asc">Ascending</MenuItem>
+                    <MenuItem value="desc">Descending</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <TextField
+                  name="date_created_from"
+                  label="Created From"
+                  type="date"
+                  value={filters.date_created_from}
+                  onChange={handleFilterChange}
+                  fullWidth
+                  variant="outlined"
+                  size="small"
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <TextField
+                  name="date_created_to"
+                  label="Created To"
+                  type="date"
+                  value={filters.date_created_to}
+                  onChange={handleFilterChange}
+                  fullWidth
+                  variant="outlined"
+                  size="small"
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} display="flex" justifyContent="flex-end">
+                <Button
+                  variant="outlined"
+                  startIcon={<ClearIcon />}
+                  onClick={clearFilters}
+                  sx={{ mr: 1 }}
+                >
+                  Clear Filters
+                </Button>
+                <Button
+                  variant="contained"
+                  startIcon={<FilterListIcon />}
+                  onClick={applyFilters}
+                >
+                  Apply Filters
+                </Button>
+              </Grid>
+            </Grid>
+          </AccordionDetails>
+        </Accordion>
+      </Box>
+
+      {/* Customer Table */}
+      <TableContainer component={Paper} sx={{ mt: 2 }}>
+        <Table size="small" sx={{ '& .MuiTableCell-root': { py: 1 } }}>
+          <TableHead>
+            <TableRow>
+              {/* Dynamically generate all columns based on preferences */}
+              {Object.entries(columnPreferences)
+                // Sort to ensure image comes first if enabled
+                .sort(([colA], [colB]) => {
+                  if (colA === 'image') return -1;
+                  if (colB === 'image') return 1;
+                  return 0;
+                })
+                .map(([column, isVisible]) => {
+                  // Skip columns that aren't visible
+                  if (!isVisible) return null;
+                  
+                  // Format column name for display (capitalize, replace underscores with spaces)
+                  const displayName = column
+                    .split('_')
+                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                    .join(' ');
+                  
+                  return <TableCell key={column}>{displayName}</TableCell>;
+                })}
+              {/* Always show actions column */}
+              <TableCell>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {getCurrentPageCustomers().map((customer) => (
+              <TableRow key={customer.id}>
+                {/* Dynamically generate all cells based on preferences */}
+                {Object.entries(columnPreferences)
+                  // Sort to ensure image comes first if enabled
+                  .sort(([colA], [colB]) => {
+                    if (colA === 'image') return -1;
+                    if (colB === 'image') return 1;
+                    return 0;
+                  })
+                  .map(([column, isVisible]) => {
+                    // Skip columns that aren't visible
+                    if (!isVisible) return null;
+                    
+                    // Render based on column type
+                    return (
+                      <TableCell key={column}>
+                        {column === 'image' ? (
+                          customer.image ? (
+                            <Box
+                              component="img"
+                              src={typeof customer.image === 'object' && customer.image.type === 'Buffer' 
+                                ? bufferToDataUrl(customer.image) 
+                                : customer.image}
+                              alt="Customer"
+                              sx={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: '50%',
+                                objectFit: 'cover',
+                                border: '1px solid #ccc'
+                              }}
+                            />
+                          ) : (
+                            <Box
+                              sx={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: '50%',
+                                backgroundColor: '#f0f0f0',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: '1px solid #ccc',
+                                color: '#999',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {customer.first_name && customer.last_name ? 
+                                `${customer.first_name[0]}${customer.last_name[0]}` : 'NA'}
+                            </Box>
+                          )
+                        ) : column === 'status' ? (
+                          <Chip 
+                            label={customer.status} 
+                            color={customer.status === 'active' ? 'success' : 'default'}
+                            size="small"
+                          />
+                        ) : column === 'risk_level' ? (
+                          <Chip 
+                            label={customer.risk_level} 
+                            color={
+                              customer.risk_level === 'high' ? 'error' : 
+                              customer.risk_level === 'normal' ? 'primary' : 'success'
+                            }
+                            size="small"
+                          />
+                        ) : (
+                          // Default: show the field value directly
+                          customer[column]
+                        )}
+                      </TableCell>
+                    );
+                  })}
+                <TableCell>
+                  <IconButton onClick={() => handleEdit(customer)} size="small">
+                    <EditIcon />
+                  </IconButton>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={() => handleSelectCustomer(customer)}
+                  >
+                    Select
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+            {filteredCustomers.length === 0 && !loading && (
+              <TableRow>
+                <TableCell colSpan={8} align="center">
+                  No customers found
+                </TableCell>
+              </TableRow>
+            )}
+            {loading && (
+              <TableRow>
+                <TableCell colSpan={8} align="center">
+                  <CircularProgress size={24} />
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      
+      {/* Pagination */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2, mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mr: 2 }}>
+            {filteredCustomers.length > 0 ? 
+              `Showing ${(page - 1) * rowsPerPage + 1}-${Math.min(page * rowsPerPage, filteredCustomers.length)} of ${filteredCustomers.length} customers` : 
+              'No customers found'}
+          </Typography>
+          <FormControl variant="outlined" size="small" sx={{ minWidth: 120 }}>
+            <InputLabel id="rows-per-page-label">Per Page</InputLabel>
+            <Select
+              labelId="rows-per-page-label"
+              value={rowsPerPage}
+              onChange={handleRowsPerPageChange}
+              label="Per Page"
             >
-              {loading ? (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'center' }}>
-                  <CircularProgress size={20} color="inherit" />
-                  <span>Searching...</span>
-                </Box>
-              ) : (
-                'Search Customer'
-              )}
-            </Button>
-          </Grid>
-        </Grid>
-        <Grid container direction="column">
-          <Grid item xs={12}>
-            <Divider>OR</Divider>
-          </Grid>
-          <Grid item xs={12}>
-            <Button
-              variant="outlined"
-              color="primary"
-              onClick={handleRegisterNew}
-              fullWidth
-              sx={{ height: '48px' }}
-            >
-              Register New Customer
-            </Button>
-          </Grid>
-          <Grid item xs={12}>
-            <Button
-              variant="text"
-              onClick={handleProceedAsGuest}
-              fullWidth
-              sx={{ height: '48px' }}
-            >
-              Continue as Guest
-            </Button>
-          </Grid>
-        </Grid>
-      </Paper>
+              <MenuItem value={8}>8</MenuItem>
+              <MenuItem value={10}>10</MenuItem>
+              <MenuItem value={20}>20</MenuItem>
+              <MenuItem value={50}>50</MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
+        <Pagination 
+          count={totalPages} 
+          page={page} 
+          onChange={handlePageChange} 
+          color="primary" 
+          showFirstButton 
+          showLastButton
+          size="medium"
+          siblingCount={1}
+        />
+      </Box>
 
       {/* Search Results Dialog */}
       <Dialog

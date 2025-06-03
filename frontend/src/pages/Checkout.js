@@ -25,6 +25,7 @@ import {
   TableRow,
   Snackbar,
   Alert,
+  Chip,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PaymentIcon from '@mui/icons-material/Payment';
@@ -45,6 +46,7 @@ function Checkout() {
   const { cartItems, addToCart, selectedCustomer, setCustomer, clearCart } = useCart();
   const { user } = useAuth();
   const [isInitialized, setIsInitialized] = useState(false);
+  const [checkoutItems, setCheckoutItems] = useState([]);
 
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentDetails, setPaymentDetails] = useState({
@@ -391,6 +393,15 @@ function Checkout() {
       clearCart();
       setCustomer(null);
       navigate('/quote-manager');
+    } else if (location.state?.from === 'cart') {
+      // Save cart items and navigate back to customer ticket
+      sessionStorage.setItem('cartItems', JSON.stringify(cartItems));
+      navigate('/customer-ticket', {
+        state: {
+          from: 'checkout',
+          items: cartItems
+        }
+      });
     } else {
       // Save the cart items to session storage before navigating back
       sessionStorage.setItem('estimationState', JSON.stringify({
@@ -403,21 +414,36 @@ function Checkout() {
     }
   };
 
-  // Set customer info and cart items from quote if available
-  useEffect(() => {
-    if (!isInitialized && location.state?.items && location.state?.customerName) {
-      // Set the customer info
-      const customer = {
-        name: location.state.customerName,
-        email: location.state.customerEmail || '',
-        phone: location.state.customerPhone || '',
-        id: null // For quotes, we don't have a customer ID
-      };
-      setCustomer(customer);
+  // Set customer info and cart items from quote or cart
+  useEffect(() => {    
+    if (!isInitialized) {
+      // Handle items from cart
+      if (location.state?.items && location.state?.from === 'cart') {        
+        setCheckoutItems(location.state.items);
+        addToCart(location.state.items);
+        
+        // Get customer from state if available
+        if (location.state.customer) {
+          setCustomer(location.state.customer);
+        }
+        
+        setIsInitialized(true);
+      }
+      // Handle items from quote
+      else if (location.state?.items && location.state?.customerName) {        
+        // Set the customer info
+        const customer = {
+          name: location.state.customerName,
+          email: location.state.customerEmail || '',
+          phone: location.state.customerPhone || '',
+          id: null // For quotes, we don't have a customer ID
+        };
+        setCustomer(customer);
 
-      // Set the cart items
-      addToCart(location.state.items);
-      setIsInitialized(true);
+        // Set the cart items
+        addToCart(location.state.items);
+        setIsInitialized(true);
+      }
     }
   }, [location.state, setCustomer, addToCart, isInitialized]);
 
@@ -437,7 +463,8 @@ function Checkout() {
           startIcon={<ArrowBackIcon />}
           sx={{ mb: 2 }}
         >
-          {location.state?.quoteId ? 'Back to Quotes' : 'Back to Estimation'}
+          {location.state?.quoteId ? 'Back to Quotes' : 
+           location.state?.from === 'cart' ? 'Back to Ticket' : 'Back to Estimation'}
         </Button>
         <Grid container spacing={3}>
           {/* Customer Details */}
@@ -475,36 +502,118 @@ function Checkout() {
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Item</TableCell>
-                      <TableCell>Transaction Type</TableCell>
-                      <TableCell align="right">Price</TableCell>
+                      <TableCell width="55%">Item Description</TableCell>
+                      <TableCell width="25%">Transaction Type</TableCell>
+                      <TableCell width="20%" align="right">Price</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {cartItems.map((item, index) => (
-                      <TableRow key={item.id || index}>
-                        <TableCell>
-                          <Box>
-                            <Typography>{item.short_desc}</Typography>
-                            {item.free_text && (
-                              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                                {item.free_text}
-                              </Typography>
-                            )}
-                          </Box>
-                        </TableCell>
-                        <TableCell>{item.transaction_type}</TableCell>
-                        <TableCell align="right">
-                          ${parseFloat(item.price).toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {checkoutItems.map((item, index) => {
+                      // Determine the appropriate description to display
+                      let displayDescription = '';
+                      
+                      // Try to use description field first (most common)
+                      if (item.description) {
+                        displayDescription = item.description;
+                        if (item.category) {
+                          displayDescription += ` (${item.category})`;
+                        }
+                      }
+                      // Fallback to short_desc if present
+                      else if (item.short_desc) {
+                        displayDescription = item.short_desc;
+                      }
+                      // Handle trade items specially
+                      else if (item.tradeItem && item.storeItem) {
+                        displayDescription = `Trading "${item.tradeItem}" for "${item.storeItem}"`;
+                      }
+                      // Handle repair items specially
+                      else if (item.issue) {
+                        displayDescription = `Repair - Issue: ${item.issue}`;
+                      }
+                      // Last resort fallback
+                      else {
+                        displayDescription = 'Item';
+                      }
+                      
+                      // Determine transaction type to display
+                      let transactionType = '';
+                      if (item.transaction_type) {
+                        transactionType = item.transaction_type.charAt(0).toUpperCase() + item.transaction_type.slice(1);
+                      } else if (item.itemType) {
+                        transactionType = item.itemType.charAt(0).toUpperCase() + item.itemType.slice(1);
+                      } else {
+                        // Try to determine from structure
+                        if (item.value !== undefined) transactionType = 'Pawn';
+                        else if (item.price !== undefined) {
+                          if (item.paymentMethod !== undefined) transactionType = 'Sale';
+                          else transactionType = 'Buy';
+                        }
+                        else if (item.tradeItem !== undefined) transactionType = 'Trade';
+                        else if (item.fee !== undefined) transactionType = 'Repair';
+                        else if (item.amount !== undefined) transactionType = 'Payment';
+                        else transactionType = 'Item';
+                      }
+                      
+                      // Determine price to display
+                      let price = 0;
+                      if (item.price !== undefined) price = item.price;
+                      else if (item.value !== undefined) price = item.value;
+                      else if (item.fee !== undefined) price = item.fee;
+                      else if (item.amount !== undefined) price = item.amount;
+                    
+                      return (
+                        <TableRow key={item.id || index}>
+                          <TableCell>
+                            <Box>
+                              <Typography variant="subtitle2" fontWeight="bold">{displayDescription}</Typography>
+                              {item.free_text && (
+                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                  {item.free_text}
+                                </Typography>
+                              )}
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={transactionType}
+                              size="small"
+                              color={(() => {
+                                // Determine color based on transaction type
+                                const type = transactionType.toLowerCase();
+                                if (type === 'buy') return 'primary';
+                                if (type === 'sell' || type === 'sale') return 'success';
+                                if (type === 'pawn') return 'secondary';
+                                if (type === 'trade') return 'info';
+                                if (type === 'repair') return 'warning';
+                                if (type === 'payment') return 'default';
+                                return 'default';
+                              })()}
+                              variant="outlined"
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <Typography fontWeight="medium">
+                              ${parseFloat(price).toFixed(2)}
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </TableContainer>
               <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
                 <Typography variant="h6">
-                  Total: ${calculateTotal().toFixed(2)}
+                  Total: ${checkoutItems.reduce((total, item) => {
+                    // Get the appropriate price value based on item structure
+                    let itemValue = 0;
+                    if (item.price !== undefined) itemValue = parseFloat(item.price);
+                    else if (item.value !== undefined) itemValue = parseFloat(item.value);
+                    else if (item.fee !== undefined) itemValue = parseFloat(item.fee);
+                    else if (item.amount !== undefined) itemValue = parseFloat(item.amount);
+                    return total + itemValue;
+                  }, 0).toFixed(2)}
                 </Typography>
               </Box>
             </Paper>

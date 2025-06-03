@@ -28,9 +28,10 @@ import {
   Select,
   FormControl,
   InputLabel,
-  Checkbox
+  Checkbox,
+  Tooltip
 } from '@mui/material';
-import DeleteIcon from '@mui/icons-material/Delete';
+import BlockIcon from '@mui/icons-material/Block';
 import EditIcon from '@mui/icons-material/Edit';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -142,11 +143,10 @@ const Cart = () => {
   // Handle individual item selection toggle
   const handleItemSelect = (index) => {
     setSelectedItems(prev => {
-      if (prev.includes(index)) {
-        return prev.filter(i => i !== index);
-      } else {
-        return [...prev, index];
-      }
+      const newSelection = prev.includes(index) 
+        ? prev.filter(idx => idx !== index) 
+        : [...prev, index];
+      return newSelection;
     });
   };
   
@@ -318,9 +318,15 @@ const Cart = () => {
 
   // Handle proceed to checkout
   const handleProceedToCheckout = () => {
+    // If items are selected, only checkout those items
+    // Otherwise, checkout all filtered items
+    const itemsToCheckout = selectedItems.length > 0 
+      ? cartItems.filter((_, index) => selectedItems.includes(index))
+      : filteredItems;
+       
     navigate('/checkout', {
       state: {
-        items: cartItems,
+        items: itemsToCheckout,
         customer,
         from: 'cart'
       }
@@ -359,15 +365,15 @@ const Cart = () => {
           >
             Back to Ticket
           </Button>
-          <Button
-            startIcon={<DeleteIcon />}
+          {/* <Button
+            startIcon={<BlockIcon />}
             variant="outlined"
             color="error"
             onClick={handleClearCart}
             disabled={cartItems.length === 0}
           >
-            Clear Cart
-          </Button>
+            VOID ITEM
+          </Button> */}
         </Box>
         
 
@@ -470,21 +476,25 @@ const Cart = () => {
                     </TableCell>
                     <TableCell align="right">{formatCurrency(getItemValue(item, item.itemType || getItemTypeFromStructure(item)))}</TableCell>
                     <TableCell align="center">
-                      <IconButton 
-                        color="primary" 
-                        size="small" 
-                        onClick={() => handleEditItem(index)}
-                        sx={{ mr: 1 }}
-                      >
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton 
-                        color="error" 
-                        size="small" 
-                        onClick={() => handleRemoveItem(index)}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
+                      <Tooltip title="Edit">
+                        <IconButton 
+                          color="primary" 
+                          size="small" 
+                          onClick={() => handleEditItem(index)}
+                          sx={{ mr: 1 }}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Void">
+                        <IconButton 
+                          color="error" 
+                          size="small" 
+                          onClick={() => handleRemoveItem(index)}
+                        >
+                          <BlockIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -552,13 +562,13 @@ const Cart = () => {
         onClose={() => setConfirmDialog({ open: false, itemIndex: null })}
       >
         <DialogTitle>
-          {confirmDialog.itemIndex === -1 ? "Clear Cart" : "Remove Item"}
+          {confirmDialog.itemIndex === -1 ? "Clear Cart" : "Void Item"}
         </DialogTitle>
         <DialogContent>
           <DialogContentText>
             {confirmDialog.itemIndex === -1 
               ? "Are you sure you want to clear all items from your cart?" 
-              : "Are you sure you want to remove this item from your cart?"}
+              : "Are you sure you want to void this item from your cart?"}
           </DialogContentText>
         </DialogContent>
         <DialogActions>

@@ -4,6 +4,9 @@ import {
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import { Add as AddIcon, Edit as EditIcon } from '@mui/icons-material';
+import DiamondIcon from '@mui/icons-material/Diamond';
+import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
+import WatchIcon from '@mui/icons-material/Watch';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -133,7 +136,7 @@ const Home = () => {
   const { user } = useAuth();
   const [customers, setCustomers] = useState([]);
   const [quoteExpirationConfig, setQuoteExpirationConfig] = useState({ days: 30 });
-  const [searchForm, setSearchForm] = useState({ name: '', id_number: '', phone: '' });
+  const [searchForm, setSearchForm] = useState({ first_name: '', last_name: '', id_number: '', phone: '' });
   const [formData, setFormData] = useState({
     first_name: '', last_name: '', email: '', phone: '', image: null, address_line1: '', address_line2: '', city: '', state: '', postal_code: '', country: '', id_type: '', id_number: '', id_expiry_date: '', id_issuing_authority: '', date_of_birth: '', status: 'active', risk_level: 'normal', notes: '', gender: '', height: '', weight: ''
   });
@@ -161,14 +164,15 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
   };
   const handleSearch = async (e) => {
     e.preventDefault();
-    if (!searchForm.name && !searchForm.id_number && !searchForm.phone) {
+    if (!searchForm.first_name && !searchForm.last_name && !searchForm.id_number && !searchForm.phone) {
       showSnackbar('Please enter at least one search criteria', 'warning');
       return;
     }
     setLoading(true);
     try {
       const params = {};
-      if (searchForm.name && searchForm.name.trim()) params.name = searchForm.name.trim();
+      if (searchForm.first_name && searchForm.first_name.trim()) params.first_name = searchForm.first_name.trim();
+      if (searchForm.last_name && searchForm.last_name.trim()) params.last_name = searchForm.last_name.trim();
       if (searchForm.id_number && searchForm.id_number.trim()) params.id_number = searchForm.id_number.trim();
       if (searchForm.phone && searchForm.phone.trim()) params.phone = searchForm.phone.trim();
       const queryParams = new URLSearchParams(params).toString();
@@ -393,9 +397,9 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
     handleCloseSearchDialog();
   };
   const handleQuickSale = (customer) => {
-    const quickSaleCustomer = {
-    }
+    navigate('/customer-ticket', { state: { customer } });
   };
+
   const handleRegisterNew = () => {
     const newCustomer = { first_name: '', last_name: '', email: '', phone: '', status: 'active', created_at: new Date().toISOString(), image: '' };
     setCustomer(newCustomer);
@@ -443,13 +447,22 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
             </Typography>
             <Grid container spacing={2} direction="column">
               <Grid item xs={12}>
-                <TextField
-                  name="name"
-                  label="Name"
-                  value={searchForm.name}
-                  onChange={handleInputChange}
-                  fullWidth
-                />
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <TextField
+                    name="first_name"
+                    label="First Name"
+                    value={searchForm.first_name || ''}
+                    onChange={handleInputChange}
+                    fullWidth
+                  />
+                  <TextField
+                    name="last_name"
+                    label="Last Name"
+                    value={searchForm.last_name || ''}
+                    onChange={handleInputChange}
+                    fullWidth
+                  />
+                </Box>
               </Grid>
               <Grid item xs={12}>
                 <TextField
@@ -475,7 +488,7 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                   color="primary"
                   onClick={handleSearch}
                   fullWidth
-                  disabled={loading || (!searchForm.name && !searchForm.id_number && !searchForm.phone)}
+                  disabled={loading || (!searchForm.first_name && !searchForm.last_name && !searchForm.id_number && !searchForm.phone)}
                   sx={{ height: '48px' }}
                 >
                   {loading ? (
@@ -548,6 +561,53 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
           <Paper sx={{ p: 1.2, borderRadius: 2, boxShadow: 1, textAlign: 'center', bgcolor: '#fff' }}>
             <Typography variant="subtitle2" sx={{ color: 'primary.main', fontWeight: 700 }}>Today's Sales</Typography>
             <Typography variant="h6">$3,245</Typography>
+          </Paper>
+        </Grid>
+      </Grid>
+      
+      {/* Quick Tools Section - Added beside stats */}
+      <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
+        <Grid item xs={12}>
+          <Paper sx={{ p: 1.2, borderRadius: 2, boxShadow: 1 }}>
+            <Typography variant="subtitle2" sx={{ color: 'primary.main', fontWeight: 700, mb: 1 }}>Quick Tools</Typography>
+            <Grid container spacing={1}>
+              <Grid item xs={6} sm={3} md={2}>
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  fullWidth
+                  startIcon={<DiamondIcon />}
+                  onClick={() => navigate('/gem-estimator')}
+                  sx={{ py: 1 }}
+                >
+                  Jewelry Estimator
+                </Button>
+              </Grid>
+              <Grid item xs={6} sm={3} md={2}>
+                <Button
+                  variant="contained"
+                  color="warning"
+                  fullWidth
+                  startIcon={<MonetizationOnIcon />}
+                  onClick={() => navigate('/bullion-estimator')}
+                  sx={{ py: 1 }}
+                >
+                  Bullion Estimator
+                </Button>
+              </Grid>
+              <Grid item xs={6} sm={4} md={3}>
+                <Button
+                  variant="contained"
+                  color="info"
+                  fullWidth
+                  startIcon={<WatchIcon />}
+                  onClick={() => navigate('/manufacturing-estimator')}
+                  sx={{ py: 1, fontSize: { xs: '0.75rem', sm: '0.8rem', md: '0.875rem' } }}
+                >
+                  Misc. Goods Estimator
+                </Button>
+              </Grid>
+            </Grid>
           </Paper>
         </Grid>
       </Grid>
@@ -740,21 +800,34 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
               </>
             ) : (
               <Box sx={{ p: 2 }}>
-                <Typography variant="body1" color="text.secondary" gutterBottom>
-                  No customers found matching your search criteria.
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+                  <Typography variant="body1" color="text.secondary">
+                    No customers found matching your search criteria.
+                  </Typography>
+                  <Button 
+                    variant="text" 
+                    color="primary" 
+                    onClick={handleCloseSearchDialog}
+                    sx={{ p: 0, minWidth: 'auto', fontWeight: 'bold', textTransform: 'none' }}
+                  >
+                    Search Again
+                  </Button>
+                </Box>
                 <Box sx={{ mt: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary" align="center" sx={{ display: 'block', mt: 1 }}>
-                      Registered customer quotes are managed by database triggers based on system configuration
-                    </Typography>
-                  </Box>
-                  <Box>
+
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={handleRegisterNew}
+                      sx={{ height: '48px', flex: 1 }}
+                    >
+                      Register New Customer
+                    </Button>
                     <Button
                       variant="outlined"
                       onClick={handleProceedAsGuest}
-                      fullWidth
-                      sx={{ height: '48px' }}
+                      sx={{ height: '48px', flex: 1 }}
                     >
                       Continue as Guest
                     </Button>
@@ -1307,6 +1380,8 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
           </Alert>
         </Snackbar>
 
+
+      
       <Grid item xs={12}>
         <Grid container spacing={2}>
         {/* Messages Section */}
