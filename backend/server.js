@@ -1543,6 +1543,116 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
     }
 });
 
+// Customer Preferences Configuration API Endpoints
+app.get('/api/customer-preferences/config', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM customer_headers_preferences 
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No customer preferences configuration found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching customer preferences config:', err);
+    res.status(500).json({ error: 'Failed to fetch customer preferences configuration' });
+  }
+});
+
+app.put('/api/customer-preferences/config', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    // Extract all the boolean fields from the request
+    const { 
+      display_header, header_style,
+      show_id, show_first_name, show_last_name, show_email, show_phone,
+      show_address_line1, show_address_line2, show_city, show_state,
+      show_postal_code, show_country, show_id_type, show_id_number,
+      show_id_expiry, show_gender, show_height, show_weight,
+      show_date_of_birth, show_status, show_risk_level, show_notes
+    } = req.body;
+    
+    await client.query('BEGIN');
+
+    // Update configuration or insert if none exists
+    const updateResult = await client.query(`
+      UPDATE customer_headers_preferences
+      SET 
+        display_header = $1,
+        header_style = $2,
+        show_id = $3,
+        show_first_name = $4,
+        show_last_name = $5,
+        show_email = $6,
+        show_phone = $7,
+        show_address_line1 = $8,
+        show_address_line2 = $9,
+        show_city = $10,
+        show_state = $11,
+        show_postal_code = $12,
+        show_country = $13,
+        show_id_type = $14,
+        show_id_number = $15,
+        show_id_expiry = $16,
+        show_gender = $17,
+        show_height = $18,
+        show_weight = $19,
+        show_date_of_birth = $20,
+        show_status = $21,
+        show_risk_level = $22,
+        show_notes = $23,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `, [
+      display_header, header_style, 
+      show_id, show_first_name, show_last_name, show_email, show_phone,
+      show_address_line1, show_address_line2, show_city, show_state,
+      show_postal_code, show_country, show_id_type, show_id_number,
+      show_id_expiry, show_gender, show_height, show_weight,
+      show_date_of_birth, show_status, show_risk_level, show_notes
+    ]);
+
+    // If no rows were updated, insert new configuration
+    let result;
+    if (updateResult.rowCount === 0) {
+      result = await client.query(`
+        INSERT INTO customer_preferences (
+          display_header, header_style, 
+          show_id, show_first_name, show_last_name, show_email, show_phone,
+          show_address_line1, show_address_line2, show_city, show_state,
+          show_postal_code, show_country, show_id_type, show_id_number,
+          show_id_expiry, show_gender, show_height, show_weight,
+          show_date_of_birth, show_status, show_risk_level, show_notes
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+        RETURNING *
+      `, [
+        display_header, header_style, 
+        show_id, show_first_name, show_last_name, show_email, show_phone,
+        show_address_line1, show_address_line2, show_city, show_state,
+        show_postal_code, show_country, show_id_type, show_id_number,
+        show_id_expiry, show_gender, show_height, show_weight,
+        show_date_of_birth, show_status, show_risk_level, show_notes
+      ]);
+    } else {
+      result = updateResult;
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating customer preferences config:', err);
+    res.status(500).json({ error: 'Failed to update customer preferences configuration' });
+  } finally {
+    client.release();
+  }
+});
+
 // Customer routes
 app.get('/api/customers', async (req, res) => {
   try {

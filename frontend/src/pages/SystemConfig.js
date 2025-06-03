@@ -9,6 +9,7 @@ import {
   Box,
   Divider,
   Switch,
+  Checkbox,
   FormControlLabel,
   Alert,
   Snackbar,
@@ -17,6 +18,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   InputAdornment
@@ -92,6 +94,140 @@ function SystemConfig() {
   const [diamondEstimates, setDiamondEstimates] = useState([]);
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
   const [loading, setLoading] = useState(false);
+  const [customerColumns, setCustomerColumns] = useState([]);
+  const [selectedCustomerColumns, setSelectedCustomerColumns] = useState({});
+
+  const fetchCustomerHeaderPreferences = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch the customer preferences directly
+      const prefsResponse = await axios.get(`${API_BASE_URL}/customer-preferences/config`);
+      const preferences = prefsResponse.data || {};
+      
+      // Extract all fields that start with 'show_' from the preferences object
+      const showFields = Object.keys(preferences).filter(field => field.startsWith('show_'));
+      
+      // Create mappings between database fields and UI fields
+      const dbToUiMapping = {};
+      const uiToDbMapping = {};
+      
+      showFields.forEach(dbField => {
+        // Convert show_field_name to field_name for UI
+        const uiField = dbField.replace('show_', '');
+        dbToUiMapping[dbField] = uiField;
+        uiToDbMapping[uiField] = dbField;
+      });
+      
+      // Create preferences object for UI state
+      const columnPreferences = {};
+      
+      // Map database preferences to UI fields
+      Object.keys(dbToUiMapping).forEach(dbField => {
+        if (preferences[dbField] !== undefined) {
+          const uiField = dbToUiMapping[dbField];
+          columnPreferences[uiField] = preferences[dbField];
+        }
+      });
+
+      // Update selected columns state
+      setSelectedCustomerColumns(columnPreferences);
+      
+      // Generate columns array for the UI
+      const uiColumns = Object.keys(dbToUiMapping).map(dbField => {
+        const uiField = dbToUiMapping[dbField];
+        return {
+          name: uiField,
+          label: uiField.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+          type: getColumnType(uiField),
+          selected: preferences[dbField] || false
+        };
+      });
+      
+      // Update customer columns state for UI display
+      setCustomerColumns(uiColumns);
+      
+    } catch (error) {
+      console.error('Error fetching customer header preferences:', error);
+      
+      try {
+        // Fallback: fetch the database table structure directly
+        const tableInfoResponse = await axios.get(`${API_BASE_URL}/database/table-info?table=customer_headers_preferences`);
+        
+        if (tableInfoResponse.data && tableInfoResponse.data.columns) {
+          // Extract all fields that start with 'show_'
+          const columns = tableInfoResponse.data.columns
+            .filter(col => col.name.startsWith('show_'))
+            .map(col => ({
+              dbField: col.name,
+              uiField: col.name.replace('show_', ''),
+              defaultValue: col.default_value === 'true' || col.default_value === 't'
+            }));
+            
+          // Create UI columns based on database schema
+          const schemaColumns = columns.map(col => ({
+            name: col.uiField,
+            label: col.uiField.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+            type: getColumnType(col.uiField),
+            selected: col.defaultValue // Use default value from schema
+          }));
+          
+          setCustomerColumns(schemaColumns);
+          
+          // Create preferences object based on schema defaults
+          const schemaPrefs = {};
+          columns.forEach(col => {
+            schemaPrefs[col.uiField] = col.defaultValue;
+          });
+          
+          setSelectedCustomerColumns(schemaPrefs);
+        } else {
+          throw new Error('Failed to retrieve table structure');
+        }
+      } catch (fallbackError) {
+        console.error('Fallback error fetching schema:', fallbackError);
+        
+        // Last resort - create minimal hardcoded columns based on what we know must exist
+        // This is only used if both API methods fail
+        const minimalColumns = [
+          { name: 'id', dbField: 'show_id' },
+          { name: 'first_name', dbField: 'show_first_name' },
+          { name: 'last_name', dbField: 'show_last_name' },
+          { name: 'email', dbField: 'show_email' },
+          { name: 'phone', dbField: 'show_phone' }
+        ];
+        
+        const minimalUIColumns = minimalColumns.map(col => ({
+          name: col.name,
+          label: col.name.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+          type: getColumnType(col.name),
+          selected: true
+        }));
+        
+        setCustomerColumns(minimalUIColumns);
+        
+        const minimalPrefs = {};
+        minimalColumns.forEach(col => {
+          minimalPrefs[col.name] = true;
+        });
+        
+        setSelectedCustomerColumns(minimalPrefs);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper function to determine column type based on field name
+  const getColumnType = (fieldName) => {
+    if (fieldName.includes('date') || fieldName.includes('expiry')) {
+      return 'date';
+    } else if (['id', 'height', 'weight'].includes(fieldName) || fieldName.endsWith('_id')) {
+      return 'number';
+    } else {
+      return 'string';
+    }
+  };
 
   useEffect(() => {
     const fetchPreciousMetalNames = async () => {
@@ -196,24 +332,25 @@ function SystemConfig() {
   
     const fetchInventoryHoldPeriod = async () => {
       try {
+        setLoading(true);
         const response = await axios.get(`${API_BASE_URL}/inventory-hold-period/config`);
-        const config = response.data;
-        setInventoryHoldPeriod({
-          days: config.days,
-          id: config.id
-        });
-      } catch (error) {
-        console.error('Error fetching inventory hold period config:', error);
-        if (error.response?.status !== 404) {
-          setSnackbar({
-            open: true,
-            message: 'Failed to fetch inventory hold period configuration',
-            severity: 'error'
+        if (response.data) {
+          setInventoryHoldPeriod({
+            days: response.data.days,
+            id: response.data.id || null
           });
         }
+      } catch (error) {
+        console.error('Error fetching inventory hold period config:', error);
+        // Set default value
+        setInventoryHoldPeriod({ days: 7, id: null });
+      } finally {
+        setLoading(false);
       }
     };
 
+    // Fetch data on component mount
+    fetchCustomerHeaderPreferences();
     fetchPreciousMetalNames();
     fetchLivePricing();
     fetchSpotPrices();
@@ -223,7 +360,7 @@ function SystemConfig() {
     fetchCaratConversion();
     fetchInventoryHoldPeriod();
   }, []);
-
+  
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
   };
@@ -335,6 +472,25 @@ function SystemConfig() {
   
       // Wait for all price estimate updates to complete
       await Promise.all(updatePriceEstimates);
+      
+      // Save customer header preferences
+      try {
+        // Convert the selectedCustomerColumns object to the format expected by the API
+        const headerPreferences = {
+          display_header: true,
+          header_style: 'standard'
+        };
+        
+        // Map UI fields to database fields
+        Object.keys(selectedCustomerColumns).forEach(uiField => {
+          const dbField = 'show_' + uiField; // Correct mapping from UI field to database field
+          headerPreferences[dbField] = selectedCustomerColumns[uiField];
+        });
+        
+        await axios.put(`${API_BASE_URL}/customer-preferences/config`, headerPreferences);
+      } catch (headerError) {
+        console.error('Error saving customer header preferences:', headerError);
+      }
 
       setSnackbar({
         open: true,
@@ -559,6 +715,73 @@ function SystemConfig() {
               />
           </Grid>
             </Grid>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Customer Columns
+            </Typography>
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="body2" color="textSecondary" paragraph>
+                Select which columns should be displayed as headers in the customer table:
+              </Typography>
+              <TableContainer component={Paper} sx={{ mt: 2 }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Select</TableCell>
+                      <TableCell>Column Name</TableCell>
+                      <TableCell>Display Label</TableCell>
+                      <TableCell>Data Type</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {customerColumns.map((column) => (
+                      <TableRow key={column.name}>
+                        <TableCell padding="checkbox">
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={selectedCustomerColumns[column.name] || false}
+                                onChange={(e) => {
+                                  setSelectedCustomerColumns(prev => ({
+                                    ...prev,
+                                    [column.name]: e.target.checked
+                                  }));
+                                }}
+                                color="primary"
+                                size="small"
+                              />
+                            }
+                            label=""                           
+                          />
+                        </TableCell>
+                        <TableCell><code>{column.name}</code></TableCell>
+                        <TableCell>{column.label}</TableCell>
+                        <TableCell>{column.type}</TableCell>
+                      </TableRow>
+                    ))}
+                    {customerColumns.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={4} align="center">
+                          {loading ? 'Loading...' : 'No columns found'}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+                <Button 
+                  variant="contained" 
+                  color="primary" 
+                  onClick={handleSaveSettings}
+                  disabled={loading}
+                >
+                  Save Column Preferences
+                </Button>
+              </Box>
+            </Box>
           </ConfigSection>
 
           <ConfigSection>
