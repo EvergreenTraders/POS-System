@@ -150,69 +150,7 @@ function SystemConfig() {
     } catch (error) {
       console.error('Error fetching customer header preferences:', error);
       
-      try {
-        // Fallback: fetch the database table structure directly
-        const tableInfoResponse = await axios.get(`${API_BASE_URL}/database/table-info?table=customer_headers_preferences`);
-        
-        if (tableInfoResponse.data && tableInfoResponse.data.columns) {
-          // Extract all fields that start with 'show_'
-          const columns = tableInfoResponse.data.columns
-            .filter(col => col.name.startsWith('show_'))
-            .map(col => ({
-              dbField: col.name,
-              uiField: col.name.replace('show_', ''),
-              defaultValue: col.default_value === 'true' || col.default_value === 't'
-            }));
-            
-          // Create UI columns based on database schema
-          const schemaColumns = columns.map(col => ({
-            name: col.uiField,
-            label: col.uiField.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
-            type: getColumnType(col.uiField),
-            selected: col.defaultValue // Use default value from schema
-          }));
-          
-          setCustomerColumns(schemaColumns);
-          
-          // Create preferences object based on schema defaults
-          const schemaPrefs = {};
-          columns.forEach(col => {
-            schemaPrefs[col.uiField] = col.defaultValue;
-          });
-          
-          setSelectedCustomerColumns(schemaPrefs);
-        } else {
-          throw new Error('Failed to retrieve table structure');
-        }
-      } catch (fallbackError) {
-        console.error('Fallback error fetching schema:', fallbackError);
-        
-        // Last resort - create minimal hardcoded columns based on what we know must exist
-        // This is only used if both API methods fail
-        const minimalColumns = [
-          { name: 'id', dbField: 'show_id' },
-          { name: 'first_name', dbField: 'show_first_name' },
-          { name: 'last_name', dbField: 'show_last_name' },
-          { name: 'email', dbField: 'show_email' },
-          { name: 'phone', dbField: 'show_phone' }
-        ];
-        
-        const minimalUIColumns = minimalColumns.map(col => ({
-          name: col.name,
-          label: col.name.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
-          type: getColumnType(col.name),
-          selected: true
-        }));
-        
-        setCustomerColumns(minimalUIColumns);
-        
-        const minimalPrefs = {};
-        minimalColumns.forEach(col => {
-          minimalPrefs[col.name] = true;
-        });
-        
-        setSelectedCustomerColumns(minimalPrefs);
-      }
+
     } finally {
       setLoading(false);
     }

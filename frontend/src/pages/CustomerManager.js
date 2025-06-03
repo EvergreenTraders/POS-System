@@ -13,6 +13,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
+import axios from 'axios';
+
+const API_BASE_URL = config.apiUrl;
 
 // Converts a Buffer-like object (from backend) to a base64 data URL for image preview
 function bufferToDataUrl(bufferObj) {
@@ -89,6 +92,9 @@ const CustomerManager = () => {
     message: '',
     severity: 'success'
   });
+  
+  // State for column preferences
+  const [columnPreferences, setColumnPreferences] = useState({});
 
   // Camera effect
   useEffect(() => {
@@ -109,12 +115,102 @@ const CustomerManager = () => {
     fetchCustomers(filters);
   }, [page, rowsPerPage]);
   
+  // Fetch column preferences on component mount
+  useEffect(() => {
+    fetchColumnPreferences();
+  }, []);
+  
   // Apply client-side filtering when filters change but not on initial load
   useEffect(() => {
     if (customers.length > 0) {
       applyLocalFilters();
     }
   }, [filters, customers]);
+
+  // Fetch column preferences from customer_headers_preferences table
+  const fetchColumnPreferences = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch the customer preferences directly - same approach as SystemConfig.js
+      const prefsResponse = await axios.get(`${API_BASE_URL}/customer-preferences/config`);
+      const preferences = prefsResponse.data || {};
+      
+      // Extract all fields that start with 'show_' from the preferences object
+      const showFields = Object.keys(preferences).filter(field => field.startsWith('show_'));
+      
+      // Create mappings between database fields and UI fields
+      const dbToUiMapping = {};
+      const uiToDbMapping = {};
+      
+      showFields.forEach(dbField => {
+        // Convert show_field_name to field_name for UI
+        const uiField = dbField.replace('show_', '');
+        dbToUiMapping[dbField] = uiField;
+        uiToDbMapping[uiField] = dbField;
+      });
+      
+      // Create preferences object for UI state
+      const columnPreferences = {};
+      
+      // Map database preferences to UI fields
+      Object.keys(dbToUiMapping).forEach(dbField => {
+        if (preferences[dbField] !== undefined) {
+          const uiField = dbToUiMapping[dbField];
+          columnPreferences[uiField] = preferences[dbField];
+        }
+      });
+      
+      // Log the preferences for debugging
+      console.log('Fetched column preferences:', columnPreferences);
+      
+      // Update state with the processed preferences
+      setColumnPreferences(columnPreferences);
+      
+    } catch (error) {
+      console.error('Error fetching customer header preferences:', error);
+      
+      try {
+        // Fallback: fetch the database table structure directly
+        console.log('Attempting fallback: fetching schema info');
+        const tableInfoResponse = await axios.get(`${API_BASE_URL}/database/table-info?table=customer_headers_preferences`);
+        
+        if (tableInfoResponse.data && tableInfoResponse.data.columns) {
+          // Extract all fields that start with 'show_'
+          const columns = tableInfoResponse.data.columns
+            .filter(col => col.name.startsWith('show_'))
+            .map(col => ({
+              dbField: col.name,
+              uiField: col.name.replace('show_', ''),
+              defaultValue: col.default_value === 'true' || col.default_value === 't'
+            }));
+          
+          // Create preferences object based on schema defaults
+          const schemaPrefs = {};
+          columns.forEach(col => {
+            schemaPrefs[col.uiField] = col.defaultValue;
+          });
+          
+          console.log('Fallback column preferences from schema:', schemaPrefs);
+          setColumnPreferences(schemaPrefs);
+        } else {
+          throw new Error('Failed to retrieve table structure');
+        }
+      } catch (fallbackError) {
+        console.error('Fallback error fetching schema:', fallbackError);
+        // Set minimal default preferences in case of complete failure
+        setColumnPreferences({
+          id: true,
+          first_name: true,
+          last_name: true, 
+          email: true,
+          phone: true
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const startCamera = async () => {
     try {
@@ -765,76 +861,105 @@ const CustomerManager = () => {
         <Table size="small" sx={{ '& .MuiTableCell-root': { py: 1 } }}>
           <TableHead>
             <TableRow>
-              <TableCell>Image</TableCell>
-              <TableCell>Name</TableCell>
-              <TableCell>Phone</TableCell>
-              <TableCell>Email</TableCell>
-              <TableCell>ID Number</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Risk Level</TableCell>
+              {/* Dynamically generate all columns based on preferences */}
+              {Object.entries(columnPreferences)
+                // Sort to ensure image comes first if enabled
+                .sort(([colA], [colB]) => {
+                  if (colA === 'image') return -1;
+                  if (colB === 'image') return 1;
+                  return 0;
+                })
+                .map(([column, isVisible]) => {
+                  // Skip columns that aren't visible
+                  if (!isVisible) return null;
+                  
+                  // Format column name for display (capitalize, replace underscores with spaces)
+                  const displayName = column
+                    .split('_')
+                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                    .join(' ');
+                  
+                  return <TableCell key={column}>{displayName}</TableCell>;
+                })}
+              {/* Always show actions column */}
               <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {getCurrentPageCustomers().map((customer) => (
               <TableRow key={customer.id}>
-                <TableCell>
-                  {customer.image ? (
-                    <Box
-                      component="img"
-                      src={typeof customer.image === 'object' && customer.image.type === 'Buffer' 
-                        ? bufferToDataUrl(customer.image) 
-                        : customer.image}
-                      alt={`${customer.first_name} ${customer.last_name}`}
-                      sx={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: '50%',
-                        objectFit: 'cover',
-                        border: '1px solid #ccc'
-                      }}
-                    />
-                  ) : (
-                    <Box
-                      sx={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: '50%',
-                        backgroundColor: '#f0f0f0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        border: '1px solid #ccc',
-                        color: '#999',
-                        fontSize: '0.7rem'
-                      }}
-                    >
-                      {customer.first_name && customer.last_name ? 
-                        `${customer.first_name[0]}${customer.last_name[0]}` : 'NA'}
-                    </Box>
-                  )}
-                </TableCell>
-                <TableCell>{`${customer.first_name} ${customer.last_name}`}</TableCell>
-                <TableCell>{customer.phone}</TableCell>
-                <TableCell>{customer.email}</TableCell>
-                <TableCell>{customer.id_number}</TableCell>
-                <TableCell>
-                  <Chip 
-                    label={customer.status} 
-                    color={customer.status === 'active' ? 'success' : 'default'}
-                    size="small"
-                  />
-                </TableCell>
-                <TableCell>
-                  <Chip 
-                    label={customer.risk_level} 
-                    color={
-                      customer.risk_level === 'high' ? 'error' : 
-                      customer.risk_level === 'normal' ? 'primary' : 'success'
-                    }
-                    size="small"
-                  />
-                </TableCell>
+                {/* Dynamically generate all cells based on preferences */}
+                {Object.entries(columnPreferences)
+                  // Sort to ensure image comes first if enabled
+                  .sort(([colA], [colB]) => {
+                    if (colA === 'image') return -1;
+                    if (colB === 'image') return 1;
+                    return 0;
+                  })
+                  .map(([column, isVisible]) => {
+                    // Skip columns that aren't visible
+                    if (!isVisible) return null;
+                    
+                    // Render based on column type
+                    return (
+                      <TableCell key={column}>
+                        {column === 'image' ? (
+                          customer.image ? (
+                            <Box
+                              component="img"
+                              src={typeof customer.image === 'object' && customer.image.type === 'Buffer' 
+                                ? bufferToDataUrl(customer.image) 
+                                : customer.image}
+                              alt="Customer"
+                              sx={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: '50%',
+                                objectFit: 'cover',
+                                border: '1px solid #ccc'
+                              }}
+                            />
+                          ) : (
+                            <Box
+                              sx={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: '50%',
+                                backgroundColor: '#f0f0f0',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: '1px solid #ccc',
+                                color: '#999',
+                                fontSize: '0.7rem'
+                              }}
+                            >
+                              {customer.first_name && customer.last_name ? 
+                                `${customer.first_name[0]}${customer.last_name[0]}` : 'NA'}
+                            </Box>
+                          )
+                        ) : column === 'status' ? (
+                          <Chip 
+                            label={customer.status} 
+                            color={customer.status === 'active' ? 'success' : 'default'}
+                            size="small"
+                          />
+                        ) : column === 'risk_level' ? (
+                          <Chip 
+                            label={customer.risk_level} 
+                            color={
+                              customer.risk_level === 'high' ? 'error' : 
+                              customer.risk_level === 'normal' ? 'primary' : 'success'
+                            }
+                            size="small"
+                          />
+                        ) : (
+                          // Default: show the field value directly
+                          customer[column]
+                        )}
+                      </TableCell>
+                    );
+                  })}
                 <TableCell>
                   <IconButton onClick={() => handleEdit(customer)} size="small">
                     <EditIcon />

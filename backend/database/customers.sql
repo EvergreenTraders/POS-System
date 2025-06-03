@@ -67,8 +67,7 @@ COMMENT ON COLUMN customers.status IS 'Current status of the customer account';
 COMMENT ON COLUMN customers.notes IS 'Additional notes or comments about the customer';
 
 -- Create customer_headers_preferences table for saving customer headers and preferences
-DROP TABLE IF EXISTS customer_headers_preferences CASCADE;
-CREATE TABLE customer_headers_preferences (
+CREATE TABLE IF NOT EXISTS customer_headers_preferences (
     id SERIAL PRIMARY KEY,
     
     -- Header configuration
@@ -109,26 +108,13 @@ CREATE TRIGGER update_customer_preferences_timestamp
     BEFORE UPDATE ON customer_headers_preferences
     FOR EACH ROW
     EXECUTE FUNCTION update_customer_timestamp();
+    
+-- Add image-related columns to the customer_headers_preferences table
+ALTER TABLE customer_headers_preferences
+ADD COLUMN IF NOT EXISTS show_image BOOLEAN DEFAULT TRUE,
+ADD COLUMN IF NOT EXISTS show_id_image_front BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS show_id_image_back BOOLEAN DEFAULT FALSE;
 
 -- Add comments for documentation
 COMMENT ON TABLE customer_headers_preferences IS 'Stores configuration for customer headers and display preferences with one boolean column per customer field';
 COMMENT ON COLUMN customer_headers_preferences.header_style IS 'Visual style of customer headers (standard, compact, detailed)';
-
--- Insert default customer preferences
-INSERT INTO customer_headers_preferences (
-    -- Header configuration
-    display_header, header_style, 
-    -- Customer header fields
-    show_id, show_first_name, show_last_name, show_email, show_phone, 
-    show_address_line1, show_address_line2, show_city, show_state, show_postal_code, show_country,
-    show_id_type, show_id_number, show_id_expiry, show_gender, 
-    show_height, show_weight, show_date_of_birth, show_status, show_risk_level, show_notes
-) VALUES (
-    -- Header configuration
-    TRUE, 'standard',
-    -- Customer header fields
-    TRUE, TRUE, TRUE, TRUE, TRUE,
-    TRUE, FALSE, TRUE, TRUE, FALSE, FALSE,
-    TRUE, TRUE, FALSE, FALSE,
-    FALSE, FALSE, FALSE, TRUE, TRUE, FALSE
-);
