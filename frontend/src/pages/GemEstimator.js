@@ -1657,13 +1657,26 @@ function GemEstimator() {
     // Add items to cart before navigation
     updatedItems.forEach(item => addToCart(item));
     
-    // Navigate to customer manager
-    navigate('/customer', { 
-      state: { 
-        items: updatedItems,
-        from: 'estimator' 
-      } 
-    });
+    const customerData = location.state?.customer;
+
+    if (customerData) {
+      // If customer exists, navigate to checkout page with customer and items
+      navigate('/checkout', {
+        state: {
+          customer: customerData,
+          items: updatedItems,
+          from: 'estimator'
+        }
+      });
+    } else {
+      // Otherwise, navigate to customer manager to select or create a customer
+      navigate('/customer', {
+        state: {
+          items: updatedItems,
+          from: 'estimator'
+        }
+      });
+    }
   };
 
   useEffect(() => {

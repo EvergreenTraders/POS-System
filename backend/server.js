@@ -1261,7 +1261,43 @@ app.post('/api/jewelry', async (req, res) => {
     
     // Process each item sequentially
     let itemCounter = 1; // Counter for sequential numbers
-    for (const item of cartItems) {
+    
+    // Process cart items to ensure proper format for PostgreSQL
+    const processedCartItems = cartItems.map(item => {
+      // Handle images to ensure proper JSON format
+      let processedImages;
+      
+      if (item.images) {
+        if (typeof item.images === 'string') {
+          try {
+            processedImages = JSON.parse(item.images);
+          } catch (e) {
+            processedImages = [];
+          }
+        } else if (Array.isArray(item.images)) {
+          // Convert each image object to a simple URL string or a proper JSON object
+          processedImages = item.images.map(img => {
+            if (typeof img === 'object') {
+              return {
+                url: img.url || ''
+              };
+            }
+            return img;
+          });
+        } else {
+          processedImages = [];
+        }
+      } else {
+        processedImages = [];
+      }
+      
+      return {
+        ...item,
+        images: processedImages
+      };
+    });
+    
+    for (const item of processedCartItems) {
       // Use quote_id as item_id if provided, otherwise generate a new one
       let item_id, status;
       if (quote_id) {
@@ -1341,7 +1377,7 @@ app.post('/api/jewelry', async (req, res) => {
         item.damages || '',                                     // $6
         item.vintage || false,                                 // $7
         item.stamps || '',                                     // $8
-        item.images || [],                                     // $9
+        JSON.stringify(item.images || []),                      // $9 - Ensure proper JSON string format
         parseFloat(item.metal_weight) || 0,                       // $10
         item.precious_metal_type || '',                           // $11
         item.non_precious_metal_type || '',                       // $12

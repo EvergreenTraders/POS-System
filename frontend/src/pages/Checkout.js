@@ -67,6 +67,27 @@ function Checkout() {
   const [currentTransactionId, setCurrentTransactionId] = useState(null);
   const [payments, setPayments] = useState([]);
 
+  // Effect to initialize cart and customer from GemEstimator navigation
+  useEffect(() => {
+    if (location.state?.from === 'estimator' && location.state?.items && location.state?.customer && !isInitialized) {
+      console.log('Initializing checkout with items:', location.state.items);
+      // Clear existing cart items before adding new ones from estimator
+      clearCart(); 
+      
+      // Ensure each item is added individually to the cart
+      if (Array.isArray(location.state.items)) {
+        location.state.items.forEach(item => addToCart(item));
+      }
+      
+      // Set checkoutItems for display
+      setCheckoutItems(location.state.items);
+      
+      // Set the customer
+      setCustomer(location.state.customer);
+      setIsInitialized(true); // Mark as initialized to prevent re-running
+    }
+  }, [location.state, addToCart, setCustomer, clearCart, isInitialized]);
+
   // Initialize or update remaining amount when cart changes
   useEffect(() => {
     const total = calculateTotal();
@@ -185,16 +206,40 @@ function Checkout() {
           createdJewelryItems = convertResponse.data;
         } else {
           // If coming from estimator, create new jewelry items
+          
+          // Process the cart items to ensure images are in the correct format
+          const processedCartItems = cartItems.map(item => {
+            // Create a deep copy of the item without the images property
+            const { images, ...itemWithoutImages } = item;
+            
+            // Process images to ensure they're in a format the backend can handle
+            let processedImages = [];
+            if (images && Array.isArray(images)) {
+              // Extract only the URL from each image object
+              processedImages = images.map(img => {
+                if (typeof img === 'object') {
+                  return { url: img.url || '' };
+                }
+                return img;
+              });
+            }
+            
+            // Return the item with processed images
+            return {
+              ...itemWithoutImages,
+              images: processedImages
+            };
+          });
+                    
           const jewelryResponse = await axios.post(
             `${config.apiUrl}/jewelry`,
-            { cartItems },
+            { cartItems: processedCartItems },
             {
               headers: { Authorization: `Bearer ${token}` }
             }
           );
           createdJewelryItems = jewelryResponse.data;
         }
-
         // Create transactions for all items
         const transactionResponse = await axios.post(
           `${config.apiUrl}/transactions`,
@@ -509,14 +554,15 @@ function Checkout() {
                   </TableHead>
                   <TableBody>
                     {checkoutItems.map((item, index) => {
+                    
                       // Determine the appropriate description to display
                       let displayDescription = '';
                       
                       // Try to use description field first (most common)
-                      if (item.description) {
-                        displayDescription = item.description;
-                        if (item.category) {
-                          displayDescription += ` (${item.category})`;
+                      if (item.long_desc) {
+                        displayDescription = item.long_desc;
+                        if (item.metal_category) {
+                          displayDescription += ` (${item.metal_category})`;
                         }
                       }
                       // Fallback to short_desc if present
