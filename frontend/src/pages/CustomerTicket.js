@@ -33,6 +33,8 @@ function bufferToDataUrl(bufferObj) {
 }
 
 const CustomerTicket = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   // State for customer lookup mode
   const [showLookupForm, setShowLookupForm] = useState(false);
   const [searchForm, setSearchForm] = useState({
@@ -231,8 +233,7 @@ const CustomerTicket = () => {
     transactions: Math.floor(Math.random() * 20) + 1,
     itemsCount: Math.floor(Math.random() * 15) + 1
   };
-  const location = useLocation();
-  const navigate = useNavigate();
+
   const { user } = useAuth(); // Get user at component level
   
   // Get customer from location state or session storage
@@ -370,7 +371,8 @@ const CustomerTicket = () => {
           category: item.metal_category || 'Jewelry',
           // Store the original estimator data for editing
           originalData: { ...item },
-          sourceEstimator: 'jewelry'
+          sourceEstimator: 'jewelry',
+          image: item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url || null
         };
         
         // Add to appropriate array based on transaction type
@@ -530,19 +532,25 @@ const CustomerTicket = () => {
     switch(targetTabIndex) {
       case 0: // Pawn
         newItem = {
+          image: itemToConvert.image,
+          images: itemToConvert.images,
           id: Math.max(...pawnItems.map(i => i.id), 0) + 1,
           description: itemToConvert.description || '',
           category: itemToConvert.category || '',
-          value: itemToConvert.price || itemToConvert.value || ''
+          value: Number(itemToConvert.price || 0),
+          originalData: itemToConvert.originalData
         };
         setPawnItems([...pawnItems, newItem]);
         break;
       case 1: // Buy
         newItem = {
+          image: itemToConvert.image,
+          images: itemToConvert.images,
           id: Math.max(...buyItems.map(i => i.id), 0) + 1,
           description: itemToConvert.description || '',
           category: itemToConvert.category || '',
-          price: itemToConvert.price || itemToConvert.value || ''
+          price: Number(itemToConvert.value || 0),
+          originalData: itemToConvert.originalData
         };
         setBuyItems([...buyItems, newItem]);
         break;
@@ -558,11 +566,14 @@ const CustomerTicket = () => {
         break;
       case 3: // Sale
         newItem = {
+          image: itemToConvert.image,
+          images: itemToConvert.images,
           id: Math.max(...saleItems.map(i => i.id), 0) + 1,
           description: itemToConvert.description || '',
           category: itemToConvert.category || '',
-          price: itemToConvert.price || itemToConvert.value || '',
-          paymentMethod: ''
+          price: Number(itemToConvert.value || 0),
+          paymentMethod: '',
+          originalData: itemToConvert.originalData
         };
         setSaleItems([...saleItems, newItem]);
         break;
@@ -902,17 +913,44 @@ const CustomerTicket = () => {
     return '/placeholder-profile.png';
   };
 
-  return (
-    <Container maxWidth="lg" sx={{ mt: 2, mb: 2 }}>
-      <Paper sx={{ p: 2, borderRadius: 2 }}>
-        {/* Customer Info Section - Top 30% */}
-        <Box sx={{ 
-          height: '30vh', 
-          maxHeight: '30%', 
-          display: 'flex', 
-          flexDirection: 'row',
-          justifyContent: 'space-between'
-        }}>
+  // Determine item image source
+  const getItemImageSource = (item) => {
+    // Handle case where item has no image
+    if (!item || !item.image) {
+      // Check for legacy format
+      if (item && item.images && item.images.length > 0) {
+        return item.images[0].url;
+      }
+      return null;
+    }
+    
+    if (item.image.file instanceof File || item.image.file instanceof Blob) {
+      return URL.createObjectURL(item.image.file);
+    } else if (item.image.url) {
+      return item.image.url;
+    } else if (typeof item.image === 'string') {
+      return item.image;
+    } else if (item.image && item.image.data) {
+      return bufferToDataUrl(item.image);
+    }
+    return null;
+  };
+
+
+// Use existing handleCheckout, formatDate, getImageSource and getItemImageSource functions that were already defined
+// We removed the duplicate function declarations here to fix syntax errors
+
+return (
+  <Container maxWidth="lg" sx={{ mt: 2, mb: 2 }}>
+    <Paper sx={{ p: 2, borderRadius: 2 }}>
+      {/* Customer Info Section - Top 30% */}
+      <Box sx={{ 
+        height: '30vh', 
+        maxHeight: '30%', 
+        display: 'flex', 
+        flexDirection: 'row',
+        justifyContent: 'space-between'
+      }}>
           {/* Left side - Customer Info or Lookup */}
           <Box sx={{ 
             display: 'flex', 
@@ -1161,9 +1199,9 @@ const CustomerTicket = () => {
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  {item.images && item.images.length > 0 ? (
+                                  {item.image ? (
                                     <img 
-                                      src={item.images[0].url} 
+                                      src={item.image} 
                                       alt="Item" 
                                       style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
                                     />
@@ -1287,9 +1325,9 @@ const CustomerTicket = () => {
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  {item.images && item.images.length > 0 ? (
+                                  {item.image ? (
                                     <img 
-                                      src={item.images[0].url} 
+                                      src={item.image} 
                                       alt="Item" 
                                       style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
                                     />
