@@ -1261,7 +1261,43 @@ app.post('/api/jewelry', async (req, res) => {
     
     // Process each item sequentially
     let itemCounter = 1; // Counter for sequential numbers
-    for (const item of cartItems) {
+    
+    // Process cart items to ensure proper format for PostgreSQL
+    const processedCartItems = cartItems.map(item => {
+      // Handle images to ensure proper JSON format
+      let processedImages;
+      
+      if (item.images) {
+        if (typeof item.images === 'string') {
+          try {
+            processedImages = JSON.parse(item.images);
+          } catch (e) {
+            processedImages = [];
+          }
+        } else if (Array.isArray(item.images)) {
+          // Convert each image object to a simple URL string or a proper JSON object
+          processedImages = item.images.map(img => {
+            if (typeof img === 'object') {
+              return {
+                url: img.url || ''
+              };
+            }
+            return img;
+          });
+        } else {
+          processedImages = [];
+        }
+      } else {
+        processedImages = [];
+      }
+      
+      return {
+        ...item,
+        images: processedImages
+      };
+    });
+    
+    for (const item of processedCartItems) {
       // Use quote_id as item_id if provided, otherwise generate a new one
       let item_id, status;
       if (quote_id) {
@@ -1273,7 +1309,7 @@ app.post('/api/jewelry', async (req, res) => {
       } else {
         // Generate unique item ID for non-quote items
         const usedIds = new Set();
-        item_id = await generateItemId(item.metal_category, client, usedIds);
+        item_id = await generateItemId(item.category, client, usedIds);
         status = 'HOLD';
       }
       // Insert jewelry record
@@ -1336,12 +1372,12 @@ app.post('/api/jewelry', async (req, res) => {
         item_id,                                              // $1
         item.long_desc || '',                                    // $2
         item.short_desc || '',                             // $3
-        item.metal_category || '',                                // $4
+        item.category || '',                                // $4
         item.brand || '',                                       // $5
         item.damages || '',                                     // $6
         item.vintage || false,                                 // $7
         item.stamps || '',                                     // $8
-        item.images || [],                                     // $9
+        JSON.stringify(item.images || []),                      // $9 - Ensure proper JSON string format
         parseFloat(item.metal_weight) || 0,                       // $10
         item.precious_metal_type || '',                           // $11
         item.non_precious_metal_type || '',                       // $12

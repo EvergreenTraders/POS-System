@@ -68,6 +68,54 @@ function Jewellery() {
     return price.toFixed(2);
   };
 
+  // Helper function to extract image URL from various image formats
+  const getImageUrl = (images) => {
+    // Default placeholder image
+    const placeholderImage = 'https://via.placeholder.com/150';
+    
+    try {
+      // If images is a string (JSON string), try to parse it
+      if (typeof images === 'string') {
+        try {
+          images = JSON.parse(images);
+        } catch (e) {
+          console.log('Failed to parse images string:', e);
+          return placeholderImage;
+        }
+      }
+      
+      // If no images or empty array
+      if (!images || !Array.isArray(images) || images.length === 0) {
+        return placeholderImage;
+      }
+      
+      // Try to find the primary image first
+      const primaryImage = images.find(img => img.isPrimary === true || img.is_primary === true);
+      
+      // If primary image found
+      if (primaryImage) {
+        // Check for different possible URL structures
+        if (primaryImage.url) return primaryImage.url;
+        if (primaryImage.image_url) return primaryImage.image_url;
+        if (typeof primaryImage === 'string') return primaryImage;
+      }
+      
+      // Otherwise use the first image
+      const firstImage = images[0];
+      if (firstImage) {
+        if (firstImage.url) return firstImage.url;
+        if (firstImage.image_url) return firstImage.image_url;
+        if (typeof firstImage === 'string') return firstImage;
+      }
+      
+      // Default to placeholder if no valid images found
+      return placeholderImage;
+    } catch (error) {
+      console.error('Error processing image:', error);
+      return placeholderImage;
+    }
+  };
+
   // Filter jewelry items based on search queries and status
   const filteredItems = jewelryItems.filter(item => {
     // Exclude items with 'quoted' status
@@ -75,7 +123,7 @@ function Jewellery() {
     
     const matchesSearch = searchQuery === '' || 
       item.short_desc?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.metal_category?.toLowerCase().includes(searchQuery.toLowerCase());
+      item.category?.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesSerial = serialQuery === '' || 
       item.item_id?.toLowerCase().includes(serialQuery.toLowerCase());
@@ -132,7 +180,7 @@ function Jewellery() {
               color="primary"
               onClick={() => navigate('/gem-estimator')}
             >
-              Estimator
+              Estimator 
             </Button>
           </Box>
 
@@ -211,10 +259,7 @@ function Jewellery() {
                 {/* Image */}
                 <Box sx={{ width: '120px', height: '120px', flexShrink: 0 }}>
                   <img 
-                    src={Array.isArray(selectedItem.images) ? 
-                      (selectedItem.images.find(img => img.is_primary)?.image_url || 
-                       selectedItem.images[0]?.image_url) : 
-                      'placeholder-image-url.jpg'} 
+                    src={getImageUrl(selectedItem.images)}
                     alt={selectedItem.name || 'Item'}
                     style={{
                       width: '100%',

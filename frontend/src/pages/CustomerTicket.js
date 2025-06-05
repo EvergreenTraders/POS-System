@@ -33,6 +33,8 @@ function bufferToDataUrl(bufferObj) {
 }
 
 const CustomerTicket = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   // State for customer lookup mode
   const [showLookupForm, setShowLookupForm] = useState(false);
   const [searchForm, setSearchForm] = useState({
@@ -231,8 +233,7 @@ const CustomerTicket = () => {
     transactions: Math.floor(Math.random() * 20) + 1,
     itemsCount: Math.floor(Math.random() * 15) + 1
   };
-  const location = useLocation();
-  const navigate = useNavigate();
+
   const { user } = useAuth(); // Get user at component level
   
   // Get customer from location state or session storage
@@ -278,6 +279,7 @@ const CustomerTicket = () => {
     if (location.state?.updatedItem && location.state?.ticketItemId && location.state?.fromEstimator === 'jewelry') {
       const updatedItem = location.state.updatedItem;
       const ticketItemId = location.state.ticketItemId;
+      const isDuplicate = location.state?.isDuplicate || false;
       
       // Create a base item with common properties from the updated item
       const baseItem = {
@@ -288,6 +290,12 @@ const CustomerTicket = () => {
         originalData: { ...updatedItem },
         sourceEstimator: 'jewelry'
       };
+      
+      // Adding image if available
+      if (updatedItem.images && updatedItem.images.length > 0) {
+        baseItem.image = updatedItem.images.find(img => img.isPrimary)?.url || updatedItem.images[0]?.url;
+        baseItem.images = updatedItem.images;
+      }
       
       // Update the appropriate item array based on transaction type
       const transactionType = updatedItem.transaction_type || 'buy';
@@ -303,6 +311,11 @@ const CustomerTicket = () => {
                 ...baseItem,
                 value: updatedItem.price || updatedItem.price_estimates?.pawn || 0
               };
+              // Show success message
+              showSnackbar(isDuplicate ? 'Item duplicated and updated successfully' : 'Item updated successfully', 'success');
+            } else {
+              // Item not found - might have been deleted while in editor
+              showSnackbar('Could not find item to update', 'error');
             }
             
             return updatedItems;
@@ -319,6 +332,11 @@ const CustomerTicket = () => {
                 ...baseItem,
                 price: updatedItem.price || updatedItem.price_estimates?.buy || 0
               };
+              // Show success message
+              showSnackbar(isDuplicate ? 'Item duplicated and updated successfully' : 'Item updated successfully', 'success');
+            } else {
+              // Item not found - might have been deleted while in editor
+              showSnackbar('Could not find item to update', 'error');
             }
             
             return updatedItems;
@@ -326,6 +344,7 @@ const CustomerTicket = () => {
           break;
           
         case 'sale':
+        case 'retail': // Handle both 'sale' and 'retail' the same way
           setSaleItems(prevItems => {
             const updatedItems = [...prevItems];
             const itemIndex = updatedItems.findIndex(item => item.id === ticketItemId);
@@ -336,6 +355,11 @@ const CustomerTicket = () => {
                 price: updatedItem.price || updatedItem.price_estimates?.retail || 0,
                 paymentMethod: prevItems[itemIndex].paymentMethod || ''
               };
+              // Show success message
+              showSnackbar(isDuplicate ? 'Item duplicated and updated successfully' : 'Item updated successfully', 'success');
+            } else {
+              // Item not found - might have been deleted while in editor
+              showSnackbar('Could not find item to update', 'error');
             }
             
             return updatedItems;
@@ -344,6 +368,23 @@ const CustomerTicket = () => {
           
         default:
           console.log('Unknown transaction type for updated item:', transactionType);
+          showSnackbar('Unknown transaction type: ' + transactionType, 'warning');
+      }
+      
+      // Set the active tab to match the transaction type
+      switch(transactionType) {
+        case 'pawn':
+          setActiveTab(0);
+          break;
+        case 'buy':
+          setActiveTab(1);
+          break;
+        case 'sale':
+        case 'retail':
+          setActiveTab(3);
+          break;
+        default:
+          // Keep current tab
       }
       
       // Clear the location state to prevent reapplying the update
@@ -367,10 +408,11 @@ const CustomerTicket = () => {
         const baseItem = {
           id: index + 1,
           description: `${item.metal_weight}g ${item.metal_purity} ${item.precious_metal_type} ${item.metal_category}${item.free_text ? ` - ${item.free_text}` : ''}`,
-          category: item.metal_category || 'Jewelry',
+          category: item.category || 'Jewelry',
           // Store the original estimator data for editing
           originalData: { ...item },
-          sourceEstimator: 'jewelry'
+          sourceEstimator: 'jewelry',
+          image: item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url || null
         };
         
         // Add to appropriate array based on transaction type
@@ -482,10 +524,52 @@ const CustomerTicket = () => {
     const itemToDuplicate = items.find(item => item.id === id);
     if (!itemToDuplicate) return;
     
+    // Create a new duplicate item with a new ID
     const newId = Math.max(...items.map(item => item.id)) + 1;
     const newItem = { ...itemToDuplicate, id: newId };
     
+    // First add the duplicate to the current list
     setItems([...items, newItem]);
+    
+    // We need to delete the duplicate to avoid having both the duplicate and the new item
+    setTimeout(() => {
+      const { items, setItems } = getCurrentItems();
+      setItems(items.filter(item => item.id !== newId));
+    }, 100); // Small delay to ensure state update completes
+    
+    // Then navigate to gem-estimator if it's a jewelry item
+    if (itemToDuplicate.sourceEstimator === 'jewelry' && itemToDuplicate.originalData) {
+      // Include a special flag to identify this is a duplicate operation
+      navigate('/gem-estimator', { 
+        state: { 
+          customer,
+          editMode: true, 
+          itemToEdit: itemToDuplicate.originalData,
+          // No returnToTicket flag, so user can manually add to ticket
+          fromDuplicate: true // Indicate this came from duplicating an item
+        } 
+      });
+    } else if (itemToDuplicate.category?.toLowerCase().includes('jewelry') || 
+               itemToDuplicate.category?.toLowerCase().includes('jewellery')) {
+      // If it's jewelry but not from estimator, still go to jewelry estimator
+      const description = itemToDuplicate.description || '';
+      navigate('/gem-estimator', { 
+        state: { 
+          customer,
+          editMode: true, 
+          itemToEdit: {
+            free_text: description,
+            category: itemToDuplicate.category,
+            price: itemToDuplicate.price || itemToDuplicate.value,
+            transaction_type: activeTab === 0 ? 'pawn' : 
+                            activeTab === 1 ? 'buy' : 
+                            activeTab === 3 ? 'retail' : 'buy'
+          },
+          // No returnToTicket flag, so user can manually add to ticket
+          fromDuplicate: true // Indicate this came from duplicating an item
+        }
+      });
+    }
   };
   
   // Handle deleting an item
@@ -530,19 +614,25 @@ const CustomerTicket = () => {
     switch(targetTabIndex) {
       case 0: // Pawn
         newItem = {
+          image: itemToConvert.image,
+          images: itemToConvert.images,
           id: Math.max(...pawnItems.map(i => i.id), 0) + 1,
           description: itemToConvert.description || '',
           category: itemToConvert.category || '',
-          value: itemToConvert.price || itemToConvert.value || ''
+          value: Number(itemToConvert.price || 0),
+          originalData: itemToConvert.originalData
         };
         setPawnItems([...pawnItems, newItem]);
         break;
       case 1: // Buy
         newItem = {
+          image: itemToConvert.image,
+          images: itemToConvert.images,
           id: Math.max(...buyItems.map(i => i.id), 0) + 1,
           description: itemToConvert.description || '',
           category: itemToConvert.category || '',
-          price: itemToConvert.price || itemToConvert.value || ''
+          price: Number(itemToConvert.value || 0),
+          originalData: itemToConvert.originalData
         };
         setBuyItems([...buyItems, newItem]);
         break;
@@ -558,11 +648,14 @@ const CustomerTicket = () => {
         break;
       case 3: // Sale
         newItem = {
+          image: itemToConvert.image,
+          images: itemToConvert.images,
           id: Math.max(...saleItems.map(i => i.id), 0) + 1,
           description: itemToConvert.description || '',
           category: itemToConvert.category || '',
-          price: itemToConvert.price || itemToConvert.value || '',
-          paymentMethod: ''
+          price: Number(itemToConvert.value || 0),
+          paymentMethod: '',
+          originalData: itemToConvert.originalData
         };
         setSaleItems([...saleItems, newItem]);
         break;
@@ -639,7 +732,7 @@ const CustomerTicket = () => {
           customer,
           editMode: true,
           itemToEdit: itemToEdit.originalData,
-          returnToTicket: true,
+         // returnToTicket: true,
           ticketItemId: itemId
         } 
       });
@@ -654,13 +747,13 @@ const CustomerTicket = () => {
           editMode: true,
           itemToEdit: {
             free_text: description,
-            metal_category: itemToEdit.category,
+            category: itemToEdit.category,
             price: itemToEdit.price || itemToEdit.value,
             transaction_type: activeTab === 0 ? 'pawn' : 
                             activeTab === 1 ? 'buy' : 
                             activeTab === 3 ? 'retail' : 'buy'
           },
-          returnToTicket: true,
+       //   returnToTicket: true,
           ticketItemId: itemId
         }
       });
@@ -902,17 +995,44 @@ const CustomerTicket = () => {
     return '/placeholder-profile.png';
   };
 
-  return (
-    <Container maxWidth="lg" sx={{ mt: 2, mb: 2 }}>
-      <Paper sx={{ p: 2, borderRadius: 2 }}>
-        {/* Customer Info Section - Top 30% */}
-        <Box sx={{ 
-          height: '30vh', 
-          maxHeight: '30%', 
-          display: 'flex', 
-          flexDirection: 'row',
-          justifyContent: 'space-between'
-        }}>
+  // Determine item image source
+  const getItemImageSource = (item) => {
+    // Handle case where item has no image
+    if (!item || !item.image) {
+      // Check for legacy format
+      if (item && item.images && item.images.length > 0) {
+        return item.images[0].url;
+      }
+      return null;
+    }
+    
+    if (item.image.file instanceof File || item.image.file instanceof Blob) {
+      return URL.createObjectURL(item.image.file);
+    } else if (item.image.url) {
+      return item.image.url;
+    } else if (typeof item.image === 'string') {
+      return item.image;
+    } else if (item.image && item.image.data) {
+      return bufferToDataUrl(item.image);
+    }
+    return null;
+  };
+
+
+// Use existing handleCheckout, formatDate, getImageSource and getItemImageSource functions that were already defined
+// We removed the duplicate function declarations here to fix syntax errors
+
+return (
+  <Container maxWidth="lg" sx={{ mt: 2, mb: 2 }}>
+    <Paper sx={{ p: 2, borderRadius: 2 }}>
+      {/* Customer Info Section - Top 30% */}
+      <Box sx={{ 
+        height: '30vh', 
+        maxHeight: '30%', 
+        display: 'flex', 
+        flexDirection: 'row',
+        justifyContent: 'space-between'
+      }}>
           {/* Left side - Customer Info or Lookup */}
           <Box sx={{ 
             display: 'flex', 
@@ -1161,9 +1281,9 @@ const CustomerTicket = () => {
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  {item.images && item.images.length > 0 ? (
+                                  {item.image ? (
                                     <img 
-                                      src={item.images[0].url} 
+                                      src={item.image} 
                                       alt="Item" 
                                       style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
                                     />
@@ -1287,9 +1407,9 @@ const CustomerTicket = () => {
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  {item.images && item.images.length > 0 ? (
+                                  {item.image ? (
                                     <img 
-                                      src={item.images[0].url} 
+                                      src={item.image} 
                                       alt="Item" 
                                       style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
                                     />

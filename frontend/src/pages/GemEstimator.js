@@ -140,7 +140,7 @@ function GemEstimator() {
       precious_metal_type: addMetal[0]?.preciousMetalType,
       non_precious_metal_type: addMetal[0]?.nonPreciousMetalType || null,
       metal_purity: addMetal[0]?.purity?.purity || addMetal[0]?.purity?.value,
-      metal_category: addMetal[0]?.metalCategory,
+      category: addMetal[0]?.metalCategory,
       jewelry_color: addMetal[0]?.jewelryColor,
       metal_spot_price: addMetal[0]?.spotPrice,
       est_metal_value: addMetal[0]?.estimatedValue?.toFixed(2),
@@ -228,7 +228,6 @@ function GemEstimator() {
 
     // If we're in edit mode and need to return to the ticket
     if (editMode && returnToTicket && location.state?.customer) {
-      console.log('Returning to ticket with updated item', itemWithPrices);
       navigate('/customer-ticket', { 
         state: { 
           customer: location.state.customer,
@@ -354,14 +353,13 @@ function GemEstimator() {
     // Check if we're in edit mode and have an item to edit
     if (location.state?.editMode && location.state?.itemToEdit) {
       const itemToEdit = location.state.itemToEdit;
-      console.log('Edit mode active. Item to edit:', itemToEdit);
       
       // Set form values based on the item being edited
       if (itemToEdit.metal_weight) {
         // This is likely a metal item with jewelry properties
         // Pre-fill metal form with item data
         setMetalFormState({
-          metalCategory: itemToEdit.metal_category || '',
+          metalCategory: itemToEdit.category || '',
           weight: itemToEdit.metal_weight || '',
           preciousMetalType: itemToEdit.precious_metal_type || '',
           purity: { value: itemToEdit.metal_purity || '' },
@@ -389,7 +387,7 @@ function GemEstimator() {
         
         // Add item to the addMetal state to display it
         const metalItem = {
-          metalCategory: itemToEdit.metal_category || '',
+          metalCategory: itemToEdit.category || '',
           weight: itemToEdit.metal_weight || '',
           preciousMetalType: itemToEdit.precious_metal_type || '',
           purity: { value: itemToEdit.metal_purity || '', purity: itemToEdit.metal_purity || '' },
@@ -1598,20 +1596,46 @@ function GemEstimator() {
   };
 
   const handleAddToTicket = () => {
-    // Get customer data from Home.js (if it was passed)
     const customerData = location.state?.customer;
     
-    // Prepare items with proper price for the selected transaction type
-    const processedItems = estimatedItems.map((item) => ({
-      ...item,
-      price: item.price_estimates[item.transaction_type],
-      free_text: item.free_text
-    }));
+    // Process items with a simplified approach similar to handleCheckout
+    const processedItems = estimatedItems.map((item) => {
+      // Preserve original images if they exist
+      let itemImages = [];
+      
+      // If item already has images array, use it
+      if (item.images && Array.isArray(item.images)) {
+        itemImages = [...item.images]; // Create a copy to avoid reference issues
+      } 
+      // If item has a single image object, convert to array
+      else if (item.image && (item.image.url || item.image.data)) {
+        itemImages = [{
+          url: item.image.url || '',
+          data: item.image.data || null,
+          isPrimary: true
+        }];
+      }
+      
+      // For testing, add a dummy image if no images exist
+      if (itemImages.length === 0) {
+        itemImages = [{
+          url: 'https://via.placeholder.com/150',
+          isPrimary: true
+        }];
+      }
+      
+      // Similar to handleCheckout, create a clean processed item
+      return {
+        ...item, // Include all item properties
+        price: item.price_estimates[item.transaction_type],
+        free_text: item.free_text,
+        images: itemImages
+      };
+    });
     
-    // Navigate to CustomerTicket.js with the customer data and estimated items
     navigate('/customer-ticket', {
       state: {
-        customer: customerData, // Pass customer data to CustomerTicket.js
+        customer: customerData,
         estimatedItems: processedItems,
         from: 'gemEstimator'
       }
@@ -1625,28 +1649,41 @@ function GemEstimator() {
       price: item.price_estimates[item.transaction_type],
       free_text: item.free_text
     }));
-    
+
     sessionStorage.setItem('estimationState', JSON.stringify({
       items: updatedItems
     }));
     
     // Add items to cart before navigation
     updatedItems.forEach(item => addToCart(item));
-    console.log("updatedItems",updatedItems);
     
-    // Navigate to customer manager
-    navigate('/customer', { 
-      state: { 
-        items: updatedItems,
-        from: 'estimator' 
-      } 
-    });
+    const customerData = location.state?.customer;
+
+    if (customerData) {
+      // If customer exists, navigate to checkout page with customer and items
+      navigate('/checkout', {
+        state: {
+          customer: customerData,
+          items: updatedItems,
+          from: 'estimator'
+        }
+      });
+    } else {
+      // Otherwise, navigate to customer manager to select or create a customer
+      navigate('/customer', {
+        state: {
+          items: updatedItems,
+          from: 'estimator'
+        }
+      });
+    }
   };
 
   useEffect(() => {
     // Try to restore state from location or session storage
     if (!estimatedItems.length) {
       const savedState = sessionStorage.getItem('estimationState');
+
       if (savedState) {
         const parsedState = JSON.parse(savedState);
         setAddMetal(parsedState.addMetal ? [parsedState.addMetal] : []);
@@ -2512,7 +2549,7 @@ function GemEstimator() {
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Box>
                             <Typography sx={{ fontWeight: 500, mb: 0.2 }}>
-                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.metal_category}
+                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.category}
                             </Typography>
                             <TextField
                               variant="standard"
