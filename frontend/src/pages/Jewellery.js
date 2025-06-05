@@ -123,7 +123,7 @@ function Jewellery() {
     
     const matchesSearch = searchQuery === '' || 
       item.short_desc?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.metal_category?.toLowerCase().includes(searchQuery.toLowerCase());
+      item.category?.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesSerial = serialQuery === '' || 
       item.item_id?.toLowerCase().includes(serialQuery.toLowerCase());

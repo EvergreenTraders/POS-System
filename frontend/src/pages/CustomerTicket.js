@@ -368,7 +368,7 @@ const CustomerTicket = () => {
         const baseItem = {
           id: index + 1,
           description: `${item.metal_weight}g ${item.metal_purity} ${item.precious_metal_type} ${item.metal_category}${item.free_text ? ` - ${item.free_text}` : ''}`,
-          category: item.metal_category || 'Jewelry',
+          category: item.category || 'Jewelry',
           // Store the original estimator data for editing
           originalData: { ...item },
           sourceEstimator: 'jewelry',
@@ -665,7 +665,7 @@ const CustomerTicket = () => {
           editMode: true,
           itemToEdit: {
             free_text: description,
-            metal_category: itemToEdit.category,
+            category: itemToEdit.category,
             price: itemToEdit.price || itemToEdit.value,
             transaction_type: activeTab === 0 ? 'pawn' : 
                             activeTab === 1 ? 'buy' : 

@@ -559,10 +559,10 @@ function Checkout() {
                       let displayDescription = '';
                       
                       // Try to use description field first (most common)
-                      if (item.long_desc) {
-                        displayDescription = item.long_desc;
-                        if (item.metal_category) {
-                          displayDescription += ` (${item.metal_category})`;
+                      if (item.long_desc || item.description) {
+                        displayDescription = item.long_desc || item.description;
+                        if (item.category) {
+                          displayDescription += " "+ item.category;
                         }
                       }
                       // Fallback to short_desc if present

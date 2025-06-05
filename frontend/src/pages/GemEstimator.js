@@ -140,7 +140,7 @@ function GemEstimator() {
       precious_metal_type: addMetal[0]?.preciousMetalType,
       non_precious_metal_type: addMetal[0]?.nonPreciousMetalType || null,
       metal_purity: addMetal[0]?.purity?.purity || addMetal[0]?.purity?.value,
-      metal_category: addMetal[0]?.metalCategory,
+      category: addMetal[0]?.metalCategory,
       jewelry_color: addMetal[0]?.jewelryColor,
       metal_spot_price: addMetal[0]?.spotPrice,
       est_metal_value: addMetal[0]?.estimatedValue?.toFixed(2),
@@ -359,7 +359,7 @@ function GemEstimator() {
         // This is likely a metal item with jewelry properties
         // Pre-fill metal form with item data
         setMetalFormState({
-          metalCategory: itemToEdit.metal_category || '',
+          metalCategory: itemToEdit.category || '',
           weight: itemToEdit.metal_weight || '',
           preciousMetalType: itemToEdit.precious_metal_type || '',
           purity: { value: itemToEdit.metal_purity || '' },
@@ -387,7 +387,7 @@ function GemEstimator() {
         
         // Add item to the addMetal state to display it
         const metalItem = {
-          metalCategory: itemToEdit.metal_category || '',
+          metalCategory: itemToEdit.category || '',
           weight: itemToEdit.metal_weight || '',
           preciousMetalType: itemToEdit.precious_metal_type || '',
           purity: { value: itemToEdit.metal_purity || '', purity: itemToEdit.metal_purity || '' },
@@ -2549,7 +2549,7 @@ function GemEstimator() {
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Box>
                             <Typography sx={{ fontWeight: 500, mb: 0.2 }}>
-                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.metal_category}
+                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.category}
                             </Typography>
                             <TextField
                               variant="standard"
