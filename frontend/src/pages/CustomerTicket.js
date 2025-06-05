@@ -279,6 +279,7 @@ const CustomerTicket = () => {
     if (location.state?.updatedItem && location.state?.ticketItemId && location.state?.fromEstimator === 'jewelry') {
       const updatedItem = location.state.updatedItem;
       const ticketItemId = location.state.ticketItemId;
+      const isDuplicate = location.state?.isDuplicate || false;
       
       // Create a base item with common properties from the updated item
       const baseItem = {
@@ -289,6 +290,12 @@ const CustomerTicket = () => {
         originalData: { ...updatedItem },
         sourceEstimator: 'jewelry'
       };
+      
+      // Adding image if available
+      if (updatedItem.images && updatedItem.images.length > 0) {
+        baseItem.image = updatedItem.images.find(img => img.isPrimary)?.url || updatedItem.images[0]?.url;
+        baseItem.images = updatedItem.images;
+      }
       
       // Update the appropriate item array based on transaction type
       const transactionType = updatedItem.transaction_type || 'buy';
@@ -304,6 +311,11 @@ const CustomerTicket = () => {
                 ...baseItem,
                 value: updatedItem.price || updatedItem.price_estimates?.pawn || 0
               };
+              // Show success message
+              showSnackbar(isDuplicate ? 'Item duplicated and updated successfully' : 'Item updated successfully', 'success');
+            } else {
+              // Item not found - might have been deleted while in editor
+              showSnackbar('Could not find item to update', 'error');
             }
             
             return updatedItems;
@@ -320,6 +332,11 @@ const CustomerTicket = () => {
                 ...baseItem,
                 price: updatedItem.price || updatedItem.price_estimates?.buy || 0
               };
+              // Show success message
+              showSnackbar(isDuplicate ? 'Item duplicated and updated successfully' : 'Item updated successfully', 'success');
+            } else {
+              // Item not found - might have been deleted while in editor
+              showSnackbar('Could not find item to update', 'error');
             }
             
             return updatedItems;
@@ -327,6 +344,7 @@ const CustomerTicket = () => {
           break;
           
         case 'sale':
+        case 'retail': // Handle both 'sale' and 'retail' the same way
           setSaleItems(prevItems => {
             const updatedItems = [...prevItems];
             const itemIndex = updatedItems.findIndex(item => item.id === ticketItemId);
@@ -337,6 +355,11 @@ const CustomerTicket = () => {
                 price: updatedItem.price || updatedItem.price_estimates?.retail || 0,
                 paymentMethod: prevItems[itemIndex].paymentMethod || ''
               };
+              // Show success message
+              showSnackbar(isDuplicate ? 'Item duplicated and updated successfully' : 'Item updated successfully', 'success');
+            } else {
+              // Item not found - might have been deleted while in editor
+              showSnackbar('Could not find item to update', 'error');
             }
             
             return updatedItems;
@@ -345,6 +368,23 @@ const CustomerTicket = () => {
           
         default:
           console.log('Unknown transaction type for updated item:', transactionType);
+          showSnackbar('Unknown transaction type: ' + transactionType, 'warning');
+      }
+      
+      // Set the active tab to match the transaction type
+      switch(transactionType) {
+        case 'pawn':
+          setActiveTab(0);
+          break;
+        case 'buy':
+          setActiveTab(1);
+          break;
+        case 'sale':
+        case 'retail':
+          setActiveTab(3);
+          break;
+        default:
+          // Keep current tab
       }
       
       // Clear the location state to prevent reapplying the update
@@ -484,10 +524,52 @@ const CustomerTicket = () => {
     const itemToDuplicate = items.find(item => item.id === id);
     if (!itemToDuplicate) return;
     
+    // Create a new duplicate item with a new ID
     const newId = Math.max(...items.map(item => item.id)) + 1;
     const newItem = { ...itemToDuplicate, id: newId };
     
+    // First add the duplicate to the current list
     setItems([...items, newItem]);
+    
+    // We need to delete the duplicate to avoid having both the duplicate and the new item
+    setTimeout(() => {
+      const { items, setItems } = getCurrentItems();
+      setItems(items.filter(item => item.id !== newId));
+    }, 100); // Small delay to ensure state update completes
+    
+    // Then navigate to gem-estimator if it's a jewelry item
+    if (itemToDuplicate.sourceEstimator === 'jewelry' && itemToDuplicate.originalData) {
+      // Include a special flag to identify this is a duplicate operation
+      navigate('/gem-estimator', { 
+        state: { 
+          customer,
+          editMode: true, 
+          itemToEdit: itemToDuplicate.originalData,
+          // No returnToTicket flag, so user can manually add to ticket
+          fromDuplicate: true // Indicate this came from duplicating an item
+        } 
+      });
+    } else if (itemToDuplicate.category?.toLowerCase().includes('jewelry') || 
+               itemToDuplicate.category?.toLowerCase().includes('jewellery')) {
+      // If it's jewelry but not from estimator, still go to jewelry estimator
+      const description = itemToDuplicate.description || '';
+      navigate('/gem-estimator', { 
+        state: { 
+          customer,
+          editMode: true, 
+          itemToEdit: {
+            free_text: description,
+            category: itemToDuplicate.category,
+            price: itemToDuplicate.price || itemToDuplicate.value,
+            transaction_type: activeTab === 0 ? 'pawn' : 
+                            activeTab === 1 ? 'buy' : 
+                            activeTab === 3 ? 'retail' : 'buy'
+          },
+          // No returnToTicket flag, so user can manually add to ticket
+          fromDuplicate: true // Indicate this came from duplicating an item
+        }
+      });
+    }
   };
   
   // Handle deleting an item
@@ -650,7 +732,7 @@ const CustomerTicket = () => {
           customer,
           editMode: true,
           itemToEdit: itemToEdit.originalData,
-          returnToTicket: true,
+         // returnToTicket: true,
           ticketItemId: itemId
         } 
       });
@@ -671,7 +753,7 @@ const CustomerTicket = () => {
                             activeTab === 1 ? 'buy' : 
                             activeTab === 3 ? 'retail' : 'buy'
           },
-          returnToTicket: true,
+       //   returnToTicket: true,
           ticketItemId: itemId
         }
       });
