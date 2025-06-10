@@ -101,7 +101,6 @@ const Cart = () => {
       // Get unique customers
       const customersSet = new Set();
       const customers = [];
-      
       cartItems.forEach(item => {
         if (item.customer && item.customer.name) {
           // Use customer ID or name as unique identifier
@@ -323,10 +322,10 @@ const Cart = () => {
     const itemsToCheckout = selectedItems.length > 0 
       ? cartItems.filter((_, index) => selectedItems.includes(index))
       : filteredItems;
-       
     navigate('/checkout', {
       state: {
         items: itemsToCheckout,
+        allCartItems: cartItems,
         customer,
         from: 'cart'
       }

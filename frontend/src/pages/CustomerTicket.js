@@ -22,6 +22,9 @@ import DiamondIcon from '@mui/icons-material/Diamond';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import WatchIcon from '@mui/icons-material/Watch';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import ClearIcon from '@mui/icons-material/Clear';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 
 // Helper function to convert buffer to data URL for image preview
 function bufferToDataUrl(bufferObj) {
@@ -264,14 +267,64 @@ const CustomerTicket = () => {
   const [convertMenuAnchor, setConvertMenuAnchor] = React.useState(null);
   const [convertItemId, setConvertItemId] = React.useState(null);
   
-  // State for managing items in each tab
-  const [pawnItems, setPawnItems] = React.useState([{ id: 1, description: '', category: '', value: '' }]);
-  const [buyItems, setBuyItems] = React.useState([{ id: 1, description: '', category: '', price: '' }]);
-  const [tradeItems, setTradeItems] = React.useState([{ id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }]);
-  const [saleItems, setSaleItems] = React.useState([{ id: 1, description: '', category: '', price: '', paymentMethod: '' }]);
-  const [repairItems, setRepairItems] = React.useState([{ id: 1, description: '', issue: '', fee: '', completion: '' }]);
-  const [paymentItems, setPaymentItems] = React.useState([{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
-  const [refundItems, setRefundItems] = React.useState([{ id: 1, amount: '', method: '', reference: '', reason: '' }]);
+  // Helper function to save ticket items in localStorage
+  const saveTicketItems = (type, items) => {
+    if (!customer || !customer.id) return; // Don't save if no customer selected
+    
+    try {
+      localStorage.setItem(`ticket_${customer.id}_${type}`, JSON.stringify(items));
+    } catch (error) {
+      console.error(`Error saving ${type} items to localStorage:`, error);
+    }
+  };
+
+  // Helper function to load ticket items from localStorage
+  const loadTicketItems = (type) => {
+    if (!customer || !customer.id) return null; // No customer selected
+    
+    try {
+      const savedItems = localStorage.getItem(`ticket_${customer.id}_${type}`);
+      return savedItems ? JSON.parse(savedItems) : null;
+    } catch (error) {
+      console.error(`Error loading ${type} items from localStorage:`, error);
+      return null;
+    }
+  };
+  
+  // Helper function to clear ticket items from localStorage
+  const clearTicketItems = (type) => {
+    if (!customer || !customer.id) return;
+    localStorage.removeItem(`ticket_${customer.id}_${type}`);
+  };
+  
+  // State for managing items in each tab - initialize from localStorage if available
+  const [pawnItems, setPawnItems] = React.useState(() => {
+    return loadTicketItems('pawn') || [{ id: 1, description: '', category: '', value: '' }];
+  });
+  
+  const [buyItems, setBuyItems] = React.useState(() => {
+    return loadTicketItems('buy') || [{ id: 1, description: '', category: '', price: '' }];
+  });
+  
+  const [tradeItems, setTradeItems] = React.useState(() => {
+    return loadTicketItems('trade') || [{ id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }];
+  });
+  
+  const [saleItems, setSaleItems] = React.useState(() => {
+    return loadTicketItems('sale') || [{ id: 1, description: '', category: '', price: '', paymentMethod: '' }];
+  });
+  
+  const [repairItems, setRepairItems] = React.useState(() => {
+    return loadTicketItems('repair') || [{ id: 1, description: '', issue: '', fee: '', completion: '' }];
+  });
+  
+  const [paymentItems, setPaymentItems] = React.useState(() => {
+    return loadTicketItems('payment') || [{ id: 1, amount: '', method: '', reference: '', notes: '' }];
+  });
+  
+  const [refundItems, setRefundItems] = React.useState(() => {
+    return loadTicketItems('refund') || [{ id: 1, amount: '', method: '', reference: '', reason: '' }];
+  });
   
   // Process estimated items from GemEstimator.js when component mounts
   React.useEffect(() => {
@@ -318,6 +371,9 @@ const CustomerTicket = () => {
               showSnackbar('Could not find item to update', 'error');
             }
             
+            // Save to localStorage
+            saveTicketItems('pawn', updatedItems);
+            
             return updatedItems;
           });
           break;
@@ -338,6 +394,9 @@ const CustomerTicket = () => {
               // Item not found - might have been deleted while in editor
               showSnackbar('Could not find item to update', 'error');
             }
+            
+            // Save to localStorage
+            saveTicketItems('buy', updatedItems);
             
             return updatedItems;
           });
@@ -361,6 +420,9 @@ const CustomerTicket = () => {
               // Item not found - might have been deleted while in editor
               showSnackbar('Could not find item to update', 'error');
             }
+            
+            // Save to localStorage
+            saveTicketItems('sale', updatedItems);
             
             return updatedItems;
           });
@@ -445,32 +507,91 @@ const CustomerTicket = () => {
         }
       });
       
-      // Update state with new items
+      // Update state with new items and save to localStorage
       if (pawn.length > 0) {
         setPawnItems(pawn);
+        saveTicketItems('pawn', pawn);
         setActiveTab(0); // Set active tab to Pawn
       } else if (buy.length > 0) {
         setBuyItems(buy);
+        saveTicketItems('buy', buy);
         setActiveTab(1); // Set active tab to Buy
       } else if (sale.length > 0) {
         setSaleItems(sale);
+        saveTicketItems('sale', sale);
         setActiveTab(3); // Set active tab to Sale
       }
     }
   }, [estimatedItems, from]);
   
-  // Function to get current items based on active tab
+  // Function to get current items based on active tab and type name
   const getCurrentItems = () => {
+    let type = '';
+    let items = [];
+    let setItems = () => {};
+    
     switch(activeTab) {
-      case 0: return { items: pawnItems, setItems: setPawnItems };
-      case 1: return { items: buyItems, setItems: setBuyItems };
-      case 2: return { items: tradeItems, setItems: setTradeItems };
-      case 3: return { items: saleItems, setItems: setSaleItems };
-      case 4: return { items: repairItems, setItems: setRepairItems };
-      case 5: return { items: paymentItems, setItems: setPaymentItems };
-      case 6: return { items: refundItems, setItems: setRefundItems };
-      default: return { items: [], setItems: () => {} };
+      case 0: 
+        type = 'pawn';
+        items = pawnItems;
+        setItems = (newItems) => {
+          setPawnItems(newItems);
+          saveTicketItems(type, newItems);
+        };
+        break;
+      case 1: 
+        type = 'buy';
+        items = buyItems;
+        setItems = (newItems) => {
+          setBuyItems(newItems);
+          saveTicketItems(type, newItems);
+        };
+        break;
+      case 2: 
+        type = 'trade';
+        items = tradeItems;
+        setItems = (newItems) => {
+          setTradeItems(newItems);
+          saveTicketItems(type, newItems);
+        };
+        break;
+      case 3: 
+        type = 'sale';
+        items = saleItems;
+        setItems = (newItems) => {
+          setSaleItems(newItems);
+          saveTicketItems(type, newItems);
+        };
+        break;
+      case 4: 
+        type = 'repair';
+        items = repairItems;
+        setItems = (newItems) => {
+          setRepairItems(newItems);
+          saveTicketItems(type, newItems);
+        };
+        break;
+      case 5: 
+        type = 'payment';
+        items = paymentItems;
+        setItems = (newItems) => {
+          setPaymentItems(newItems);
+          saveTicketItems(type, newItems);
+        };
+        break;
+      case 6: 
+        type = 'refund';
+        items = refundItems;
+        setItems = (newItems) => {
+          setRefundItems(newItems);
+          saveTicketItems(type, newItems);
+        };
+        break;
+      default: 
+        return { items: [], setItems: () => {}, type: '' };
     }
+    
+    return { items, setItems, type };
   };
   
   // Handle adding a new row
@@ -867,15 +988,68 @@ const CustomerTicket = () => {
     // Stay on current tab and ticket page
   };
   
+  const handleClearCurrentTab = () => {
+    if (!customer) {
+      showSnackbar('No customer selected', 'warning');
+      return;
+    }
+    
+    const { type } = getCurrentItems();
+    if (!type) return;
+    
+    // Confirm before clearing
+    if (window.confirm(`Clear all items in ${getTabName(activeTab)} tab?`)) {
+      // Reset to initial state with one empty item
+      let emptyItem;
+      switch (activeTab) {
+        case 0: // Pawn
+          emptyItem = { id: 1, description: '', category: '', value: '' };
+          setPawnItems([emptyItem]);
+          break;
+        case 1: // Buy
+          emptyItem = { id: 1, description: '', category: '', price: '' };
+          setBuyItems([emptyItem]);
+          break;
+        case 2: // Trade
+          emptyItem = { id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' };
+          setTradeItems([emptyItem]);
+          break;
+        case 3: // Sale
+          emptyItem = { id: 1, description: '', category: '', price: '', paymentMethod: '' };
+          setSaleItems([emptyItem]);
+          break;
+        case 4: // Repair
+          emptyItem = { id: 1, description: '', issue: '', fee: '', completion: '' };
+          setRepairItems([emptyItem]);
+          break;
+        case 5: // Payment
+          emptyItem = { id: 1, amount: '', method: '', reference: '', notes: '' };
+          setPaymentItems([emptyItem]);
+          break;
+        case 6: // Refund
+          emptyItem = { id: 1, amount: '', method: '', reference: '', reason: '' };
+          setRefundItems([emptyItem]);
+          break;
+      }
+      
+      // Clear from localStorage
+      clearTicketItems(type);
+      showSnackbar(`Cleared all items in ${getTabName(activeTab)} tab`, 'success');
+    }
+  };
+
   const handleAddToCart = () => {
-    // Calculate totals before adding to cart
-    calculateTotal();
+    if (!customer) {
+      alert('Please select a customer before adding items to cart');
+      return;
+    }
     
-    // Get current items based on active tab
-    const { items } = getCurrentItems();
+    // Get items from current tab
+    const { items, type } = getCurrentItems();
     
-    // Only add items that have content
+    // Filter out empty items
     const filteredItems = items.filter(item => {
+      // Check fields based on item type
       if (activeTab === 0) { // Pawn items
         return item.description || item.value;
       } else if (activeTab === 1) { // Buy items
@@ -951,7 +1125,44 @@ const CustomerTicket = () => {
         sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
       }
       
-      // Then navigate to cart page
+      // Clear the items from localStorage for this tab since they're now in cart
+      clearTicketItems(type);
+      
+      // Replace current tab items with a fresh empty item
+      let emptyItem;
+      switch (activeTab) {
+        case 0: // Pawn
+          emptyItem = { id: 1, description: '', category: '', value: '' };
+          setPawnItems([emptyItem]);
+          break;
+        case 1: // Buy
+          emptyItem = { id: 1, description: '', category: '', price: '' };
+          setBuyItems([emptyItem]);
+          break;
+        case 2: // Trade
+          emptyItem = { id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' };
+          setTradeItems([emptyItem]);
+          break;
+        case 3: // Sale
+          emptyItem = { id: 1, description: '', category: '', price: '', paymentMethod: '' };
+          setSaleItems([emptyItem]);
+          break;
+        case 4: // Repair
+          emptyItem = { id: 1, description: '', issue: '', fee: '', completion: '' };
+          setRepairItems([emptyItem]);
+          break;
+        case 5: // Payment
+          emptyItem = { id: 1, amount: '', method: '', reference: '', notes: '' };
+          setPaymentItems([emptyItem]);
+          break;
+        case 6: // Refund
+          emptyItem = { id: 1, amount: '', method: '', reference: '', reason: '' };
+          setRefundItems([emptyItem]);
+          break;
+      }
+      
+      // Show success message and navigate to cart
+      showSnackbar('Items added to cart', 'success');
       navigate('/cart');
       
     } catch (error) {
@@ -2163,19 +2374,28 @@ return (
                     </Box>
                   )}
                 </Box>
-                {/* Global action buttons */}
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3, mb: 1, px: 2 }}>
-                  <Button variant="outlined" color="error" onClick={handleCancel}>
-                    Cancel
+                {/* Action buttons */}
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2, gap: 2 }}>
+                  <Button
+                    variant="outlined"
+                    onClick={handleClearCurrentTab}
+                    startIcon={<ClearIcon />}
+                    disabled={!customer}
+                  >
+                    Clear Tab
                   </Button>
-                  <Box>
-                    <Button variant="contained" color="primary" sx={{ mr: 2 }} onClick={handleAddToCart}>
-                      Add to Cart
-                    </Button>
-                    <Button variant="contained" color="success" onClick={handleCheckout}>
-                      Checkout
-                    </Button>
-                  </Box>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleAddToCart}
+                    disabled={!customer}
+                    startIcon={<ShoppingCartIcon />}
+                  >
+                    Add to Cart
+                  </Button>
+                  <Button variant="contained" color="success" onClick={handleCheckout}>
+                    Checkout
+                  </Button>
                 </Box>
               </CardContent>
             </Card>

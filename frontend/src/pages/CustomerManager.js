@@ -161,9 +161,6 @@ const CustomerManager = () => {
         }
       });
       
-      // Log the preferences for debugging
-      console.log('Fetched column preferences:', columnPreferences);
-      
       // Update state with the processed preferences
       setColumnPreferences(columnPreferences);
       
@@ -281,7 +278,6 @@ const CustomerManager = () => {
       const url = queryString ? `${config.apiUrl}/customers?${queryString}` : `${config.apiUrl}/customers`;
       
       const response = await fetch(url);
-      console.log('Response:', response);
       if (!response.ok) throw new Error('Failed to fetch customers');
       
       const data = await response.json();

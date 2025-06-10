@@ -47,6 +47,7 @@ function Checkout() {
   const { user } = useAuth();
   const [isInitialized, setIsInitialized] = useState(false);
   const [checkoutItems, setCheckoutItems] = useState([]);
+  const [allCartItems, setAllCartItems] = useState([]);
 
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentDetails, setPaymentDetails] = useState({
@@ -66,25 +67,40 @@ function Checkout() {
   const [transactionCreated, setTransactionCreated] = useState(false);
   const [currentTransactionId, setCurrentTransactionId] = useState(null);
   const [payments, setPayments] = useState([]);
+  const [isFullyPaid, setIsFullyPaid] = useState(false);
 
-  // Effect to initialize cart and customer from GemEstimator navigation
+  // Effect to initialize cart and customer from navigation (either Estimator or Cart)
   useEffect(() => {
-    if (location.state?.from === 'estimator' && location.state?.items && location.state?.customer && !isInitialized) {
-      console.log('Initializing checkout with items:', location.state.items);
-      // Clear existing cart items before adding new ones from estimator
-      clearCart(); 
-      
-      // Ensure each item is added individually to the cart
-      if (Array.isArray(location.state.items)) {
-        location.state.items.forEach(item => addToCart(item));
+    if (!isInitialized && location.state) {
+      if (location.state.from === 'estimator' && location.state?.items && location.state?.customer) {
+        console.log('Initializing checkout with items from estimator:', location.state.items);
+        // Clear existing cart items before adding new ones from estimator
+        clearCart(); 
+        
+        // Ensure each item is added individually to the cart
+        if (Array.isArray(location.state.items)) {
+          location.state.items.forEach(item => addToCart(item));
+        }
+        
+        // Set checkoutItems for display
+        setCheckoutItems(location.state.items);
+        
+        // Set the customer
+        setCustomer(location.state.customer);
+        setIsInitialized(true); // Mark as initialized to prevent re-running
+      } 
+      else if (location.state.from === 'cart' && location.state?.items) {        
+        // Store the items to checkout and all cart items separately
+        setCheckoutItems(location.state.items);
+        setAllCartItems(location.state.allCartItems);
+        
+        // Set the customer if provided
+        if (location.state.customer) {
+          setCustomer(location.state.customer);
+        }
+        
+        setIsInitialized(true); // Mark as initialized to prevent re-running
       }
-      
-      // Set checkoutItems for display
-      setCheckoutItems(location.state.items);
-      
-      // Set the customer
-      setCustomer(location.state.customer);
-      setIsInitialized(true); // Mark as initialized to prevent re-running
     }
   }, [location.state, addToCart, setCustomer, clearCart, isInitialized]);
 
@@ -297,6 +313,9 @@ function Checkout() {
       
       const newRemainingAmount = remainingAmount - paymentAmount;
       setRemainingAmount(newRemainingAmount);
+      
+      // Check if payment is complete
+      setIsFullyPaid(newRemainingAmount === 0);
 
       // Reset payment form but keep card number if using card
       setPaymentDetails({
@@ -439,24 +458,70 @@ function Checkout() {
       setCustomer(null);
       navigate('/quote-manager');
     } else if (location.state?.from === 'cart') {
-      // Save cart items and navigate back to customer ticket
-      sessionStorage.setItem('cartItems', JSON.stringify(cartItems));
+      // If fully paid, filter out items that were checked out
+      // Otherwise, use all cart items as is
+      let itemsToKeep;
+      if (isFullyPaid) {
+        // Create a set of checkout item IDs for faster lookup
+        const checkoutItemIds = new Set(checkoutItems.map(item => item.id));
+        // Filter out items that were checked out
+        itemsToKeep = allCartItems.filter(item => !checkoutItemIds.has(item.id));
+      } else {
+        itemsToKeep = allCartItems;
+      }
+      console.log("Items to keep:", itemsToKeep);
+      // Ensure each item is a properly formatted object, not an array
+      const formattedCartItems = itemsToKeep.map(item => {
+        // If item is an array, convert it to a proper object
+        if (Array.isArray(item)) {
+          return {
+            id: item[0].id || null,
+            description: item[0].description || '',
+            category: item[0].category || '',
+            value: item[0].value || '',
+            itemType: item[0].itemType || 'pawn',
+            customer: item[0].customer  || null,
+            employee: item[0].employee || null
+          };
+        }
+        return item; // Already in correct format
+      });
+      
+      // Save formatted items to session storage
+      sessionStorage.setItem('cartItems', JSON.stringify(formattedCartItems));
+      
       navigate('/customer-ticket', {
         state: {
           from: 'checkout',
-          items: cartItems
+          items: formattedCartItems // Pass the properly formatted items
         }
       });
     } else {
-      // Save the cart items to session storage before navigating back
+      // Ensure items are properly formatted before saving to session storage
+      const formattedCartItems = cartItems.map(item => {
+        if (Array.isArray(item)) {
+          return {
+            id: item[0].id || null,
+            description: item[0].description || '',
+            category: item[0].category || '',
+            value: item[0].value || '',
+            itemType: item[0].itemType || 'pawn',
+            customer: item[0].customer  || null,
+            employee: item[0].employee || null
+          };
+        }
+        return item;
+      });
+      
+      // Save the formatted cart items to session storage before navigating back
       sessionStorage.setItem('estimationState', JSON.stringify({
-        items: cartItems
+        items: formattedCartItems
       }));
       clearCart();
       setCustomer(null);
       // Go back to gem estimator
       navigate('/gem-estimator');
-    }
+    }  
   };
 
   // Set customer info and cart items from quote or cart
@@ -465,7 +530,11 @@ function Checkout() {
       // Handle items from cart
       if (location.state?.items && location.state?.from === 'cart') {        
         setCheckoutItems(location.state.items);
-        addToCart(location.state.items);
+        
+        // Add each item individually to the cart
+        if (Array.isArray(location.state.items)) {
+          location.state.items.forEach(item => addToCart(item));
+        }
         
         // Get customer from state if available
         if (location.state.customer) {
