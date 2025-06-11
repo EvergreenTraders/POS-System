@@ -514,10 +514,16 @@ const CustomerManager = () => {
 
       // If we have items in location state, add them to cart context and navigate
       if (location.state?.items?.length > 0) {
-      //  location.state.items.forEach(item => addToCart(item));
+        location.state.items.forEach(item => addToCart(item));
+        
+        // When coming from GemEstimator, make sure to preserve source as 'estimator'
+        const sourceFrom = location.state.from === 'gem-estimator' ? 'estimator' : (location.state.from || 'customer');
+        
         navigate('/checkout', { 
           state: { 
-            from: location.state.from || 'customer'
+            from: sourceFrom,
+            items: location.state.items,
+            customer: savedCustomer
           }
         });
       }
@@ -633,10 +639,16 @@ const CustomerManager = () => {
     
     // If we have items in location state, add them to cart context and navigate
     if (location.state?.items?.length > 0) {
-    //  location.state.items.forEach(item => addToCart(item));
+      location.state.items.forEach(item => addToCart(item));
+      
+      // When coming from GemEstimator, make sure to preserve source as 'estimator'
+      const sourceFrom = location.state.from === 'gem-estimator' ? 'estimator' : (location.state.from || 'customer');
+      
       navigate('/checkout', { 
         state: { 
-          from: location.state.from || 'customer'
+          from: sourceFrom,
+          items: location.state.items,
+          customer: selectedCustomer
         }
       });
     }

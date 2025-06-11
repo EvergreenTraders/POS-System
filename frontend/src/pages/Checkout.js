@@ -48,6 +48,7 @@ function Checkout() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [checkoutItems, setCheckoutItems] = useState([]);
   const [allCartItems, setAllCartItems] = useState([]);
+  const [jewelryItems, setJewelryItems] = useState([]);
 
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentDetails, setPaymentDetails] = useState({
@@ -73,7 +74,6 @@ function Checkout() {
   useEffect(() => {
     if (!isInitialized && location.state) {
       if (location.state.from === 'estimator' && location.state?.items && location.state?.customer) {
-        console.log('Initializing checkout with items from estimator:', location.state.items);
         // Clear existing cart items before adding new ones from estimator
         clearCart(); 
         
@@ -91,7 +91,18 @@ function Checkout() {
       } 
       else if (location.state.from === 'cart' && location.state?.items) {        
         // Store the items to checkout and all cart items separately
-        setCheckoutItems(location.state.items);
+        const items = location.state.items;
+        
+        // Extract jewelry-specific items and store them in state for later use in handleSubmit
+        const filteredJewelryItems = items.filter(item => item.sourceEstimator === 'jewelry');
+        setJewelryItems(filteredJewelryItems);
+        
+        if (filteredJewelryItems.length > 0) {
+          console.log('Jewelry items from gem estimator found in checkout:', filteredJewelryItems);
+        }
+        
+        // Set the checkout items, ensuring jewelry items retain all fields
+        setCheckoutItems(items);
         setAllCartItems(location.state.allCartItems);
         
         // Set the customer if provided
@@ -224,7 +235,7 @@ function Checkout() {
           // If coming from estimator, create new jewelry items
           
           // Process the cart items to ensure images are in the correct format
-          const processedCartItems = cartItems.map(item => {
+          const processedItems = cartItems.map(item => {
             // Create a deep copy of the item without the images property
             const { images, ...itemWithoutImages } = item;
             
@@ -240,16 +251,20 @@ function Checkout() {
               });
             }
             
-            // Return the item with processed images
+            // Return the processed item with appropriate fields
             return {
               ...itemWithoutImages,
               images: processedImages
             };
           });
-                    
+          
+          // Check if we have any jewelry items from the gem estimator
+          const itemsToPost = jewelryItems.length > 0 ? jewelryItems : processedItems;
+          console.log('Using jewelryItems from state in API call:', itemsToPost, cartItems);
+
           const jewelryResponse = await axios.post(
             `${config.apiUrl}/jewelry`,
-            { cartItems: processedCartItems },
+            { cartItems: itemsToPost },
             {
               headers: { Authorization: `Bearer ${token}` }
             }
@@ -479,7 +494,7 @@ function Checkout() {
             description: item[0].description || '',
             category: item[0].category || '',
             value: item[0].value || '',
-            itemType: item[0].itemType || 'pawn',
+            transaction_type: item[0].transaction_type || 'pawn',
             customer: item[0].customer  || null,
             employee: item[0].employee || null
           };
@@ -505,7 +520,7 @@ function Checkout() {
             description: item[0].description || '',
             category: item[0].category || '',
             value: item[0].value || '',
-            itemType: item[0].itemType || 'pawn',
+            transaction_type: item[0].transaction_type || 'pawn',
             customer: item[0].customer  || null,
             employee: item[0].employee || null
           };
@@ -533,6 +548,22 @@ function Checkout() {
         
         // Add each item individually to the cart
         if (Array.isArray(location.state.items)) {
+          location.state.items.forEach(item => addToCart(item));
+        }
+        
+        // Get customer from state if available
+        if (location.state.customer) {
+          setCustomer(location.state.customer);
+        }
+        
+        setIsInitialized(true);
+      }
+      // Handle items from estimator
+      else if (location.state?.items && location.state?.from === 'estimator') {
+        setCheckoutItems(location.state.items);
+        
+        // Add each item individually to the cart if not already added
+        if (Array.isArray(location.state.items) && cartItems.length === 0) {
           location.state.items.forEach(item => addToCart(item));
         }
         
@@ -630,9 +661,6 @@ function Checkout() {
                       // Try to use description field first (most common)
                       if (item.long_desc || item.description) {
                         displayDescription = item.long_desc || item.description;
-                        if (item.category) {
-                          displayDescription += " "+ item.category;
-                        }
                       }
                       // Fallback to short_desc if present
                       else if (item.short_desc) {
@@ -655,8 +683,8 @@ function Checkout() {
                       let transactionType = '';
                       if (item.transaction_type) {
                         transactionType = item.transaction_type.charAt(0).toUpperCase() + item.transaction_type.slice(1);
-                      } else if (item.itemType) {
-                        transactionType = item.itemType.charAt(0).toUpperCase() + item.itemType.slice(1);
+                      } else if (item.transaction_type) {
+                        transactionType = item.transaction_type.charAt(0).toUpperCase() + item.transaction_type.slice(1);
                       } else {
                         // Try to determine from structure
                         if (item.value !== undefined) transactionType = 'Pawn';

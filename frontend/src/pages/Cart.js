@@ -259,7 +259,7 @@ const Cart = () => {
     return selectedItems.reduce((total, index) => {
       const item = filteredItems[index];
       if (!item) return total; // Skip if item doesn't exist
-      return total + parseFloat(getItemValue(item, item.itemType || getItemTypeFromStructure(item)) || 0);
+      return total + parseFloat(getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)) || 0);
     }, 0);
   };
 
@@ -289,7 +289,7 @@ const Cart = () => {
         customer,
         editItem: item,
         editItemIndex: index,
-        editItemType: item.itemType
+        editItemType: item.transaction_type
       }
     });
   };
@@ -319,9 +319,34 @@ const Cart = () => {
   const handleProceedToCheckout = () => {
     // If items are selected, only checkout those items
     // Otherwise, checkout all filtered items
-    const itemsToCheckout = selectedItems.length > 0 
+    let itemsToCheckout = selectedItems.length > 0 
       ? cartItems.filter((_, index) => selectedItems.includes(index))
       : filteredItems;
+      
+    // Make sure we're preserving all jewelry-specific fields for items from the gem estimator
+    itemsToCheckout = itemsToCheckout.map(item => {
+      // If this is a jewelry item from the gem estimator, ensure all fields are preserved
+      if (item.sourceEstimator === 'jewelry') {
+        console.log('Passing jewelry item to checkout:', item);
+        return {
+          ...item,
+          // Ensure these critical fields are included
+          sourceEstimator: 'jewelry',
+          metal_type: item.metal_type || item.precious_metal_type || (item.originalData?.precious_metal_type),
+          metal_purity: item.metal_purity || (item.originalData?.metal_purity),
+          metal_weight: item.metal_weight || (item.originalData?.metal_weight),
+          metal_category: item.metal_category || (item.originalData?.metal_category),
+          gems: item.gems || (item.originalData?.gems),
+          stones: item.stones || (item.originalData?.stones),
+          free_text: item.free_text || (item.originalData?.free_text),
+          price_estimates: item.price_estimates || (item.originalData?.price_estimates),
+          // Keep the original data for reference
+       //   originalData: item.originalData || null
+        };
+      }
+      return item;
+    });
+
     navigate('/checkout', {
       state: {
         items: itemsToCheckout,
@@ -443,12 +468,12 @@ const Cart = () => {
                     </TableCell>
                     <TableCell>
                       <Chip 
-                        label={getItemTypeLabel(item.itemType || getItemTypeFromStructure(item))}
-                        color={getItemTypeColor(item.itemType || getItemTypeFromStructure(item))}
+                        label={getItemTypeLabel(item.transaction_type || getItemTypeFromStructure(item))}
+                        color={getItemTypeColor(item.transaction_type || getItemTypeFromStructure(item))}
                         size="small"
                       />
                     </TableCell>
-                    <TableCell>{getItemDescription(item, item.itemType || getItemTypeFromStructure(item))}</TableCell>
+                    <TableCell>{getItemDescription(item, item.transaction_type || getItemTypeFromStructure(item))}</TableCell>
                     <TableCell>
                       {item.customer ? (
                         <Typography variant="body2">
@@ -473,7 +498,7 @@ const Cart = () => {
                         </Typography>
                       )}
                     </TableCell>
-                    <TableCell align="right">{formatCurrency(getItemValue(item, item.itemType || getItemTypeFromStructure(item)))}</TableCell>
+                    <TableCell align="right">{formatCurrency(getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)))}</TableCell>
                     <TableCell align="center">
                       <Tooltip title="Edit">
                         <IconButton 

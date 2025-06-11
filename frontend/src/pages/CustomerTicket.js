@@ -464,12 +464,11 @@ const CustomerTicket = () => {
       const pawn = [];
       const buy = [];
       const sale = [];
-      
       estimatedItems.forEach((item, index) => {
         // Create a base item with common properties
         const baseItem = {
           id: index + 1,
-          description: `${item.metal_weight}g ${item.metal_purity} ${item.precious_metal_type} ${item.metal_category}${item.free_text ? ` - ${item.free_text}` : ''}`,
+          description: `${item.short_desc}`,
           category: item.category || 'Jewelry',
           // Store the original estimator data for editing
           originalData: { ...item },
@@ -1074,37 +1073,67 @@ const CustomerTicket = () => {
     }
     
     // Determine item type based on active tab
-    let itemType;
+    let transaction_type;
     switch(activeTab) {
-      case 0: itemType = 'pawn'; break;
-      case 1: itemType = 'buy'; break;
-      case 2: itemType = 'trade'; break;
-      case 3: itemType = 'sale'; break;
-      case 4: itemType = 'repair'; break;
-      case 5: itemType = 'payment'; break;
-      case 6: itemType = 'refund'; break;
-      default: itemType = 'unknown';
+      case 0: transaction_type = 'pawn'; break;
+      case 1: transaction_type = 'buy'; break;
+      case 2: transaction_type = 'trade'; break;
+      case 3: transaction_type = 'sale'; break;
+      case 4: transaction_type = 'repair'; break;
+      case 5: transaction_type = 'payment'; break;
+      case 6: transaction_type = 'refund'; break;
+      default: transaction_type = 'unknown';
     }
     
     // Instead of navigating, save to session storage first
     try {
       // Add item type, customer, and employee data to each item
       // Using user from component scope instead of calling useAuth() here
-      const itemsWithMetadata = filteredItems.map(item => ({
-        ...item,
-        itemType: itemType,
-        customer: customer ? {
-          id: customer.id,
-          name: `${customer.first_name} ${customer.last_name}`,
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
-      }));
+      const itemsWithMetadata = filteredItems.map(item => {
+        // Create base metadata for all items
+        const baseItem = {
+          ...item,
+          transaction_type: transaction_type,
+          customer: customer ? {
+            id: customer.id,
+            name: `${customer.first_name} ${customer.last_name}`,
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        };
+        
+        // If the item came from the jewelry estimator, include all jewelry-specific fields
+        if (item.sourceEstimator === 'jewelry') {
+          // Preserve all jewelry fields from the original data or directly from the item if available
+          return {
+            ...baseItem,
+            // Indicate this is a jewelry item for the cart and checkout
+            sourceEstimator: 'jewelry',
+            // Include all jewelry-specific fields that may be present
+            metal_type: item.metal_type || item.precious_metal_type || (item.originalData?.precious_metal_type),
+            metal_purity: item.metal_purity || (item.originalData?.metal_purity),
+            metal_weight: item.metal_weight || (item.originalData?.metal_weight),
+            metal_category: item.metal_category || (item.originalData?.metal_category),
+            gems: item.gems || (item.originalData?.gems),
+            stones: item.stones || (item.originalData?.stones),
+            free_text: item.free_text || (item.originalData?.free_text),
+            price_estimates: item.price_estimates || (item.originalData?.price_estimates),
+            // Pass along the complete original data from the estimator
+         //   originalData: item.originalData || null,
+            // Ensure images are properly passed
+            images: item.images || (item.image ? [item.image] : []),
+            // Include timestamp for when the item was added to cart
+            addedToCartAt: new Date().toISOString()
+          };
+        }
+        
+        return baseItem;
+      });
       
       // Get existing cart items from session storage
       const existingCartItems = sessionStorage.getItem('cartItems');
