@@ -30,6 +30,8 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PaymentIcon from '@mui/icons-material/Payment';
 import SaveIcon from '@mui/icons-material/Save';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import CreditCardIcon from '@mui/icons-material/CreditCard';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -260,7 +262,6 @@ function Checkout() {
           
           // Check if we have any jewelry items from the gem estimator
           const itemsToPost = jewelryItems.length > 0 ? jewelryItems : processedItems;
-          console.log('Using jewelryItems from state in API call:', itemsToPost, cartItems);
 
           const jewelryResponse = await axios.post(
             `${config.apiUrl}/jewelry`,
@@ -305,32 +306,65 @@ function Checkout() {
         throw new Error('Transaction ID not found');
       }
 
-      // Process payment
-      await axios.post(
-        `${config.apiUrl}/payments`,
-        {
-          transaction_id: transactionId,
-          amount: paymentAmount,
-          payment_method: paymentMethod.toUpperCase()
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
-
       // Add payment to list and update remaining amount
       const newPayment = { 
+        transaction_id: transactionId,
         method: paymentMethod, 
         amount: paymentAmount,
+        payment_method: paymentMethod.toUpperCase(),
         timestamp: new Date().toISOString()
       };
-      setPayments([...payments, newPayment]);
+      const updatedPayments = [...payments, newPayment];
+      setPayments(updatedPayments);
       
-      const newRemainingAmount = remainingAmount - paymentAmount;
+      // Fix floating point precision issues by rounding to 2 decimal places
+      const newRemainingAmount = parseFloat((remainingAmount - paymentAmount).toFixed(2));
       setRemainingAmount(newRemainingAmount);
       
       // Check if payment is complete
-      setIsFullyPaid(newRemainingAmount === 0);
+      const isPaid = newRemainingAmount == 0;
+      setIsFullyPaid(isPaid);
+      
+      if (isPaid) {
+        // Process all collected payments
+        try {
+          for (const payment of updatedPayments) {
+            await axios.post(
+              `${config.apiUrl}/payments`,
+              {
+                transaction_id: payment.transaction_id,
+                amount: payment.amount,
+                payment_method: payment.payment_method
+              },
+              {
+                headers: { Authorization: `Bearer ${token}` }
+              }
+            );
+          }
+
+          await axios.put(
+            `${config.apiUrl}/transactions/${transactionId}`,
+            { transaction_status: 'COMPLETED' },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+
+        } catch (paymentError) {
+          console.error('Error processing payments:', paymentError);
+          setSnackbar({
+            open: true,
+            message: 'Error processing payments. Please try again.',
+            severity: 'error'
+          });
+          return;
+        }
+      } else {
+        // Show partial payment message
+        setSnackbar({
+          open: true,
+          message: `Payment of $${paymentAmount} accepted. Remaining: $${newRemainingAmount}`,
+          severity: 'info'
+        });
+      }
 
       // Reset payment form but keep card number if using card
       setPaymentDetails({
@@ -338,39 +372,6 @@ function Checkout() {
         cashAmount: '',
         cardNumber: paymentMethod === 'credit_card' ? paymentDetails.cardNumber : ''
       });
-
-      if (newRemainingAmount === 0) {
-        // Update transaction status to COMPLETED when fully paid
-        await axios.put(
-          `${config.apiUrl}/transactions/${transactionId}`,
-          { transaction_status: 'COMPLETED' },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-
-        setSnackbar({
-          open: true,
-          message: 'All payments processed successfully',
-          severity: 'success'
-        });
-
-        // Reset state
-        setTransactionCreated(false);
-        setCurrentTransactionId(null);
-        setPayments([]);
-        clearCart();
-        
-        navigate('/gem-estimator', { 
-          state: { 
-            from: 'checkout'
-          }
-        });
-      } else {
-        setSnackbar({
-          open: true,
-          message: `Payment of ${paymentAmount} processed. Remaining amount: ${newRemainingAmount}`,
-          severity: 'success'
-        });
-      }
     } catch (error) {
       if (error.message === 'Authentication token not found') {
         sessionStorage.setItem('redirectAfterLogin', '/checkout');
@@ -837,6 +838,24 @@ function Checkout() {
                   Process Payment
                 </Button>
               </Box>
+              
+              {/* Payment History */}
+              {payments.length > 0 && (
+                <Box sx={{ mt: 4 }}>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    {payments.map((payment, index) => (
+                      <Chip
+                        key={index}
+                        icon={payment.method === 'cash' ? <AttachMoneyIcon /> : <CreditCardIcon />}
+                        label={`${payment.method === 'cash' ? 'Cash' : 'Credit Card'} $${parseFloat(payment.amount).toFixed(2)}`}
+                        color={payment.method === 'cash' ? 'success' : 'primary'}
+                        variant="outlined"
+                        sx={{ paddingY: 2.5, paddingX: 0.5, fontSize: '0.9rem' }}
+                      />
+                    ))}
+                  </Box>
+                </Box>
+              )}
             </Paper>
           </Grid>
         </Grid>
