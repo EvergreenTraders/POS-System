@@ -219,91 +219,15 @@ function Checkout() {
 
       let transactionId;
 
-      // Only create transaction once
+      // Create a temporary transaction ID for tracking payments
+      // We'll only create the actual records in the database when payment is complete
       if (!transactionCreated) {
-        let createdJewelryItems;
-
-        if (isFromQuotes) {
-          // If coming from quotes, update each quote item to a regular item
-          const convertResponse = await axios.put(
-            `${config.apiUrl}/jewelry/${quoteId}`,
-            {},
-            {
-              headers: { Authorization: `Bearer ${token}` }
-            }
-          );
-          createdJewelryItems = convertResponse.data;
-        } else {
-          // If coming from estimator, create new jewelry items
-          
-          // Process the cart items to ensure images are in the correct format
-          const processedItems = cartItems.map(item => {
-            // Create a deep copy of the item without the images property
-            const { images, ...itemWithoutImages } = item;
-            
-            // Process images to ensure they're in a format the backend can handle
-            let processedImages = [];
-            if (images && Array.isArray(images)) {
-              // Extract only the URL from each image object
-              processedImages = images.map(img => {
-                if (typeof img === 'object') {
-                  return { url: img.url || '' };
-                }
-                return img;
-              });
-            }
-            
-            // Return the processed item with appropriate fields
-            return {
-              ...itemWithoutImages,
-              images: processedImages
-            };
-          });
-          
-          // Check if we have any jewelry items from the gem estimator
-          const itemsToPost = jewelryItems.length > 0 ? jewelryItems : processedItems;
-
-          const jewelryResponse = await axios.post(
-            `${config.apiUrl}/jewelry`,
-            { cartItems: itemsToPost },
-            {
-              headers: { Authorization: `Bearer ${token}` }
-            }
-          );
-          createdJewelryItems = jewelryResponse.data;
-        }
-        // Create transactions for all items
-        const transactionResponse = await axios.post(
-          `${config.apiUrl}/transactions`,
-          {
-            customer_id: selectedCustomer.id,
-            employee_id: employeeId,
-            total_amount: calculateTotal(),
-            cartItems: createdJewelryItems.map((item, index) => {
-              const type = cartItems[index].transaction_type.toLowerCase();
-              return {
-                item_id: item.item_id,
-                transaction_type_id: transactionTypes[type],
-                price: cartItems[index].price
-              };
-            }),
-            transaction_status: 'PENDING',
-            transaction_date: new Date().toISOString().split('T')[0]
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` }
-          }
-        );
-
-        transactionId = transactionResponse.data.transaction.transaction_id;
+        // Generate temporary ID for tracking payments until fully paid
+        transactionId = 'temp-' + Date.now();
         setCurrentTransactionId(transactionId);
         setTransactionCreated(true);
       } else {
         transactionId = currentTransactionId;
-      }
-
-      if (!transactionId) {
-        throw new Error('Transaction ID not found');
       }
 
       // Add payment to list and update remaining amount
@@ -326,13 +250,93 @@ function Checkout() {
       setIsFullyPaid(isPaid);
       
       if (isPaid) {
-        // Process all collected payments
+        // Only create jewelry items and transactions when payment is fully completed
         try {
+          let createdJewelryItems;
+          let realTransactionId;
+
+          // Step 1: Create jewelry items
+          if (isFromQuotes) {
+            // If coming from quotes, update each quote item to a regular item
+            const convertResponse = await axios.put(
+              `${config.apiUrl}/jewelry/${quoteId}`,
+              {},
+              {
+                headers: { Authorization: `Bearer ${token}` }
+              }
+            );
+            createdJewelryItems = convertResponse.data;
+          } else {
+            // If coming from estimator, create new jewelry items
+            
+            // Process the cart items to ensure images are in the correct format
+            const processedItems = cartItems.map(item => {
+              // Create a deep copy of the item without the images property
+              const { images, ...itemWithoutImages } = item;
+              
+              // Process images to ensure they're in a format the backend can handle
+              let processedImages = [];
+              if (images && Array.isArray(images)) {
+                // Extract only the URL from each image object
+                processedImages = images.map(img => {
+                  if (typeof img === 'object') {
+                    return { url: img.url || '' };
+                  }
+                  return img;
+                });
+              }
+              
+              // Return the processed item with appropriate fields
+              return {
+                ...itemWithoutImages,
+                images: processedImages
+              };
+            });
+            
+            // Check if we have any jewelry items from the gem estimator
+            const itemsToPost = jewelryItems.length > 0 ? jewelryItems : processedItems;
+  
+            const jewelryResponse = await axios.post(
+              `${config.apiUrl}/jewelry`,
+              { cartItems: itemsToPost },
+              {
+                headers: { Authorization: `Bearer ${token}` }
+              }
+            );
+            createdJewelryItems = jewelryResponse.data;
+          }
+          
+          // Step 2: Create transaction
+          const transactionResponse = await axios.post(
+            `${config.apiUrl}/transactions`,
+            {
+              customer_id: selectedCustomer.id,
+              employee_id: employeeId,
+            total_amount: calculateTotal(),
+              cartItems: createdJewelryItems.map((item, index) => {
+                const type = cartItems[index].transaction_type.toLowerCase();
+                return {
+                  item_id: item.item_id,
+                  transaction_type_id: transactionTypes[type],
+                  price: cartItems[index].price
+                };
+              }),
+              transaction_status: 'PENDING',
+              transaction_date: new Date().toISOString().split('T')[0]
+            },
+            {
+              headers: { Authorization: `Bearer ${token}` }
+            }
+          );
+  
+          realTransactionId = transactionResponse.data.transaction.transaction_id;
+          
+          // Step 3: Process all collected payments against the real transaction ID
           for (const payment of updatedPayments) {
             await axios.post(
               `${config.apiUrl}/payments`,
               {
-                transaction_id: payment.transaction_id,
+                transaction_id: realTransactionId, // Use real transaction ID instead of temporary one
                 amount: payment.amount,
                 payment_method: payment.payment_method
               },
@@ -342,11 +346,29 @@ function Checkout() {
             );
           }
 
+          // Step 4: Update transaction status to completed
           await axios.put(
-            `${config.apiUrl}/transactions/${transactionId}`,
+            `${config.apiUrl}/transactions/${realTransactionId}`,
             { transaction_status: 'COMPLETED' },
             { headers: { Authorization: `Bearer ${token}` } }
           );
+          
+          // Step 5: Display success message and clear cart
+          setSnackbar({
+            open: true,
+            message: 'Transaction completed successfully!',
+            severity: 'success'
+          });
+          
+          // Clear cart and reset state
+          clearCart();
+          setTransactionCreated(false);
+          setCurrentTransactionId(null);
+          setPayments([]);
+          
+          // Navigate to login page after successful payment
+          console.log('Navigating to login page');
+          setTimeout(() => navigate('/login'), 300);
 
         } catch (paymentError) {
           console.error('Error processing payments:', paymentError);
