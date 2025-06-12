@@ -23,6 +23,7 @@ import QuoteManager from './pages/QuoteManager';
 import CustomerManager from './pages/CustomerManager';
 import CustomerEditor from './pages/CustomerEditor';
 import CustomerTicket from './pages/CustomerTicket';
+import CustomerReporting from './pages/CustomerReporting';
 import Cart from './pages/Cart';
 
 const theme = createTheme({
@@ -298,6 +299,14 @@ function App() {
                     <AuthenticatedLayout>
                       <CustomerManager />
                     </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/customer-reporting"
+                element={
+                  <ProtectedRoute>
+                    <CustomerReporting />
                   </ProtectedRoute>
                 }
               />
