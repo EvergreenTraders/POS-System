@@ -36,36 +36,28 @@ const CustomerReporting = () => {
     has_pawns: false,
     last_transaction_days: ''
   });
-  const [reportColumns, setReportColumns] = useState({
-    id: true,
-    first_name: true,
-    last_name: true,
-    email: true,
-    phone: true,
-    status: true,
-    risk_level: true,
-    created_at: true,
-    last_transaction_date: false,
-    total_purchase_amount: false,
-    total_pawn_amount: false,
-    id_type: false,
-    address_line1: false,
-    city: false,
-    state: false,
-    country: false
-  });
+  // Initialize reportColumns as empty object, will be populated from API
+  const [reportColumns, setReportColumns] = useState({});
+  
+  // State to track header preferences from API
+  const [headerPreferences, setHeaderPreferences] = useState({});
   const [reportFormat, setReportFormat] = useState('screen');
   const [reportTitle, setReportTitle] = useState('Customer Report');
   const [reportError, setReportError] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
 
+  // Call fetchCustomerHeaderPreferences when the component mounts
+  useEffect(() => {
+    fetchCustomerHeaderPreferences();
+  }, []);
+
   // Group column selections for better organization in the UI
-  const columnGroups = {
-    'Basic Info': ['id', 'first_name', 'last_name', 'email', 'phone', 'status', 'risk_level', 'created_at'],
+  const [columnGroups, setColumnGroups] = useState({
+    'Basic Info': [],
     'Transactions': ['last_transaction_date', 'total_purchase_amount', 'total_pawn_amount'],
-    'Address': ['address_line1', 'city', 'state', 'country'],
-    'Identification': ['id_type']
-  };
+    'Address': [],
+    'Identification': []
+  });
 
   // Format column names for display
   const formatColumnName = (column) => {
@@ -95,10 +87,81 @@ const CustomerReporting = () => {
 
   const handleReportColumnChange = (e) => {
     const { name, checked } = e.target;
+    // Update the report columns state directly with the checkbox value
     setReportColumns(prev => ({
       ...prev,
       [name]: checked
     }));
+    
+    // Also update in header preferences with the show_ prefix
+    const prefKey = name.startsWith('show_') ? name : `show_${name}`;
+    setHeaderPreferences(prev => ({
+      ...prev,
+      [prefKey]: checked
+    }));
+  };
+
+
+  // Fetch customer header preferences from API
+  const fetchCustomerHeaderPreferences = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/customer-preferences/config`);
+      const preferences = response.data || {};
+      
+      // Store the header preferences
+      setHeaderPreferences(preferences);
+      
+      // Initialize a new reportColumns object based on API data
+      const newReportColumns = {};
+      
+      // Extract all fields that start with 'show_' from the preferences
+      Object.entries(preferences).forEach(([key, value]) => {
+        if (key.startsWith('show_')) {
+          const columnName = key.replace('show_', '');
+          // Add to report columns with the boolean value from API
+          newReportColumns[columnName] = value;
+        }
+      });
+      
+      // Make sure we have some default transaction fields even if not in API
+      const defaultFields = ['last_transaction_date', 'total_purchase_amount', 'total_pawn_amount'];
+      defaultFields.forEach(field => {
+        if (!(field in newReportColumns)) {
+          newReportColumns[field] = false;
+        }
+      });
+      
+      // Set the report columns from the API
+      setReportColumns(newReportColumns);
+      
+      // Organize columns into appropriate groups based on field type
+      const basicInfoFields = [];
+      const addressFields = [];
+      const identificationFields = [];
+      const transactionFields = ['last_transaction_date', 'total_purchase_amount', 'total_pawn_amount'];
+      
+      Object.keys(newReportColumns).forEach(column => {
+        if (['id', 'image', 'first_name', 'last_name', 'email', 'phone', 'status', 'notes','risk_level', 'created_at'].includes(column)) {
+          basicInfoFields.push(column);
+        } else if (['address_line1', 'address_line2','city', 'state', 'postal_code', 'country'].includes(column)) {
+          addressFields.push(column);
+        } else if (column.includes('id_') || column.includes('identification')) {
+          identificationFields.push(column);
+        }
+      });
+      
+      // Update column groups with the organized fields
+      setColumnGroups({
+        'Basic Info': basicInfoFields,
+        'Transactions': transactionFields,
+        'Address': addressFields,
+        'Identification': identificationFields
+      });
+   
+      
+    } catch (error) {
+      console.error('Error fetching customer header preferences:', error);
+    }
   };
 
   const handleReportFormatChange = (e) => {
@@ -126,18 +189,27 @@ const CustomerReporting = () => {
       // Build query parameters for report
       const params = new URLSearchParams();
       
-      // Add filter parameters
+      // Add filter parameters - keeping this intact as requested
       Object.entries(reportFilters).forEach(([key, value]) => {
         if (value !== '' && value !== false) {
           params.append(key, value);
         }
       });
       
-      // Add column selections
+      // Extract selected columns based on reportColumns state
       const selectedColumns = Object.entries(reportColumns)
         .filter(([_, isSelected]) => isSelected)
         .map(([column]) => column);
-        
+      
+      if (selectedColumns.length === 0) {
+        setReportError('Please select at least one column for the report.');
+        setReportLoading(false);
+        return;
+      }
+      
+      console.log('Selected columns for report:', selectedColumns, reportColumns);
+      
+      // Add selected columns to params
       params.append('columns', selectedColumns.join(','));
       
       // Add report format
@@ -146,7 +218,14 @@ const CustomerReporting = () => {
       // Add report title
       params.append('title', reportTitle);
       
-      const response = await axios.get(`${API_BASE_URL}/reports/customers?${params.toString()}`, {
+      // Generate appropriate endpoint URL based on the report format
+      const endpoint = reportFormat === 'screen' ? 
+        `${API_BASE_URL}/customers` : 
+        `${API_BASE_URL}/reports/customers/export`;
+      
+      const response = await axios({
+        method: 'get',
+        url: `${endpoint}?${params.toString()}`,
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
@@ -160,7 +239,7 @@ const CustomerReporting = () => {
           : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
           
         const fileExtension = reportFormat === 'pdf' ? '.pdf' : '.xlsx';
-        const filename = `${reportTitle.replace(/\\s+/g, '_')}_${new Date().toISOString().split('T')[0]}${fileExtension}`;
+        const filename = `${reportTitle.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}${fileExtension}`;
         
         const url = window.URL.createObjectURL(new Blob([response.data], { type: contentType }));
         const link = document.createElement('a');
@@ -170,8 +249,16 @@ const CustomerReporting = () => {
         link.click();
         link.remove();
       } else {
-        // For screen display
-        setReportData(response.data);
+        // For screen display - filter the data to only show selected columns
+        const filteredResponseData = response.data.map(customer => {
+          const filteredCustomer = {};
+          selectedColumns.forEach(column => {
+            filteredCustomer[column] = customer[column];
+          });
+          return filteredCustomer;
+        });
+        
+        setReportData(filteredResponseData);
       }
     } catch (error) {
       console.error('Error generating report:', error);
@@ -395,21 +482,28 @@ const CustomerReporting = () => {
                       {groupName}
                     </Typography>
                     <Grid container>
-                      {columns.map(column => (
-                        <Grid item xs={6} sm={4} key={column}>
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={reportColumns[column] || false}
-                                onChange={handleReportColumnChange}
-                                name={column}
-                                size="small"
-                              />
-                            }
-                            label={formatColumnName(column)}
-                          />
-                        </Grid>
-                      ))}
+                      {columns.map(column => {
+                        // Check directly in reportColumns first, then fall back to headerPreferences
+                        const isChecked = column in reportColumns
+                          ? reportColumns[column]
+                          : headerPreferences[`show_${column}`] || false;
+                        
+                        return (
+                          <Grid item xs={6} sm={4} key={column}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={isChecked}
+                                  onChange={handleReportColumnChange}
+                                  name={column}
+                                  size="small"
+                                />
+                              }
+                              label={formatColumnName(column)}
+                            />
+                          </Grid>
+                        );
+                      })}
                     </Grid>
                     <Divider sx={{ mt: 1 }} />
                   </Box>
@@ -468,7 +562,11 @@ const CustomerReporting = () => {
                                       ? `$${parseFloat(row[column]).toFixed(2)}`
                                       : '-'
                                   ) : (
-                                    row[column] !== undefined && row[column] !== null ? row[column] : '-'
+                                    row[column] !== undefined && row[column] !== null 
+                                      ? (typeof row[column] === 'object' 
+                                          ? JSON.stringify(row[column])
+                                          : row[column])
+                                      : '-'
                                   )}
                                 </TableCell>
                               ))}

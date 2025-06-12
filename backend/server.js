@@ -1970,6 +1970,274 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
   }
 });
 
+// Report Generation API endpoints
+app.get('/api/reports/customers/export', async (req, res) => {
+  try {
+    // Import required PDF and Excel libraries
+    const PDFDocument = require('pdfkit');
+    const ExcelJS = require('exceljs');
+    
+    const { format, title, columns, status, risk_level, start_date, end_date, transaction_min, transaction_max } = req.query;
+    
+    // Get the customer data using the same logic as in the /api/customers endpoint
+    let queryParams = [];
+    let conditions = [];
+    let paramCounter = 1;
+    
+    let selectFields = '*';
+    if (columns) {
+      const columnList = columns.split(',').map(col => col.trim());
+      if (columnList.length > 0) {
+        selectFields = columnList.join(', ');
+      }
+    }
+    
+    let query = `SELECT ${selectFields} FROM customers WHERE 1=1`;
+    
+    if (status) {
+      conditions.push(`status = $${paramCounter++}`);
+      queryParams.push(status);
+    }
+    
+    if (risk_level) {
+      conditions.push(`risk_level = $${paramCounter++}`);
+      queryParams.push(risk_level);
+    }
+    
+    if (start_date) {
+      conditions.push(`created_at >= $${paramCounter++}`);
+      queryParams.push(start_date);
+    }
+    
+    if (end_date) {
+      conditions.push(`created_at <= $${paramCounter++}`);
+      queryParams.push(end_date);
+    }
+    
+    if (transaction_min) {
+      conditions.push(`total_purchase_amount >= $${paramCounter++}`);
+      queryParams.push(parseFloat(transaction_min));
+    }
+    
+    if (transaction_max) {
+      conditions.push(`total_purchase_amount <= $${paramCounter++}`);
+      queryParams.push(parseFloat(transaction_max));
+    }
+    
+    if (conditions.length > 0) {
+      query += ' AND ' + conditions.join(' AND ');
+    }
+    
+    // Execute the query to get the customer data
+    const result = await pool.query(query, queryParams);
+    const customers = result.rows;
+    
+    // Format column names for headers
+    const formatColumnName = (column) => {
+      return column
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    };
+    
+    // Parse selected columns
+    const selectedColumns = columns ? columns.split(',') : Object.keys(customers[0] || {});
+    const columnHeaders = selectedColumns.map(formatColumnName);
+    
+    if (format === 'pdf') {
+      // Generate PDF report
+      const doc = new PDFDocument({
+        margin: 30,
+        size: 'A4',
+        layout: 'landscape' // Use landscape for more room
+      });
+      
+      // Set response headers for PDF download
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${title.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf"`);
+      
+      doc.pipe(res);
+      
+      // Add title with padding
+      doc.fontSize(18).text(title, { align: 'center' });
+      doc.moveDown(1);
+      
+      // Set some constants for table layout
+      const margin = 30;
+      const availableWidth = doc.page.width - (margin * 2);
+      
+      // Use all selected columns
+      const displayColumns = selectedColumns;
+      const displayHeaders = columnHeaders;
+      
+      // Calculate column widths more intelligently
+      // Give each column a minimum width based on the header text length
+      const columnWidths = [];
+      const minColWidth = 60;
+      let totalAllocatedWidth = 0;
+      
+      // First pass - allocate minimum widths
+      displayHeaders.forEach((header) => {
+        const width = Math.max(minColWidth, header.length * 7); // Approximate pixel width
+        columnWidths.push(width);
+        totalAllocatedWidth += width;
+      });
+      
+      // Second pass - distribute remaining space proportionally
+      if (totalAllocatedWidth < availableWidth) {
+        const extraPerColumn = (availableWidth - totalAllocatedWidth) / displayColumns.length;
+        columnWidths.forEach((width, i) => {
+          columnWidths[i] += extraPerColumn;
+        });
+      } else if (totalAllocatedWidth > availableWidth) {
+        // Scale down if needed
+        const ratio = availableWidth / totalAllocatedWidth;
+        columnWidths.forEach((width, i) => {
+          columnWidths[i] = width * ratio;
+        });
+      }
+      
+      // Start drawing the table
+      let x = margin;
+      let y = doc.y + 10;
+      
+      // Draw header background
+      doc.rect(margin, y - 5, availableWidth, 25).fill('#f0f0f0');
+      doc.fillColor('#000000');
+      
+      // Draw header texts
+      displayHeaders.forEach((header, i) => {
+        doc.fontSize(10)
+           .font('Helvetica-Bold')
+           .text(header, x, y, {
+              width: columnWidths[i] - 10, // Subtract padding
+              align: 'left',
+              lineBreak: false
+           });
+        x += columnWidths[i];
+      });
+      
+      // Reset x and move y down for data rows
+      y += 25;
+      
+      // Draw table rows with alternating background
+      customers.forEach((customer, rowIndex) => {
+        // Add alternating row background
+        if (rowIndex % 2 === 0) {
+          doc.rect(margin, y - 5, availableWidth, 20).fill('#f9f9f9');
+          doc.fillColor('#000000');
+        }
+        
+        x = margin;
+        for (let i = 0; i < displayColumns.length; i++) {
+          const column = displayColumns[i];
+          let value = customer[column];
+          
+          // Format special values
+          if (value === null || value === undefined) {
+            value = '-';
+          } else if (typeof value === 'object') {
+            value = JSON.stringify(value);
+          } else if (typeof value === 'string' && value.length > 25) {
+            // Truncate long text
+            value = value.substring(0, 22) + '...';
+          }
+          
+          // Draw cell text
+          doc.fontSize(8)
+             .font('Helvetica')
+             .text(String(value), x, y, {
+                width: columnWidths[i] - 10, // Subtract padding
+                align: 'left',
+                lineBreak: false
+             });
+             
+          x += columnWidths[i];
+        }
+        
+        y += 30; // Move to the next row with increased spacing
+        
+        // Start a new page if we're near the bottom AND there are more records to display
+        if (y > doc.page.height - 50 && rowIndex < customers.length - 1) {
+          doc.addPage();
+          y = margin;
+          
+          // Re-draw the header on the new page
+          x = margin;
+          doc.rect(margin, y - 5, availableWidth, 25).fill('#f0f0f0');
+          doc.fillColor('#000000');
+          
+          displayHeaders.forEach((header, i) => {
+            doc.fontSize(10)
+               .font('Helvetica-Bold')
+               .text(header, x, y, {
+                  width: columnWidths[i] - 10,
+                  align: 'left',
+                  lineBreak: false
+               });
+            x += columnWidths[i];
+          });
+          
+          y += 25;
+        }
+      });
+      
+      // No additional columns page - all columns are already displayed
+      
+      // Finalize the PDF
+      doc.end();
+      
+    } else if (format === 'excel') {
+      // Generate Excel report
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet(title);
+      
+      // Add column headers
+      worksheet.addRow(columnHeaders);
+      
+      // Style the header row
+      worksheet.getRow(1).font = { bold: true };
+      
+      // Add data rows
+      customers.forEach(customer => {
+        const rowData = selectedColumns.map(column => {
+          let value = customer[column];
+          
+          // Format special values
+          if (value === null || value === undefined) {
+            return '-';
+          } else if (typeof value === 'object') {
+            return JSON.stringify(value);
+          }
+          
+          return value;
+        });
+        
+        worksheet.addRow(rowData);
+      });
+      
+      // Auto-fit columns
+      worksheet.columns.forEach(column => {
+        column.width = 15;
+      });
+      
+      // Set response headers for Excel download
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${title.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx"`);
+      
+      // Write to response
+      await workbook.xlsx.write(res);
+      res.end();
+    } else {
+      // Unsupported format
+      res.status(400).json({ error: 'Unsupported export format. Use pdf or excel.' });
+    }
+  } catch (error) {
+    console.error('Error generating report:', error);
+    res.status(500).json({ error: 'Failed to generate report' });
+  }
+});
+
 // Transaction routes
 app.get('/api/transactions', async (req, res) => {
   try {
