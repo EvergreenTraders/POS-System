@@ -161,9 +161,6 @@ const CustomerManager = () => {
         }
       });
       
-      // Log the preferences for debugging
-      console.log('Fetched column preferences:', columnPreferences);
-      
       // Update state with the processed preferences
       setColumnPreferences(columnPreferences);
       
@@ -281,7 +278,6 @@ const CustomerManager = () => {
       const url = queryString ? `${config.apiUrl}/customers?${queryString}` : `${config.apiUrl}/customers`;
       
       const response = await fetch(url);
-      console.log('Response:', response);
       if (!response.ok) throw new Error('Failed to fetch customers');
       
       const data = await response.json();
@@ -518,10 +514,16 @@ const CustomerManager = () => {
 
       // If we have items in location state, add them to cart context and navigate
       if (location.state?.items?.length > 0) {
-      //  location.state.items.forEach(item => addToCart(item));
+        location.state.items.forEach(item => addToCart(item));
+        
+        // When coming from GemEstimator, make sure to preserve source as 'estimator'
+        const sourceFrom = location.state.from === 'gem-estimator' ? 'estimator' : (location.state.from || 'customer');
+        
         navigate('/checkout', { 
           state: { 
-            from: location.state.from || 'customer'
+            from: sourceFrom,
+            items: location.state.items,
+            customer: savedCustomer
           }
         });
       }
@@ -637,10 +639,16 @@ const CustomerManager = () => {
     
     // If we have items in location state, add them to cart context and navigate
     if (location.state?.items?.length > 0) {
-    //  location.state.items.forEach(item => addToCart(item));
+      location.state.items.forEach(item => addToCart(item));
+      
+      // When coming from GemEstimator, make sure to preserve source as 'estimator'
+      const sourceFrom = location.state.from === 'gem-estimator' ? 'estimator' : (location.state.from || 'customer');
+      
       navigate('/checkout', { 
         state: { 
-          from: location.state.from || 'customer'
+          from: sourceFrom,
+          items: location.state.items,
+          customer: selectedCustomer
         }
       });
     }

@@ -30,6 +30,8 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PaymentIcon from '@mui/icons-material/Payment';
 import SaveIcon from '@mui/icons-material/Save';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import CreditCardIcon from '@mui/icons-material/CreditCard';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -47,6 +49,8 @@ function Checkout() {
   const { user } = useAuth();
   const [isInitialized, setIsInitialized] = useState(false);
   const [checkoutItems, setCheckoutItems] = useState([]);
+  const [allCartItems, setAllCartItems] = useState([]);
+  const [jewelryItems, setJewelryItems] = useState([]);
 
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentDetails, setPaymentDetails] = useState({
@@ -66,25 +70,50 @@ function Checkout() {
   const [transactionCreated, setTransactionCreated] = useState(false);
   const [currentTransactionId, setCurrentTransactionId] = useState(null);
   const [payments, setPayments] = useState([]);
+  const [isFullyPaid, setIsFullyPaid] = useState(false);
 
-  // Effect to initialize cart and customer from GemEstimator navigation
+  // Effect to initialize cart and customer from navigation (either Estimator or Cart)
   useEffect(() => {
-    if (location.state?.from === 'estimator' && location.state?.items && location.state?.customer && !isInitialized) {
-      console.log('Initializing checkout with items:', location.state.items);
-      // Clear existing cart items before adding new ones from estimator
-      clearCart(); 
-      
-      // Ensure each item is added individually to the cart
-      if (Array.isArray(location.state.items)) {
-        location.state.items.forEach(item => addToCart(item));
+    if (!isInitialized && location.state) {
+      if (location.state.from === 'estimator' && location.state?.items && location.state?.customer) {
+        // Clear existing cart items before adding new ones from estimator
+        clearCart(); 
+        
+        // Ensure each item is added individually to the cart
+        if (Array.isArray(location.state.items)) {
+          location.state.items.forEach(item => addToCart(item));
+        }
+        
+        // Set checkoutItems for display
+        setCheckoutItems(location.state.items);
+        
+        // Set the customer
+        setCustomer(location.state.customer);
+        setIsInitialized(true); // Mark as initialized to prevent re-running
+      } 
+      else if (location.state.from === 'cart' && location.state?.items) {        
+        // Store the items to checkout and all cart items separately
+        const items = location.state.items;
+        
+        // Extract jewelry-specific items and store them in state for later use in handleSubmit
+        const filteredJewelryItems = items.filter(item => item.sourceEstimator === 'jewelry');
+        setJewelryItems(filteredJewelryItems);
+        
+        if (filteredJewelryItems.length > 0) {
+          console.log('Jewelry items from gem estimator found in checkout:', filteredJewelryItems);
+        }
+        
+        // Set the checkout items, ensuring jewelry items retain all fields
+        setCheckoutItems(items);
+        setAllCartItems(location.state.allCartItems);
+        
+        // Set the customer if provided
+        if (location.state.customer) {
+          setCustomer(location.state.customer);
+        }
+        
+        setIsInitialized(true); // Mark as initialized to prevent re-running
       }
-      
-      // Set checkoutItems for display
-      setCheckoutItems(location.state.items);
-      
-      // Set the customer
-      setCustomer(location.state.customer);
-      setIsInitialized(true); // Mark as initialized to prevent re-running
     }
   }, [location.state, addToCart, setCustomer, clearCart, isInitialized]);
 
@@ -190,113 +219,174 @@ function Checkout() {
 
       let transactionId;
 
-      // Only create transaction once
+      // Create a temporary transaction ID for tracking payments
+      // We'll only create the actual records in the database when payment is complete
       if (!transactionCreated) {
-        let createdJewelryItems;
-
-        if (isFromQuotes) {
-          // If coming from quotes, update each quote item to a regular item
-          const convertResponse = await axios.put(
-            `${config.apiUrl}/jewelry/${quoteId}`,
-            {},
-            {
-              headers: { Authorization: `Bearer ${token}` }
-            }
-          );
-          createdJewelryItems = convertResponse.data;
-        } else {
-          // If coming from estimator, create new jewelry items
-          
-          // Process the cart items to ensure images are in the correct format
-          const processedCartItems = cartItems.map(item => {
-            // Create a deep copy of the item without the images property
-            const { images, ...itemWithoutImages } = item;
-            
-            // Process images to ensure they're in a format the backend can handle
-            let processedImages = [];
-            if (images && Array.isArray(images)) {
-              // Extract only the URL from each image object
-              processedImages = images.map(img => {
-                if (typeof img === 'object') {
-                  return { url: img.url || '' };
-                }
-                return img;
-              });
-            }
-            
-            // Return the item with processed images
-            return {
-              ...itemWithoutImages,
-              images: processedImages
-            };
-          });
-                    
-          const jewelryResponse = await axios.post(
-            `${config.apiUrl}/jewelry`,
-            { cartItems: processedCartItems },
-            {
-              headers: { Authorization: `Bearer ${token}` }
-            }
-          );
-          createdJewelryItems = jewelryResponse.data;
-        }
-        // Create transactions for all items
-        const transactionResponse = await axios.post(
-          `${config.apiUrl}/transactions`,
-          {
-            customer_id: selectedCustomer.id,
-            employee_id: employeeId,
-            total_amount: calculateTotal(),
-            cartItems: createdJewelryItems.map((item, index) => {
-              const type = cartItems[index].transaction_type.toLowerCase();
-              return {
-                item_id: item.item_id,
-                transaction_type_id: transactionTypes[type],
-                price: cartItems[index].price
-              };
-            }),
-            transaction_status: 'PENDING',
-            transaction_date: new Date().toISOString().split('T')[0]
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` }
-          }
-        );
-
-        transactionId = transactionResponse.data.transaction.transaction_id;
+        // Generate temporary ID for tracking payments until fully paid
+        transactionId = 'temp-' + Date.now();
         setCurrentTransactionId(transactionId);
         setTransactionCreated(true);
       } else {
         transactionId = currentTransactionId;
       }
 
-      if (!transactionId) {
-        throw new Error('Transaction ID not found');
-      }
-
-      // Process payment
-      await axios.post(
-        `${config.apiUrl}/payments`,
-        {
-          transaction_id: transactionId,
-          amount: paymentAmount,
-          payment_method: paymentMethod.toUpperCase()
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
-
       // Add payment to list and update remaining amount
       const newPayment = { 
+        transaction_id: transactionId,
         method: paymentMethod, 
         amount: paymentAmount,
+        payment_method: paymentMethod.toUpperCase(),
         timestamp: new Date().toISOString()
       };
-      setPayments([...payments, newPayment]);
+      const updatedPayments = [...payments, newPayment];
+      setPayments(updatedPayments);
       
-      const newRemainingAmount = remainingAmount - paymentAmount;
+      // Fix floating point precision issues by rounding to 2 decimal places
+      const newRemainingAmount = parseFloat((remainingAmount - paymentAmount).toFixed(2));
       setRemainingAmount(newRemainingAmount);
+      
+      // Check if payment is complete
+      const isPaid = newRemainingAmount == 0;
+      setIsFullyPaid(isPaid);
+      
+      if (isPaid) {
+        // Only create jewelry items and transactions when payment is fully completed
+        try {
+          let createdJewelryItems;
+          let realTransactionId;
+
+          // Step 1: Create jewelry items
+          if (isFromQuotes) {
+            // If coming from quotes, update each quote item to a regular item
+            const convertResponse = await axios.put(
+              `${config.apiUrl}/jewelry/${quoteId}`,
+              {},
+              {
+                headers: { Authorization: `Bearer ${token}` }
+              }
+            );
+            createdJewelryItems = convertResponse.data;
+          } else {
+            // If coming from estimator, create new jewelry items
+            
+            // Process the cart items to ensure images are in the correct format
+            const processedItems = cartItems.map(item => {
+              // Create a deep copy of the item without the images property
+              const { images, ...itemWithoutImages } = item;
+              
+              // Process images to ensure they're in a format the backend can handle
+              let processedImages = [];
+              if (images && Array.isArray(images)) {
+                // Extract only the URL from each image object
+                processedImages = images.map(img => {
+                  if (typeof img === 'object') {
+                    return { url: img.url || '' };
+                  }
+                  return img;
+                });
+              }
+              
+              // Return the processed item with appropriate fields
+              return {
+                ...itemWithoutImages,
+                images: processedImages
+              };
+            });
+            
+            // Check if we have any jewelry items from the gem estimator
+            const itemsToPost = jewelryItems.length > 0 ? jewelryItems : processedItems;
+  
+            const jewelryResponse = await axios.post(
+              `${config.apiUrl}/jewelry`,
+              { cartItems: itemsToPost },
+              {
+                headers: { Authorization: `Bearer ${token}` }
+              }
+            );
+            createdJewelryItems = jewelryResponse.data;
+          }
+          
+          // Step 2: Create transaction
+          const transactionResponse = await axios.post(
+            `${config.apiUrl}/transactions`,
+            {
+              customer_id: selectedCustomer.id,
+              employee_id: employeeId,
+            total_amount: calculateTotal(),
+              cartItems: createdJewelryItems.map((item, index) => {
+                const type = cartItems[index].transaction_type.toLowerCase();
+                return {
+                  item_id: item.item_id,
+                  transaction_type_id: transactionTypes[type],
+                  price: cartItems[index].price
+                };
+              }),
+              transaction_status: 'PENDING',
+              transaction_date: new Date().toISOString().split('T')[0]
+            },
+            {
+              headers: { Authorization: `Bearer ${token}` }
+            }
+          );
+  
+          realTransactionId = transactionResponse.data.transaction.transaction_id;
+          
+          // Step 3: Process all collected payments against the real transaction ID
+          for (const payment of updatedPayments) {
+            await axios.post(
+              `${config.apiUrl}/payments`,
+              {
+                transaction_id: realTransactionId, // Use real transaction ID instead of temporary one
+                amount: payment.amount,
+                payment_method: payment.payment_method
+              },
+              {
+                headers: { Authorization: `Bearer ${token}` }
+              }
+            );
+          }
+
+          // Step 4: Update transaction status to completed
+          await axios.put(
+            `${config.apiUrl}/transactions/${realTransactionId}`,
+            { transaction_status: 'COMPLETED' },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          
+          // Step 5: Display success message and clear cart
+          setSnackbar({
+            open: true,
+            message: 'Transaction completed successfully!',
+            severity: 'success'
+          });
+          
+          // Clear cart and reset state
+          clearCart();
+          setTransactionCreated(false);
+          setCurrentTransactionId(null);
+          setPayments([]);
+          
+          // Navigate to login page after successful payment
+          console.log('Navigating to login page');
+          setTimeout(() => navigate('/login'), 300);
+
+        } catch (paymentError) {
+          console.error('Error processing payments:', paymentError);
+          setSnackbar({
+            open: true,
+            message: 'Error processing payments. Please try again.',
+            severity: 'error'
+          });
+          return;
+        }
+      } else {
+        // Show partial payment message
+        setSnackbar({
+          open: true,
+          message: `Payment of $${paymentAmount} accepted. Remaining: $${newRemainingAmount}`,
+          severity: 'info'
+        });
+      }
 
       // Reset payment form but keep card number if using card
       setPaymentDetails({
@@ -304,39 +394,6 @@ function Checkout() {
         cashAmount: '',
         cardNumber: paymentMethod === 'credit_card' ? paymentDetails.cardNumber : ''
       });
-
-      if (newRemainingAmount === 0) {
-        // Update transaction status to COMPLETED when fully paid
-        await axios.put(
-          `${config.apiUrl}/transactions/${transactionId}`,
-          { transaction_status: 'COMPLETED' },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-
-        setSnackbar({
-          open: true,
-          message: 'All payments processed successfully',
-          severity: 'success'
-        });
-
-        // Reset state
-        setTransactionCreated(false);
-        setCurrentTransactionId(null);
-        setPayments([]);
-        clearCart();
-        
-        navigate('/gem-estimator', { 
-          state: { 
-            from: 'checkout'
-          }
-        });
-      } else {
-        setSnackbar({
-          open: true,
-          message: `Payment of ${paymentAmount} processed. Remaining amount: ${newRemainingAmount}`,
-          severity: 'success'
-        });
-      }
     } catch (error) {
       if (error.message === 'Authentication token not found') {
         sessionStorage.setItem('redirectAfterLogin', '/checkout');
@@ -439,24 +496,70 @@ function Checkout() {
       setCustomer(null);
       navigate('/quote-manager');
     } else if (location.state?.from === 'cart') {
-      // Save cart items and navigate back to customer ticket
-      sessionStorage.setItem('cartItems', JSON.stringify(cartItems));
+      // If fully paid, filter out items that were checked out
+      // Otherwise, use all cart items as is
+      let itemsToKeep;
+      if (isFullyPaid) {
+        // Create a set of checkout item IDs for faster lookup
+        const checkoutItemIds = new Set(checkoutItems.map(item => item.id));
+        // Filter out items that were checked out
+        itemsToKeep = allCartItems.filter(item => !checkoutItemIds.has(item.id));
+      } else {
+        itemsToKeep = allCartItems;
+      }
+      console.log("Items to keep:", itemsToKeep);
+      // Ensure each item is a properly formatted object, not an array
+      const formattedCartItems = itemsToKeep.map(item => {
+        // If item is an array, convert it to a proper object
+        if (Array.isArray(item)) {
+          return {
+            id: item[0].id || null,
+            description: item[0].description || '',
+            category: item[0].category || '',
+            value: item[0].value || '',
+            transaction_type: item[0].transaction_type || 'pawn',
+            customer: item[0].customer  || null,
+            employee: item[0].employee || null
+          };
+        }
+        return item; // Already in correct format
+      });
+      
+      // Save formatted items to session storage
+      sessionStorage.setItem('cartItems', JSON.stringify(formattedCartItems));
+      
       navigate('/customer-ticket', {
         state: {
           from: 'checkout',
-          items: cartItems
+          items: formattedCartItems // Pass the properly formatted items
         }
       });
     } else {
-      // Save the cart items to session storage before navigating back
+      // Ensure items are properly formatted before saving to session storage
+      const formattedCartItems = cartItems.map(item => {
+        if (Array.isArray(item)) {
+          return {
+            id: item[0].id || null,
+            description: item[0].description || '',
+            category: item[0].category || '',
+            value: item[0].value || '',
+            transaction_type: item[0].transaction_type || 'pawn',
+            customer: item[0].customer  || null,
+            employee: item[0].employee || null
+          };
+        }
+        return item;
+      });
+      
+      // Save the formatted cart items to session storage before navigating back
       sessionStorage.setItem('estimationState', JSON.stringify({
-        items: cartItems
+        items: formattedCartItems
       }));
       clearCart();
       setCustomer(null);
       // Go back to gem estimator
       navigate('/gem-estimator');
-    }
+    }  
   };
 
   // Set customer info and cart items from quote or cart
@@ -465,7 +568,27 @@ function Checkout() {
       // Handle items from cart
       if (location.state?.items && location.state?.from === 'cart') {        
         setCheckoutItems(location.state.items);
-        addToCart(location.state.items);
+        
+        // Add each item individually to the cart
+        if (Array.isArray(location.state.items)) {
+          location.state.items.forEach(item => addToCart(item));
+        }
+        
+        // Get customer from state if available
+        if (location.state.customer) {
+          setCustomer(location.state.customer);
+        }
+        
+        setIsInitialized(true);
+      }
+      // Handle items from estimator
+      else if (location.state?.items && location.state?.from === 'estimator') {
+        setCheckoutItems(location.state.items);
+        
+        // Add each item individually to the cart if not already added
+        if (Array.isArray(location.state.items) && cartItems.length === 0) {
+          location.state.items.forEach(item => addToCart(item));
+        }
         
         // Get customer from state if available
         if (location.state.customer) {
@@ -561,9 +684,6 @@ function Checkout() {
                       // Try to use description field first (most common)
                       if (item.long_desc || item.description) {
                         displayDescription = item.long_desc || item.description;
-                        if (item.category) {
-                          displayDescription += " "+ item.category;
-                        }
                       }
                       // Fallback to short_desc if present
                       else if (item.short_desc) {
@@ -586,8 +706,8 @@ function Checkout() {
                       let transactionType = '';
                       if (item.transaction_type) {
                         transactionType = item.transaction_type.charAt(0).toUpperCase() + item.transaction_type.slice(1);
-                      } else if (item.itemType) {
-                        transactionType = item.itemType.charAt(0).toUpperCase() + item.itemType.slice(1);
+                      } else if (item.transaction_type) {
+                        transactionType = item.transaction_type.charAt(0).toUpperCase() + item.transaction_type.slice(1);
                       } else {
                         // Try to determine from structure
                         if (item.value !== undefined) transactionType = 'Pawn';
@@ -740,6 +860,24 @@ function Checkout() {
                   Process Payment
                 </Button>
               </Box>
+              
+              {/* Payment History */}
+              {payments.length > 0 && (
+                <Box sx={{ mt: 4 }}>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    {payments.map((payment, index) => (
+                      <Chip
+                        key={index}
+                        icon={payment.method === 'cash' ? <AttachMoneyIcon /> : <CreditCardIcon />}
+                        label={`${payment.method === 'cash' ? 'Cash' : 'Credit Card'} $${parseFloat(payment.amount).toFixed(2)}`}
+                        color={payment.method === 'cash' ? 'success' : 'primary'}
+                        variant="outlined"
+                        sx={{ paddingY: 2.5, paddingX: 0.5, fontSize: '0.9rem' }}
+                      />
+                    ))}
+                  </Box>
+                </Box>
+              )}
             </Paper>
           </Grid>
         </Grid>
