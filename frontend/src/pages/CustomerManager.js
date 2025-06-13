@@ -8,7 +8,8 @@ import {
   AccordionDetails, Pagination, FormControlLabel, Checkbox
 } from '@mui/material';
 import { Add as AddIcon, Edit as EditIcon, FilterList as FilterListIcon, 
-  ExpandMore as ExpandMoreIcon, Clear as ClearIcon } from '@mui/icons-material';
+  ExpandMore as ExpandMoreIcon, Clear as ClearIcon, Assessment as AssessmentIcon } from '@mui/icons-material';
+import CustomerReporting from './CustomerReporting';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -92,6 +93,9 @@ const CustomerManager = () => {
     message: '',
     severity: 'success'
   });
+  
+  // State for reporting dialog - set to false by default so it only opens on button click
+  const [openReportingDialog, setOpenReportingDialog] = useState(false);
   
   // State for column preferences
   const [columnPreferences, setColumnPreferences] = useState({});
@@ -702,6 +706,8 @@ const CustomerManager = () => {
     handleCloseSearchDialog();
   };
 
+  // Removed auto-open effect
+
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -717,6 +723,15 @@ const CustomerManager = () => {
             sx={{ mr: 1 }}
           >
             Add New Customer
+          </Button>
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<AssessmentIcon />}
+            onClick={() => setOpenReportingDialog(true)}
+            sx={{ ml: 1 }}
+          >
+            Ad-hoc Reports
           </Button>
         </Box>
       </Box>
@@ -1514,6 +1529,24 @@ const CustomerManager = () => {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {/* Ad-hoc Reporting Dialog */}
+      <Dialog
+        open={openReportingDialog}
+        onClose={() => setOpenReportingDialog(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle sx={{ borderBottom: '1px solid rgba(0,0,0,0.12)' }}>
+          <Typography variant="h6">Ad-hoc Customer Reporting</Typography>
+        </DialogTitle>
+        <DialogContent sx={{ p: 0 }}>
+          <CustomerReporting />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenReportingDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };
