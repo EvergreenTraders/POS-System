@@ -203,6 +203,16 @@ function App() {
                 }
               />
               <Route
+                path="/bullion-estimator"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CoinsBullions />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/customer"
                 element={
                   <ProtectedRoute>
