@@ -64,7 +64,7 @@ function GemEstimator() {
   const [editMode, setEditMode] = useState(location.state?.editMode || false);
   const [returnToTicket, setReturnToTicket] = useState(location.state?.returnToTicket || false);
   const [ticketItemId, setTicketItemId] = useState(location.state?.ticketItemId || null);
-  const [priceEstimates, setPriceEstimates] = useState({ pawn: 0, buy: 0, retail: 0 });
+  const [priceEstimates, setPriceEstimates] = useState({ pawn: 0, buy: 0, melt: 0, retail: 0 });
   const [transactionType, setTransactionType] = useState(location.state?.itemToEdit?.transaction_type || 'buy');
   const [freeText, setFreeText] = useState(location.state?.itemToEdit?.free_text || '');
   const [diamondSummary, setDiamondSummary] = useState([]);
@@ -93,6 +93,7 @@ function GemEstimator() {
     setPriceEstimates({
       pawn: estimates.pawn,
       buy: estimates.buy,
+      melt: estimates.melt,
       retail: estimates.retail
     });
   };
@@ -196,6 +197,7 @@ function GemEstimator() {
       transaction_type: transactionType || 'buy',
       buy_price: priceEstimates.buy,
       pawn_price: priceEstimates.pawn,
+      melt_price: priceEstimates.melt,
       retail_price: priceEstimates.retail,
       
       // Images
@@ -371,6 +373,7 @@ function GemEstimator() {
           setPriceEstimates({
             pawn: itemToEdit.price_estimates.pawn || 0,
             buy: itemToEdit.price_estimates.buy || 0,
+            melt: itemToEdit.price_estimates.melt || 0,
             retail: itemToEdit.price_estimates.retail || 0
           });
         }
@@ -889,10 +892,12 @@ function GemEstimator() {
     // Get percentages for each transaction type, default to 0 if not found
     const pawnPercent = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
     const buyPercent = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
+    const meltPercent = 98;
     const retailPercent = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
     return {
       pawn: Number((value * pawnPercent / 100).toFixed(2)),
       buy: Number((value * buyPercent / 100).toFixed(2)),
+      melt: Number((value * meltPercent / 100).toFixed(2)),
       retail: Number((value * retailPercent / 100).toFixed(2))
     };
   };
@@ -932,6 +937,7 @@ function GemEstimator() {
     setPriceEstimates(prev => ({
       pawn: prev.pawn + estimates.pawn,
       buy: prev.buy + estimates.buy,
+      melt: prev.melt + estimates.melt,
       retail: prev.retail + estimates.retail
     }));
     
@@ -1020,6 +1026,7 @@ function GemEstimator() {
     setPriceEstimates(prev => ({
       pawn: prev.pawn + estimates.pawn,
       buy: prev.buy + estimates.buy,
+      melt: prev.melt + estimates.melt,
       retail: prev.retail + estimates.retail
     }));
 
@@ -1692,6 +1699,7 @@ function GemEstimator() {
         setPriceEstimates(parsedState.priceEstimates || {
           pawn: 0,
           buy: 0,
+          melt: 0,
           retail: 0
         });
       }
@@ -2348,6 +2356,40 @@ function GemEstimator() {
                     onChange={(e) => {
                       const newValue = parseFloat(e.target.value);
                       setPriceEstimates(prev => ({ ...prev, buy: newValue }));
+                    }}
+                    inputProps={{ 
+                      min: 0,
+                      inputMode: 'decimal',
+                      pattern: '[0-9]*\\.?[0-9]*',
+                      style: { width: '70px' }
+                    }}
+                    sx={{ 
+                      ml: 1,
+                      '& .MuiInputBase-root': {
+                        ml: 0,
+                        pl: 0
+                      }
+                    }}
+                  />
+                </Box>
+
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  p: 1.5,
+                  '&:hover': { bgcolor: 'action.hover' }
+                }}>
+                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary', ml: 0 }}>
+                    Melt Value: $
+                  </Typography>
+                  <TextField 
+                    size="small"
+                    type="decimal"
+                    value={priceEstimates.melt}
+                    variant="standard"
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value);
+                      setPriceEstimates(prev => ({ ...prev, melt: newValue }));
                     }}
                     inputProps={{ 
                       min: 0,
