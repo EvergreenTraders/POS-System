@@ -189,8 +189,7 @@ const useMetalForm = ({
 
   const calculateValue = useCallback(() => {
     if (!isManualOverride && form.weight && form.spotPrice && form.purity) {
-      const percentageFactor = 0.7;
-      const newValue = form.spotPrice * form.purity.value * form.weight * percentageFactor;
+      const newValue = form.spotPrice * form.purity.value * form.weight;
       setTotalValue(newValue);
       onMetalValueChange(newValue);
     }
