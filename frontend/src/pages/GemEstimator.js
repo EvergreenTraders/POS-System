@@ -183,14 +183,17 @@ function GemEstimator() {
         secondary_gem_quantity: diamondSummary[1].quantity || 0,
         secondary_gem_lab_grown: diamondSummary[1].labGrown || false,
         secondary_gem_value: diamondSummary[1].estimatedValue || 0
-      } : addedGemTypes.secondary === 'stone' && stoneSummary?.[1] ? {
-        secondary_gem_shape: stoneSummary[1].shape || '',
-        secondary_gem_quantity: stoneSummary[1].quantity || 0,
-        secondary_gem_authentic: stoneSummary[1].authentic || false,
-        secondary_gem_type: stoneSummary[1].type || '',
-        secondary_gem_color: stoneSummary[1].color || '',
-        secondary_gem_weight: stoneSummary[1].weight || 0,
-        secondary_gem_value: stoneSummary[1].estimatedValue || 0
+      } : addedGemTypes.secondary === 'stone' ? {
+        // Find the correct stone entry for secondary gem
+        // If there's only one stone and it's secondary, use index 0
+        // If there are two stones (primary and secondary), use index 1
+        secondary_gem_shape: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.shape : stoneSummary?.[0]?.shape) || '',
+        secondary_gem_quantity: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.quantity : stoneSummary?.[0]?.quantity) || 0,
+        secondary_gem_authentic: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.authentic : stoneSummary?.[0]?.authentic) || false,
+        secondary_gem_type: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.name : stoneSummary?.[0]?.name) || '',
+        secondary_gem_color: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.color : stoneSummary?.[0]?.color) || '',
+        secondary_gem_weight: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.weight : stoneSummary?.[0]?.weight) || 0,
+        secondary_gem_value: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.estimatedValue : stoneSummary?.[0]?.estimatedValue) || 0
       } : {}),
       
       // Price estimates - use selected transaction type instead of hardcoded 'pawn'
