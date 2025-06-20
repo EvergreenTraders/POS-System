@@ -64,7 +64,7 @@ function GemEstimator() {
   const [editMode, setEditMode] = useState(location.state?.editMode || false);
   const [returnToTicket, setReturnToTicket] = useState(location.state?.returnToTicket || false);
   const [ticketItemId, setTicketItemId] = useState(location.state?.ticketItemId || null);
-  const [priceEstimates, setPriceEstimates] = useState({ pawn: 0, buy: 0, retail: 0 });
+  const [priceEstimates, setPriceEstimates] = useState({ pawn: 0, buy: 0, melt: 0, retail: 0 });
   const [transactionType, setTransactionType] = useState(location.state?.itemToEdit?.transaction_type || 'buy');
   const [freeText, setFreeText] = useState(location.state?.itemToEdit?.free_text || '');
   const [diamondSummary, setDiamondSummary] = useState([]);
@@ -93,6 +93,7 @@ function GemEstimator() {
     setPriceEstimates({
       pawn: estimates.pawn,
       buy: estimates.buy,
+      melt: estimates.melt,
       retail: estimates.retail
     });
   };
@@ -182,20 +183,24 @@ function GemEstimator() {
         secondary_gem_quantity: diamondSummary[1].quantity || 0,
         secondary_gem_lab_grown: diamondSummary[1].labGrown || false,
         secondary_gem_value: diamondSummary[1].estimatedValue || 0
-      } : addedGemTypes.secondary === 'stone' && stoneSummary?.[1] ? {
-        secondary_gem_shape: stoneSummary[1].shape || '',
-        secondary_gem_quantity: stoneSummary[1].quantity || 0,
-        secondary_gem_authentic: stoneSummary[1].authentic || false,
-        secondary_gem_type: stoneSummary[1].type || '',
-        secondary_gem_color: stoneSummary[1].color || '',
-        secondary_gem_weight: stoneSummary[1].weight || 0,
-        secondary_gem_value: stoneSummary[1].estimatedValue || 0
+      } : addedGemTypes.secondary === 'stone' ? {
+        // Find the correct stone entry for secondary gem
+        // If there's only one stone and it's secondary, use index 0
+        // If there are two stones (primary and secondary), use index 1
+        secondary_gem_shape: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.shape : stoneSummary?.[0]?.shape) || '',
+        secondary_gem_quantity: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.quantity : stoneSummary?.[0]?.quantity) || 0,
+        secondary_gem_authentic: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.authentic : stoneSummary?.[0]?.authentic) || false,
+        secondary_gem_type: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.name : stoneSummary?.[0]?.name) || '',
+        secondary_gem_color: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.color : stoneSummary?.[0]?.color) || '',
+        secondary_gem_weight: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.weight : stoneSummary?.[0]?.weight) || 0,
+        secondary_gem_value: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.estimatedValue : stoneSummary?.[0]?.estimatedValue) || 0
       } : {}),
       
       // Price estimates - use selected transaction type instead of hardcoded 'pawn'
       transaction_type: transactionType || 'buy',
       buy_price: priceEstimates.buy,
       pawn_price: priceEstimates.pawn,
+      melt_price: priceEstimates.melt,
       retail_price: priceEstimates.retail,
       
       // Images
@@ -371,6 +376,7 @@ function GemEstimator() {
           setPriceEstimates({
             pawn: itemToEdit.price_estimates.pawn || 0,
             buy: itemToEdit.price_estimates.buy || 0,
+            melt: itemToEdit.price_estimates.melt || 0,
             retail: itemToEdit.price_estimates.retail || 0
           });
         }
@@ -889,26 +895,30 @@ function GemEstimator() {
     // Get percentages for each transaction type, default to 0 if not found
     const pawnPercent = estimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
     const buyPercent = estimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
+    const meltPercent = 98;
     const retailPercent = estimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
     return {
       pawn: Number((value * pawnPercent / 100).toFixed(2)),
       buy: Number((value * buyPercent / 100).toFixed(2)),
+      melt: Number((value * meltPercent / 100).toFixed(2)),
       retail: Number((value * retailPercent / 100).toFixed(2))
     };
   };
 
-  const calculateDiamondPriceEstimates = (value) => {
+  const calculateGemPriceEstimates = (value) => {
     // Get the estimates for diamonds
     const pawnPercent = diamondEstimates.find(e => e.transaction_type === 'pawn')?.estimate || 0;
     const buyPercent = diamondEstimates.find(e => e.transaction_type === 'buy')?.estimate || 0;
     const retailPercent = diamondEstimates.find(e => e.transaction_type === 'retail')?.estimate || 0;
+    const meltPercent = 98;
     return {
-      pawn: value * (pawnPercent / 100),
-      buy: value * (buyPercent / 100),
-      retail: value * (retailPercent / 100)
+      pawn: Number((value * (pawnPercent / 100)).toFixed(2)),
+      buy: Number((value * (buyPercent / 100)).toFixed(2)),
+      melt: Number((value * (meltPercent / 100)).toFixed(2)), 
+      retail: Number((value * (retailPercent / 100)).toFixed(2))
     };
   };
-
+  
   const addDiamond = () => {
     const currentForm = getCurrentForm();
     const isPrimary = activeTab.startsWith('primary');
@@ -927,12 +937,13 @@ function GemEstimator() {
     }
 
     const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
-    const estimates = calculateDiamondPriceEstimates(diamondValue);
+    const estimates = calculateGemPriceEstimates(diamondValue);
     // Add new estimates to existing ones
     setPriceEstimates(prev => ({
-      pawn: prev.pawn + estimates.pawn,
-      buy: prev.buy + estimates.buy,
-      retail: prev.retail + estimates.retail
+      pawn: Number((prev.pawn + estimates.pawn).toFixed(2)),
+      buy: Number((prev.buy + estimates.buy).toFixed(2)),
+      melt: Number((prev.melt + estimates.melt).toFixed(2)),
+      retail: Number((prev.retail + estimates.retail).toFixed(2))
     }));
     
     const newItem = {
@@ -1014,13 +1025,14 @@ function GemEstimator() {
     }
 
     const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
-    const estimates = calculateDiamondPriceEstimates(stoneValue);
+    const estimates = calculateGemPriceEstimates(stoneValue);
     
     // Add new estimates to existing ones
     setPriceEstimates(prev => ({
-      pawn: prev.pawn + estimates.pawn,
-      buy: prev.buy + estimates.buy,
-      retail: prev.retail + estimates.retail
+      pawn: Number((prev.pawn + estimates.pawn).toFixed(2)),
+      buy: Number((prev.buy + estimates.buy).toFixed(2)),
+      melt: Number((prev.melt + estimates.melt).toFixed(2)),
+      retail: Number((prev.retail + estimates.retail).toFixed(2))
     }));
 
     const newStone = {
@@ -1692,6 +1704,7 @@ function GemEstimator() {
         setPriceEstimates(parsedState.priceEstimates || {
           pawn: 0,
           buy: 0,
+          melt: 0,
           retail: 0
         });
       }
@@ -1702,10 +1715,14 @@ function GemEstimator() {
     // Calculate price estimates for the diamond
     const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
     
-    // Add the diamond with its value
+    // Calculate the price estimates
+    const estimates = calculateGemPriceEstimates(diamondValue);
+    
+    // Add the diamond with its value and price estimates
     const diamondWithValue = {
       ...newDiamond,
-      estimatedValue: diamondValue
+      estimatedValue: diamondValue,
+      priceEstimates: estimates
     };
     setDiamondSummary(prev => [...prev, diamondWithValue]);
     
@@ -1720,10 +1737,14 @@ function GemEstimator() {
     // Calculate price estimates for the stone
     const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
     
-    // Add the stone with its value
+    // Calculate the price estimates
+    const estimates = calculateGemPriceEstimates(stoneValue);
+    
+    // Add the stone with its value and price estimates
     const stoneWithValue = {
       ...newStone,
-      estimatedValue: stoneValue
+      estimatedValue: stoneValue,
+      priceEstimates: estimates
     };
     setStoneSummary(prev => [...prev, stoneWithValue]);
     
@@ -2348,6 +2369,40 @@ function GemEstimator() {
                     onChange={(e) => {
                       const newValue = parseFloat(e.target.value);
                       setPriceEstimates(prev => ({ ...prev, buy: newValue }));
+                    }}
+                    inputProps={{ 
+                      min: 0,
+                      inputMode: 'decimal',
+                      pattern: '[0-9]*\\.?[0-9]*',
+                      style: { width: '70px' }
+                    }}
+                    sx={{ 
+                      ml: 1,
+                      '& .MuiInputBase-root': {
+                        ml: 0,
+                        pl: 0
+                      }
+                    }}
+                  />
+                </Box>
+
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  p: 1.5,
+                  '&:hover': { bgcolor: 'action.hover' }
+                }}>
+                  <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary', ml: 0 }}>
+                    Melt Value: $
+                  </Typography>
+                  <TextField 
+                    size="small"
+                    type="decimal"
+                    value={priceEstimates.melt}
+                    variant="standard"
+                    onChange={(e) => {
+                      const newValue = parseFloat(e.target.value);
+                      setPriceEstimates(prev => ({ ...prev, melt: newValue }));
                     }}
                     inputProps={{ 
                       min: 0,
