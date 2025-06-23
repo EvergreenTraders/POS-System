@@ -594,8 +594,8 @@ function CoinsBullions() {
                     <Grid container spacing={2}>
                       {/* Left side - Form fields */}
                       <Grid item xs={12} sm={6}>
-                    <Grid container spacing={1}>
-                      <Grid item xs={12}>
+                        <Grid container spacing={1}>
+                          <Grid item xs={12}>
                         <TextField
                           size="small"
                           label="Purity"
@@ -613,7 +613,7 @@ function CoinsBullions() {
                           sx={{
                             '& .MuiInputBase-input': {
                               textAlign: 'left',
-                              paddingLeft: '0px'
+                              paddingLeft: '14px'
                             },
                             '& .MuiFormLabel-root': {
                               left: 0
@@ -644,7 +644,7 @@ function CoinsBullions() {
                           sx={{
                             '& .MuiInputBase-input': {
                               textAlign: 'left',
-                              paddingLeft: '0px'
+                              paddingLeft: '14px'
                             },
                             '& .MuiFormLabel-root': {
                               left: 0
@@ -692,9 +692,10 @@ function CoinsBullions() {
                           label="Est. Value"
                           name="estimatedValue"
                           value={formData.estimatedValue}
+                          onChange={handleChange}
+                          type="number"
                           InputProps={{
                             startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                            readOnly: true,
                           }}
                           InputLabelProps={{
                             shrink: true,
@@ -751,7 +752,7 @@ function CoinsBullions() {
                       </Grid>
                       {/* Right side - Image controls */}
                       <Grid item xs={12} sm={6}>
-                    {/* Container with relative positioning */}
+                        {/* Container with relative positioning */}
                     <Box sx={{ position: 'relative' }}>  
                       {/* Buttons in their original position */}
                       <Box sx={{ display: 'flex', gap: 1, mt: 10 }}>
@@ -1074,8 +1075,8 @@ function CoinsBullions() {
                               fullWidth
                             />
                           </Grid>
+                            </Grid>
                         </Grid>
-                      </Grid>
                       
                       {/* Right column */}
                       <Grid item xs={12} sm={6}>
@@ -1195,8 +1196,8 @@ function CoinsBullions() {
                               fullWidth
                             />
                           </Grid>
+                            </Grid>
                         </Grid>
-                      </Grid>
                     </Grid>
                   </FormSection>
                 </Grid>
