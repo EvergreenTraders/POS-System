@@ -326,7 +326,9 @@ const CustomerTicket = () => {
     return loadTicketItems('refund') || [{ id: 1, amount: '', method: '', reference: '', reason: '' }];
   });
   
-  // Process estimated items from GemEstimator.js when component mounts
+  // Process estimated items when component mounts - use a ref to track if the current navigation state has been processed
+  const processedStateRef = React.useRef(null);
+  
   React.useEffect(() => {
     // Handle updated item from jewelry estimator when in edit mode
     if (location.state?.updatedItem && location.state?.ticketItemId && location.state?.fromEstimator === 'jewelry') {
@@ -521,7 +523,80 @@ const CustomerTicket = () => {
         setActiveTab(3); // Set active tab to Sale
       }
     }
-  }, [estimatedItems, from]);
+    
+    // Handle items coming from CoinsBullions
+    else if (location.state?.addedItems && location.state?.from === 'coinsBullions') {
+      // Skip if we've already processed this state
+      const stateHash = JSON.stringify(location.state);
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+      
+      const addedItems = location.state.addedItems;
+      
+      // Clear initial empty items if needed
+      const hasEmptyPawnItems = pawnItems.length === 1 && !pawnItems[0].description;
+      const hasEmptyBuyItems = buyItems.length === 1 && !buyItems[0].description;
+      
+      // Process items by transaction type
+      const pawnItemsArr = [];
+      const buyItemsArr = [];
+      
+      addedItems.forEach((item, index) => {
+        // Create a base item with common properties
+        const baseItem = {
+          id: Date.now() + index, // Use timestamp + index to ensure unique IDs
+          description: item.description || '',
+          category: item.category || '',
+          originalItem: item.originalItem || item
+        };
+        
+        // Add to appropriate array based on transaction type
+        switch (item.transaction_type) {
+          case 'pawn':
+            pawnItemsArr.push({
+              ...baseItem,
+              value: item.value || item.price || 0
+            });
+            break;
+          case 'buy':
+          default: // Default to buy if not specified
+            buyItemsArr.push({
+              ...baseItem,
+              price: item.price || item.value || 0
+            });
+            break;
+        }
+      });
+      
+      // Update state with new items and save to localStorage
+      if (pawnItemsArr.length > 0) {
+        setPawnItems(prevItems => {
+          // Replace empty placeholder item if needed
+          const newItems = hasEmptyPawnItems ? pawnItemsArr : [...prevItems, ...pawnItemsArr];
+          saveTicketItems('pawn', newItems);
+          return newItems;
+        });
+        setActiveTab(0); // Set active tab to Pawn
+        showSnackbar(`${pawnItemsArr.length} pawn items added to ticket`, 'success');
+      }
+      
+      if (buyItemsArr.length > 0) {
+        setBuyItems(prevItems => {
+          // Replace empty placeholder item if needed
+          const newItems = hasEmptyBuyItems ? buyItemsArr : [...prevItems, ...buyItemsArr];
+          saveTicketItems('buy', newItems);
+          return newItems;
+        });
+        setActiveTab(1); // Set active tab to Buy
+        showSnackbar(`${buyItemsArr.length} buy items added to ticket`, 'success');
+      }
+      
+      // Clear the location state to prevent reprocessing
+      window.history.replaceState({}, document.title);
+    }
+  }, [estimatedItems, from, location.state, customer]);
   
   // Function to get current items based on active tab and type name
   const getCurrentItems = () => {

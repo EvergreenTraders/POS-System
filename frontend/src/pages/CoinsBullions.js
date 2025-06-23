@@ -171,16 +171,21 @@ function CoinsBullions() {
   const [images, setImages] = useState([]);
   const [scrapMetalItems, setScrapMetalItems] = useState([]);
   const [coinsBullions, setCoinsBullions] = useState([]);
+  const [estimatedScrapItems, setEstimatedScrapItems] = useState([]);
+  const [estimatedCoinItems, setEstimatedCoinItems] = useState([]);
   const [metalSpotPrices, setMetalSpotPrices] = useState({});
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState('success');
+  const [editingItemId, setEditingItemId] = useState(null);
+  const [editPrice, setEditPrice] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   
   const [formData, setFormData] = useState({
     item: '',
-    metalType: 'gold',
+    metalType: 'Gold',
     purity: '',
     weight: '',
     mintMark: '',
@@ -196,7 +201,7 @@ function CoinsBullions() {
     description: '',
   });
 
-  const metalTypes = ['gold', 'silver', 'other'];
+  const metalTypes = ['Gold', 'Silver', 'other'];
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -236,50 +241,62 @@ function CoinsBullions() {
         ...formData,
         type: tabValue === 0 ? 'scrap' : 'coin',
         images: images.length > 0 ? images.filter(img => img.isPrimary)[0].preview : null,
+        id: Date.now(), // Generate temporary ID for the item
+        transaction_type: 'buy' // Default transaction type
       };
 
-      const response = await axios.post(`${config.apiUrl}/inventory/coins-bullions`, itemData, {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-      });
-
-      if (response.status === 200 || response.status === 201) {
-        // Reset form and images
-        setFormData({
-          item: '',
-          metalType: 'gold',
-          purity: '',
-          weight: '',
-          mintMark: '',
-          year: '',
-          grade: '',
-          serialNumber: '',
-          premiumDollar: '',
-          premiumPercent: '',
-          price: '',
-          pricePerGram: '',
-          estimatedValue: '',
-          quantity: '1',
-          description: '',
-        });
-        setImages([]);
-        
-        // Update inventory list
-        if (tabValue === 0) {
-          setScrapMetalItems([...scrapMetalItems, response.data]);
-        } else {
-          setCoinsBullions([...coinsBullions, response.data]);
-        }
-
-        // Show success message
-        setSnackbarOpen(true);
-        setSnackbarMessage('Item added successfully!');
-        setSnackbarSeverity('success');
+      // Add to estimated items directly without API call
+      if (tabValue === 0) {
+        // For scrap metal
+        const newItem = {
+          ...itemData,
+          metalType: itemData.metalType,
+          purity: itemData.purity,
+          weight: itemData.weight,
+          estimatedValue: itemData.estimatedValue,
+          image: itemData.images, // Use the primary image
+          description: itemData.description
+        };
+        setEstimatedScrapItems([...estimatedScrapItems, newItem]);
       } else {
-        throw new Error('Failed to add item');
+        // For coins & bullions
+        const newItem = {
+          ...itemData,
+          name: itemData.item,
+          metalType: itemData.metalType,
+          purity: itemData.purity,
+          weight: itemData.weight,
+          price: itemData.price || itemData.estimatedValue,
+          image: itemData.images, // Use the primary image
+          description: itemData.description
+        };
+        setEstimatedCoinItems([...estimatedCoinItems, newItem]);
       }
+
+      // Reset form and images
+      setFormData({
+        item: '',
+        metalType: 'gold',
+        purity: '',
+        weight: '',
+        mintMark: '',
+        year: '',
+        grade: '',
+        serialNumber: '',
+        premiumDollar: '',
+        premiumPercent: '',
+        price: '',
+        pricePerGram: '',
+        estimatedValue: '',
+        quantity: '1',
+        description: '',
+      });
+      setImages([]);
+      
+      // Show success message
+      setSnackbarOpen(true);
+      setSnackbarMessage('Item added to estimated items!');
+      setSnackbarSeverity('success');
     } catch (error) {
       setSnackbarOpen(true);
       setSnackbarMessage(`Error adding item: ${error.message}`);
@@ -335,13 +352,141 @@ function CoinsBullions() {
   };
 
   const handleEditItem = (item, type) => {
-    // Handle edit functionality
+    // Handle edit functionality for inventory items
     console.log(`Editing ${type} item:`, item);
+  };
+  
+  const handleEditEstimatedItem = (item, type) => {
+    setEditingItemId(item.id);
+    setEditPrice(type === 'scrap' ? item.estimatedValue : item.price);
+  };
+  
+  const handleSaveEditedPrice = (id, type) => {
+    if (type === 'scrap') {
+      setEstimatedScrapItems(items => 
+        items.map(item => 
+          item.id === id ? { ...item, estimatedValue: editPrice } : item
+        )
+      );
+    } else {
+      setEstimatedCoinItems(items => 
+        items.map(item => 
+          item.id === id ? { ...item, price: editPrice } : item
+        )
+      );
+    }
+    
+    setSnackbarOpen(true);
+    setSnackbarMessage('Price updated successfully');
+    setSnackbarSeverity('success');
+    setEditingItemId(null);
+  };
+  
+  const handleCancelEdit = () => {
+    setEditingItemId(null);
+    setEditPrice('');
+  };
+  
+  const handleAddToTicket = () => {
+    setIsLoading(true);
+
+    try {
+      const currentItems = tabValue === 0 ? estimatedScrapItems : estimatedCoinItems;
+      
+      if (currentItems.length === 0) {
+        setSnackbarOpen(true);
+        setSnackbarMessage('No items to add to ticket');
+        setSnackbarSeverity('warning');
+        setIsLoading(false);
+        return;
+      }
+      
+      const ticketItems = currentItems.map(item => {
+        if (tabValue === 0) { 
+          return {
+            id: item.id,
+            description: `${item.metalType} (${item.purity}, ${item.weight}g)`,
+            category: 'Scrap Metal',
+            value: item.estimatedValue,
+            price: item.estimatedValue, // Added price field for consistency
+            transaction_type: item.transaction_type || 'buy',
+            originalItem: item 
+          };
+        } else { 
+          return {
+            id: item.id,
+            description: item.name || item.item,
+            category: `${item.metalType} ${item.purity || ''}`,
+            price: item.price || 0,
+            transaction_type: item.transaction_type || 'buy',
+            originalItem: item 
+          };
+        }
+      });
+      
+      // Store items in localStorage for persistence
+      const existingItems = JSON.parse(localStorage.getItem('pending_ticket_items') || '[]');
+      localStorage.setItem('pending_ticket_items', JSON.stringify([...existingItems, ...ticketItems]));
+      
+      // Clear the current estimated items
+      if (tabValue === 0) {
+        setEstimatedScrapItems([]);
+      } else {
+        setEstimatedCoinItems([]);
+      }
+      
+      if (ticketItems.length > 0) {
+        setSnackbarOpen(true);
+        setSnackbarMessage(`${ticketItems.length} item(s) added to ticket`);
+        setSnackbarSeverity('success');
+        
+        // Navigate to customer ticket after a short delay - only use navigation state
+        setTimeout(() => {
+          navigate('/customer-ticket', { 
+            state: { 
+              from: 'coinsBullions',
+              addedItems: ticketItems // Pass the items directly in the navigation state
+            } 
+          });
+        }, 500); // Short delay so the user can see the snackbar
+      } else {
+        setSnackbarOpen(true);
+        setSnackbarMessage('No valid items to add to ticket');
+        setSnackbarSeverity('warning');
+      }
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error adding items to ticket:', error);
+      setSnackbarOpen(true);
+      setSnackbarMessage('Error adding items to ticket');
+      setSnackbarSeverity('error');
+      setIsLoading(false);
+    }
+  };
+  
+  const handleProceedToCheckout = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      setSnackbarOpen(true);
+      setSnackbarMessage('Proceeding to checkout');
+      setSnackbarSeverity('success');
+      // Navigate to checkout (implementation can be updated later)
+      // history.push('/checkout');
+    }, 1000);
   };
 
   const handleDeleteConfirm = (id, type) => {
     setItemToDelete({ id, type });
     setDeleteDialogOpen(true);
+  };
+  
+  const handleDeleteEstimatedItem = (id, type) => {
+    if (type === 'scrap') {
+      setEstimatedScrapItems(prev => prev.filter(item => item.id !== id));
+    } else if (type === 'coin') {
+      setEstimatedCoinItems(prev => prev.filter(item => item.id !== id));
+    }
   };
 
   const handleSnackbarClose = () => {
@@ -609,7 +754,7 @@ function CoinsBullions() {
                     {/* Container with relative positioning */}
                     <Box sx={{ position: 'relative' }}>  
                       {/* Buttons in their original position */}
-                      <Box sx={{ display: 'flex', gap: 1, mt: 4 }}>
+                      <Box sx={{ display: 'flex', gap: 1, mt: 10 }}>
                         <Button
                           size="small"
                           variant="outlined"
@@ -700,7 +845,7 @@ function CoinsBullions() {
                       <IconButton size="small" onClick={() => handleEditItem(item, 'scrap')}>
                         <EditIcon sx={{ fontSize: '0.9rem' }} />
                       </IconButton>
-                      <IconButton size="small" onClick={() => handleDeleteConfirm(item.id, 'scrap')}>
+                      <IconButton size="small" onClick={() => handleDeleteEstimatedItem(item.id, 'scrap')}>
                         <DeleteIcon sx={{ fontSize: '0.9rem' }} />
                       </IconButton>
                     </StyledTableCell>
@@ -711,6 +856,120 @@ function CoinsBullions() {
           </TableContainer>
         </Box>
       )}
+      
+      {/* Estimated Items Block for Scrap Metal */}
+      <Box sx={{ mt: 2, mb: 1 }}>
+        <Typography variant="h6" fontWeight="bold" sx={{ mb: 1 }}>
+          Estimated Items
+        </Typography>
+        <TableContainer component={Paper}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Image</TableCell>
+                <TableCell>Description</TableCell>
+                <TableCell>Transaction Type</TableCell>
+                <TableCell>Price</TableCell>
+                <TableCell>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {estimatedScrapItems.map((item) => (
+                <StyledTableRow key={`estimate-${item.id}`}>
+                  <StyledTableCell>
+                    {item.image && (
+                      <img
+                        src={item.image}
+                        alt={item.metalType}
+                        style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                      />
+                    )}
+                  </StyledTableCell>
+                  <StyledTableCell>
+                    <Typography variant="body2"><strong>{item.metalType}</strong></Typography>
+                    <Typography variant="caption" color="textSecondary">
+                      {item.purity}, {item.weight}g
+                    </Typography>
+                  </StyledTableCell>
+                  <StyledTableCell>
+                    <Select
+                      size="small"
+                      value={item.transaction_type || 'buy'}
+                      onChange={(e) => {
+                        const updatedItems = [...estimatedScrapItems];
+                        const index = updatedItems.findIndex(i => i.id === item.id);
+                        updatedItems[index] = {...updatedItems[index], transaction_type: e.target.value};
+                        setEstimatedScrapItems(updatedItems);
+                      }}
+                      sx={{ minWidth: 100 }}
+                    >
+                      <MenuItem value="buy">Buy</MenuItem>
+                      <MenuItem value="pawn">Pawn</MenuItem>
+                    </Select>
+                  </StyledTableCell>
+                  <StyledTableCell>
+                    {editingItemId === item.id ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <TextField
+                          size="small"
+                          type="number"
+                          value={editPrice}
+                          onChange={(e) => setEditPrice(e.target.value)}
+                          InputProps={{
+                            startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                          }}
+                          sx={{ width: '100px' }}
+                          autoFocus
+                        />
+                        <IconButton size="small" color="primary" onClick={() => handleSaveEditedPrice(item.id, 'scrap')}>
+                          <CheckIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" color="error" onClick={handleCancelEdit}>
+                          <CloseIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    ) : (
+                      <Typography variant="body2">
+                        ${parseFloat(item.estimatedValue).toFixed(2)}
+                      </Typography>
+                    )}
+                  </StyledTableCell>
+                  <StyledTableCell>
+                    <Box sx={{ display: 'flex' }}>
+                      <IconButton size="small" color="primary" onClick={() => handleEditEstimatedItem(item, 'scrap')}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton size="small" color="error" onClick={() => handleDeleteEstimatedItem(item.id, 'scrap')}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  </StyledTableCell>
+                </StyledTableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        
+        {/* Action buttons after estimated items */}
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, gap: 2 }}>
+          <Button 
+            variant="contained" 
+            color="primary"
+            onClick={handleAddToTicket}
+            disabled={isLoading || estimatedScrapItems.length === 0}
+          >
+            Add to Ticket
+          </Button>
+          <Button 
+            variant="contained" 
+            color="secondary"
+            onClick={handleProceedToCheckout}
+            disabled={isLoading || estimatedScrapItems.length === 0}
+          >
+            Proceed to Checkout
+          </Button>
+        </Box>
+      </Box>
     </Box>
   )}
 
@@ -983,7 +1242,7 @@ function CoinsBullions() {
                     <IconButton size="small" onClick={() => handleEditItem(item, 'coin')}>
                       <EditIcon fontSize="small" />
                     </IconButton>
-                    <IconButton size="small" onClick={() => handleDeleteConfirm(item.id, 'coin')}>
+                    <IconButton size="small" onClick={() => handleDeleteEstimatedItem(item.id, 'coin')}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
                   </StyledTableCell>
@@ -994,6 +1253,119 @@ function CoinsBullions() {
         </TableContainer>
       </Box>
             )}
+            
+            {/* Estimated Items Block for Coins & Bullions */}
+            <Box sx={{ mt: 2, mb: 1 }}>
+              <Typography variant="h6" fontWeight="bold" sx={{ mb: 1 }}>
+                Estimated Items
+              </Typography>
+              <TableContainer component={Paper}>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Image</TableCell>
+                      <TableCell>Description</TableCell>
+                      <TableCell>Transaction Type</TableCell>
+                      <TableCell>Price</TableCell>
+                      <TableCell>Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {estimatedCoinItems.map((item) => (
+                      <StyledTableRow key={`estimate-${item.id}`}>
+                        <StyledTableCell>
+                          {item.image && (
+                            <img
+                              src={item.image}
+                              alt={item.name}
+                              style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                            />
+                          )}
+                        </StyledTableCell>
+                        <StyledTableCell>
+                          <Typography variant="body2"><strong>{item.name}</strong></Typography>
+                          <Typography variant="caption" color="textSecondary">
+                            {item.metalType}, {item.purity}, {item.weight}oz
+                          </Typography>
+                        </StyledTableCell>
+                        <StyledTableCell>
+                          <Select
+                            size="small"
+                            value={item.transaction_type || 'buy'}
+                            onChange={(e) => {
+                              const updatedItems = [...estimatedCoinItems];
+                              const index = updatedItems.findIndex(i => i.id === item.id);
+                              updatedItems[index] = {...updatedItems[index], transaction_type: e.target.value};
+                              setEstimatedCoinItems(updatedItems);
+                            }}
+                            sx={{ minWidth: 100 }}
+                          >
+                            <MenuItem value="buy">Buy</MenuItem>
+                            <MenuItem value="pawn">Pawn</MenuItem>
+                          </Select>
+                        </StyledTableCell>
+                        <StyledTableCell>
+                          {editingItemId === item.id ? (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <TextField
+                                size="small"
+                                type="number"
+                                value={editPrice}
+                                onChange={(e) => setEditPrice(e.target.value)}
+                                InputProps={{
+                                  startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                                }}
+                                sx={{ width: '100px' }}
+                                autoFocus
+                              />
+                              <IconButton size="small" color="primary" onClick={() => handleSaveEditedPrice(item.id, 'coin')}>
+                                <CheckIcon fontSize="small" />
+                              </IconButton>
+                              <IconButton size="small" color="error" onClick={handleCancelEdit}>
+                                <CloseIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                          ) : (
+                            <Typography variant="body2">
+                              ${parseFloat(item.price || 0).toFixed(2)}
+                            </Typography>
+                          )}
+                        </StyledTableCell>
+                        <StyledTableCell>
+                          <Box sx={{ display: 'flex' }}>
+                            <IconButton size="small" color="primary" onClick={() => handleEditEstimatedItem(item, 'coin')}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton size="small" color="error" onClick={() => handleDeleteEstimatedItem(item.id, 'coin')}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </StyledTableCell>
+                      </StyledTableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              {/* Action buttons after estimated items */}
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, gap: 2 }}>
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  onClick={handleAddToTicket}
+                  disabled={isLoading || estimatedCoinItems.length === 0}
+                >
+                  Add to Ticket
+                </Button>
+                <Button 
+                  variant="contained" 
+                  color="secondary"
+                  onClick={handleProceedToCheckout}
+                  disabled={isLoading || estimatedCoinItems.length === 0}
+                >
+                  Proceed to Checkout
+                </Button>
+              </Box>
+            </Box>
           </Box>
         )}
       </StyledPaper>
@@ -1034,6 +1406,8 @@ function CoinsBullions() {
           </Button>
         </DialogActions>
       </Dialog>
+
+
     </Container>
   );
 }
