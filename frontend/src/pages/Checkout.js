@@ -72,10 +72,11 @@ function Checkout() {
   const [payments, setPayments] = useState([]);
   const [isFullyPaid, setIsFullyPaid] = useState(false);
 
-  // Effect to initialize cart and customer from navigation (either Estimator or Cart)
+  // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
     if (!isInitialized && location.state) {
-      if (location.state.from === 'estimator' && location.state?.items && location.state?.customer) {
+      // Handle from generic estimator or specific estimators like coinsbullions
+      if ((location.state.from === 'jewelry' || location.state.from === 'coinsbullions') && location.state?.items) {
         // Clear existing cart items before adding new ones from estimator
         clearCart(); 
         
@@ -87,8 +88,10 @@ function Checkout() {
         // Set checkoutItems for display
         setCheckoutItems(location.state.items);
         
-        // Set the customer
-        setCustomer(location.state.customer);
+        // Set the customer if it exists
+        if (location.state.customer) {
+          setCustomer(location.state.customer);
+        }
         setIsInitialized(true); // Mark as initialized to prevent re-running
       } 
       else if (location.state.from === 'cart' && location.state?.items) {        
@@ -495,6 +498,15 @@ function Checkout() {
       clearCart();
       setCustomer(null);
       navigate('/quote-manager');
+    } else if (location.state?.from === 'coinsbullions') {
+      // Save the cart items to session storage before navigating back to CoinsBullions
+      sessionStorage.setItem('coinsbullionsState', JSON.stringify({
+        items: cartItems
+      }));
+      clearCart();
+      setCustomer(null);
+      // Go back to coins bullions estimator
+      navigate('/bullion-estimator');
     } else if (location.state?.from === 'cart') {
       // If fully paid, filter out items that were checked out
       // Otherwise, use all cart items as is
@@ -552,7 +564,7 @@ function Checkout() {
       });
       
       // Save the formatted cart items to session storage before navigating back
-      sessionStorage.setItem('estimationState', JSON.stringify({
+      sessionStorage.setItem('jewelryState', JSON.stringify({
         items: formattedCartItems
       }));
       clearCart();
@@ -632,7 +644,8 @@ function Checkout() {
           sx={{ mb: 2 }}
         >
           {location.state?.quoteId ? 'Back to Quotes' : 
-           location.state?.from === 'cart' ? 'Back to Ticket' : 'Back to Estimation'}
+           location.state?.from === 'cart' ? 'Customer Ticket' : 
+           location.state?.from === 'coinsbullions' ? 'Bullions Estimator' : 'Jewelry Estimator'}
         </Button>
         <Grid container spacing={3}>
           {/* Customer Details */}

@@ -166,6 +166,7 @@ const ItemImageThumbnail = ({ src, isPrimary, onDelete, onSetPrimary }) => (
 function CoinsBullions() {
   const { token } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const fileInputRef = useRef(null);
   const [tabValue, setTabValue] = useState(0);
   const [images, setImages] = useState([]);
@@ -182,7 +183,7 @@ function CoinsBullions() {
   const [editingItemId, setEditingItemId] = useState(null);
   const [editPrice, setEditPrice] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  
+
   const [formData, setFormData] = useState({
     item: '',
     metalType: 'Gold',
@@ -205,31 +206,31 @@ function CoinsBullions() {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => {
+    setFormData((prev) => {
       const updatedForm = {
         ...prev,
-        [name]: value
+        [name]: value,
       };
-      
+
       // Auto-calculate estimated value when weight or price changes
       if (name === 'weight' || name === 'pricePerGram') {
         const weight = name === 'weight' ? value : prev.weight;
         const pricePerGram = name === 'pricePerGram' ? value : prev.pricePerGram;
-        
+
         if (weight && pricePerGram) {
           const calculatedValue = parseFloat(weight) * parseFloat(pricePerGram);
           updatedForm.estimatedValue = calculatedValue.toFixed(2);
         }
       }
-      
+
       return updatedForm;
     });
   };
 
   const handleMetalTypeSelect = (metal) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      metalType: metal
+      metalType: metal,
     }));
   };
 
@@ -240,9 +241,9 @@ function CoinsBullions() {
       const itemData = {
         ...formData,
         type: tabValue === 0 ? 'scrap' : 'coin',
-        images: images.length > 0 ? images.filter(img => img.isPrimary)[0].preview : null,
+        images: images.length > 0 ? images.filter((img) => img.isPrimary)[0].preview : null,
         id: Date.now(), // Generate temporary ID for the item
-        transaction_type: 'buy' // Default transaction type
+        transaction_type: 'buy', // Default transaction type
       };
 
       // Add to estimated items directly without API call
@@ -255,7 +256,7 @@ function CoinsBullions() {
           weight: itemData.weight,
           estimatedValue: itemData.estimatedValue,
           image: itemData.images, // Use the primary image
-          description: itemData.description
+          description: itemData.description,
         };
         setEstimatedScrapItems([...estimatedScrapItems, newItem]);
       } else {
@@ -268,7 +269,7 @@ function CoinsBullions() {
           weight: itemData.weight,
           price: itemData.price || itemData.estimatedValue,
           image: itemData.images, // Use the primary image
-          description: itemData.description
+          description: itemData.description,
         };
         setEstimatedCoinItems([...estimatedCoinItems, newItem]);
       }
@@ -276,7 +277,7 @@ function CoinsBullions() {
       // Reset form and images
       setFormData({
         item: '',
-        metalType: 'gold',
+        metalType: 'Gold',
         purity: '',
         weight: '',
         mintMark: '',
@@ -292,7 +293,7 @@ function CoinsBullions() {
         description: '',
       });
       setImages([]);
-      
+
       // Show success message
       setSnackbarOpen(true);
       setSnackbarMessage('Item added to estimated items!');
@@ -311,7 +312,7 @@ function CoinsBullions() {
     }
     return '';
   };
-  
+
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
   };
@@ -321,7 +322,7 @@ function CoinsBullions() {
     const newImages = files.map((file, index) => ({
       file,
       preview: URL.createObjectURL(file),
-      isPrimary: images.length === 0 && index === 0 // Only make the first image primary if no images exist
+      isPrimary: images.length === 0 && index === 0, // Only make the first image primary if no images exist
     }));
     setImages([...images, ...newImages]);
   };
@@ -341,7 +342,7 @@ function CoinsBullions() {
   const setAsPrimaryImage = (index) => {
     const newImages = images.map((img, i) => ({
       ...img,
-      isPrimary: i === index
+      isPrimary: i === index,
     }));
     setImages(newImages);
   };
@@ -355,44 +356,40 @@ function CoinsBullions() {
     // Handle edit functionality for inventory items
     console.log(`Editing ${type} item:`, item);
   };
-  
+
   const handleEditEstimatedItem = (item, type) => {
     setEditingItemId(item.id);
     setEditPrice(type === 'scrap' ? item.estimatedValue : item.price);
   };
-  
+
   const handleSaveEditedPrice = (id, type) => {
     if (type === 'scrap') {
-      setEstimatedScrapItems(items => 
-        items.map(item => 
-          item.id === id ? { ...item, estimatedValue: editPrice } : item
-        )
+      setEstimatedScrapItems((items) =>
+        items.map((item) => (item.id === id ? { ...item, estimatedValue: editPrice } : item))
       );
     } else {
-      setEstimatedCoinItems(items => 
-        items.map(item => 
-          item.id === id ? { ...item, price: editPrice } : item
-        )
+      setEstimatedCoinItems((items) =>
+        items.map((item) => (item.id === id ? { ...item, price: editPrice } : item))
       );
     }
-    
+
     setSnackbarOpen(true);
     setSnackbarMessage('Price updated successfully');
     setSnackbarSeverity('success');
     setEditingItemId(null);
   };
-  
+
   const handleCancelEdit = () => {
     setEditingItemId(null);
     setEditPrice('');
   };
-  
+
   const handleAddToTicket = () => {
     setIsLoading(true);
 
     try {
       const currentItems = tabValue === 0 ? estimatedScrapItems : estimatedCoinItems;
-      
+
       if (currentItems.length === 0) {
         setSnackbarOpen(true);
         setSnackbarMessage('No items to add to ticket');
@@ -400,9 +397,9 @@ function CoinsBullions() {
         setIsLoading(false);
         return;
       }
-      
-      const ticketItems = currentItems.map(item => {
-        if (tabValue === 0) { 
+
+      const ticketItems = currentItems.map((item) => {
+        if (tabValue === 0) {
           return {
             id: item.id,
             description: `${item.metalType} (${item.purity}, ${item.weight}g)`,
@@ -410,43 +407,43 @@ function CoinsBullions() {
             value: item.estimatedValue,
             price: item.estimatedValue, // Added price field for consistency
             transaction_type: item.transaction_type || 'buy',
-            originalItem: item 
+            originalItem: item,
           };
-        } else { 
+        } else {
           return {
             id: item.id,
             description: item.name || item.item,
             category: `${item.metalType} ${item.purity || ''}`,
             price: item.price || 0,
             transaction_type: item.transaction_type || 'buy',
-            originalItem: item 
+            originalItem: item,
           };
         }
       });
-      
+
       // Store items in localStorage for persistence
       const existingItems = JSON.parse(localStorage.getItem('pending_ticket_items') || '[]');
       localStorage.setItem('pending_ticket_items', JSON.stringify([...existingItems, ...ticketItems]));
-      
+
       // Clear the current estimated items
       if (tabValue === 0) {
         setEstimatedScrapItems([]);
       } else {
         setEstimatedCoinItems([]);
       }
-      
+
       if (ticketItems.length > 0) {
         setSnackbarOpen(true);
         setSnackbarMessage(`${ticketItems.length} item(s) added to ticket`);
         setSnackbarSeverity('success');
-        
+
         // Navigate to customer ticket after a short delay - only use navigation state
         setTimeout(() => {
-          navigate('/customer-ticket', { 
-            state: { 
-              from: 'coinsBullions',
-              addedItems: ticketItems // Pass the items directly in the navigation state
-            } 
+          navigate('/customer-ticket', {
+            state: {
+              from: 'coinsbullions',
+              addedItems: ticketItems, // Pass the items directly in the navigation state
+            },
           });
         }, 500); // Short delay so the user can see the snackbar
       } else {
@@ -463,7 +460,7 @@ function CoinsBullions() {
       setIsLoading(false);
     }
   };
-  
+
   const handleProceedToCheckout = () => {
     setIsLoading(true);
     setTimeout(() => {
@@ -471,12 +468,35 @@ function CoinsBullions() {
       setSnackbarOpen(true);
       setSnackbarMessage('Proceeding to checkout');
       setSnackbarSeverity('success');
-      // Navigate to checkout (implementation can be updated later)
-      // history.push('/checkout');
+
+      // Get customer data from location state if available
+      const customerData = location.state?.customer;
+
+      // Navigate to checkout with estimated items
+      if (customerData) {
+        // If customer exists, navigate to checkout page with customer and items
+        navigate('/checkout', {
+          state: {
+            from: 'coinsbullions',
+            items: tabValue === 0 ? estimatedScrapItems : estimatedCoinItems,
+            customer: customerData,
+          },
+        });
+      } else {
+        // Otherwise, navigate to customer manager to select/create a customer
+        navigate('/customer', {
+          state: {
+            items: tabValue === 0 ? estimatedScrapItems : estimatedCoinItems,
+            from: 'coinsbullions',
+            nextRoute: '/checkout',
+          },
+        });
+      }
     }, 1000);
   };
 
   const handleDeleteConfirm = (id, type) => {
+    // ...
     setItemToDelete({ id, type });
     setDeleteDialogOpen(true);
   };
