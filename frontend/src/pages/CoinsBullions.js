@@ -187,9 +187,6 @@ function CoinsBullions() {
   const [formData, setFormData] = useState({
     item: '',
     metalType: 'Gold',
-    purity: '',
-    weight: '',
-    mintMark: '',
     year: '',
     grade: '',
     serialNumber: '',
@@ -197,7 +194,6 @@ function CoinsBullions() {
     premiumPercent: '',
     price: '',
     pricePerGram: '',
-    estimatedValue: '',
     quantity: '1',
     description: '',
   });
@@ -219,7 +215,7 @@ function CoinsBullions() {
 
         if (weight && pricePerGram) {
           const calculatedValue = parseFloat(weight) * parseFloat(pricePerGram);
-          updatedForm.estimatedValue = calculatedValue.toFixed(2);
+          updatedForm.price = calculatedValue.toFixed(2);
         }
       }
 
@@ -254,9 +250,9 @@ function CoinsBullions() {
           metalType: itemData.metalType,
           purity: itemData.purity,
           weight: itemData.weight,
-          estimatedValue: itemData.estimatedValue,
+          price: itemData.price,
           image: itemData.images, // Use the primary image
-          description: itemData.description,
+          description: `${itemData.metalType} ${itemData.purity} ${itemData.weight}g`,
         };
         setEstimatedScrapItems([...estimatedScrapItems, newItem]);
       } else {
@@ -265,11 +261,10 @@ function CoinsBullions() {
           ...itemData,
           name: itemData.item,
           metalType: itemData.metalType,
-          purity: itemData.purity,
-          weight: itemData.weight,
-          price: itemData.price || itemData.estimatedValue,
+          price: itemData.price,
+          pricePerGram: itemData.pricePerGram,
           image: itemData.images, // Use the primary image
-          description: itemData.description,
+          description: `${itemData.metalType} ${itemData.item}`,
         };
         setEstimatedCoinItems([...estimatedCoinItems, newItem]);
       }
@@ -278,9 +273,6 @@ function CoinsBullions() {
       setFormData({
         item: '',
         metalType: 'Gold',
-        purity: '',
-        weight: '',
-        mintMark: '',
         year: '',
         grade: '',
         serialNumber: '',
@@ -288,7 +280,6 @@ function CoinsBullions() {
         premiumPercent: '',
         price: '',
         pricePerGram: '',
-        estimatedValue: '',
         quantity: '1',
         description: '',
       });
@@ -359,7 +350,7 @@ function CoinsBullions() {
 
   const handleEditEstimatedItem = (item, type) => {
     setEditingItemId(item.id);
-    setEditPrice(type === 'scrap' ? item.estimatedValue : item.price);
+    setEditPrice(type === 'scrap' ? item.price : item.price);
   };
 
   const handleSaveEditedPrice = (id, type) => {
@@ -404,8 +395,8 @@ function CoinsBullions() {
             id: item.id,
             description: `${item.metalType} (${item.purity}, ${item.weight}g)`,
             category: 'Scrap Metal',
-            value: item.estimatedValue,
-            price: item.estimatedValue, // Added price field for consistency
+            value: item.pricePerGram,
+            price: item.price, // Added price field for consistency
             transaction_type: item.transaction_type || 'buy',
             originalItem: item,
           };
@@ -710,8 +701,8 @@ function CoinsBullions() {
                         <TextField
                           size="small"
                           label="Est. Value"
-                          name="estimatedValue"
-                          value={formData.estimatedValue}
+                          name="price"
+                          value={formData.price}
                           onChange={handleChange}
                           type="number"
                           InputProps={{
@@ -861,7 +852,7 @@ function CoinsBullions() {
                     </StyledTableCell>
                     <StyledTableCell sx={{ p: 0.5 }}>{item.metalType}</StyledTableCell>
                     <StyledTableCell sx={{ p: 0.5 }}>{item.purity}, {item.weight}g</StyledTableCell>
-                    <StyledTableCell sx={{ p: 0.5 }}>${item.estimatedValue}</StyledTableCell>
+                    <StyledTableCell sx={{ p: 0.5 }}>${item.price}</StyledTableCell>
                     <StyledTableCell sx={{ p: 0, width: '60px' }}>
                       <IconButton size="small" onClick={() => handleEditItem(item, 'scrap')}>
                         <EditIcon sx={{ fontSize: '0.9rem' }} />
@@ -951,7 +942,7 @@ function CoinsBullions() {
                       </Box>
                     ) : (
                       <Typography variant="body2">
-                        ${parseFloat(item.estimatedValue).toFixed(2)}
+                        ${parseFloat(item.price).toFixed(2)}
                       </Typography>
                     )}
                   </StyledTableCell>
@@ -1006,7 +997,7 @@ function CoinsBullions() {
                       <Grid item xs={12}>
                         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            <Typography variant="subtitle2" sx={{ mr: 2 }}>Metal Type</Typography>
+                            <Typography variant="subtitle2" sx={{ mr: 2 }}>Metal Type *</Typography>
                             <Box sx={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 0.5 }}>
                               {metalTypes.map((metal) => (
                                 <MetalTypeChip
@@ -1304,9 +1295,9 @@ function CoinsBullions() {
                           )}
                         </StyledTableCell>
                         <StyledTableCell>
-                          <Typography variant="body2"><strong>{item.name}</strong></Typography>
+                          <Typography variant="body2"><strong>{item.metalType}</strong></Typography>
                           <Typography variant="caption" color="textSecondary">
-                            {item.metalType}, {item.purity}, {item.weight}oz
+                            {item.item}
                           </Typography>
                         </StyledTableCell>
                         <StyledTableCell>
