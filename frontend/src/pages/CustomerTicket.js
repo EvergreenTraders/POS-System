@@ -744,8 +744,7 @@ const CustomerTicket = () => {
           fromDuplicate: true // Indicate this came from duplicating an item
         } 
       });
-    } else if (itemToDuplicate.category?.toLowerCase().includes('jewelry') || 
-               itemToDuplicate.category?.toLowerCase().includes('jewellery')) {
+    } else if (itemToDuplicate.category?.toLowerCase().includes('jewelry')) {
       // If it's jewelry but not from estimator, still go to jewelry estimator
       const description = itemToDuplicate.description || '';
       navigate('/gem-estimator', { 
@@ -931,8 +930,7 @@ const CustomerTicket = () => {
           ticketItemId: itemId
         } 
       });
-    } else if (itemToEdit.category?.toLowerCase().includes('jewelry') || 
-               itemToEdit.category?.toLowerCase().includes('jewellery')) {
+    } else if (itemToEdit.category?.toLowerCase().includes('jewelry')) {
       // If it's jewelry but not from estimator, still go to jewelry estimator
       // Try to parse data from the description
       const description = itemToEdit.description || '';
