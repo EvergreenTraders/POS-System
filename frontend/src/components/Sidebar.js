@@ -167,9 +167,9 @@ function Sidebar() {
 
         <Collapse in={inventoryOpen && isOpen} timeout="auto" unmountOnExit>
           <List component="div" disablePadding>
-            <StyledLink to="/inventory/jewellery">
-              <StyledListItem active={isActive('/inventory/jewellery')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="Jewellery" />}
+            <StyledLink to="/inventory/jewelry">
+              <StyledListItem active={isActive('/inventory/jewelry')} sx={{ pl: 4 }}>
+                {isOpen && <ListItemText primary="Jewelry" />}
               </StyledListItem>
             </StyledLink>
             <StyledLink to="/inventory/coins-bullions">

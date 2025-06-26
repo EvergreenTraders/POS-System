@@ -12,7 +12,7 @@ import Dashboard from './pages/Dashboard';
 import Home from './pages/Home';
 import Products from './pages/Products';
 import Orders from './pages/Orders';
-import Jewellery from './pages/Jewellery';
+import Jewelry from './pages/Jewelry';
 import CoinsBullions from './pages/CoinsBullions';
 import SystemConfig from './pages/SystemConfig';
 import Employees from './pages/Employees';
@@ -183,11 +183,11 @@ function App() {
                 }
               />
               <Route
-                path="/inventory/jewellery"
+                path="/inventory/jewelry"
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <Jewellery />
+                      <Jewelry />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
@@ -257,7 +257,7 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <Jewellery />
+                      <Jewelry />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

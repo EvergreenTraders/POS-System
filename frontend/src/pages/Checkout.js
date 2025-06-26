@@ -72,10 +72,11 @@ function Checkout() {
   const [payments, setPayments] = useState([]);
   const [isFullyPaid, setIsFullyPaid] = useState(false);
 
-  // Effect to initialize cart and customer from navigation (either Estimator or Cart)
+  // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
     if (!isInitialized && location.state) {
-      if (location.state.from === 'estimator' && location.state?.items && location.state?.customer) {
+      // Handle from generic estimator or specific estimators like coinsbullions
+      if ((location.state.from === 'jewelry' || location.state.from === 'coinsbullions') && location.state?.items) {
         // Clear existing cart items before adding new ones from estimator
         clearCart(); 
         
@@ -87,8 +88,10 @@ function Checkout() {
         // Set checkoutItems for display
         setCheckoutItems(location.state.items);
         
-        // Set the customer
-        setCustomer(location.state.customer);
+        // Set the customer if it exists
+        if (location.state.customer) {
+          setCustomer(location.state.customer);
+        }
         setIsInitialized(true); // Mark as initialized to prevent re-running
       } 
       else if (location.state.from === 'cart' && location.state?.items) {        
@@ -495,6 +498,15 @@ function Checkout() {
       clearCart();
       setCustomer(null);
       navigate('/quote-manager');
+    } else if (location.state?.from === 'coinsbullions') {
+      // Save the cart items to session storage before navigating back to CoinsBullions
+      sessionStorage.setItem('coinsbullionsState', JSON.stringify({
+        items: cartItems
+      }));
+      clearCart();
+      setCustomer(null);
+      // Go back to coins bullions estimator
+      navigate('/bullion-estimator');
     } else if (location.state?.from === 'cart') {
       // If fully paid, filter out items that were checked out
       // Otherwise, use all cart items as is
@@ -552,7 +564,7 @@ function Checkout() {
       });
       
       // Save the formatted cart items to session storage before navigating back
-      sessionStorage.setItem('estimationState', JSON.stringify({
+      sessionStorage.setItem('jewelryState', JSON.stringify({
         items: formattedCartItems
       }));
       clearCart();
@@ -625,43 +637,34 @@ function Checkout() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: 4 }}>
-        <Button
-          variant="outlined"
-          onClick={handleBackToEstimation}
-          startIcon={<ArrowBackIcon />}
-          sx={{ mb: 2 }}
-        >
-          {location.state?.quoteId ? 'Back to Quotes' : 
-           location.state?.from === 'cart' ? 'Back to Ticket' : 'Back to Estimation'}
-        </Button>
         <Grid container spacing={3}>
-          {/* Customer Details */}
-          <Grid item xs={12}>
+          {/* Left side: Customer Details and Order Summary stacked */}
+          <Grid item xs={12} md={8}>
+            {/* Customer Details */}
             <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
               <Typography variant="h6" gutterBottom>
                 Customer Details
               </Typography>
               <Grid container spacing={2}>
-                <Grid item xs={12} sm={4}>
+                <Grid item xs={12} sm={3}>
                   <Typography variant="subtitle1">
-                    <strong>Name:</strong> {selectedCustomer?.name || 'Not specified'}
+                  <strong>N:</strong> {selectedCustomer?.name || 'Not specified'}
                   </Typography>
                 </Grid>
-                <Grid item xs={12} sm={4}>
+                <Grid item xs={12} sm={6}>
                   <Typography variant="subtitle1">
-                    <strong>Email:</strong> {selectedCustomer?.email || 'Not specified'}
+                  <strong>E:</strong> {selectedCustomer?.email || 'Not specified'}
                   </Typography>
                 </Grid>
-                <Grid item xs={12} sm={4}>
+                <Grid item xs={12} sm={3}>
                   <Typography variant="subtitle1">
-                    <strong>Phone:</strong> {selectedCustomer?.phone || 'Not specified'}
+                  <strong>P:</strong> {selectedCustomer?.phone || 'Not specified'}
                   </Typography>
                 </Grid>
               </Grid>
             </Paper>
-          </Grid>
-          {/* Order Summary */}
-          <Grid item xs={12} md={8}>
+            
+            {/* Order Summary - stacked below customer details */}
             <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
               <Typography variant="h6" gutterBottom>
                 Order Summary
@@ -704,21 +707,23 @@ function Checkout() {
                       
                       // Determine transaction type to display
                       let transactionType = '';
-                      if (item.transaction_type) {
-                        transactionType = item.transaction_type.charAt(0).toUpperCase() + item.transaction_type.slice(1);
+                      if (item.transactionType) {
+                        transactionType = item.transactionType;
                       } else if (item.transaction_type) {
-                        transactionType = item.transaction_type.charAt(0).toUpperCase() + item.transaction_type.slice(1);
+                        transactionType = item.transaction_type;
                       } else {
-                        // Try to determine from structure
-                        if (item.value !== undefined) transactionType = 'Pawn';
-                        else if (item.price !== undefined) {
-                          if (item.paymentMethod !== undefined) transactionType = 'Sale';
-                          else transactionType = 'Buy';
+                        // Fallback logic to determine transaction type
+                        if (item.price > 0 || item.value > 0 || (item.fee !== undefined && item.fee > 0)) {
+                          transactionType = 'Sale';
+                        } else if (item.price < 0 || item.value < 0 || (item.fee !== undefined && item.fee < 0)) {
+                          transactionType = 'Purchase';
+                        } else if (item.tradeItem) {
+                          transactionType = 'Trade';
+                        } else if (item.issue) {
+                          transactionType = 'Repair';
+                        } else {
+                          transactionType = 'Other';
                         }
-                        else if (item.tradeItem !== undefined) transactionType = 'Trade';
-                        else if (item.fee !== undefined) transactionType = 'Repair';
-                        else if (item.amount !== undefined) transactionType = 'Payment';
-                        else transactionType = 'Item';
                       }
                       
                       // Determine price to display
@@ -727,41 +732,15 @@ function Checkout() {
                       else if (item.value !== undefined) price = item.value;
                       else if (item.fee !== undefined) price = item.fee;
                       else if (item.amount !== undefined) price = item.amount;
-                    
+                      
                       return (
-                        <TableRow key={item.id || index}>
+                        <TableRow key={index}>
                           <TableCell>
-                            <Box>
-                              <Typography variant="subtitle2" fontWeight="bold">{displayDescription}</Typography>
-                              {item.free_text && (
-                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                                  {item.free_text}
-                                </Typography>
-                              )}
-                            </Box>
+                            {displayDescription}
                           </TableCell>
-                          <TableCell>
-                            <Chip 
-                              label={transactionType}
-                              size="small"
-                              color={(() => {
-                                // Determine color based on transaction type
-                                const type = transactionType.toLowerCase();
-                                if (type === 'buy') return 'primary';
-                                if (type === 'sell' || type === 'sale') return 'success';
-                                if (type === 'pawn') return 'secondary';
-                                if (type === 'trade') return 'info';
-                                if (type === 'repair') return 'warning';
-                                if (type === 'payment') return 'default';
-                                return 'default';
-                              })()}
-                              variant="outlined"
-                            />
-                          </TableCell>
+                          <TableCell>{transactionType}</TableCell>
                           <TableCell align="right">
-                            <Typography fontWeight="medium">
-                              ${parseFloat(price).toFixed(2)}
-                            </Typography>
+                            ${parseFloat(price).toFixed(2)}
                           </TableCell>
                         </TableRow>
                       );
@@ -784,16 +763,27 @@ function Checkout() {
               </Box>
             </Paper>
           </Grid>
-
-          {/* Payment Details */}
+          
+          {/* Right side: Payment Details */}
           <Grid item xs={12} md={4}>
-            <Paper elevation={3} sx={{ p: 3 }}>
-                <Typography variant="h6" color="primary" gutterBottom>
-                  Remaining: ${remainingAmount.toFixed(2)}
+            <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">
+                  Payment Details
                 </Typography>
-
-              <Typography variant="h6" gutterBottom>
-                Payment Details
+                <Button
+                  variant="outlined"
+                  onClick={handleBackToEstimation}
+                  startIcon={<ArrowBackIcon />}
+                  size="small"
+                >
+                  {location.state?.quoteId ? 'Back to Quotes' : 
+                   location.state?.from === 'cart' ? 'Customer Ticket' : 
+                   location.state?.from === 'coinsbullions' ? 'Bullion Est.' : 'Jewelry Est.'}
+                </Button>
+              </Box>
+              <Typography variant="h6" color="primary" gutterBottom>
+                Remaining: ${remainingAmount.toFixed(2)}
               </Typography>
               <FormControl component="fieldset" sx={{ mb: 2 }}>
                 <RadioGroup

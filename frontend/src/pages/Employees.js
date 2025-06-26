@@ -377,7 +377,7 @@ function Employees() {
                 <MenuItem value="Store Manager">Store Manager</MenuItem>
                 <MenuItem value="Sales Associate">Sales Associate</MenuItem>
                 <MenuItem value="Cashier">Cashier</MenuItem>
-                <MenuItem value="Jewellery Specialist">Jewellery Specialist</MenuItem>
+                <MenuItem value="Jewelry Specialist">Jewelry Specialist</MenuItem>
                 <MenuItem value="Software Developer">Software Developer</MenuItem>
               </Select>
             </FormControl>
