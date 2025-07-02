@@ -525,7 +525,7 @@ const CustomerTicket = () => {
     }
     
     // Handle items coming from CoinsBullions
-    else if (location.state?.addedItems && location.state?.from === 'coinsBullions') {
+    else if (location.state?.addedItems && location.state?.from === 'coinsbullions') {
       // Skip if we've already processed this state
       const stateHash = JSON.stringify(location.state);
       if (processedStateRef.current === stateHash) {

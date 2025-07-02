@@ -38,6 +38,7 @@ import { styled } from '@mui/material/styles';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
+import ImageNotSupportedIcon from '@mui/icons-material/ImageNotSupported';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import SearchIcon from '@mui/icons-material/Search';
 import CheckIcon from '@mui/icons-material/Check';
@@ -169,11 +170,14 @@ function CoinsBullions() {
   const location = useLocation();
   const fileInputRef = useRef(null);
   const [tabValue, setTabValue] = useState(0);
-  const [images, setImages] = useState([]);
+  const [scrapImages, setScrapImages] = useState([]);
+  const [coinBullionImages, setCoinBullionImages] = useState([]);
+  const [numismaticImages, setNumismaticImages] = useState([]);
   const [scrapMetalItems, setScrapMetalItems] = useState([]);
   const [coinsBullions, setCoinsBullions] = useState([]);
   const [estimatedScrapItems, setEstimatedScrapItems] = useState([]);
   const [estimatedCoinItems, setEstimatedCoinItems] = useState([]);
+  const [estimatedNumismaticItems, setEstimatedNumismaticItems] = useState([]);
   const [metalSpotPrices, setMetalSpotPrices] = useState({});
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState(null);
@@ -234,10 +238,20 @@ function CoinsBullions() {
     e.preventDefault();
     try {
       // Prepare item data based on tab
+      // Select the appropriate image array based on current tab
+      let currentImages;
+      if (tabValue === 0) {
+        currentImages = scrapImages;
+      } else if (tabValue === 1) {
+        currentImages = coinBullionImages;
+      } else {
+        currentImages = numismaticImages;
+      }
+
       const itemData = {
         ...formData,
-        type: tabValue === 0 ? 'scrap' : 'coin',
-        images: images.length > 0 ? images.filter((img) => img.isPrimary)[0].preview : null,
+        type: tabValue === 0 ? 'scrap' : tabValue === 1 ? 'coin' : 'numismatic',
+        images: currentImages.length > 0 ? currentImages.filter((img) => img.isPrimary)[0].preview : null,
         id: Date.now(), // Generate temporary ID for the item
         transaction_type: 'buy', // Default transaction type
       };
@@ -255,7 +269,7 @@ function CoinsBullions() {
           description: `${itemData.metalType} ${itemData.purity} ${itemData.weight}g`,
         };
         setEstimatedScrapItems([...estimatedScrapItems, newItem]);
-      } else {
+      } else if (tabValue === 1) {
         // For coins & bullions
         const newItem = {
           ...itemData,
@@ -267,6 +281,22 @@ function CoinsBullions() {
           description: `${itemData.metalType} ${itemData.item}`,
         };
         setEstimatedCoinItems([...estimatedCoinItems, newItem]);
+      } else {
+        // For numismatic items
+        const newItem = {
+          ...itemData,
+          name: itemData.item,
+          metalType: itemData.metalType,
+          year: itemData.year,
+          grade: itemData.grade,
+          serialNumber: itemData.serialNumber,
+          price: itemData.price,
+          premiumDollar: itemData.premiumDollar,
+          premiumPercent: itemData.premiumPercent,
+          image: itemData.images, // Use the primary image
+          description: `${itemData.item} ${itemData.year ? '(' + itemData.year + ')' : ''} ${itemData.grade ? 'Grade: ' + itemData.grade : ''}`,
+        };
+        setEstimatedNumismaticItems([...estimatedNumismaticItems, newItem]);
       }
 
       // Reset form and images
@@ -283,7 +313,14 @@ function CoinsBullions() {
         quantity: '1',
         description: '',
       });
-      setImages([]);
+      // Clear only the images for the current tab
+      if (tabValue === 0) {
+        setScrapImages([]);
+      } else if (tabValue === 1) {
+        setCoinBullionImages([]);
+      } else {
+        setNumismaticImages([]);
+      }
 
       // Show success message
       setSnackbarOpen(true);
@@ -310,32 +347,82 @@ function CoinsBullions() {
 
   const handleImageUpload = (e) => {
     const files = Array.from(e.target.files);
-    const newImages = files.map((file, index) => ({
-      file,
-      preview: URL.createObjectURL(file),
-      isPrimary: images.length === 0 && index === 0, // Only make the first image primary if no images exist
-    }));
-    setImages([...images, ...newImages]);
+    
+    if (tabValue === 0) { // Scrap Metal tab
+      const newImages = files.map((file, index) => ({
+        file,
+        preview: URL.createObjectURL(file),
+        isPrimary: scrapImages.length === 0 && index === 0, 
+      }));
+      setScrapImages([...scrapImages, ...newImages]);
+    } else if (tabValue === 1) { // Coins & Bullions tab
+      const newImages = files.map((file, index) => ({
+        file,
+        preview: URL.createObjectURL(file),
+        isPrimary: coinBullionImages.length === 0 && index === 0,
+      }));
+      setCoinBullionImages([...coinBullionImages, ...newImages]);
+    } else { // Numismatic tab
+      const newImages = files.map((file, index) => ({
+        file,
+        preview: URL.createObjectURL(file),
+        isPrimary: numismaticImages.length === 0 && index === 0,
+      }));
+      setNumismaticImages([...numismaticImages, ...newImages]);
+    }
   };
 
   const removeImage = (index) => {
-    const newImages = [...images];
-    // If removing the primary image, set the first remaining image as primary
-    if (newImages[index].isPrimary && newImages.length > 1) {
-      const nextIndex = index === 0 ? 1 : 0;
-      newImages[nextIndex].isPrimary = true;
+    if (tabValue === 0) { // Scrap Metal tab
+      const newImages = [...scrapImages];
+      if (newImages[index].isPrimary && newImages.length > 1) {
+        const nextIndex = index === 0 ? 1 : 0;
+        newImages[nextIndex].isPrimary = true;
+      }
+      URL.revokeObjectURL(newImages[index].preview);
+      newImages.splice(index, 1);
+      setScrapImages(newImages);
+    } else if (tabValue === 1) { // Coins & Bullions tab
+      const newImages = [...coinBullionImages];
+      if (newImages[index].isPrimary && newImages.length > 1) {
+        const nextIndex = index === 0 ? 1 : 0;
+        newImages[nextIndex].isPrimary = true;
+      }
+      URL.revokeObjectURL(newImages[index].preview);
+      newImages.splice(index, 1);
+      setCoinBullionImages(newImages);
+    } else { // Numismatic tab
+      const newImages = [...numismaticImages];
+      if (newImages[index].isPrimary && newImages.length > 1) {
+        const nextIndex = index === 0 ? 1 : 0;
+        newImages[nextIndex].isPrimary = true;
+      }
+      URL.revokeObjectURL(newImages[index].preview);
+      newImages.splice(index, 1);
+      setNumismaticImages(newImages);
     }
-    URL.revokeObjectURL(newImages[index].preview);
-    newImages.splice(index, 1);
-    setImages(newImages);
   };
 
   const setAsPrimaryImage = (index) => {
-    const newImages = images.map((img, i) => ({
-      ...img,
-      isPrimary: i === index,
-    }));
-    setImages(newImages);
+    if (tabValue === 0) { // Scrap Metal tab
+      const newImages = scrapImages.map((img, i) => ({
+        ...img,
+        isPrimary: i === index,
+      }));
+      setScrapImages(newImages);
+    } else if (tabValue === 1) { // Coins & Bullions tab
+      const newImages = coinBullionImages.map((img, i) => ({
+        ...img,
+        isPrimary: i === index,
+      }));
+      setCoinBullionImages(newImages);
+    } else { // Numismatic tab
+      const newImages = numismaticImages.map((img, i) => ({
+        ...img,
+        isPrimary: i === index,
+      }));
+      setNumismaticImages(newImages);
+    }
   };
 
   const handleCameraOpen = () => {
@@ -350,13 +437,21 @@ function CoinsBullions() {
 
   const handleEditEstimatedItem = (item, type) => {
     setEditingItemId(item.id);
-    setEditPrice(type === 'scrap' ? item.price : item.price);
+    if (type === 'scrap') {
+      setEditPrice(item.estimatedValue || item.price || 0);
+    } else {
+      setEditPrice(item.price || 0);
+    }
   };
 
   const handleSaveEditedPrice = (id, type) => {
     if (type === 'scrap') {
       setEstimatedScrapItems((items) =>
         items.map((item) => (item.id === id ? { ...item, estimatedValue: editPrice } : item))
+      );
+    } else if (type === 'numismatic') {
+      setEstimatedNumismaticItems((items) =>
+        items.map((item) => (item.id === id ? { ...item, price: editPrice } : item))
       );
     } else {
       setEstimatedCoinItems((items) =>
@@ -372,14 +467,22 @@ function CoinsBullions() {
 
   const handleCancelEdit = () => {
     setEditingItemId(null);
-    setEditPrice('');
+    setEditPrice(0);
   };
 
   const handleAddToTicket = () => {
     setIsLoading(true);
 
     try {
-      const currentItems = tabValue === 0 ? estimatedScrapItems : estimatedCoinItems;
+      // Get the appropriate items based on current tab
+      let currentItems = [];
+      if (tabValue === 0) {
+        currentItems = estimatedScrapItems;
+      } else if (tabValue === 1) {
+        currentItems = estimatedCoinItems;
+      } else { // tabValue === 2 for numismatic
+        currentItems = estimatedNumismaticItems;
+      }
 
       if (currentItems.length === 0) {
         setSnackbarOpen(true);
@@ -391,22 +494,37 @@ function CoinsBullions() {
 
       const ticketItems = currentItems.map((item) => {
         if (tabValue === 0) {
+          // Scrap metal
           return {
             id: item.id,
             description: `${item.metalType} (${item.purity}, ${item.weight}g)`,
             category: 'Scrap Metal',
             value: item.pricePerGram,
-            price: item.price, // Added price field for consistency
+            price: item.price,
             transaction_type: item.transaction_type || 'buy',
             originalItem: item,
           };
-        } else {
+        } else if (tabValue === 1) {
+          // Coins & Bullions
           return {
             id: item.id,
             description: item.name || item.item,
             category: `${item.metalType} ${item.purity || ''}`,
             price: item.price || 0,
             transaction_type: item.transaction_type || 'buy',
+            originalItem: item,
+          };
+        } else {
+          // Numismatic
+          return {
+            id: item.id,
+            description: `${item.name || item.item} ${item.year ? `(${item.year})` : ''} ${item.grade ? `Grade: ${item.grade}` : ''}`,
+            category: 'Numismatic',
+            price: item.price || 0,
+            transaction_type: item.transaction_type || 'buy',
+            serialNumber: item.serialNumber,
+            grade: item.grade,
+            year: item.year,
             originalItem: item,
           };
         }
@@ -419,8 +537,10 @@ function CoinsBullions() {
       // Clear the current estimated items
       if (tabValue === 0) {
         setEstimatedScrapItems([]);
-      } else {
+      } else if (tabValue === 1) {
         setEstimatedCoinItems([]);
+      } else {
+        setEstimatedNumismaticItems([]);
       }
 
       if (ticketItems.length > 0) {
@@ -462,6 +582,16 @@ function CoinsBullions() {
 
       // Get customer data from location state if available
       const customerData = location.state?.customer;
+      
+      // Get the current items based on the active tab
+      let currentItems = [];
+      if (tabValue === 0) {
+        currentItems = estimatedScrapItems;
+      } else if (tabValue === 1) {
+        currentItems = estimatedCoinItems;
+      } else { // tabValue === 2
+        currentItems = estimatedNumismaticItems;
+      }
 
       // Navigate to checkout with estimated items
       if (customerData) {
@@ -469,7 +599,7 @@ function CoinsBullions() {
         navigate('/checkout', {
           state: {
             from: 'coinsbullions',
-            items: tabValue === 0 ? estimatedScrapItems : estimatedCoinItems,
+            items: currentItems,
             customer: customerData,
           },
         });
@@ -477,7 +607,7 @@ function CoinsBullions() {
         // Otherwise, navigate to customer manager to select/create a customer
         navigate('/customer', {
           state: {
-            items: tabValue === 0 ? estimatedScrapItems : estimatedCoinItems,
+            items: currentItems,
             from: 'coinsbullions',
             nextRoute: '/checkout',
           },
@@ -497,6 +627,8 @@ function CoinsBullions() {
       setEstimatedScrapItems(prev => prev.filter(item => item.id !== id));
     } else if (type === 'coin') {
       setEstimatedCoinItems(prev => prev.filter(item => item.id !== id));
+    } else if (type === 'numismatic') {
+      setEstimatedNumismaticItems(prev => prev.filter(item => item.id !== id));
     }
   };
 
@@ -546,12 +678,12 @@ function CoinsBullions() {
             onChange={handleTabChange}
             aria-label="inventory tabs"
             variant="fullWidth"
-            sx={{ maxWidth: 600, mx: 'auto' }}
+            sx={{ maxWidth: 900, mx: 'auto' }}
           >
             <Tab 
               label="Scrap Metal"
               sx={{ 
-                width: '275px', 
+                width: '200px', 
                 textAlign: 'center',
                 textTransform: 'uppercase',
                 fontWeight: 'bold'
@@ -560,7 +692,16 @@ function CoinsBullions() {
             <Tab 
               label="Coins & Bullions"
               sx={{ 
-                width: '275px', 
+                width: '200px', 
+                textAlign: 'center',
+                textTransform: 'uppercase',
+                fontWeight: 'bold'
+              }}
+            />
+            <Tab 
+              label="Numismatic"
+              sx={{ 
+                width: '200px', 
                 textAlign: 'center',
                 textTransform: 'uppercase',
                 fontWeight: 'bold'
@@ -804,7 +945,7 @@ function CoinsBullions() {
                           zIndex: 1
                         }}
                       >
-                        {images.map((img, index) => (
+                        {(tabValue === 0 ? scrapImages : tabValue === 1 ? coinBullionImages : numismaticImages).map((img, index) => (
                           <ItemImageThumbnail
                             key={index}
                             src={img.preview}
@@ -1123,29 +1264,6 @@ function CoinsBullions() {
                               Photo
                             </Button>
                           </Box>
-                          
-                          {/* Images positioned to overlay the buttons */}
-                          <Box 
-                            sx={{ 
-                              display: 'flex', 
-                              flexWrap: 'wrap', 
-                              gap: 0.5, 
-                              position: 'absolute',
-                              top: '-120px',
-                              left: 0,
-                              zIndex: 1
-                            }}
-                          >
-                            {images.map((img, index) => (
-                              <ItemImageThumbnail
-                                key={index}
-                                src={img.preview}
-                                isPrimary={img.isPrimary}
-                                onDelete={() => removeImage(index)}
-                                onSetPrimary={() => setAsPrimaryImage(index)}
-                              />
-                            ))}
-                          </Box>
                         </Box>
                         
                         {/* Form fields */}
@@ -1380,6 +1498,372 @@ function CoinsBullions() {
             </Box>
           </Box>
         )}
+        
+        {/* Numismatic Tab Content */}
+        {tabValue === 2 && (
+          <Box sx={{ p: 3 }}>
+            <form onSubmit={handleSubmit}>
+              <Grid container spacing={1}>
+                <Grid item xs={12}>
+                  <FormSection sx={{ mb: 1 }}>
+                    {/* Header with Metal Type and Add Item button */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, justifyContent: 'space-between' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Typography variant="subtitle2" sx={{ mr: 2 }}>Metal Type *</Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                          {metalTypes.map((type) => (
+                            <MetalTypeChip
+                              key={type}
+                              label={type}
+                              onClick={() => handleMetalTypeSelect(type)}
+                              selected={formData.metalType === type}
+                            />
+                          ))}
+                        </Box>
+                      </Box>
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        startIcon={<AddIcon />}
+                        type="submit"
+                      >
+                        Add Item
+                      </Button>
+                    </Box>
+                    
+                    {/* Images thumbnails */}
+                    <Box sx={{ 
+                      display: 'flex', 
+                      flexWrap: 'wrap',
+                      mb: 2
+                    }}>
+                      {(tabValue === 0 ? scrapImages : tabValue === 1 ? coinBullionImages : numismaticImages).map((img, index) => (
+                        <ItemImageThumbnail
+                          key={index}
+                          src={img.preview || img.url}
+                          isPrimary={img.isPrimary}
+                          onDelete={() => removeImage(index)}
+                          onSetPrimary={() => setAsPrimaryImage(index)}
+                        />
+                      ))}
+                    </Box>
+
+                    {/* Form fields in two columns */}
+                    <Grid container spacing={2}>
+                      {/* Left column - Form fields */}
+                      <Grid item xs={12} sm={6}>
+                        <Grid container spacing={1} direction="column">
+                          <Grid item>
+                            <TextField
+                              size="small"
+                              label="SKU"
+                              name="sku"
+                              value={formData.sku || ''}
+                              onChange={handleChange}
+                              margin="dense"
+                              fullWidth
+                            />
+                          </Grid>
+                          <Grid item>
+                            <TextField
+                              size="small"
+                              label="In Stock"
+                              name="inStock"
+                              type="number"
+                              value={formData.inStock || ''}
+                              onChange={handleChange}
+                              margin="dense"
+                              fullWidth
+                              InputProps={{
+                                inputProps: { min: 0 }
+                              }}
+                            />
+                          </Grid>
+                          <Grid item>
+                            <TextField
+                              size="small"
+                              label="Item"
+                              name="item"
+                              value={formData.item}
+                              onChange={handleChange}
+                              required
+                              margin="dense"
+                              fullWidth
+                            />
+                          </Grid>
+                          <Grid item>
+                            <TextField
+                              size="small"
+                              label="Source"
+                              name="source"
+                              value={formData.source || ''}
+                              onChange={handleChange}
+                              margin="dense"
+                              fullWidth
+                            />
+                          </Grid>
+                          <Grid item>
+                            <TextField
+                              size="small"
+                              label="Description"
+                              name="description"
+                              value={formData.description || ''}
+                              onChange={handleChange}
+                              margin="dense"
+                              fullWidth
+                              multiline
+                              rows={2}
+                            />
+                          </Grid>
+                        </Grid>
+                      </Grid>
+                      
+                      {/* Right column */}
+                      <Grid item xs={12} sm={6}>
+                        {/* Empty space for better positioning */}
+                        <Box sx={{ mb: 2 }}></Box>
+                        
+                        {/* Image upload and thumbnails */}
+                        <Box sx={{ position: 'relative' }}>
+                          {/* Buttons in their original position */}
+                          <Box sx={{ display: 'flex', gap: 1, mt: 4 }}>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<CloudUpload />}
+                              onClick={() => fileInputRef.current.click()}
+                            >
+                              Upload
+                            </Button>
+                            <input
+                              type="file"
+                              ref={fileInputRef}
+                              accept="image/*"
+                              style={{ display: 'none' }}
+                              onChange={handleImageUpload}
+                              multiple
+                            />
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<PhotoCamera />}
+                              onClick={handleCameraOpen}
+                            >
+                              Photo
+                            </Button>
+                          </Box>
+                        </Box>
+                        <Grid container spacing={1} direction="column">
+                          <Grid item>
+                            <TextField
+                              size="small"
+                              label="Quantity"
+                              name="quantity"
+                              type="number"
+                              value={formData.quantity || '1'}
+                              onChange={handleChange}
+                              margin="dense"
+                              fullWidth
+                              InputProps={{
+                                inputProps: { min: 1 }
+                              }}
+                            />
+                          </Grid>
+                          <Grid item>
+                            <TextField
+                              size="small"
+                              label="Premium"
+                              name="premiumDollar"
+                              type="number"
+                              value={formData.premiumDollar}
+                              onChange={handleChange}
+                              margin="dense"
+                              InputProps={{
+                                startAdornment: <InputAdornment position="start">$</InputAdornment>
+                              }}
+                              fullWidth
+                            />
+                          </Grid>
+                          <Grid item>
+                            <TextField
+                              size="small"
+                              label="Price"
+                              name="price"
+                              type="number"
+                              value={formData.price}
+                              onChange={handleChange}
+                              required
+                              margin="dense"
+                              InputProps={{
+                                startAdornment: <InputAdornment position="start">$</InputAdornment>
+                              }}
+                              fullWidth
+                            />
+                          </Grid>
+                        </Grid>
+                      </Grid>
+                    </Grid>
+                    
+                    {/* Image thumbnails display */}
+                    <Box 
+                      sx={{ 
+                        display: 'flex', 
+                        flexWrap: 'wrap',
+                        mt: 2
+                      }}
+                    >
+                      {(tabValue === 0 ? scrapImages : tabValue === 1 ? coinBullionImages : numismaticImages).map((img, index) => (
+                        <ItemImageThumbnail
+                          key={index}
+                          src={img.preview || img.url}
+                          isPrimary={img.isPrimary}
+                          onDelete={() => removeImage(index)}
+                          onSetPrimary={() => setAsPrimaryImage(index)}
+                        />
+                      ))}
+                    </Box>
+                  </FormSection>
+                </Grid>
+              </Grid>
+            </form>
+
+            {/* Display estimated items for numismatic */}
+            <Box sx={{ mt: 1 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="h6">Estimated Items</Typography>
+              </Box>
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Image</TableCell>
+                      <TableCell>Description</TableCell>
+                      <TableCell>Transaction Type</TableCell>
+                      <TableCell>Price</TableCell>
+                      <TableCell>Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {estimatedNumismaticItems.length === 0 ? (
+                      <StyledTableRow>
+                        <StyledTableCell colSpan={5} align="center">
+                          No numismatic items added
+                        </StyledTableCell>
+                      </StyledTableRow>
+                    ) : estimatedNumismaticItems.map((item) => (
+                      <StyledTableRow key={item.id}>
+                        <StyledTableCell>
+                          {item.image ? (
+                            <img
+                              src={item.image}
+                              alt={item.item}
+                              style={{ width: '50px', height: '50px', objectFit: 'contain' }}
+                            />
+                          ) : (
+                            <Box
+                              sx={{
+                                width: '50px',
+                                height: '50px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                bgcolor: 'grey.200'
+                              }}
+                            >
+                              <ImageNotSupportedIcon color="disabled" />
+                            </Box>
+                          )}
+                        </StyledTableCell>
+                        <StyledTableCell>
+                          <Typography variant="body2" fontWeight="bold">
+                            {item.item || item.name}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {item.source && `Source: ${item.source}`}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {item.sku && `SKU: ${item.sku}`}
+                          </Typography>
+                        </StyledTableCell>
+                        <StyledTableCell>
+                          <Select
+                            size="small"
+                            value={item.transaction_type || 'buy'}
+                            onChange={(e) => {
+                              const updatedItems = [...estimatedNumismaticItems];
+                              const index = updatedItems.findIndex(i => i.id === item.id);
+                              updatedItems[index] = {...updatedItems[index], transaction_type: e.target.value};
+                              setEstimatedNumismaticItems(updatedItems);
+                            }}
+                            sx={{ minWidth: 100 }}
+                          >
+                            <MenuItem value="buy">Buy</MenuItem>
+                            <MenuItem value="pawn">Pawn</MenuItem>
+                          </Select>
+                        </StyledTableCell>
+                        <StyledTableCell>
+                          {editingItemId === item.id ? (
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                              <TextField
+                                size="small"
+                                type="number"
+                                value={editPrice}
+                                onChange={(e) => setEditPrice(e.target.value)}
+                                InputProps={{
+                                  startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                                }}
+                                sx={{ width: '100px' }}
+                                autoFocus
+                              />
+                              <IconButton size="small" color="primary" onClick={() => handleSaveEditedPrice(item.id, 'numismatic')}>
+                                <CheckIcon fontSize="small" />
+                              </IconButton>
+                              <IconButton size="small" color="error" onClick={handleCancelEdit}>
+                                <CloseIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                          ) : (
+                            <Typography variant="body2">
+                              ${parseFloat(item.price || 0).toFixed(2)}
+                            </Typography>
+                          )}
+                        </StyledTableCell>
+                        <StyledTableCell>
+                          <Box sx={{ display: 'flex' }}>
+                            <IconButton size="small" color="primary" onClick={() => handleEditEstimatedItem(item, 'numismatic')}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton size="small" color="error" onClick={() => handleDeleteEstimatedItem(item.id, 'numismatic')}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </StyledTableCell>
+                      </StyledTableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, gap: 2 }}>
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  onClick={handleAddToTicket}
+                  disabled={isLoading || estimatedNumismaticItems.length === 0}
+                >
+                  Add to Ticket
+                </Button>
+                <Button 
+                  variant="contained" 
+                  color="secondary"
+                  onClick={handleProceedToCheckout}
+                  disabled={isLoading || estimatedNumismaticItems.length === 0}
+                >
+                  Proceed to Checkout
+                </Button>
+              </Box>
+            </Box>
+          </Box>
+        )}
       </StyledPaper>
 
       <Snackbar
@@ -1418,8 +1902,6 @@ function CoinsBullions() {
           </Button>
         </DialogActions>
       </Dialog>
-
-
     </Container>
   );
 }
