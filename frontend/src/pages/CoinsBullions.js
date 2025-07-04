@@ -1232,13 +1232,11 @@ function CoinsBullions() {
                       
                       {/* Right column */}
                       <Grid item xs={12} sm={6}>
-                        {/* Empty space for better positioning */}
-                        <Box sx={{ mb: 2 }}></Box>
                         
                         {/* Image upload and thumbnails */}
                         <Box sx={{ position: 'relative' }}>
                           {/* Buttons in their original position */}
-                          <Box sx={{ display: 'flex', gap: 1, mt: 4 }}>
+                          <Box sx={{ display: 'flex', gap: 1, mt: 6 }}>
                             <Button
                               size="small"
                               variant="outlined"
@@ -1264,7 +1262,29 @@ function CoinsBullions() {
                               Photo
                             </Button>
                           </Box>
-                        </Box>
+                          {/* Images positioned to overlay the buttons */}
+                      <Box 
+                        sx={{ 
+                          display: 'flex', 
+                          flexWrap: 'wrap', 
+                          gap: 0.5, 
+                          position: 'absolute',
+                          top: '-120px',
+                          left: 0,
+                          zIndex: 1
+                        }}
+                      >
+                        {(tabValue === 0 ? scrapImages : tabValue === 1 ? coinBullionImages : numismaticImages).map((img, index) => (
+                          <ItemImageThumbnail
+                            key={index}
+                            src={img.preview}
+                            isPrimary={img.isPrimary}
+                            onDelete={() => removeImage(index)}
+                            onSetPrimary={() => setAsPrimaryImage(index)}
+                          />
+                        ))}
+                      </Box>
+                    </Box>
                         
                         {/* Form fields */}
                         <Grid container direction="column" spacing={1}>
@@ -1530,23 +1550,6 @@ function CoinsBullions() {
                         Add Item
                       </Button>
                     </Box>
-                    
-                    {/* Images thumbnails */}
-                    <Box sx={{ 
-                      display: 'flex', 
-                      flexWrap: 'wrap',
-                      mb: 2
-                    }}>
-                      {(tabValue === 0 ? scrapImages : tabValue === 1 ? coinBullionImages : numismaticImages).map((img, index) => (
-                        <ItemImageThumbnail
-                          key={index}
-                          src={img.preview || img.url}
-                          isPrimary={img.isPrimary}
-                          onDelete={() => removeImage(index)}
-                          onSetPrimary={() => setAsPrimaryImage(index)}
-                        />
-                      ))}
-                    </Box>
 
                     {/* Form fields in two columns */}
                     <Grid container spacing={2}>
@@ -1620,13 +1623,11 @@ function CoinsBullions() {
                       
                       {/* Right column */}
                       <Grid item xs={12} sm={6}>
-                        {/* Empty space for better positioning */}
-                        <Box sx={{ mb: 2 }}></Box>
                         
                         {/* Image upload and thumbnails */}
                         <Box sx={{ position: 'relative' }}>
                           {/* Buttons in their original position */}
-                          <Box sx={{ display: 'flex', gap: 1, mt: 4 }}>
+                          <Box sx={{ display: 'flex', gap: 1, mt: 10 }}>
                             <Button
                               size="small"
                               variant="outlined"
@@ -1652,7 +1653,29 @@ function CoinsBullions() {
                               Photo
                             </Button>
                           </Box>
-                        </Box>
+                          {/* Images positioned to overlay the buttons */}
+                      <Box 
+                        sx={{ 
+                          display: 'flex', 
+                          flexWrap: 'wrap', 
+                          gap: 0.5, 
+                          position: 'absolute',
+                          top: '-120px',
+                          left: 0,
+                          zIndex: 1
+                        }}
+                      >
+                        {(tabValue === 0 ? scrapImages : tabValue === 1 ? coinBullionImages : numismaticImages).map((img, index) => (
+                          <ItemImageThumbnail
+                            key={index}
+                            src={img.preview}
+                            isPrimary={img.isPrimary}
+                            onDelete={() => removeImage(index)}
+                            onSetPrimary={() => setAsPrimaryImage(index)}
+                          />
+                        ))}
+                      </Box>
+                      </Box>
                         <Grid container spacing={1} direction="column">
                           <Grid item>
                             <TextField
@@ -1703,25 +1726,6 @@ function CoinsBullions() {
                         </Grid>
                       </Grid>
                     </Grid>
-                    
-                    {/* Image thumbnails display */}
-                    <Box 
-                      sx={{ 
-                        display: 'flex', 
-                        flexWrap: 'wrap',
-                        mt: 2
-                      }}
-                    >
-                      {(tabValue === 0 ? scrapImages : tabValue === 1 ? coinBullionImages : numismaticImages).map((img, index) => (
-                        <ItemImageThumbnail
-                          key={index}
-                          src={img.preview || img.url}
-                          isPrimary={img.isPrimary}
-                          onDelete={() => removeImage(index)}
-                          onSetPrimary={() => setAsPrimaryImage(index)}
-                        />
-                      ))}
-                    </Box>
                   </FormSection>
                 </Grid>
               </Grid>
