@@ -769,8 +769,47 @@ const CustomerTicket = () => {
   // Handle deleting an item
   const handleDeleteItem = (id) => {
     const { items, setItems } = getCurrentItems();
-    if (items.length <= 1) return; // Keep at least one row
-    setItems(items.filter(item => item.id !== id));
+    
+    // Find the item to be deleted
+    const itemToDelete = items.find(item => item.id === id);
+    
+    // If we're deleting the only item and it's from an estimator (has originalItem or sourceEstimator property)
+    // then allow deletion; otherwise keep at least one row (legacy behavior)
+    const isFromEstimator = itemToDelete && (itemToDelete.originalItem || itemToDelete.sourceEstimator);
+    if (items.length <= 1 && !isFromEstimator) return; // Keep at least one row if not from estimator
+    
+    // If we're deleting the last estimator item, add an empty row to maintain UI consistency
+    const remainingItems = items.filter(item => item.id !== id);
+    if (remainingItems.length === 0) {
+      // Add an empty item with a new ID
+      const emptyItem = { id: Date.now(), description: '', category: '' };
+      // Add appropriate fields based on the active tab
+      const { type } = getCurrentItems();
+      if (type === 'pawn') emptyItem.value = '';
+      if (type === 'buy' || type === 'sale') emptyItem.price = '';
+      if (type === 'trade') {
+        emptyItem.tradeItem = '';
+        emptyItem.tradeValue = '';
+        emptyItem.storeItem = '';
+        emptyItem.priceDiff = '';
+      }
+      if (type === 'repair') {
+        emptyItem.issue = '';
+        emptyItem.fee = '';
+        emptyItem.completion = '';
+      }
+      if (type === 'payment' || type === 'refund') {
+        emptyItem.amount = '';
+        emptyItem.method = '';
+        emptyItem.reference = '';
+        type === 'payment' ? emptyItem.notes = '' : emptyItem.reason = '';
+      }
+      
+      setItems([emptyItem]);
+    } 
+    else {
+      setItems(remainingItems);
+    }
   };
   
   const handleTabChange = (event, newValue) => {
