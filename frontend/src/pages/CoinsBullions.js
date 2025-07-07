@@ -476,12 +476,17 @@ function CoinsBullions() {
     try {
       // Get the appropriate items based on current tab
       let currentItems = [];
+      let currentImages = [];
+
       if (tabValue === 0) {
         currentItems = estimatedScrapItems;
+        currentImages = scrapImages;
       } else if (tabValue === 1) {
         currentItems = estimatedCoinItems;
+        currentImages = coinBullionImages;
       } else { // tabValue === 2 for numismatic
         currentItems = estimatedNumismaticItems;
+        currentImages = numismaticImages;
       }
 
       if (currentItems.length === 0) {
@@ -503,6 +508,7 @@ function CoinsBullions() {
             price: item.price,
             transaction_type: item.transaction_type || 'buy',
             originalItem: item,
+            images: item.images || [] // Add images to ticket item
           };
         } else if (tabValue === 1) {
           // Coins & Bullions
@@ -513,6 +519,7 @@ function CoinsBullions() {
             price: item.price || 0,
             transaction_type: item.transaction_type || 'buy',
             originalItem: item,
+            images: item.images || [] // Add images to ticket item
           };
         } else {
           // Numismatic
@@ -526,6 +533,7 @@ function CoinsBullions() {
             grade: item.grade,
             year: item.year,
             originalItem: item,
+            images: item.images || [] // Add images to ticket item
           };
         }
       });

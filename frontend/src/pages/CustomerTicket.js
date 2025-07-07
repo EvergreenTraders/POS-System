@@ -549,7 +549,9 @@ const CustomerTicket = () => {
           id: Date.now() + index, // Use timestamp + index to ensure unique IDs
           description: item.description || '',
           category: item.category || '',
-          originalItem: item.originalItem || item
+          originalItem: item.originalItem || item,
+          // Add support for images
+          image: item.images || []
         };
         
         // Add to appropriate array based on transaction type
@@ -1350,23 +1352,33 @@ const CustomerTicket = () => {
   // Determine item image source
   const getItemImageSource = (item) => {
     // Handle case where item has no image
-    if (!item || !item.image) {
-      // Check for legacy format
-      if (item && item.images && item.images.length > 0) {
-        return item.images[0].url;
+    if (!item) return null;
+    
+    // Handle direct image string from CoinsBullions.js
+    if (item.image) {
+      if (item.image.file instanceof File || item.image.file instanceof Blob) {
+        return URL.createObjectURL(item.image.file);
+      } else if (item.image.url) {
+        return item.image.url;
+      } else if (typeof item.image === 'string') {
+        return item.image;
+      } else if (item.image && item.image.data) {
+        return bufferToDataUrl(item.image);
       }
-      return null;
     }
     
-    if (item.image.file instanceof File || item.image.file instanceof Blob) {
-      return URL.createObjectURL(item.image.file);
-    } else if (item.image.url) {
-      return item.image.url;
-    } else if (typeof item.image === 'string') {
-      return item.image;
-    } else if (item.image && item.image.data) {
-      return bufferToDataUrl(item.image);
+    // Handle images array
+    if (item.images && item.images.length > 0) {
+      // Handle CoinsBullions.js direct image strings in array
+      if (typeof item.images[0] === 'string') {
+        return item.images[0];
+      }
+      // Handle legacy format with url property
+      if (item.images[0].url) {
+        return item.images[0].url;
+      }
     }
+    
     return null;
   };
 
