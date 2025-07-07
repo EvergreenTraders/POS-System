@@ -326,7 +326,9 @@ const CustomerTicket = () => {
     return loadTicketItems('refund') || [{ id: 1, amount: '', method: '', reference: '', reason: '' }];
   });
   
-  // Process estimated items from GemEstimator.js when component mounts
+  // Process estimated items when component mounts - use a ref to track if the current navigation state has been processed
+  const processedStateRef = React.useRef(null);
+  
   React.useEffect(() => {
     // Handle updated item from jewelry estimator when in edit mode
     if (location.state?.updatedItem && location.state?.ticketItemId && location.state?.fromEstimator === 'jewelry') {
@@ -521,7 +523,82 @@ const CustomerTicket = () => {
         setActiveTab(3); // Set active tab to Sale
       }
     }
-  }, [estimatedItems, from]);
+    
+    // Handle items coming from CoinsBullions
+    else if (location.state?.addedItems && location.state?.from === 'coinsbullions') {
+      // Skip if we've already processed this state
+      const stateHash = JSON.stringify(location.state);
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+      
+      const addedItems = location.state.addedItems;
+      
+      // Clear initial empty items if needed
+      const hasEmptyPawnItems = pawnItems.length === 1 && !pawnItems[0].description;
+      const hasEmptyBuyItems = buyItems.length === 1 && !buyItems[0].description;
+      
+      // Process items by transaction type
+      const pawnItemsArr = [];
+      const buyItemsArr = [];
+      
+      addedItems.forEach((item, index) => {
+        // Create a base item with common properties
+        const baseItem = {
+          id: Date.now() + index, // Use timestamp + index to ensure unique IDs
+          description: item.description || '',
+          category: item.category || '',
+          originalItem: item.originalItem || item,
+          // Add support for images
+          image: item.images || []
+        };
+        
+        // Add to appropriate array based on transaction type
+        switch (item.transaction_type) {
+          case 'pawn':
+            pawnItemsArr.push({
+              ...baseItem,
+              value: item.value || item.price || 0
+            });
+            break;
+          case 'buy':
+          default: // Default to buy if not specified
+            buyItemsArr.push({
+              ...baseItem,
+              price: item.price || item.value || 0
+            });
+            break;
+        }
+      });
+      
+      // Update state with new items and save to localStorage
+      if (pawnItemsArr.length > 0) {
+        setPawnItems(prevItems => {
+          // Replace empty placeholder item if needed
+          const newItems = hasEmptyPawnItems ? pawnItemsArr : [...prevItems, ...pawnItemsArr];
+          saveTicketItems('pawn', newItems);
+          return newItems;
+        });
+        setActiveTab(0); // Set active tab to Pawn
+        showSnackbar(`${pawnItemsArr.length} pawn items added to ticket`, 'success');
+      }
+      
+      if (buyItemsArr.length > 0) {
+        setBuyItems(prevItems => {
+          // Replace empty placeholder item if needed
+          const newItems = hasEmptyBuyItems ? buyItemsArr : [...prevItems, ...buyItemsArr];
+          saveTicketItems('buy', newItems);
+          return newItems;
+        });
+        setActiveTab(1); // Set active tab to Buy
+        showSnackbar(`${buyItemsArr.length} buy items added to ticket`, 'success');
+      }
+      
+      // Clear the location state to prevent reprocessing
+      window.history.replaceState({}, document.title);
+    }
+  }, [estimatedItems, from, location.state, customer]);
   
   // Function to get current items based on active tab and type name
   const getCurrentItems = () => {
@@ -669,8 +746,7 @@ const CustomerTicket = () => {
           fromDuplicate: true // Indicate this came from duplicating an item
         } 
       });
-    } else if (itemToDuplicate.category?.toLowerCase().includes('jewelry') || 
-               itemToDuplicate.category?.toLowerCase().includes('jewellery')) {
+    } else if (itemToDuplicate.category?.toLowerCase().includes('jewelry')) {
       // If it's jewelry but not from estimator, still go to jewelry estimator
       const description = itemToDuplicate.description || '';
       navigate('/gem-estimator', { 
@@ -695,8 +771,47 @@ const CustomerTicket = () => {
   // Handle deleting an item
   const handleDeleteItem = (id) => {
     const { items, setItems } = getCurrentItems();
-    if (items.length <= 1) return; // Keep at least one row
-    setItems(items.filter(item => item.id !== id));
+    
+    // Find the item to be deleted
+    const itemToDelete = items.find(item => item.id === id);
+    
+    // If we're deleting the only item and it's from an estimator (has originalItem or sourceEstimator property)
+    // then allow deletion; otherwise keep at least one row (legacy behavior)
+    const isFromEstimator = itemToDelete && (itemToDelete.originalItem || itemToDelete.sourceEstimator);
+    if (items.length <= 1 && !isFromEstimator) return; // Keep at least one row if not from estimator
+    
+    // If we're deleting the last estimator item, add an empty row to maintain UI consistency
+    const remainingItems = items.filter(item => item.id !== id);
+    if (remainingItems.length === 0) {
+      // Add an empty item with a new ID
+      const emptyItem = { id: Date.now(), description: '', category: '' };
+      // Add appropriate fields based on the active tab
+      const { type } = getCurrentItems();
+      if (type === 'pawn') emptyItem.value = '';
+      if (type === 'buy' || type === 'sale') emptyItem.price = '';
+      if (type === 'trade') {
+        emptyItem.tradeItem = '';
+        emptyItem.tradeValue = '';
+        emptyItem.storeItem = '';
+        emptyItem.priceDiff = '';
+      }
+      if (type === 'repair') {
+        emptyItem.issue = '';
+        emptyItem.fee = '';
+        emptyItem.completion = '';
+      }
+      if (type === 'payment' || type === 'refund') {
+        emptyItem.amount = '';
+        emptyItem.method = '';
+        emptyItem.reference = '';
+        type === 'payment' ? emptyItem.notes = '' : emptyItem.reason = '';
+      }
+      
+      setItems([emptyItem]);
+    } 
+    else {
+      setItems(remainingItems);
+    }
   };
   
   const handleTabChange = (event, newValue) => {
@@ -856,8 +971,7 @@ const CustomerTicket = () => {
           ticketItemId: itemId
         } 
       });
-    } else if (itemToEdit.category?.toLowerCase().includes('jewelry') || 
-               itemToEdit.category?.toLowerCase().includes('jewellery')) {
+    } else if (itemToEdit.category?.toLowerCase().includes('jewelry')) {
       // If it's jewelry but not from estimator, still go to jewelry estimator
       // Try to parse data from the description
       const description = itemToEdit.description || '';
@@ -1238,23 +1352,33 @@ const CustomerTicket = () => {
   // Determine item image source
   const getItemImageSource = (item) => {
     // Handle case where item has no image
-    if (!item || !item.image) {
-      // Check for legacy format
-      if (item && item.images && item.images.length > 0) {
-        return item.images[0].url;
+    if (!item) return null;
+    
+    // Handle direct image string from CoinsBullions.js
+    if (item.image) {
+      if (item.image.file instanceof File || item.image.file instanceof Blob) {
+        return URL.createObjectURL(item.image.file);
+      } else if (item.image.url) {
+        return item.image.url;
+      } else if (typeof item.image === 'string') {
+        return item.image;
+      } else if (item.image && item.image.data) {
+        return bufferToDataUrl(item.image);
       }
-      return null;
     }
     
-    if (item.image.file instanceof File || item.image.file instanceof Blob) {
-      return URL.createObjectURL(item.image.file);
-    } else if (item.image.url) {
-      return item.image.url;
-    } else if (typeof item.image === 'string') {
-      return item.image;
-    } else if (item.image && item.image.data) {
-      return bufferToDataUrl(item.image);
+    // Handle images array
+    if (item.images && item.images.length > 0) {
+      // Handle CoinsBullions.js direct image strings in array
+      if (typeof item.images[0] === 'string') {
+        return item.images[0];
+      }
+      // Handle legacy format with url property
+      if (item.images[0].url) {
+        return item.images[0].url;
+      }
     }
+    
     return null;
   };
 

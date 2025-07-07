@@ -25,7 +25,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import config from '../config';
 import axios from 'axios';
 
-function Jewellery() {
+function Jewelry() {
   const navigate = useNavigate();
   const API_BASE_URL = config.apiUrl;
   const [selectedItem, setSelectedItem] = useState(null);
@@ -185,7 +185,7 @@ function Jewellery() {
           </Box>
 
           <TableContainer component={Paper} sx={{ flex: 1, overflow: 'auto' }}>
-            <Table stickyHeader sx={{ minWidth: 650 }} aria-label="jewellery inventory table">
+            <Table stickyHeader sx={{ minWidth: 650 }} aria-label="jewelry inventory table">
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ width: '100px' }}>ID</TableCell>
@@ -327,4 +327,4 @@ function Jewellery() {
   );
 }
 
-export default Jewellery;
+export default Jewelry;

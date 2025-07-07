@@ -1677,7 +1677,7 @@ function GemEstimator() {
         state: {
           customer: customerData,
           items: updatedItems,
-          from: 'estimator'
+          from: 'jewelry'
         }
       });
     } else {
@@ -1685,7 +1685,7 @@ function GemEstimator() {
       navigate('/customer', {
         state: {
           items: updatedItems,
-          from: 'estimator'
+          from: 'jewelry'
         }
       });
     }

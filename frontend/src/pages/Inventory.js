@@ -85,7 +85,7 @@ function Inventory() {
       if (response.ok) {
         setSnackbar({
           open: true,
-          message: 'Jewellery item added successfully!',
+          message: 'Jewelry item added successfully!',
           severity: 'success',
         });
         // Reset form
@@ -132,7 +132,7 @@ function Inventory() {
           color: '#1a472a'
         }}
       >
-        Inventory Management - Jewellery
+        Inventory Management - Jewelry
       </Typography>
       
       <StyledPaper elevation={3}>
@@ -251,7 +251,7 @@ function Inventory() {
                 size="large"
                 sx={{ mt: 2 }}
               >
-                Add Jewellery Item
+                Add Jewelry Item
               </Button>
             </Grid>
           </Grid>
