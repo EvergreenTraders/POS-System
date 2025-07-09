@@ -206,29 +206,6 @@ function GemEstimator() {
           secondary_gem_value: stone.estimatedValue || 0
         }))
       ],
-      
-      // For backward compatibility - maintain the first secondary gem in old format
-      secondary_gem_category: addedGemTypes.secondary || null,
-      ...(secondaryDiamonds.length > 0 ? {
-        secondary_gem_shape: secondaryDiamonds[0].shape || '',
-        secondary_gem_clarity: secondaryDiamonds[0].clarity || '',
-        secondary_gem_color: secondaryDiamonds[0].color || '',
-        secondary_gem_exact_color: secondaryDiamonds[0].exactColor || '',
-        secondary_gem_cut: secondaryDiamonds[0].cut || '',
-        secondary_gem_weight: secondaryDiamonds[0].weight || 0,
-        secondary_gem_size: secondaryDiamonds[0].size || '',
-        secondary_gem_quantity: secondaryDiamonds[0].quantity || 0,
-        secondary_gem_lab_grown: secondaryDiamonds[0].labGrown || false,
-        secondary_gem_value: secondaryDiamonds[0].estimatedValue || 0
-      } : secondaryStones.length > 0 ? {
-        secondary_gem_shape: secondaryStones[0].shape || '',
-        secondary_gem_quantity: secondaryStones[0].quantity || 0,
-        secondary_gem_authentic: secondaryStones[0].authentic || false,
-        secondary_gem_type: secondaryStones[0].name || '',
-        secondary_gem_color: secondaryStones[0].color || '',
-        secondary_gem_weight: secondaryStones[0].weight || 0,
-        secondary_gem_value: secondaryStones[0].estimatedValue || 0
-      } : {}),
 
       // Price estimates - use selected transaction type instead of hardcoded 'pawn'
       transaction_type: transactionType || 'buy',
