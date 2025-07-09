@@ -269,6 +269,52 @@ function Checkout() {
               }
             );
             createdJewelryItems = convertResponse.data;
+            
+            // Push data to jewelry_secondary_gems for items converted from quotes
+            for (const item of createdJewelryItems) {
+              // Find matching cart item to get secondary gem data
+              const originalItem = cartItems.find(cartItem => 
+                cartItem.item_id && cartItem.item_id.startsWith(quoteId));
+                
+              if (originalItem && (originalItem.secondary_gem_type || 
+                  originalItem.secondary_gem_category || 
+                  originalItem.secondary_gem_quantity || 
+                  originalItem.secondary_gem_shape ||
+                  originalItem.secondary_gem_weight ||
+                  originalItem.secondary_gem_color ||
+                  originalItem.secondary_gem_clarity)) {
+                
+                try {
+                  // Extract all secondary gem fields from the original item
+                  const secondaryGemData = {
+                    secondary_gem_type: originalItem.secondary_gem_type,
+                    secondary_gem_category: originalItem.secondary_gem_category,
+                    secondary_gem_size: originalItem.secondary_gem_size,
+                    secondary_gem_quantity: originalItem.secondary_gem_quantity,
+                    secondary_gem_shape: originalItem.secondary_gem_shape,
+                    secondary_gem_weight: originalItem.secondary_gem_weight,
+                    secondary_gem_color: originalItem.secondary_gem_color,
+                    secondary_gem_exact_color: originalItem.secondary_gem_exact_color,
+                    secondary_gem_clarity: originalItem.secondary_gem_clarity,
+                    secondary_gem_cut: originalItem.secondary_gem_cut,
+                    secondary_gem_lab_grown: originalItem.secondary_gem_lab_grown,
+                    secondary_gem_authentic: originalItem.secondary_gem_authentic,
+                    secondary_gem_value: originalItem.secondary_gem_value
+                  };
+                  
+                  // Push to jewelry_secondary_gems with the same item_id
+                  await axios.put(
+                    `${config.apiUrl}/jewelry_secondary_gems/${item.item_id}`,
+                    secondaryGemData,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+                  console.log(`Successfully added secondary gems for converted item ${item.item_id}`);
+                } catch (error) {
+                  console.error(`Error adding secondary gems for converted item ${item.item_id}:`, error);
+                  // Continue with transaction even if secondary gems fail
+                }
+              }
+            }
           } else {
             // If coming from estimator, create new jewelry items
             
@@ -307,6 +353,52 @@ function Checkout() {
               }
             );
             createdJewelryItems = jewelryResponse.data;
+            
+            // Push data to jewelry_secondary_gems for each created item
+            for (let i = 0; i < createdJewelryItems.length; i++) {
+              const item = createdJewelryItems[i];
+              const originalItem = itemsToPost[i];
+              
+              // Check if this item has secondary gem data that should be pushed
+              if (originalItem.secondary_gem_type || 
+                  originalItem.secondary_gem_category || 
+                  originalItem.secondary_gem_quantity || 
+                  originalItem.secondary_gem_shape ||
+                  originalItem.secondary_gem_weight ||
+                  originalItem.secondary_gem_color ||
+                  originalItem.secondary_gem_clarity) {
+                
+                try {
+                  // Extract all secondary gem fields from the original item
+                  const secondaryGemData = {
+                    secondary_gem_type: originalItem.secondary_gem_type,
+                    secondary_gem_category: originalItem.secondary_gem_category,
+                    secondary_gem_size: originalItem.secondary_gem_size,
+                    secondary_gem_quantity: originalItem.secondary_gem_quantity,
+                    secondary_gem_shape: originalItem.secondary_gem_shape,
+                    secondary_gem_weight: originalItem.secondary_gem_weight,
+                    secondary_gem_color: originalItem.secondary_gem_color,
+                    secondary_gem_exact_color: originalItem.secondary_gem_exact_color,
+                    secondary_gem_clarity: originalItem.secondary_gem_clarity,
+                    secondary_gem_cut: originalItem.secondary_gem_cut,
+                    secondary_gem_lab_grown: originalItem.secondary_gem_lab_grown,
+                    secondary_gem_authentic: originalItem.secondary_gem_authentic,
+                    secondary_gem_value: originalItem.secondary_gem_value
+                  };
+                  
+                  // Push to jewelry_secondary_gems with the same item_id
+                  await axios.put(
+                    `${config.apiUrl}/jewelry_secondary_gems/${item.item_id}`,
+                    secondaryGemData,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+                  console.log(`Successfully added secondary gems for item ${item.item_id}`);
+                } catch (error) {
+                  console.error(`Error adding secondary gems for item ${item.item_id}:`, error);
+                  // Continue with transaction even if secondary gems fail
+                }
+              }
+            }
           }
           
           // Step 2: Create transaction

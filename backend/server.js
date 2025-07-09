@@ -2445,6 +2445,144 @@ app.get('/api/jewelry/prefix/:prefix', async (req, res) => {
   }
 });
 
+// Jewelry Secondary Gems API Endpoints
+app.get('/api/jewelry_secondary_gems', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM jewelry_secondary_gems ORDER BY created_at DESC';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching all jewelry secondary gems:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/jewelry_secondary_gems/:item_id', async (req, res) => {
+  try {
+    const { item_id } = req.params;
+    const query = 'SELECT * FROM jewelry_secondary_gems WHERE item_id = $1';
+    const result = await pool.query(query, [item_id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Secondary gems not found for this item' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching jewelry secondary gems:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/jewelry_secondary_gems/:item_id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { item_id } = req.params;
+    
+    // Check if the item exists in the jewelry table
+    const checkItemQuery = 'SELECT item_id FROM jewelry WHERE item_id = $1';
+    const itemExists = await client.query(checkItemQuery, [item_id]);
+    
+    if (itemExists.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+    
+    // Check if record exists in secondary gems table
+    const checkQuery = 'SELECT item_id FROM jewelry_secondary_gems WHERE item_id = $1';
+    const exists = await client.query(checkQuery, [item_id]);
+    
+    let result;
+    if (exists.rows.length > 0) {
+      // Update existing record
+      const updateQuery = `
+        UPDATE jewelry_secondary_gems
+        SET 
+          secondary_gem_type = $1,
+          secondary_gem_category = $2,
+          secondary_gem_size = $3,
+          secondary_gem_quantity = $4,
+          secondary_gem_shape = $5,
+          secondary_gem_weight = $6,
+          secondary_gem_color = $7,
+          secondary_gem_exact_color = $8,
+          secondary_gem_clarity = $9,
+          secondary_gem_cut = $10,
+          secondary_gem_lab_grown = $11,
+          secondary_gem_authentic = $12,
+          secondary_gem_value = $13
+        WHERE item_id = $14
+        RETURNING *
+      `;
+      
+      result = await client.query(updateQuery, [
+        req.body.secondary_gem_type || null,
+        req.body.secondary_gem_category || null,
+        parseFloat(req.body.secondary_gem_size) || null,
+        parseInt(req.body.secondary_gem_quantity) || 0,
+        req.body.secondary_gem_shape || null,
+        parseFloat(req.body.secondary_gem_weight) || null,
+        req.body.secondary_gem_color || null,
+        req.body.secondary_gem_exact_color || null,
+        req.body.secondary_gem_clarity || null,
+        req.body.secondary_gem_cut || null,
+        req.body.secondary_gem_lab_grown === true || req.body.secondary_gem_lab_grown === 'true',
+        req.body.secondary_gem_authentic === true || req.body.secondary_gem_authentic === 'true',
+        parseFloat(req.body.secondary_gem_value) || null,
+        item_id
+      ]);
+    } else {
+      // Insert new record
+      const insertQuery = `
+        INSERT INTO jewelry_secondary_gems (
+          item_id,
+          secondary_gem_type,
+          secondary_gem_category,
+          secondary_gem_size,
+          secondary_gem_quantity,
+          secondary_gem_shape,
+          secondary_gem_weight,
+          secondary_gem_color,
+          secondary_gem_exact_color,
+          secondary_gem_clarity,
+          secondary_gem_cut,
+          secondary_gem_lab_grown,
+          secondary_gem_authentic,
+          secondary_gem_value
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        RETURNING *
+      `;
+      
+      result = await client.query(insertQuery, [
+        item_id,
+        req.body.secondary_gem_type || null,
+        req.body.secondary_gem_category || null,
+        parseFloat(req.body.secondary_gem_size) || null,
+        parseInt(req.body.secondary_gem_quantity) || 0,
+        req.body.secondary_gem_shape || null,
+        parseFloat(req.body.secondary_gem_weight) || null,
+        req.body.secondary_gem_color || null,
+        req.body.secondary_gem_exact_color || null,
+        req.body.secondary_gem_clarity || null,
+        req.body.secondary_gem_cut || null,
+        req.body.secondary_gem_lab_grown === true || req.body.secondary_gem_lab_grown === 'true',
+        req.body.secondary_gem_authentic === true || req.body.secondary_gem_authentic === 'true',
+        parseFloat(req.body.secondary_gem_value) || null
+      ]);
+    }
+    
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating jewelry secondary gems:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
