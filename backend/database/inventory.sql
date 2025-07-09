@@ -108,15 +108,6 @@ COMMENT ON COLUMN jewelry.primary_gem_cut IS 'Cut grade of the primary gemstone'
 COMMENT ON COLUMN jewelry.primary_gem_lab_grown IS 'Whether the primary gemstone is lab-grown';
 COMMENT ON COLUMN jewelry.primary_gem_authentic IS 'Whether the primary gemstone is authentic';
 COMMENT ON COLUMN jewelry.primary_gem_value IS 'Estimated value of the primary gemstone';
-COMMENT ON COLUMN jewelry.secondary_gem_type IS 'Type of the secondary gemstones';
-COMMENT ON COLUMN jewelry.secondary_gem_shape IS 'Shape of the secondary gemstone (round, oval, etc)';
-COMMENT ON COLUMN jewelry.secondary_gem_weight IS 'Weight of the secondary gemstone in carats';
-COMMENT ON COLUMN jewelry.secondary_gem_color IS 'Color grade of the secondary gemstone';
-COMMENT ON COLUMN jewelry.secondary_gem_clarity IS 'Clarity grade of the secondary gemstone';
-COMMENT ON COLUMN jewelry.secondary_gem_cut IS 'Cut grade of the secondary gemstone';
-COMMENT ON COLUMN jewelry.secondary_gem_lab_grown IS 'Whether the secondary gemstone is lab-grown';
-COMMENT ON COLUMN jewelry.secondary_gem_authentic IS 'Whether the secondary gemstone is authentic';
-COMMENT ON COLUMN jewelry.secondary_gem_value IS 'Estimated value of the secondary gemstone';
 COMMENT ON COLUMN jewelry.images IS 'Array of image URLs for the jewelry item';
 
 -- Create trigger function for updated_at
@@ -132,3 +123,69 @@ CREATE TRIGGER update_jewelry_timestamp
     BEFORE UPDATE ON jewelry
     FOR EACH ROW
     EXECUTE FUNCTION update_jewelry_timestamp();
+    
+-- Create secondary_gems table to store multiple secondary gems per jewelry item
+CREATE TABLE IF NOT EXISTS jewelry_secondary_gems (
+    item_id VARCHAR(10) NOT NULL,
+     -- Secondary gem
+    secondary_gem_type VARCHAR(50),
+    secondary_gem_category VARCHAR(20) CHECK (secondary_gem_category IS NULL OR secondary_gem_category IN ('diamond', 'stone')),
+    secondary_gem_size DECIMAL(10,2),
+    secondary_gem_quantity INTEGER,
+    secondary_gem_shape VARCHAR(50),
+    secondary_gem_weight DECIMAL(10,3),
+    secondary_gem_color VARCHAR(50),
+    secondary_gem_exact_color CHAR(1),
+    secondary_gem_clarity VARCHAR(50),
+    secondary_gem_cut VARCHAR(50),
+    secondary_gem_lab_grown BOOLEAN DEFAULT false,
+    secondary_gem_authentic BOOLEAN DEFAULT false,
+    secondary_gem_value DECIMAL(10,2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create index on item_id for faster lookups
+CREATE INDEX idx_jewelry_secondary_gems_item_id ON jewelry_secondary_gems(item_id);
+
+-- Drop all secondary_gem columns from the jewelry table as they are now stored in the jewelry_secondary_gems table
+ALTER TABLE jewelry
+  DROP COLUMN secondary_gem_type,
+  DROP COLUMN secondary_gem_category,
+  DROP COLUMN secondary_gem_size,
+  DROP COLUMN secondary_gem_quantity,
+  DROP COLUMN secondary_gem_shape,
+  DROP COLUMN secondary_gem_weight,
+  DROP COLUMN secondary_gem_color,
+  DROP COLUMN secondary_gem_exact_color,
+  DROP COLUMN secondary_gem_clarity,
+  DROP COLUMN secondary_gem_cut,
+  DROP COLUMN secondary_gem_lab_grown,
+  DROP COLUMN secondary_gem_authentic,
+  DROP COLUMN secondary_gem_value;
+
+-- Create trigger function for secondary_gems updated_at
+CREATE OR REPLACE FUNCTION update_jewelry_secondary_gems_timestamp() RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger for secondary_gems updated_at
+CREATE TRIGGER update_jewelry_secondary_gems_timestamp
+    BEFORE UPDATE ON jewelry_secondary_gems
+    FOR EACH ROW
+    EXECUTE FUNCTION update_jewelry_secondary_gems_timestamp();
+    
+-- Add comments to secondary_gems table
+COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_type IS 'Type of the secondary gemstones';
+COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_shape IS 'Shape of the secondary gemstone (round, oval, etc)';
+COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_weight IS 'Weight of the secondary gemstone in carats';
+COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_color IS 'Color grade of the secondary gemstone';
+COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_clarity IS 'Clarity grade of the secondary gemstone';
+COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_cut IS 'Cut grade of the secondary gemstone';
+COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_lab_grown IS 'Whether the secondary gemstone is lab-grown';
+COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_authentic IS 'Whether the secondary gemstone is authentic';
+COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_value IS 'Estimated value of the secondary gemstone';
+

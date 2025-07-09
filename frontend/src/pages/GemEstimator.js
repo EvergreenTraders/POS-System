@@ -134,6 +134,14 @@ function GemEstimator() {
     const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
     const totalWeight = parseFloat(addMetal[0]?.weight || 0) + gemWeightInGrams;
 
+    // Get all secondary diamonds and stones
+    const secondaryDiamonds = diamondSummary.filter(d => !d.isPrimary);
+    const secondaryStones = stoneSummary.filter(s => !s.isPrimary);
+
+    // Find primary diamond and stone
+    const primaryDiamond = diamondSummary.find(d => d.isPrimary);
+    const primaryStone = stoneSummary.find(s => s.isPrimary);
+
     // Create new item with all required jewelry fields
     const jewelryItem = {
       // Basic item details
@@ -149,53 +157,56 @@ function GemEstimator() {
 
       // Primary gem details
       primary_gem_category: addedGemTypes.primary || null,
-      ...(addedGemTypes.primary === 'diamond' && diamondSummary?.[0] ? {
-        primary_gem_shape: diamondSummary[0].shape,
-        primary_gem_clarity: diamondSummary[0].clarity,
-        primary_gem_color: diamondSummary[0].color,
-        primary_gem_exact_color: diamondSummary[0].exactColor,
-        primary_gem_cut: diamondSummary[0].cut,
-        primary_gem_weight: diamondSummary[0].weight,
-        primary_gem_size: diamondSummary[0].size,
-        primary_gem_quantity: diamondSummary[0].quantity,
-        primary_gem_lab_grown: diamondSummary[0].labGrown,
-        primary_gem_value: diamondSummary[0].estimatedValue
-      } : addedGemTypes.primary === 'stone' && stoneSummary?.[0] ? {
-        primary_gem_shape: stoneSummary[0]?.shape || '',
-        primary_gem_quantity: stoneSummary[0]?.quantity || 0,
-        primary_gem_authentic: stoneSummary[0]?.authentic || false,
-        primary_gem_type: stoneSummary[0]?.type || '',
-        primary_gem_color: stoneSummary[0]?.color || '',
-        primary_gem_weight: stoneSummary[0]?.weight || 0,
-        primary_gem_value: stoneSummary[0]?.estimatedValue || 0
+      ...(addedGemTypes.primary === 'diamond' && primaryDiamond ? {
+        primary_gem_shape: primaryDiamond.shape,
+        primary_gem_clarity: primaryDiamond.clarity,
+        primary_gem_color: primaryDiamond.color,
+        primary_gem_exact_color: primaryDiamond.exactColor,
+        primary_gem_cut: primaryDiamond.cut,
+        primary_gem_weight: primaryDiamond.weight,
+        primary_gem_size: primaryDiamond.size,
+        primary_gem_quantity: primaryDiamond.quantity,
+        primary_gem_lab_grown: primaryDiamond.labGrown,
+        primary_gem_value: primaryDiamond.estimatedValue
+      } : addedGemTypes.primary === 'stone' && primaryStone ? {
+        primary_gem_shape: primaryStone?.shape || '',
+        primary_gem_quantity: primaryStone?.quantity || 0,
+        primary_gem_authentic: primaryStone?.authentic || false,
+        primary_gem_type: primaryStone?.type || '',
+        primary_gem_color: primaryStone?.color || '',
+        primary_gem_weight: primaryStone?.weight || 0,
+        primary_gem_value: primaryStone?.estimatedValue || 0
       } : {}),
 
-      // Secondary gem details
-      secondary_gem_category: addedGemTypes.secondary || null,
-      ...(addedGemTypes.secondary === 'diamond' && diamondSummary?.[1] ? {
-        secondary_gem_shape: diamondSummary[1].shape || '',
-        secondary_gem_clarity: diamondSummary[1].clarity || '',
-        secondary_gem_color: diamondSummary[1].color || '',
-        secondary_gem_exact_color: diamondSummary[1].exactColor || '',
-        secondary_gem_cut: diamondSummary[1].cut || '',
-        secondary_gem_weight: diamondSummary[1].weight || 0,
-        secondary_gem_size: diamondSummary[1].size || '',
-        secondary_gem_quantity: diamondSummary[1].quantity || 0,
-        secondary_gem_lab_grown: diamondSummary[1].labGrown || false,
-        secondary_gem_value: diamondSummary[1].estimatedValue || 0
-      } : addedGemTypes.secondary === 'stone' ? {
-        // Find the correct stone entry for secondary gem
-        // If there's only one stone and it's secondary, use index 0
-        // If there are two stones (primary and secondary), use index 1
-        secondary_gem_shape: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.shape : stoneSummary?.[0]?.shape) || '',
-        secondary_gem_quantity: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.quantity : stoneSummary?.[0]?.quantity) || 0,
-        secondary_gem_authentic: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.authentic : stoneSummary?.[0]?.authentic) || false,
-        secondary_gem_type: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.name : stoneSummary?.[0]?.name) || '',
-        secondary_gem_color: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.color : stoneSummary?.[0]?.color) || '',
-        secondary_gem_weight: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.weight : stoneSummary?.[0]?.weight) || 0,
-        secondary_gem_value: (addedGemTypes.primary === 'stone' ? stoneSummary?.[1]?.estimatedValue : stoneSummary?.[0]?.estimatedValue) || 0
-      } : {}),
-      
+      // Secondary gem details - store in arrays
+      secondary_gems: [
+        // Process secondary diamonds
+        ...secondaryDiamonds.map(diamond => ({
+          secondary_gem_category: 'diamond',
+          secondary_gem_shape: diamond.shape || '',
+          secondary_gem_clarity: diamond.clarity || '',
+          secondary_gem_color: diamond.color || '',
+          secondary_gem_exact_color: diamond.exactColor || '',
+          secondary_gem_cut: diamond.cut || '',
+          secondary_gem_weight: diamond.weight || 0,
+          secondary_gem_size: diamond.size || '',
+          secondary_gem_quantity: diamond.quantity || 0,
+          secondary_gem_lab_grown: diamond.labGrown || false,
+          secondary_gem_value: diamond.estimatedValue || 0
+        })),
+        // Process secondary stones
+        ...secondaryStones.map(stone => ({
+          secondary_gem_category: 'stone',
+          secondary_gem_shape: stone.shape || '',
+          secondary_gem_quantity: stone.quantity || 0,
+          secondary_gem_authentic: stone.authentic || false,
+          secondary_gem_type: stone.name || '',
+          secondary_gem_color: stone.color || '',
+          secondary_gem_weight: stone.weight || 0,
+          secondary_gem_value: stone.estimatedValue || 0
+        }))
+      ],
+
       // Price estimates - use selected transaction type instead of hardcoded 'pawn'
       transaction_type: transactionType || 'buy',
       buy_price: priceEstimates.buy,
@@ -212,10 +223,12 @@ function GemEstimator() {
       // Free text description if available
       free_text: freeText || '',
       
-      // Additional jewelry details
-      short_desc: addMetal[0] ? `${addMetal[0].weight}g ${addMetal[0].purity?.purity || addMetal[0].purity?.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && diamondSummary[0] ? diamondSummary[0]?.shape : stoneSummary[0]?.type}` : ''}${addedGemTypes.secondary ? ` ${addedGemTypes.secondary === 'diamond' && diamondSummary[1] ? diamondSummary[1]?.shape : stoneSummary[1]?.type}` : ''}` : '',
+      // Additional jewelry details - update short_desc to handle multiple secondary gems
+      short_desc: addMetal[0] ? `${addMetal[0].weight}g ${addMetal[0].purity?.purity || addMetal[0].purity?.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
+
       long_desc: addMetal[0] ? `${addMetal[0].purity?.purity || addMetal[0].purity?.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}` : ''
     };
+    console.log("jewelryItem", jewelryItem);
 
     // Add the item to estimated items array with all price information
     const itemWithPrices = {
@@ -1673,6 +1686,7 @@ function GemEstimator() {
 
     if (customerData) {
       // If customer exists, navigate to checkout page with customer and items
+      console.log("items", updatedItems);
       navigate('/checkout', {
         state: {
           customer: customerData,
