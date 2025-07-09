@@ -132,10 +132,10 @@ CREATE TRIGGER update_jewelry_timestamp
     BEFORE UPDATE ON jewelry
     FOR EACH ROW
     EXECUTE FUNCTION update_jewelry_timestamp();
-
+drop table if exists jewelry_secondary_gems cascade;
 -- Create secondary_gems table to store multiple secondary gems per jewelry item
 CREATE TABLE IF NOT EXISTS jewelry_secondary_gems (
-    item_id VARCHAR(10) PRIMARY KEY,
+    item_id VARCHAR(10) NOT NULL,
      -- Secondary gem
     secondary_gem_type VARCHAR(50),
     secondary_gem_category VARCHAR(20) CHECK (secondary_gem_category IS NULL OR secondary_gem_category IN ('diamond', 'stone')),

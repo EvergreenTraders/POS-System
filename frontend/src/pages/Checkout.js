@@ -275,45 +275,61 @@ function Checkout() {
               // Find matching cart item to get secondary gem data
               const originalItem = cartItems.find(cartItem => 
                 cartItem.item_id && cartItem.item_id.startsWith(quoteId));
-                
-              if (originalItem && (originalItem.secondary_gem_type || 
-                  originalItem.secondary_gem_category || 
-                  originalItem.secondary_gem_quantity || 
-                  originalItem.secondary_gem_shape ||
-                  originalItem.secondary_gem_weight ||
-                  originalItem.secondary_gem_color ||
-                  originalItem.secondary_gem_clarity)) {
-                
+              
                 try {
-                  // Extract all secondary gem fields from the original item
-                  const secondaryGemData = {
-                    secondary_gem_type: originalItem.secondary_gem_type,
-                    secondary_gem_category: originalItem.secondary_gem_category,
-                    secondary_gem_size: originalItem.secondary_gem_size,
-                    secondary_gem_quantity: originalItem.secondary_gem_quantity,
-                    secondary_gem_shape: originalItem.secondary_gem_shape,
-                    secondary_gem_weight: originalItem.secondary_gem_weight,
-                    secondary_gem_color: originalItem.secondary_gem_color,
-                    secondary_gem_exact_color: originalItem.secondary_gem_exact_color,
-                    secondary_gem_clarity: originalItem.secondary_gem_clarity,
-                    secondary_gem_cut: originalItem.secondary_gem_cut,
-                    secondary_gem_lab_grown: originalItem.secondary_gem_lab_grown,
-                    secondary_gem_authentic: originalItem.secondary_gem_authentic,
-                    secondary_gem_value: originalItem.secondary_gem_value
-                  };
-                  
-                  // Push to jewelry_secondary_gems with the same item_id
-                  await axios.put(
-                    `${config.apiUrl}/jewelry_secondary_gems/${item.item_id}`,
-                    secondaryGemData,
-                    { headers: { Authorization: `Bearer ${token}` } }
-                  );
+                  if (originalItem.secondary_gems && originalItem.secondary_gems.length > 0) {
+                    // Handle the new array format of secondary gems
+                    console.log(`Processing ${originalItem.secondary_gems.length} secondary gems for converted item ${item.item_id}`);
+                    
+                    // Send each secondary gem individually
+                    try {
+                      for (const gemData of originalItem.secondary_gems) {
+                        
+                        // Send the gem data
+                        await axios.post(
+                          `${config.apiUrl}/jewelry_secondary_gems`,
+                          {
+                            jewelry_id: item.item_id,
+                            ...gemData
+                          },
+                          { headers: { Authorization: `Bearer ${token}` } }
+                        );
+                      }
+                      console.log(`Successfully added ${originalItem.secondary_gems.length} individual secondary gems for converted item ${item.item_id}`);
+                    } catch (error) {
+                      console.error(`Error adding secondary gems for item ${item.item_id}:`, error);
+                    }
+                  } else {
+                    // Extract all secondary gem fields from the original item (legacy format)
+                    const secondaryGemData = {
+                      secondary_gem_type: originalItem.secondary_gem_type,
+                      secondary_gem_category: originalItem.secondary_gem_category,
+                      secondary_gem_size: originalItem.secondary_gem_size,
+                      secondary_gem_quantity: originalItem.secondary_gem_quantity,
+                      secondary_gem_shape: originalItem.secondary_gem_shape,
+                      secondary_gem_weight: originalItem.secondary_gem_weight,
+                      secondary_gem_color: originalItem.secondary_gem_color,
+                      secondary_gem_exact_color: originalItem.secondary_gem_exact_color,
+                      secondary_gem_clarity: originalItem.secondary_gem_clarity,
+                      secondary_gem_cut: originalItem.secondary_gem_cut,
+                      secondary_gem_lab_grown: originalItem.secondary_gem_lab_grown,
+                      secondary_gem_authentic: originalItem.secondary_gem_authentic,
+                      secondary_gem_value: originalItem.secondary_gem_value
+                    };
+                    
+                    // Push to jewelry_secondary_gems with the same item_id
+                    await axios.put(
+                      `${config.apiUrl}/jewelry_secondary_gems/${item.item_id}`,
+                      secondaryGemData,
+                      { headers: { Authorization: `Bearer ${token}` } }
+                    );
                   console.log(`Successfully added secondary gems for converted item ${item.item_id}`);
-                } catch (error) {
+                }
+               } catch (error) {
                   console.error(`Error adding secondary gems for converted item ${item.item_id}:`, error);
                   // Continue with transaction even if secondary gems fail
                 }
-              }
+    
             }
           } else {
             // If coming from estimator, create new jewelry items
@@ -360,39 +376,55 @@ function Checkout() {
               const originalItem = itemsToPost[i];
               
               // Check if this item has secondary gem data that should be pushed
-              if (originalItem.secondary_gem_type || 
-                  originalItem.secondary_gem_category || 
-                  originalItem.secondary_gem_quantity || 
-                  originalItem.secondary_gem_shape ||
-                  originalItem.secondary_gem_weight ||
-                  originalItem.secondary_gem_color ||
-                  originalItem.secondary_gem_clarity) {
-                
+              if ( 
+                  (originalItem.secondary_gems && originalItem.secondary_gems.length > 0)) {
                 try {
-                  // Extract all secondary gem fields from the original item
-                  const secondaryGemData = {
-                    secondary_gem_type: originalItem.secondary_gem_type,
-                    secondary_gem_category: originalItem.secondary_gem_category,
-                    secondary_gem_size: originalItem.secondary_gem_size,
-                    secondary_gem_quantity: originalItem.secondary_gem_quantity,
-                    secondary_gem_shape: originalItem.secondary_gem_shape,
-                    secondary_gem_weight: originalItem.secondary_gem_weight,
-                    secondary_gem_color: originalItem.secondary_gem_color,
-                    secondary_gem_exact_color: originalItem.secondary_gem_exact_color,
-                    secondary_gem_clarity: originalItem.secondary_gem_clarity,
-                    secondary_gem_cut: originalItem.secondary_gem_cut,
-                    secondary_gem_lab_grown: originalItem.secondary_gem_lab_grown,
-                    secondary_gem_authentic: originalItem.secondary_gem_authentic,
-                    secondary_gem_value: originalItem.secondary_gem_value
-                  };
-                  
-                  // Push to jewelry_secondary_gems with the same item_id
-                  await axios.put(
-                    `${config.apiUrl}/jewelry_secondary_gems/${item.item_id}`,
-                    secondaryGemData,
-                    { headers: { Authorization: `Bearer ${token}` } }
-                  );
-                  console.log(`Successfully added secondary gems for item ${item.item_id}`);
+                  if (originalItem.secondary_gems && originalItem.secondary_gems.length > 0) {
+                    
+                    // Send each secondary gem individually
+                    try {
+                      for (const gemData of originalItem.secondary_gems) {
+                        
+                        // Send the gem data
+                        await axios.post(
+                          `${config.apiUrl}/jewelry_secondary_gems`,
+                          {
+                            jewelry_id: item.item_id,
+                            ...gemData
+                          },
+                          { headers: { Authorization: `Bearer ${token}` } }
+                        );
+                      }
+                    } catch (error) {
+                      console.error(`Error adding secondary gems for item ${item.item_id}:`, error);
+                    }
+                  } else {
+                    // Fallback to legacy format for backward compatibility
+                    // Extract all secondary gem fields from the original item
+                    const secondaryGemData = {
+                      secondary_gem_type: originalItem.secondary_gem_type,
+                      secondary_gem_category: originalItem.secondary_gem_category,
+                      secondary_gem_size: originalItem.secondary_gem_size,
+                      secondary_gem_quantity: originalItem.secondary_gem_quantity,
+                      secondary_gem_shape: originalItem.secondary_gem_shape,
+                      secondary_gem_weight: originalItem.secondary_gem_weight,
+                      secondary_gem_color: originalItem.secondary_gem_color,
+                      secondary_gem_exact_color: originalItem.secondary_gem_exact_color,
+                      secondary_gem_clarity: originalItem.secondary_gem_clarity,
+                      secondary_gem_cut: originalItem.secondary_gem_cut,
+                      secondary_gem_lab_grown: originalItem.secondary_gem_lab_grown,
+                      secondary_gem_authentic: originalItem.secondary_gem_authentic,
+                      secondary_gem_value: originalItem.secondary_gem_value
+                    };
+                    
+                    // Push to jewelry_secondary_gems with the same item_id using the legacy endpoint
+                    await axios.put(
+                      `${config.apiUrl}/jewelry_secondary_gems/${item.item_id}`,
+                      secondaryGemData,
+                      { headers: { Authorization: `Bearer ${token}` } }
+                    );
+                    console.log(`Successfully added secondary gem for item ${item.item_id} using legacy format`);
+                  }
                 } catch (error) {
                   console.error(`Error adding secondary gems for item ${item.item_id}:`, error);
                   // Continue with transaction even if secondary gems fail

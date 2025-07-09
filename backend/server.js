@@ -2583,6 +2583,82 @@ app.put('/api/jewelry_secondary_gems/:item_id', async (req, res) => {
   }
 });
 
+// Jewelry Secondary Gems endpoint
+app.post('/api/jewelry_secondary_gems', authenticateToken, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    // Extract all fields from the request body
+    const { jewelry_id } = req.body;
+    
+    // Validate required fields
+    if (!jewelry_id) {
+      throw new Error('jewelry_id is required');
+    }
+    
+    // Check if jewelry item exists
+    const jewelryCheck = await client.query(
+      'SELECT item_id FROM jewelry WHERE item_id = $1',
+      [jewelry_id]
+    );
+    
+    if (jewelryCheck.rows.length === 0) {
+      throw new Error(`Jewelry item with ID ${jewelry_id} does not exist`);
+    }
+    
+    // Insert secondary gem record
+    const query = `
+      INSERT INTO jewelry_secondary_gems (
+        item_id, 
+        secondary_gem_type,
+        secondary_gem_category,
+        secondary_gem_size,
+        secondary_gem_quantity,
+        secondary_gem_shape,
+        secondary_gem_weight,
+        secondary_gem_color,
+        secondary_gem_exact_color,
+        secondary_gem_clarity,
+        secondary_gem_cut,
+        secondary_gem_lab_grown,
+        secondary_gem_authentic,
+        secondary_gem_value,
+        created_at,
+        updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW()
+      ) RETURNING *
+    `;
+    
+    const result = await client.query(query, [
+      jewelry_id,
+      req.body.secondary_gem_type || null,
+      req.body.secondary_gem_category || null,
+      parseFloat(req.body.secondary_gem_size) || null,
+      parseInt(req.body.secondary_gem_quantity) || 0,
+      req.body.secondary_gem_shape || null,
+      parseFloat(req.body.secondary_gem_weight) || null,
+      req.body.secondary_gem_color || null,
+      req.body.secondary_gem_exact_color || null,
+      req.body.secondary_gem_clarity || null,
+      req.body.secondary_gem_cut || null,
+      req.body.secondary_gem_lab_grown === true,
+      req.body.secondary_gem_authentic === true,
+      parseFloat(req.body.secondary_gem_value) || null
+    ]);
+    
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error saving jewelry secondary gem:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
