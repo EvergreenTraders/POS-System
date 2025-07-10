@@ -759,7 +759,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       <Box display="flex" alignItems="center">
         <TextField
           fullWidth
-          label="Spot Price/oz"
+          label="Spot Price/gr"
           name="spotPrice"
           value={form.spotPrice}
           onChange={handleChange}

@@ -457,10 +457,17 @@ const CustomerTicket = () => {
     
     // If we have estimated items and they're from gemEstimator
     else if (estimatedItems.length > 0 && from === 'gemEstimator') {
-      // Clear initial empty items
-      setPawnItems([]);
-      setBuyItems([]);
-      setSaleItems([]);
+      // Skip if we've already processed this state
+      const stateHash = JSON.stringify({estimatedItems, from});
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+      
+      // Check for empty placeholder items
+      const hasEmptyPawnItems = pawnItems.length === 1 && !pawnItems[0].description;
+      const hasEmptyBuyItems = buyItems.length === 1 && !buyItems[0].description;
+      const hasEmptySaleItems = saleItems.length === 1 && !saleItems[0].description;
       
       // Process items by transaction type
       const pawn = [];
@@ -510,18 +517,70 @@ const CustomerTicket = () => {
       
       // Update state with new items and save to localStorage
       if (pawn.length > 0) {
-        setPawnItems(pawn);
-        saveTicketItems('pawn', pawn);
+        // Get the existing pawn items or default to empty array
+        const existingItems = [...pawnItems];
+        const hasOnlyEmptyItem = existingItems.length === 1 && !existingItems[0].description;
+        
+        // Create unique IDs for new items
+        const timestamp = Date.now();
+        const newItems = pawn.map((item, index) => ({
+          ...item,
+          id: timestamp + index // Ensures unique IDs
+        }));
+        
+        // If there's just an empty placeholder item, replace it
+        // Otherwise append to existing items
+        const updatedItems = hasOnlyEmptyItem ? newItems : [...existingItems, ...newItems];
+        
+        setPawnItems(updatedItems);
+        saveTicketItems('pawn', updatedItems);
         setActiveTab(0); // Set active tab to Pawn
-      } else if (buy.length > 0) {
-        setBuyItems(buy);
-        saveTicketItems('buy', buy);
+      }
+      
+      if (buy.length > 0) {
+        // Get the existing buy items or default to empty array
+        const existingItems = [...buyItems];
+        const hasOnlyEmptyItem = existingItems.length === 1 && !existingItems[0].description;
+        
+        // Create unique IDs for new items
+        const timestamp = Date.now();
+        const newItems = buy.map((item, index) => ({
+          ...item,
+          id: timestamp + index // Ensures unique IDs
+        }));
+        
+        // If there's just an empty placeholder item, replace it
+        // Otherwise append to existing items
+        const updatedItems = hasOnlyEmptyItem ? newItems : [...existingItems, ...newItems];
+        
+        setBuyItems(updatedItems);
+        saveTicketItems('buy', updatedItems);
         setActiveTab(1); // Set active tab to Buy
-      } else if (sale.length > 0) {
-        setSaleItems(sale);
-        saveTicketItems('sale', sale);
+      }
+      
+      if (sale.length > 0) {
+        // Get the existing sale items or default to empty array
+        const existingItems = [...saleItems];
+        const hasOnlyEmptyItem = existingItems.length === 1 && !existingItems[0].description;
+        
+        // Create unique IDs for new items
+        const timestamp = Date.now();
+        const newItems = sale.map((item, index) => ({
+          ...item,
+          id: timestamp + index // Ensures unique IDs
+        }));
+        
+        // If there's just an empty placeholder item, replace it
+        // Otherwise append to existing items
+        const updatedItems = hasOnlyEmptyItem ? newItems : [...existingItems, ...newItems];
+        
+        setSaleItems(updatedItems);
+        saveTicketItems('sale', updatedItems);
         setActiveTab(3); // Set active tab to Sale
       }
+      
+      // Clear the location state to prevent reprocessing on navigation
+      window.history.replaceState({}, document.title);
     }
     
     // Handle items coming from CoinsBullions
@@ -935,20 +994,32 @@ const CustomerTicket = () => {
   };
   
   // Helper function to get tab name by index
-  const getTabName = (index) => {
-    switch(index) {
-      case 0: return 'Pawn';
-      case 1: return 'Buy';
-      case 2: return 'Trade';
-      case 3: return 'Sale';
-      case 4: return 'Repair';
-      case 5: return 'Payment';
-      case 6: return 'Refund';
-      default: return '';
+  const hasActiveItems = (tabIndex) => {
+    switch(tabIndex) {
+      case 0: // Pawn
+        return pawnItems.length > 0 && pawnItems.some(item => item.description || item.value);
+      case 1: // Buy
+        return buyItems.length > 0 && buyItems.some(item => item.description || item.price);
+      case 2: // Trade
+        return tradeItems.length > 0 && tradeItems.some(item => item.tradeItem || item.storeItem);
+      case 3: // Sale
+        return saleItems.length > 0 && saleItems.some(item => item.description || item.price);
+      case 4: // Repair
+        return repairItems.length > 0 && repairItems.some(item => item.description || item.issue || item.fee);
+      case 5: // Payment
+        return paymentItems.length > 0 && paymentItems.some(item => item.amount || item.method);
+      case 6: // Refund
+        return refundItems.length > 0 && refundItems.some(item => item.amount || item.method || item.reason);
+      default:
+        return false;
     }
   };
-  
-  // Handlers for item type buttons - navigate to respective estimator pages
+
+  const getTabName = (tabIndex) => {
+    const tabNames = ['Pawn', 'Buy', 'Trade', 'Sale', 'Repair', 'Payment', 'Refund'];
+    return tabNames[tabIndex] || 'Unknown';
+  };
+
   const handleJewelryEstimatorClick = () => {
     navigate('/gem-estimator', { state: { customer } });
   };
@@ -1583,22 +1654,29 @@ return (
             <Card>
               <CardContent>
                 <Box sx={{ width: '100%' }}>
-                  <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-                    <Tabs 
-                      value={activeTab} 
-                      onChange={handleTabChange} 
-                      variant="scrollable"
-                      scrollButtons="auto"
-                      sx={{ mb: 1 }}
-                    >
-                      <Tab label="Pawn" />
-                      <Tab label="Buy" />
-                      <Tab label="Trade" />
-                      <Tab label="Sale" />
-                      <Tab label="Repair" />
-                      <Tab label="Payment" />
-                      <Tab label="Refund" />
-                    </Tabs>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
+                    <Box sx={{ display: 'flex', flexGrow: 1 }}>
+                      <Tabs 
+                        value={activeTab} 
+                        onChange={handleTabChange} 
+                        variant="scrollable"
+                        scrollButtons="auto"
+                        sx={{ mb: 1 }}
+                      >
+                        <Tab label={`Pawn${hasActiveItems(0) ? ' *' : ''}`} />
+                        <Tab label={`Buy${hasActiveItems(1) ? ' *' : ''}`} />
+                        <Tab label={`Trade${hasActiveItems(2) ? ' *' : ''}`} />
+                        <Tab label={`Sale${hasActiveItems(3) ? ' *' : ''}`} />
+                        <Tab label={`Repair${hasActiveItems(4) ? ' *' : ''}`} />
+                        <Tab label={`Payment${hasActiveItems(5) ? ' *' : ''}`} />
+                        <Tab label={`Refund${hasActiveItems(6) ? ' *' : ''}`} />
+                      </Tabs>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', pr: 2 }}>
+                      <Typography variant="h6" color="primary" sx={{ ml: 2 }}>
+                        All Tickets: ${(totals.pawn + totals.buy + totals.trade + totals.sale + totals.repair + totals.payment + totals.refund).toFixed(2)}
+                      </Typography>
+                    </Box>
                   </Box>
                   
                   {/* Pawn Tab */}

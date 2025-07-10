@@ -624,6 +624,22 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
           aria-labelledby="customer-search-dialog-title"
           maxWidth={false}
           fullWidth
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              if (searchResults.length > 0) {
+                const nextIdx = Math.min(selectedSearchIdx + 1, searchResults.length - 1);
+                setSelectedSearchIdx(nextIdx);
+              }
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              if (searchResults.length > 0 && selectedSearchIdx > 0) {
+                setSelectedSearchIdx(selectedSearchIdx - 1);
+              }
+            } else if (e.key === 'Enter' && selectedSearchIdx >= 0 && searchResults[selectedSearchIdx]) {
+              handleSelectCustomer(searchResults[selectedSearchIdx]);
+            }
+          }}
           PaperProps={{
             sx: {
               width: 800,
