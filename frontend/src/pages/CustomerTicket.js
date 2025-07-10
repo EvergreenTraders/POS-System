@@ -994,20 +994,32 @@ const CustomerTicket = () => {
   };
   
   // Helper function to get tab name by index
-  const getTabName = (index) => {
-    switch(index) {
-      case 0: return 'Pawn';
-      case 1: return 'Buy';
-      case 2: return 'Trade';
-      case 3: return 'Sale';
-      case 4: return 'Repair';
-      case 5: return 'Payment';
-      case 6: return 'Refund';
-      default: return '';
+  const hasActiveItems = (tabIndex) => {
+    switch(tabIndex) {
+      case 0: // Pawn
+        return pawnItems.length > 0 && pawnItems.some(item => item.description || item.value);
+      case 1: // Buy
+        return buyItems.length > 0 && buyItems.some(item => item.description || item.price);
+      case 2: // Trade
+        return tradeItems.length > 0 && tradeItems.some(item => item.tradeItem || item.storeItem);
+      case 3: // Sale
+        return saleItems.length > 0 && saleItems.some(item => item.description || item.price);
+      case 4: // Repair
+        return repairItems.length > 0 && repairItems.some(item => item.description || item.issue || item.fee);
+      case 5: // Payment
+        return paymentItems.length > 0 && paymentItems.some(item => item.amount || item.method);
+      case 6: // Refund
+        return refundItems.length > 0 && refundItems.some(item => item.amount || item.method || item.reason);
+      default:
+        return false;
     }
   };
-  
-  // Handlers for item type buttons - navigate to respective estimator pages
+
+  const getTabName = (tabIndex) => {
+    const tabNames = ['Pawn', 'Buy', 'Trade', 'Sale', 'Repair', 'Payment', 'Refund'];
+    return tabNames[tabIndex] || 'Unknown';
+  };
+
   const handleJewelryEstimatorClick = () => {
     navigate('/gem-estimator', { state: { customer } });
   };
@@ -1650,13 +1662,13 @@ return (
                       scrollButtons="auto"
                       sx={{ mb: 1 }}
                     >
-                      <Tab label="Pawn" />
-                      <Tab label="Buy" />
-                      <Tab label="Trade" />
-                      <Tab label="Sale" />
-                      <Tab label="Repair" />
-                      <Tab label="Payment" />
-                      <Tab label="Refund" />
+                      <Tab label={`Pawn${hasActiveItems(0) ? ' *' : ''}`} />
+                      <Tab label={`Buy${hasActiveItems(1) ? ' *' : ''}`} />
+                      <Tab label={`Trade${hasActiveItems(2) ? ' *' : ''}`} />
+                      <Tab label={`Sale${hasActiveItems(3) ? ' *' : ''}`} />
+                      <Tab label={`Repair${hasActiveItems(4) ? ' *' : ''}`} />
+                      <Tab label={`Payment${hasActiveItems(5) ? ' *' : ''}`} />
+                      <Tab label={`Refund${hasActiveItems(6) ? ' *' : ''}`} />
                     </Tabs>
                   </Box>
                   
