@@ -457,10 +457,17 @@ const CustomerTicket = () => {
     
     // If we have estimated items and they're from gemEstimator
     else if (estimatedItems.length > 0 && from === 'gemEstimator') {
-      // Clear initial empty items
-      setPawnItems([]);
-      setBuyItems([]);
-      setSaleItems([]);
+      // Skip if we've already processed this state
+      const stateHash = JSON.stringify({estimatedItems, from});
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+      
+      // Check for empty placeholder items
+      const hasEmptyPawnItems = pawnItems.length === 1 && !pawnItems[0].description;
+      const hasEmptyBuyItems = buyItems.length === 1 && !buyItems[0].description;
+      const hasEmptySaleItems = saleItems.length === 1 && !saleItems[0].description;
       
       // Process items by transaction type
       const pawn = [];
@@ -510,18 +517,70 @@ const CustomerTicket = () => {
       
       // Update state with new items and save to localStorage
       if (pawn.length > 0) {
-        setPawnItems(pawn);
-        saveTicketItems('pawn', pawn);
+        // Get the existing pawn items or default to empty array
+        const existingItems = [...pawnItems];
+        const hasOnlyEmptyItem = existingItems.length === 1 && !existingItems[0].description;
+        
+        // Create unique IDs for new items
+        const timestamp = Date.now();
+        const newItems = pawn.map((item, index) => ({
+          ...item,
+          id: timestamp + index // Ensures unique IDs
+        }));
+        
+        // If there's just an empty placeholder item, replace it
+        // Otherwise append to existing items
+        const updatedItems = hasOnlyEmptyItem ? newItems : [...existingItems, ...newItems];
+        
+        setPawnItems(updatedItems);
+        saveTicketItems('pawn', updatedItems);
         setActiveTab(0); // Set active tab to Pawn
-      } else if (buy.length > 0) {
-        setBuyItems(buy);
-        saveTicketItems('buy', buy);
+      }
+      
+      if (buy.length > 0) {
+        // Get the existing buy items or default to empty array
+        const existingItems = [...buyItems];
+        const hasOnlyEmptyItem = existingItems.length === 1 && !existingItems[0].description;
+        
+        // Create unique IDs for new items
+        const timestamp = Date.now();
+        const newItems = buy.map((item, index) => ({
+          ...item,
+          id: timestamp + index // Ensures unique IDs
+        }));
+        
+        // If there's just an empty placeholder item, replace it
+        // Otherwise append to existing items
+        const updatedItems = hasOnlyEmptyItem ? newItems : [...existingItems, ...newItems];
+        
+        setBuyItems(updatedItems);
+        saveTicketItems('buy', updatedItems);
         setActiveTab(1); // Set active tab to Buy
-      } else if (sale.length > 0) {
-        setSaleItems(sale);
-        saveTicketItems('sale', sale);
+      }
+      
+      if (sale.length > 0) {
+        // Get the existing sale items or default to empty array
+        const existingItems = [...saleItems];
+        const hasOnlyEmptyItem = existingItems.length === 1 && !existingItems[0].description;
+        
+        // Create unique IDs for new items
+        const timestamp = Date.now();
+        const newItems = sale.map((item, index) => ({
+          ...item,
+          id: timestamp + index // Ensures unique IDs
+        }));
+        
+        // If there's just an empty placeholder item, replace it
+        // Otherwise append to existing items
+        const updatedItems = hasOnlyEmptyItem ? newItems : [...existingItems, ...newItems];
+        
+        setSaleItems(updatedItems);
+        saveTicketItems('sale', updatedItems);
         setActiveTab(3); // Set active tab to Sale
       }
+      
+      // Clear the location state to prevent reprocessing on navigation
+      window.history.replaceState({}, document.title);
     }
     
     // Handle items coming from CoinsBullions
