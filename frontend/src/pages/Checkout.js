@@ -968,13 +968,6 @@ function Checkout() {
                             />
                           </ListItem>
                         ))
-                      ) : (searchForm.first_name || searchForm.last_name || searchForm.id_number || searchForm.phone) ? (
-                        <ListItem>
-                          <ListItemText 
-                            primary="No customers found" 
-                            primaryTypographyProps={{ variant: 'body2', color: 'text.secondary', align: 'center' }}
-                          />
-                        </ListItem>
                       ) : null}
                     </List>
                   </Box>
@@ -985,15 +978,21 @@ function Checkout() {
                     <Grid container spacing={2}>
                       {/* Display customer details based on preferences */}
                       <Grid item xs={12}>
-                        <Typography variant="subtitle1">
-                          <strong>N:</strong> {`${selectedCustomer.first_name || ''} ${selectedCustomer.last_name || ''}`}
-                          {selectedCustomer.email && (
-                            <span> <strong>E:</strong> {selectedCustomer.email}</span>
-                          )}
-                          {selectedCustomer.phone && (
-                            <span> <strong>P:</strong> {selectedCustomer.phone}</span>
-                          )}
-                        </Typography>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <Typography variant="subtitle1" sx={{ flexBasis: '30%' }}>
+                            <strong>N:</strong> {`${selectedCustomer.first_name || ''} ${selectedCustomer.last_name || ''}`}
+                          </Typography>
+                          <Typography variant="subtitle1" sx={{ flexBasis: '40%', textAlign: 'center' }}>
+                            {selectedCustomer.email && (
+                              <><strong>E:</strong> {selectedCustomer.email}</>
+                            )}
+                          </Typography>
+                          <Typography variant="subtitle1" sx={{ flexBasis: '30%', textAlign: 'right' }}>
+                            {selectedCustomer.phone && (
+                              <><strong>P:</strong> {selectedCustomer.phone}</>
+                            )}
+                          </Typography>
+                        </Box>
                       </Grid>
                       
                       {selectedCustomer.address && (
