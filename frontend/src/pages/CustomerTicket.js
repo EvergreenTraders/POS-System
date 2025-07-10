@@ -1654,22 +1654,29 @@ return (
             <Card>
               <CardContent>
                 <Box sx={{ width: '100%' }}>
-                  <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-                    <Tabs 
-                      value={activeTab} 
-                      onChange={handleTabChange} 
-                      variant="scrollable"
-                      scrollButtons="auto"
-                      sx={{ mb: 1 }}
-                    >
-                      <Tab label={`Pawn${hasActiveItems(0) ? ' *' : ''}`} />
-                      <Tab label={`Buy${hasActiveItems(1) ? ' *' : ''}`} />
-                      <Tab label={`Trade${hasActiveItems(2) ? ' *' : ''}`} />
-                      <Tab label={`Sale${hasActiveItems(3) ? ' *' : ''}`} />
-                      <Tab label={`Repair${hasActiveItems(4) ? ' *' : ''}`} />
-                      <Tab label={`Payment${hasActiveItems(5) ? ' *' : ''}`} />
-                      <Tab label={`Refund${hasActiveItems(6) ? ' *' : ''}`} />
-                    </Tabs>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
+                    <Box sx={{ display: 'flex', flexGrow: 1 }}>
+                      <Tabs 
+                        value={activeTab} 
+                        onChange={handleTabChange} 
+                        variant="scrollable"
+                        scrollButtons="auto"
+                        sx={{ mb: 1 }}
+                      >
+                        <Tab label={`Pawn${hasActiveItems(0) ? ' *' : ''}`} />
+                        <Tab label={`Buy${hasActiveItems(1) ? ' *' : ''}`} />
+                        <Tab label={`Trade${hasActiveItems(2) ? ' *' : ''}`} />
+                        <Tab label={`Sale${hasActiveItems(3) ? ' *' : ''}`} />
+                        <Tab label={`Repair${hasActiveItems(4) ? ' *' : ''}`} />
+                        <Tab label={`Payment${hasActiveItems(5) ? ' *' : ''}`} />
+                        <Tab label={`Refund${hasActiveItems(6) ? ' *' : ''}`} />
+                      </Tabs>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', pr: 2 }}>
+                      <Typography variant="h6" color="primary" sx={{ ml: 2 }}>
+                        All Tickets: ${(totals.pawn + totals.buy + totals.trade + totals.sale + totals.repair + totals.payment + totals.refund).toFixed(2)}
+                      </Typography>
+                    </Box>
                   </Box>
                   
                   {/* Pawn Tab */}
