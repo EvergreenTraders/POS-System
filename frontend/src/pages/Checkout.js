@@ -4,6 +4,7 @@ import axios from 'axios';
 import config from '../config';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import PersonSearchIcon from '@mui/icons-material/PersonSearch';
 import {
   Container,
   Paper,
@@ -18,6 +19,16 @@ import {
   Radio,
   RadioGroup,
   Table,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemAvatar,
+  Avatar,
+  CircularProgress,
   TableBody,
   TableCell,
   TableContainer,
@@ -47,7 +58,17 @@ function Checkout() {
   const navigate = useNavigate();
   const { cartItems, addToCart, selectedCustomer, setCustomer, clearCart } = useCart();
   const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [customerSearchDialogOpen, setCustomerSearchDialogOpen] = useState(false);
+  const [searchForm, setSearchForm] = useState({
+    first_name: '',
+    last_name: '',
+    id_number: '',
+    phone: ''
+  });
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
   const [checkoutItems, setCheckoutItems] = useState([]);
   const [allCartItems, setAllCartItems] = useState([]);
   const [jewelryItems, setJewelryItems] = useState([]);
@@ -57,8 +78,6 @@ function Checkout() {
     cashAmount: '',
     cardNumber: ''
   });
-
-  const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
@@ -178,6 +197,63 @@ function Checkout() {
       ...paymentDetails,
       [field]: value,
     });
+  };
+  
+  // Handle input change for search form
+  const handleLookupInputChange = (e) => {
+    const { name, value } = e.target;
+    setSearchForm(prev => ({ ...prev, [name]: value }));
+  };
+  
+  // Handle search customer
+  const handleSearchCustomer = async () => {
+    if (!searchForm.first_name && !searchForm.last_name && !searchForm.id_number && !searchForm.phone) {
+      setSnackbar({
+        open: true,
+        message: 'Please enter at least one search criteria',
+        severity: 'warning'
+      });
+      return;
+    }
+    
+    setSearching(true);
+    try {
+      const params = {};
+      if (searchForm.first_name && searchForm.first_name.trim()) params.first_name = searchForm.first_name.trim();
+      if (searchForm.last_name && searchForm.last_name.trim()) params.last_name = searchForm.last_name.trim();
+      if (searchForm.id_number && searchForm.id_number.trim()) params.id_number = searchForm.id_number.trim();
+      if (searchForm.phone && searchForm.phone.trim()) params.phone = searchForm.phone.trim();
+      
+      const queryParams = new URLSearchParams(params).toString();
+      const response = await fetch(`${config.apiUrl}/customers/search?${queryParams}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      
+      if (!response.ok) throw new Error('Failed to search customers');
+      const data = await response.json();
+      
+      setSearchResults(data);
+      
+      if (data.length === 0) {
+        setSnackbar({
+          open: true,
+          message: 'No customers found matching your search criteria',
+          severity: 'info'
+        });
+      } else if (data.length === 1) {
+        // If only one customer found, select them automatically
+        handleSelectCustomer(data[0]);
+      }
+    } catch (error) {
+      console.error('Error searching customers:', error);
+      setSnackbar({
+        open: true,
+        message: `Error: ${error.message}`,
+        severity: 'error'
+      });
+    } finally {
+      setSearching(false);
+    }
   };
 
   // Initialize remaining amount when component mounts or cart changes
@@ -757,35 +833,184 @@ function Checkout() {
       navigate('/quote-manager');
     }
   }, [selectedCustomer, cartItems, navigate, isInitialized]);
+  
+  // Handle customer selection from search results
+  const handleSelectCustomer = (customerData) => {
+    // Format the selected customer for the ticket
+    const selectedCustomer = {
+      ...customerData,
+      name: `${customerData.first_name || ''} ${customerData.last_name || ''}`.trim(),
+    };
+    
+    // Update the customer state
+    setCustomer(selectedCustomer);
+    
+    // Close dialog and clear search
+    setCustomerSearchDialogOpen(false);
+    setSearchForm({
+      first_name: '',
+      last_name: '',
+      id_number: '',
+      phone: ''
+    });
+    setSearchResults([]);
+    
+    // Show success message
+    setSnackbar({
+      open: true,
+      message: `Customer ${selectedCustomer.name} selected`,
+      severity: 'success'
+    });
+  };
 
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: 4 }}>
+
         <Grid container spacing={3}>
           {/* Left side: Customer Details and Order Summary stacked */}
           <Grid item xs={12} md={8}>
             {/* Customer Details */}
             <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Customer Details
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={3}>
-                  <Typography variant="subtitle1">
-                  <strong>N:</strong> {selectedCustomer?.name || 'Not specified'}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <Typography variant="subtitle1">
-                  <strong>E:</strong> {selectedCustomer?.email || 'Not specified'}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12} sm={3}>
-                  <Typography variant="subtitle1">
-                  <strong>P:</strong> {selectedCustomer?.phone || 'Not specified'}
-                  </Typography>
-                </Grid>
-              </Grid>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">
+                  Customer Details
+                </Typography>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => setCustomerSearchDialogOpen(!customerSearchDialogOpen)}
+                  startIcon={customerSearchDialogOpen ? null : <PersonSearchIcon />}
+                >
+                  {customerSearchDialogOpen ? 'Close Search' : 'Change Customer'}
+                </Button>
+              </Box>
+              
+              {customerSearchDialogOpen ? (
+                <Box sx={{ mb: 2 }}>
+                  <Grid container spacing={1} mb={1}>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        name="first_name"
+                        label="First Name"
+                        value={searchForm.first_name}
+                        onChange={handleLookupInputChange}
+                        variant="outlined"
+                        size="small"
+                        onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        name="last_name"
+                        label="Last Name"
+                        value={searchForm.last_name}
+                        onChange={handleLookupInputChange}
+                        variant="outlined"
+                        size="small"
+                        onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        name="id_number"
+                        label="ID Number"
+                        value={searchForm.id_number}
+                        onChange={handleLookupInputChange}
+                        variant="outlined"
+                        size="small"
+                        onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        name="phone"
+                        label="Phone"
+                        value={searchForm.phone}
+                        onChange={handleLookupInputChange}
+                        variant="outlined"
+                        size="small"
+                        onKeyPress={(e) => e.key === 'Enter' && handleSearchCustomer()}
+                      />
+                    </Grid>
+                  </Grid>
+                  
+                  <Box sx={{ maxHeight: '250px', overflow: 'auto', bgcolor: 'background.paper', border: '1px solid #e0e0e0', borderRadius: 1 }}>
+                    <List dense disablePadding>
+                      {searchResults.length > 0 ? (
+                        searchResults.map((customer) => (
+                          <ListItem 
+                            key={customer.id} 
+                            button 
+                            onClick={() => handleSelectCustomer(customer)}
+                            divider
+                          >
+                            <ListItemAvatar>
+                              <Avatar sx={{ width: 32, height: 32, fontSize: '0.9rem' }}>
+                                {`${customer.first_name?.[0] || ''}${customer.last_name?.[0] || ''}`}
+                              </Avatar>
+                            </ListItemAvatar>
+                            <ListItemText 
+                              primary={`${customer.first_name || ''} ${customer.last_name || ''}`}
+                              secondary={
+                                <React.Fragment>
+                                  {customer.phone && <span>Phone: {customer.phone}</span>}
+                                  {customer.phone && customer.email && ' | '}
+                                  {customer.email && <span>Email: {customer.email}</span>}
+                                </React.Fragment>
+                              }
+                              primaryTypographyProps={{ variant: 'body2', fontWeight: 'medium' }}
+                              secondaryTypographyProps={{ variant: 'caption' }}
+                            />
+                          </ListItem>
+                        ))
+                      ) : (searchForm.first_name || searchForm.last_name || searchForm.id_number || searchForm.phone) ? (
+                        <ListItem>
+                          <ListItemText 
+                            primary="No customers found" 
+                            primaryTypographyProps={{ variant: 'body2', color: 'text.secondary', align: 'center' }}
+                          />
+                        </ListItem>
+                      ) : null}
+                    </List>
+                  </Box>
+                </Box>
+              ) : (
+                <Box>
+                  {selectedCustomer ? (
+                    <Grid container spacing={2}>
+                      {/* Display customer details based on preferences */}
+                      <Grid item xs={12}>
+                        <Typography variant="subtitle1">
+                          <strong>N:</strong> {`${selectedCustomer.first_name || ''} ${selectedCustomer.last_name || ''}`}
+                          {selectedCustomer.email && (
+                            <span> <strong>E:</strong> {selectedCustomer.email}</span>
+                          )}
+                          {selectedCustomer.phone && (
+                            <span> <strong>P:</strong> {selectedCustomer.phone}</span>
+                          )}
+                        </Typography>
+                      </Grid>
+                      
+                      {selectedCustomer.address && (
+                        <Grid item xs={12}>
+                          <Typography variant="subtitle1">
+                            <strong>Address:</strong> {selectedCustomer.address}
+                          </Typography>
+                        </Grid>
+                      )}
+                    </Grid>
+                  ) : (
+                    <Typography variant="body1" color="text.secondary" align="center">
+                      No customer selected. Use the search button to find and select a customer.
+                    </Typography>
+                  )}
+                </Box>
+              )}
             </Paper>
             
             {/* Order Summary - stacked below customer details */}
