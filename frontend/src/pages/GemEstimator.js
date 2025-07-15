@@ -39,6 +39,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import CloudUpload from '@mui/icons-material/CloudUpload';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import KeyboardBackspaceIcon from '@mui/icons-material/KeyboardBackspace';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
@@ -65,6 +66,7 @@ function GemEstimator() {
   const [returnToTicket, setReturnToTicket] = useState(location.state?.returnToTicket || false);
   const [ticketItemId, setTicketItemId] = useState(location.state?.ticketItemId || null);
   const [priceEstimates, setPriceEstimates] = useState({ pawn: 0, buy: 0, melt: 0, retail: 0 });
+  const [customer, setCustomer] = useState(location.state?.customer || null);
   const [transactionType, setTransactionType] = useState(location.state?.itemToEdit?.transaction_type || 'buy');
   const [freeText, setFreeText] = useState(location.state?.itemToEdit?.free_text || '');
   const [diamondSummary, setDiamondSummary] = useState([]);
@@ -1620,6 +1622,10 @@ function GemEstimator() {
     return totalCarats * parseFloat(caratConversion.grams);
   };
 
+  const handleBackToTicket = () => {
+    navigate('/customer-ticket', { state: { customer } });
+  };
+
   const handleAddToTicket = () => {
     const customerData = location.state?.customer;
     
@@ -1770,7 +1776,19 @@ function GemEstimator() {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+    <Container maxWidth="lg" sx={{ pt: 4 }}>
+      {/* Back to Ticket Button */}
+      {location.state?.customer && (
+        <Button
+          variant="outlined"
+          color="primary"
+          startIcon={<KeyboardBackspaceIcon />}
+          onClick={handleBackToTicket}
+          sx={{ mb: 2 }}
+        >
+          Back to Ticket
+        </Button>
+      )}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         {/* Metal Estimation Section */}
         <Grid item xs={12} md={3}>

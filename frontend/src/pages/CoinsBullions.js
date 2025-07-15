@@ -43,6 +43,7 @@ import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import SearchIcon from '@mui/icons-material/Search';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
+import KeyboardBackspaceIcon from '@mui/icons-material/KeyboardBackspace';
 import CloudUpload from '@mui/icons-material/CloudUpload';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
@@ -165,9 +166,12 @@ const ItemImageThumbnail = ({ src, isPrimary, onDelete, onSetPrimary }) => (
 );
 
 function CoinsBullions() {
-  const { token } = useAuth();
+  const { token, isAuthenticated, userProfile, refreshUserProfile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  
+  // Store customer data from location state
+  const [customer, setCustomer] = useState(location.state?.customer || null);
   const fileInputRef = useRef(null);
   const [tabValue, setTabValue] = useState(0);
   const [scrapImages, setScrapImages] = useState([]);
@@ -644,6 +648,10 @@ function CoinsBullions() {
     setSnackbarOpen(false);
   };
 
+  const handleBackToTicket = () => {
+    navigate('/customer-ticket', { state: { customer: location.state?.customer } });
+  };
+
   // Fetch data on component mount
   useEffect(() => {
     const fetchData = async () => {
@@ -678,6 +686,17 @@ function CoinsBullions() {
 
   return (
     <Container maxWidth="lg">
+      {location.state?.customer && (
+        <Button
+          variant="outlined"
+          color="primary"
+          startIcon={<KeyboardBackspaceIcon />}
+          onClick={handleBackToTicket}
+          sx={{ mb: 2, mt: 2 }}
+        >
+          Back to Ticket
+        </Button>
+      )}
       <StyledPaper>
         
         <Box sx={{ borderBottom: 1, borderColor: 'divider', display: 'flex', justifyContent: 'center' }}>
