@@ -93,7 +93,55 @@ function Checkout() {
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
-    if (!isInitialized && location.state) {
+    // Check if already initialized
+    if (isInitialized) return;
+    
+    // First priority: Check for checkoutItems in session storage (from CustomerTicket)
+    const storedCheckoutItems = sessionStorage.getItem('checkoutItems');
+    const storedCustomer = sessionStorage.getItem('selectedCustomer');
+    
+    if (storedCheckoutItems) {
+      try {
+        const parsedItems = JSON.parse(storedCheckoutItems);
+        console.log('Loading items from session storage:', parsedItems);
+        
+        // Clear existing cart
+        clearCart();
+        
+        // Add items to cart
+        if (Array.isArray(parsedItems)) {
+          parsedItems.forEach(item => addToCart(item));
+          
+          // Set checkout items for display
+          setCheckoutItems(parsedItems);
+          
+          // Extract jewelry-specific items if any
+          const filteredJewelryItems = parsedItems.filter(item => item.sourceEstimator === 'jewelry');
+          if (filteredJewelryItems.length > 0) {
+            setJewelryItems(filteredJewelryItems);
+            console.log('Jewelry items found in checkout from session storage:', filteredJewelryItems);
+          }
+        }
+        
+        // Load customer if available
+        if (storedCustomer) {
+          try {
+            const parsedCustomer = JSON.parse(storedCustomer);
+            setCustomer(parsedCustomer);
+          } catch (error) {
+            console.error('Error parsing customer from session storage:', error);
+          }
+        }
+        
+        setIsInitialized(true);
+        return; // Exit early since we've initialized from session storage
+      } catch (error) {
+        console.error('Error parsing checkout items from session storage:', error);
+      }
+    }
+    
+    // Second priority: Initialize from navigation state if available
+    if (location.state) {
       // Handle from generic estimator or specific estimators like coinsbullions
       if ((location.state.from === 'jewelry' || location.state.from === 'coinsbullions') && location.state?.items) {
         // Clear existing cart items before adding new ones from estimator
