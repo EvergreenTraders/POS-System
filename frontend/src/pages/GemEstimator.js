@@ -1795,7 +1795,8 @@ function GemEstimator() {
         <MetalEstimator 
                 onMetalValueChange={handleTotalMetalValueChange}
                 onAddMetal={handleAddMetal}
-                setMetalFormState={handleMetalFormChange} />
+                setMetalFormState={handleMetalFormChange}
+                initialData={location.state?.itemToEdit} />
         </Grid>
 
         {/* Diamond Estimation Section */}
@@ -2490,7 +2491,23 @@ function GemEstimator() {
 
             <Typography variant="h6" sx={{ mt: 2 }}>SUMMARY</Typography>
             <Grid container spacing={2} >
-            {addMetal.map((metal, index) => (
+            {addMetal
+              // Filter out the item being edited (if any)
+              .filter(metal => {
+                if (!location.state?.itemToEdit) return true;
+                
+                // Check if this is the item being edited by comparing key properties
+                const isEditingThisItem = (
+                  metal.preciousMetalType === location.state.itemToEdit.preciousMetalType &&
+                  metal.weight === location.state.itemToEdit.weight &&
+                  metal.purity?.id === location.state.itemToEdit.purity?.id &&
+                  metal.estimatedValue === location.state.itemToEdit.estimatedValue
+                );
+                
+                // Return true to keep items that are NOT being edited
+                return !isEditingThisItem;
+              })
+              .map((metal, index) => (
                 <Grid item xs={12} key={index}>
                     <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative' }}>
                       <div>

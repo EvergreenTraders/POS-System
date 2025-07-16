@@ -257,7 +257,7 @@ const useSpotPriceCalculator = (metalSpotPrice, metalFormState) => {
   };
 };
 
-const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) => {
+const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState, initialData = null }) => {
   const [preciousMetalTypes, setPreciousMetalTypes] = useState([]);
   const [nonPreciousMetalTypes, setNonPreciousMetalTypes] = useState([]);
   const [metalCategories, setMetalCategories] = useState([]);
@@ -278,9 +278,11 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
       const response = await axios.get(`${API_ENDPOINTS.METAL_PURITY}/${metalTypeId}`);
       // Ensure we're setting the data array from the response
       setMetalPurities(response.data || []);
+      return response.data || [];
     } catch (error) {
       console.error('Error fetching metal purities:', error);
       setMetalPurities([]);
+      return [];
     }
   };
 
@@ -312,6 +314,232 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
   const spotPriceRef = React.useRef(null);
   const addButtonRef = React.useRef(null);
 
+  // Initialize form with data from GemEstimator when in edit mode
+  useEffect(() => {
+    if (initialData) {
+      // console.log('Initializing metal form with data:', initialData);
+      
+      // Initialize form with values immediately regardless of metal types or purities
+      // Try different possible field names for each form field
+      setForm(prev => ({
+        ...prev,
+        weight: initialData.metal_weight || initialData.weight || prev.weight || '',
+        preciousMetalType: initialData.precious_metal_type || initialData.preciousMetalType || prev.preciousMetalType || '',
+        nonPreciousMetalType: initialData.non_precious_metal_type || initialData.nonPreciousMetalType || prev.nonPreciousMetalType || '',
+        metalCategory: initialData.category || initialData.metalCategory || prev.metalCategory || '',
+        jewelryColor: initialData.color || initialData.jewelryColor || prev.jewelryColor || '',
+        spotPrice: initialData.metal_spot_price || initialData.spotPrice || prev.spotPrice || 0,
+        purity: {
+          // Use 'custom' ID for manually entered values without an ID
+          id: initialData.metal_purity_id || initialData.purity?.id || initialData.purity_id || 
+              // If we have purity values but no ID, mark as custom
+              ((initialData.metal_purity || initialData.purity || initialData.purity_value) && 
+              !initialData.metal_purity_id && !initialData.purity_id ? 'custom' : prev.purity?.id || ''),
+          // Keep custom purity text
+          purity: initialData.purity?.purity || initialData.metal_purity || initialData.purity || prev.purity?.purity || '',
+          // Keep custom numeric value
+          value: initialData.purity_value !== undefined ? parseFloat(initialData.purity_value) : 
+                (initialData.purity?.value !== undefined ? initialData.purity.value : prev.purity?.value || 0),
+        }
+      }));
+      
+      // If there's an estimated value, set it immediately
+      if (initialData.estimated_value || initialData.estimatedValue) {
+        const estValue = initialData.estimated_value || initialData.estimatedValue;
+        setTotalValue(parseFloat(estValue));
+        onMetalValueChange && onMetalValueChange(parseFloat(estValue));
+      }
+            
+      // Additionally, find the metal type ID to fetch correct purities for dropdown
+      const preciousType = initialData.metal_type || initialData.preciousMetalType;
+      if (preciousType && preciousMetalTypes.length > 0) {
+        const metalType = preciousMetalTypes.find(type => 
+          type.type === preciousType
+        );
+        
+        if (metalType) {
+          console.log('Found metal type:', metalType);
+          // Set the metal type ID and fetch purities
+          setForm(prev => ({
+            ...prev,
+            preciousMetalTypeId: metalType.id
+          }));
+          
+          // fetchPurities(metalType.id).then((purities) => {
+          //   console.log('Fetched purities:', purities);
+          //   // Find the matching purity from the returned purities data
+          //   let purityId = initialData.purity?.id || initialData.purity_id;
+          //   let purityObj = null;
+            
+          //   // If we don't have the exact purity ID, try to find it by purity value
+          //   if (!purityId && purities.length > 0) {
+          //     const purityValue = initialData.purity?.purity || initialData.purity?.value || initialData.purity_name || initialData.purity_value;
+          //     if (purityValue) {
+          //       purityObj = purities.find(p => 
+          //         p.purity === purityValue || p.value === purityValue
+          //       );
+          //     if (purityObj) {
+          //       purityId = purityObj.id;
+          //       console.log('Found matching purity:', purityObj);
+                
+          //       // Update form with the found purity ID
+          //       setForm(prev => ({
+          //         ...prev,
+          //         purity: {
+          //           ...prev.purity,
+          //           id: purityId,
+          //           purity: purityObj.purity,
+          //           value: purityObj.value
+          //           }
+          //       }));
+          //       }
+          //     }
+          //   }
+          // });
+        } else {
+          console.log('Metal type not found for:', preciousType);
+          
+          // If precious metal types exist but we couldn't find the specific one,
+          // set up interval to try again (sometimes API loading happens in different order)
+          const checkInterval = setInterval(() => {
+            if (preciousMetalTypes.length > 0) {
+              const metalType = preciousMetalTypes.find(type => 
+                type.type === preciousType
+              );
+              if (metalType) {
+                clearInterval(checkInterval);
+                console.log('Found metal type after interval:', metalType);
+                setForm(prev => ({
+                  ...prev,
+                  preciousMetalTypeId: metalType.id
+                }));
+                //fetchPurities(metalType.id);
+              }
+            }
+          }, 500);
+          
+          // Clean up the interval after 5 seconds if it hasn't found the metal type
+          setTimeout(() => clearInterval(checkInterval), 5000);
+        }
+      } else if (preciousType && preciousMetalTypes.length === 0) {
+        console.log('Precious metal types not loaded yet, setting up interval');
+        
+        // If precious metal types aren't loaded yet, set up interval to check again
+        const checkInterval = setInterval(() => {
+          if (preciousMetalTypes.length > 0) {
+            const metalType = preciousMetalTypes.find(type => 
+              type.type === preciousType
+            );
+            if (metalType) {
+              clearInterval(checkInterval);
+              console.log('Found metal type after types loaded:', metalType);
+              setForm(prev => ({
+                ...prev,
+                preciousMetalTypeId: metalType.id
+              }));
+              //fetchPurities(metalType.id);
+            }
+          }
+        }, 500);
+        
+        // Clean up the interval after 5 seconds if it hasn't found the metal type
+        setTimeout(() => clearInterval(checkInterval), 5000);
+      }
+    }
+  }, [initialData, preciousMetalTypes, onMetalValueChange]);
+
+  // Special useEffect for purity matching based on selected metal type
+  useEffect(() => {
+    // Skip if custom purity is already set
+    if (form.purity?.id === 'custom') {
+      return;
+    }
+    
+    if (initialData && preciousMetalTypes.length > 0) {
+      const metalType = initialData.precious_metal_type || initialData.preciousMetalType || '';
+      const metalTypeObj = preciousMetalTypes.find(type => type.type === metalType);
+      const purityValue = initialData.metal_purity || initialData.purity?.purity || initialData.purity || '';
+      const numericPurity = initialData.purity_value || initialData.purity?.value || 0;
+      
+      if (metalTypeObj && metalTypeObj.id) {
+        fetchPurities(metalTypeObj.id).then(purities => {
+          if (form.purity?.id === 'custom') return; // Don't override custom values
+          
+          // For platinum/palladium, match by numeric value
+          if (metalType === 'Platinum' || metalType === 'Palladium') {
+            const matchingPurity = purities.find(p => 
+              parseFloat(p.value) === parseFloat(numericPurity) ||
+              p.value === numericPurity ||
+              parseFloat(p.value) === numericPurity
+            );
+            
+            if (matchingPurity) {
+              setForm(prev => ({
+                ...prev,
+                purity: matchingPurity
+              }));
+            } else if (numericPurity) {
+              // Create a custom purity object for unmatched values
+              setForm(prev => ({
+                ...prev,
+                purity: {
+                  id: 'custom',
+                  purity: '',
+                  value: numericPurity
+                }
+              }));
+            }
+          } else {
+            // For other metals (gold/silver), match by purity text
+            const matchingPurity = purities.find(p => 
+              p.purity === purityValue ||
+              p.purity.toLowerCase() === purityValue.toLowerCase()
+            );
+            
+            if (matchingPurity) {
+              setForm(prev => ({
+                ...prev,
+                purity: matchingPurity
+              }));
+            } else if (purityValue) {
+              // Create a custom purity object for unmatched values
+              setForm(prev => ({
+                ...prev,
+                purity: {
+                  id: 'custom',
+                  purity: purityValue,
+                  value: numericPurity || 0
+                }
+              }));
+            }
+          }
+        });
+      }
+      
+      // If metal type isn't found in loaded types, keep checking
+      const preciousType = initialData.precious_metal_type || initialData.preciousMetalType;
+      
+      // If precious metal types aren't loaded yet, set up interval to check again
+      const checkInterval = setInterval(() => {
+        if (preciousMetalTypes.length > 0) {
+          const metalType = preciousMetalTypes.find(type => 
+            type.type === preciousType
+          );
+          if (metalType) {
+            clearInterval(checkInterval);
+            setForm(prev => ({
+              ...prev,
+              preciousMetalTypeId: metalType.id
+            }));
+          }
+        }
+      }, 500);
+      
+      // Clean up the interval after 5 seconds if it hasn't found the metal type
+      setTimeout(() => clearInterval(checkInterval), 5000);
+    }
+  }, [initialData, preciousMetalTypes, fetchPurities, form.purity?.id]);
+
   // Focus on weight input when component mounts
   useEffect(() => {
     if (weightRef.current) {
@@ -319,10 +547,10 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
     }
   }, []);
 
+  // Simple useEffect to update parent component with form state changes
   useEffect(() => {
     setMetalFormState(form);
-    onMetalValueChange(totalValue);
-  }, [form, totalValue]);
+  }, [form, setMetalFormState]);
 
   useEffect(() => {
     const fetchAllData = async () => {
@@ -647,20 +875,22 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
               name="purity"
               value={form.purity?.id || ''}
               onChange={(e) => {
-                handleChange(e);
+                // Handle both predefined and custom values
+                if (e.target.value === 'custom') {
+                  // Keep existing custom values
+                  return;
+                }
+                
                 const selectedPurityObj = metalPurities.find(p => p.id === e.target.value);
                 setForm(prev => ({
                   ...prev,
-                  value: selectedPurityObj ? selectedPurityObj.value : ''
-                }));
-                setTimeout(() => {
-                  const valueField = document.querySelector('input[name="value"]');
-                  if (valueField && form.preciousMetalType !== 'Platinum' && form.preciousMetalType !== 'Palladium') {
-                    valueField.focus();
-                  } else {
-                    metalCategoryRef.current?.focus();
+                  purity: {
+                    ...prev.purity,
+                    id: e.target.value,
+                    purity: selectedPurityObj ? selectedPurityObj.purity : '',
+                    value: selectedPurityObj ? selectedPurityObj.value : ''
                   }
-                }, 0);
+                }));
               }}
               required
               inputRef={purityRef}
@@ -693,6 +923,16 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
                 }
               }}
             >
+              {/* Include custom value option if present */}
+              {form.purity?.id === 'custom' && (
+                <MenuItem key="custom" value="custom">
+                  {form.preciousMetalType === 'Platinum' || form.preciousMetalType === 'Palladium'
+                    ? form.purity.value
+                    : form.purity.purity}
+                </MenuItem>
+              )}
+              
+              {/* Standard options */}
               {metalPurities.map(purity => (
                 <MenuItem key={purity.id} value={purity.id}>
                   {form.preciousMetalType === 'Platinum' || form.preciousMetalType === 'Palladium'
@@ -711,11 +951,20 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState }) =
               name="value"
               type="decimal"
               value={form.purity?.value || ''}
-              onChange={handleChange}
+              onChange={(e) => {
+                // Update the purity.value directly
+                setForm(prev => ({
+                  ...prev,
+                  purity: {
+                    ...prev.purity,
+                    value: e.target.value
+                  }
+                }));
+              }}
               inputProps={{
                 min: 0,
                 inputMode: 'decimal',
-                pattern: '[0-9]*\\.?[0-9]*'
+                pattern: '[0-9]*\.?[0-9]*'
               }}
               onKeyDown={(e) => handleEnterKey(e, metalCategoryRef)}
             />
