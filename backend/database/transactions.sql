@@ -1,7 +1,12 @@
--- Drop existing tables
-drop table if exists payments cascade;
-drop table if exists transaction_items cascade;
-drop table if exists transactions cascade;
+-- Add action column to payments table
+DO $$
+BEGIN
+    ALTER TABLE IF EXISTS payments
+        ADD COLUMN IF NOT EXISTS action VARCHAR(10) NOT NULL DEFAULT 'in' CHECK (action IN ('in', 'out', 'transfer'));
+    
+    -- Add comment to explain the column
+    COMMENT ON COLUMN payments.action IS 'Type of payment flow: in (receiving money), out (paying money), or transfer (moving money between accounts)';
+END $$;
 
 -- Create transaction_type table
 CREATE TABLE IF NOT EXISTS transaction_type (
@@ -10,12 +15,6 @@ CREATE TABLE IF NOT EXISTS transaction_type (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
--- Insert default transaction types
--- INSERT INTO transaction_type (type) VALUES
---     ('pawn'),
---     ('buy'),
---     ('retail');
 
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,
@@ -80,25 +79,21 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create triggers for automatic timestamp updates
-DROP TRIGGER IF EXISTS update_transactions_timestamp ON transactions;
 CREATE TRIGGER update_transactions_timestamp
     BEFORE UPDATE ON transactions
     FOR EACH ROW
     EXECUTE FUNCTION update_timestamp();
 
-DROP TRIGGER IF EXISTS update_payments_timestamp ON payments;
 CREATE TRIGGER update_payments_timestamp
     BEFORE UPDATE ON payments
     FOR EACH ROW
     EXECUTE FUNCTION update_timestamp();
 
-DROP TRIGGER IF EXISTS update_transaction_items_timestamp ON transaction_items;
 CREATE TRIGGER update_transaction_items_timestamp
     BEFORE UPDATE ON transaction_items
     FOR EACH ROW
     EXECUTE FUNCTION update_timestamp();
 
-DROP TRIGGER IF EXISTS update_transaction_type_timestamp ON transaction_type;
 CREATE TRIGGER update_transaction_type_timestamp
     BEFORE UPDATE ON transaction_type
     FOR EACH ROW
