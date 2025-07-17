@@ -1,31 +1,65 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import debounce from 'lodash/debounce';
 import {
   Container,
   Typography,
   Paper,
-  Button,
   Box,
+  Button,
   Grid,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Divider,
+  Chip,
   CircularProgress,
+  Autocomplete,
+  TextField,
+  InputAdornment,
+  MenuItem,
   Snackbar,
   Alert,
-  InputAdornment,
-  Autocomplete,
-  Chip
+  Divider,
+  FormControl,
+  FormControlLabel,
+  Radio,
+  RadioGroup,
+  IconButton,
+  Select,
+  InputLabel
 } from '@mui/material';
-import { useNavigate, useLocation } from 'react-router-dom';
-import axios from 'axios';
-import config from '../config';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import SaveIcon from '@mui/icons-material/Save';
+import EditIcon from '@mui/icons-material/Edit';
+import CancelIcon from '@mui/icons-material/Cancel';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useAuth } from '../context/AuthContext';
+import config from '../config';
+
+// Utility functions for pricing analysis and image handling
+const formatPrice = (price) => {
+  return Number(price).toFixed(2);
+};
+
+// Function to get image URL for jewelry items
+const getImageUrl = (item) => {
+  if (!item) return '/placeholder-jewelry.png';
+  return item.image_url || '/placeholder-jewelry.png';
+};
+
+const calculatePercentage = (value, base) => {
+  if (!base || base === 0 || !value) return 'N/A';
+  const percentage = (value / base) * 100;
+  return `${percentage.toFixed(0)}%`;
+};
+
+const calculateProfitMargin = (retailPrice, costBasis) => {
+  if (!retailPrice || !costBasis || retailPrice <= 0 || costBasis <= 0) {
+    return 'N/A';
+  }
+  const profit = retailPrice - costBasis;
+  const margin = (profit / retailPrice) * 100;
+  return `${margin.toFixed(0)}%`;
+};
 
 function JewelryEdit() {
   const navigate = useNavigate();
@@ -36,21 +70,25 @@ function JewelryEdit() {
   // State variables
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [transactionType, setTransactionType] = useState('sell'); // Default to sell
-  const [sellingPrice, setSellingPrice] = useState(0);
-  const [customer, setCustomer] = useState(null);
-  const [customers, setCustomers] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
     severity: 'info'
   });
-  const [addingToCart, setAddingToCart] = useState(false);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [sellingPrice, setSellingPrice] = useState(0);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedItem, setEditedItem] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [tax, setTax] = useState({ rate: 0.13, amount: 0 }); // Default tax rate of 13%
   const [totalAmount, setTotalAmount] = useState(0);
   const [discount, setDiscount] = useState(0);
   const [discountType, setDiscountType] = useState('percentage'); // 'percentage' or 'amount'
+  const [transactionType, setTransactionType] = useState('retail'); // 'sell' or 'retail'
 
   // Effects
   useEffect(() => {
@@ -86,16 +124,56 @@ function JewelryEdit() {
   const fetchJewelryItem = async (itemId) => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_BASE_URL}/jewelry/${itemId}`);
-      setItem(response.data);
+      console.log(`Fetching jewelry item with ID: ${itemId}`);
       
+      // Fetch all jewelry items like in Jewelry.js
+      const response = await axios.get(`${API_BASE_URL}/jewelry`);
+      
+      if (!response.data || !Array.isArray(response.data)) {
+        throw new Error('Invalid data received from the server');
+      }
+      
+      // Find the specific item by item_id
+      const foundItem = response.data.find(item => item.item_id === itemId);
+      
+      if (!foundItem) {
+        throw new Error(`Item with ID ${itemId} not found`);
+      }
+      
+      console.log('Jewelry item found:', foundItem);
+      
+      // Set the jewelry item data to state
+      setItem(foundItem);
+  
+      // Set initial edited item state for form
+      setEditedItem({
+        ...foundItem,
+        inventory_status: foundItem.inventory_status || 'HOLD',
+        short_desc: foundItem.short_desc || '',
+        dimensions: foundItem.dimensions || '',
+        gemstone: foundItem.gemstone || '',
+        stone_weight: foundItem.stone_weight || '',
+        stone_color_clarity: foundItem.stone_color_clarity || '',
+        serial_number: foundItem.serial_number || '',
+        age_year: foundItem.age_year || '',
+        certification: foundItem.certification || ''
+      });
+  
       // Set initial price based on retail price
-      setSellingPrice(response.data.retail_price || 0);
-    } catch (error) {
-      console.error('Error fetching jewelry item:', error);
+      setSellingPrice(foundItem.retail_price || 0);
+      
+      // Success notification
       setSnackbar({
         open: true,
-        message: 'Failed to load jewelry item',
+        message: `Loaded jewelry item ${itemId} successfully`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error fetching jewelry item:', error);
+      setItem(null); // Reset item state on error
+      setSnackbar({
+        open: true,
+        message: `Failed to load jewelry item: ${error.message}`,
         severity: 'error'
       });
     } finally {
@@ -103,27 +181,30 @@ function JewelryEdit() {
     }
   };
 
+  // Customer search function
   const fetchCustomers = async (searchTerm) => {
-    if (!searchTerm || searchTerm.length < 2) return;
+    if (!searchTerm || searchTerm.trim() === '') {
+      setSearchResults([]);
+      setShowSearchResults(false);
+      return;
+    }
     
     try {
-      const params = new URLSearchParams();
+      const response = await axios.get(`${API_BASE_URL}/customers`, {
+        params: { search: searchTerm }
+      });
       
-      // Check if search term might be a name or phone number
-      if (searchTerm.match(/^\d+$/)) {
-        params.append('phone', searchTerm);
-      } else if (searchTerm.includes(' ')) {
-        const [firstName, lastName] = searchTerm.split(' ', 2);
-        params.append('first_name', firstName);
-        params.append('last_name', lastName);
-      } else {
-        params.append('first_name', searchTerm);
+      if (response.data) {
+        setSearchResults(response.data);
+        setShowSearchResults(true);
       }
-      
-      const response = await axios.get(`${API_BASE_URL}/customers/search?${params.toString()}`);
-      setCustomers(response.data);
     } catch (error) {
-      console.error('Error searching customers:', error);
+      console.error('Error searching for customers:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to search for customers',
+        severity: 'error'
+      });
     }
   };
 
@@ -134,27 +215,73 @@ function JewelryEdit() {
   );
 
   // Handlers
-  const handleCustomerSearch = (event, value) => {
-    setSearchTerm(value);
-    debouncedSearch(value);
+  const handleBackToInventory = () => {
+    navigate('/inventory');
   };
 
-  const handleCustomerSelect = (event, value) => {
-    setCustomer(value);
+  const handleEditToggle = () => {
+    setIsEditing(!isEditing);
   };
 
-  const handleSellingPriceChange = (e) => {
-    const value = parseFloat(e.target.value);
-    setSellingPrice(isNaN(value) ? 0 : value);
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setEditedItem(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+  
+  const handleCustomerSelection = (customer) => {
+    setSelectedCustomer(customer);
+    setSelectedCustomerId(customer.id);
+    setSearchQuery(`${customer.first_name} ${customer.last_name}`);
+    setShowSearchResults(false);
   };
 
-  const handleDiscountChange = (e) => {
-    const value = parseFloat(e.target.value);
-    setDiscount(isNaN(value) ? 0 : value);
+  const handleSaveItem = async () => {
+    try {
+      setIsSaving(true);
+      
+      // Update item with edited values
+      const response = await axios.put(`${API_BASE_URL}/jewelry/${item.id}`, editedItem);
+      
+      // Update local state with the response
+      setItem(response.data);
+      setEditedItem(response.data);
+      setIsEditing(false);
+      
+      setSnackbar({
+        open: true,
+        message: 'Item updated successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating item:', error);
+      setSnackbar({
+        open: true,
+        message: `Failed to update item: ${error.message}`,
+        severity: 'error'
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleDiscountTypeChange = (e) => {
-    setDiscountType(e.target.value);
+  const handleCancel = () => {
+    // Reset form to original item data
+    setEditedItem({
+      ...item,
+      inventory_status: item.inventory_status || 'HOLD',
+      short_desc: item.short_desc || '',
+      dimensions: item.dimensions || '',
+      gemstone: item.gemstone || '',
+      stone_weight: item.stone_weight || '',
+      stone_color_clarity: item.stone_color_clarity || '',
+      serial_number: item.serial_number || '',
+      age_year: item.age_year || '',
+      certification: item.certification || ''
+    });
+    setIsEditing(false);
   };
 
   const calculateTotals = () => {
@@ -178,141 +305,11 @@ function JewelryEdit() {
     setTotalAmount(discountedPrice + taxAmount);
   };
 
-  const handleAddToCart = async () => {
-    if (!item) {
-      setSnackbar({
-        open: true,
-        message: 'No jewelry item selected',
-        severity: 'warning'
-      });
-      return;
-    }
-
-    if (!customer) {
-      setSnackbar({
-        open: true,
-        message: 'Please select a customer',
-        severity: 'warning'
-      });
-      return;
-    }
-
-    try {
-      setAddingToCart(true);
-      
-      // Create cart item with all necessary details
-      const cartItem = {
-        id: Date.now(), // Temporary ID for the cart
-        item_id: item.item_id,
-        type: transactionType,
-        description: `${item.metal_weight}g ${item.metal_purity} ${item.metal_type} ${item.short_desc || ''}`,
-        price: sellingPrice,
-        discountedPrice: totalAmount - tax.amount,
-        tax: tax.amount,
-        totalAmount: totalAmount,
-        discount: discount,
-        discountType: discountType,
-        customer: {
-          id: customer.id,
-          name: `${customer.first_name} ${customer.last_name}`,
-          phone: customer.phone
-        },
-        employee: {
-          id: currentUser?.id,
-          name: currentUser?.name,
-          role: currentUser?.role
-        },
-        images: item.images,
-        jewelry_data: item
-      };
-      
-      // Get existing cart items from session storage
-      const existingCartItems = JSON.parse(sessionStorage.getItem('cartItems')) || [];
-      
-      // Add new item to cart
-      const updatedCart = [...existingCartItems, cartItem];
-      
-      // Save updated cart to session storage
-      sessionStorage.setItem('cartItems', JSON.stringify(updatedCart));
-      
-      setSnackbar({
-        open: true,
-        message: 'Item added to cart successfully',
-        severity: 'success'
-      });
-      
-      // Navigate to cart after short delay
-      setTimeout(() => {
-        navigate('/cart');
-      }, 1500);
-      
-    } catch (error) {
-      console.error('Error adding item to cart:', error);
-      setSnackbar({
-        open: true,
-        message: 'Failed to add item to cart',
-        severity: 'error'
-      });
-    } finally {
-      setAddingToCart(false);
-    }
-  };
-
-  const handleBackToInventory = () => {
-    navigate('/jewelry');
-  };
-
   const formatPrice = (price) => {
     if (typeof price !== 'number' || isNaN(price)) {
       return '0.00';
     }
     return price.toFixed(2);
-  };
-
-  // Helper function to get image URL
-  const getImageUrl = (images) => {
-    // Default placeholder image
-    const placeholderImage = 'https://via.placeholder.com/150';
-    
-    try {
-      // If images is a string (JSON string), try to parse it
-      if (typeof images === 'string') {
-        try {
-          images = JSON.parse(images);
-        } catch (e) {
-          return placeholderImage;
-        }
-      }
-      
-      // If no images or empty array
-      if (!images || !Array.isArray(images) || images.length === 0) {
-        return placeholderImage;
-      }
-      
-      // Try to find the primary image first
-      const primaryImage = images.find(img => img.isPrimary === true || img.is_primary === true);
-      
-      // If primary image found
-      if (primaryImage) {
-        // Check for different possible URL structures
-        if (primaryImage.url) return primaryImage.url;
-        if (primaryImage.image_url) return primaryImage.image_url;
-        if (typeof primaryImage === 'string') return primaryImage;
-      }
-      
-      // Otherwise use the first image
-      const firstImage = images[0];
-      if (firstImage) {
-        if (firstImage.url) return firstImage.url;
-        if (firstImage.image_url) return firstImage.image_url;
-        if (typeof firstImage === 'string') return firstImage;
-      }
-      
-      return placeholderImage;
-    } catch (error) {
-      console.error('Error processing image:', error);
-      return placeholderImage;
-    }
   };
 
   // Render loading state
@@ -330,10 +327,20 @@ function JewelryEdit() {
   if (!item) {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
-          <Button 
-            variant="contained" 
-            startIcon={<ArrowBackIcon />} 
+        <Box sx={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          minHeight: '60vh',
+          gap: 3 
+        }}>
+          <Typography variant="h6" color="error">
+            No jewelry item selected. Please select an item from the inventory.
+          </Typography>
+          <Button
+            variant="contained"
+            startIcon={<ArrowBackIcon />}
             onClick={handleBackToInventory}
           >
             Back to Inventory
@@ -345,18 +352,55 @@ function JewelryEdit() {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <Paper elevation={2} sx={{ p: 3 }}>
+        {/* Header Section */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography variant="h5" component="h1">
-            Sell Jewelry Item
+            Jewelry Item Management
           </Typography>
-          <Button 
-            variant="outlined" 
-            startIcon={<ArrowBackIcon />} 
-            onClick={handleBackToInventory}
-          >
-            Back to Inventory
-          </Button>
+          
+          {/* Edit/Save Buttons */}
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <Button 
+              variant="contained" 
+              color="primary"
+              onClick={handleBackToInventory}
+              startIcon={<ArrowBackIcon />}
+            >
+              Back to Inventory
+            </Button>
+            {isEditing ? (
+                  <>
+                    <Button
+                      variant="outlined"
+                      color="secondary"
+                      onClick={handleCancel}
+                      startIcon={<CancelIcon />}
+                      disabled={isSaving}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={handleSaveItem}
+                      startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+                      disabled={isSaving}
+                    >
+                      {isSaving ? 'Saving...' : 'Save Changes'}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={() => setIsEditing(true)}
+                    startIcon={<EditIcon />}
+                  >
+                    Edit Item
+                  </Button>
+                )}
+          </Box>
         </Box>
 
         <Grid container spacing={3}>
@@ -367,68 +411,305 @@ function JewelryEdit() {
                 Item Details
               </Typography>
               
+              {/* Item Image and Basic Info */}
               <Box sx={{ display: 'flex', mb: 3 }}>
                 {/* Item Image */}
                 <Box sx={{ width: 150, mr: 3 }}>
                   <img 
-                    src={getImageUrl(item.images)}
-                    alt={item.name || 'Jewelry item'}
-                    style={{ width: '100%', height: 'auto', borderRadius: 4 }}
+                    src={getImageUrl(item)}
+                    alt={item.short_desc || 'Jewelry item'}
+                    style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
                   />
                 </Box>
                 
-                {/* Basic Info */}
-                <Box>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                    {item.item_id}
+                {/* Basic Item Info */}
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="subtitle1" fontWeight="medium">
+                    {item.short_desc || 'Jewelry Item'}
                   </Typography>
-                  <Typography variant="body1">
-                    {`${item.metal_weight}g ${item.metal_purity} ${item.metal_type}`}
+                  <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+                    ID: {item.item_id}
                   </Typography>
-                  <Typography variant="body2" sx={{ mb: 1 }}>
-                    {item.short_desc || 'No description'}
-                  </Typography>
-                  <Chip 
-                    label={item.inventory_status || 'HOLD'}
-                    color={item.inventory_status === 'AVAILABLE' ? 'success' : 'default'}
-                    size="small"
-                  />
+                  
+                  {/* Inventory Status Chip */}
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Chip 
+                      label={item.inventory_status || 'HOLD'} 
+                      color={item.inventory_status === 'IN-STOCK' ? 'success' : 
+                             item.inventory_status === 'IN-PROCESS' ? 'info' : 'warning'} 
+                      size="small" 
+                      sx={{ height: 24 }}
+                    />
+                    {item.certification && (
+                      <Chip 
+                        label={`Certified: ${item.certification}`}
+                        color="info"
+                        size="small"
+                      />
+                    )}
+                  </Box>
                 </Box>
               </Box>
               
-              {/* Detailed Specs */}
+              {/* Editable Fields in Grid Layout */}
               <Grid container spacing={2}>
+                {/* Inventory Status - Editable */}
                 <Grid item xs={6}>
                   <Typography variant="caption" color="textSecondary">
-                    Category
+                    Inventory Status *
                   </Typography>
-                  <Typography variant="body2">
-                    {item.metal_category || 'N/A'}
-                  </Typography>
+                  {isEditing ? (
+                    <TextField
+                      select
+                      fullWidth
+                      size="small"
+                      name="inventory_status"
+                      value={editedItem.inventory_status || 'HOLD'}
+                      onChange={handleInputChange}
+                      margin="dense"
+                    >
+                      <MenuItem value="HOLD">HOLD</MenuItem>
+                      <MenuItem value="IN-PROCESS">IN-PROCESS</MenuItem>
+                      <MenuItem value="IN-STOCK">IN-STOCK</MenuItem>
+                    </TextField>
+                  ) : (
+                    <Typography variant="body2">
+                      {item.inventory_status || 'HOLD'}
+                    </Typography>
+                  )}
                 </Grid>
+                
+                {/* Description - Editable */}
+                <Grid item xs={12}>
+                  <Typography variant="caption" color="textSecondary">
+                    Description *
+                  </Typography>
+                  {isEditing ? (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="short_desc"
+                      value={editedItem.short_desc || ''}
+                      onChange={handleInputChange}
+                      margin="dense"
+                    />
+                  ) : (
+                    <Typography variant="body1">
+                      {item.short_desc || 'No description available'}
+                    </Typography>
+                  )}
+                </Grid>
+                
+                {/* Metal Type - Read-only for now */}
                 <Grid item xs={6}>
                   <Typography variant="caption" color="textSecondary">
-                    Cost Basis
+                    Metal Type
                   </Typography>
                   <Typography variant="body2">
-                    ${formatPrice(item.cost_basis || 0)}
+                    {item.metal_type || 'N/A'}
                   </Typography>
                 </Grid>
+                
+                {/* Purity - Read-only for now */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Purity
+                  </Typography>
+                  <Typography variant="body2">
+                    {item.metal_purity}
+                  </Typography>
+                </Grid>
+                
+                {/* Metal Weight - Read-only for now */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Metal Weight
+                  </Typography>
+                  <Typography variant="body2">
+                    {item.metal_weight}g
+                  </Typography>
+                </Grid>
+                
+                {/* Metal Value - Editable */}
                 <Grid item xs={6}>
                   <Typography variant="caption" color="textSecondary">
                     Metal Value
                   </Typography>
-                  <Typography variant="body2">
-                    ${formatPrice(item.metal_value || 0)}
-                  </Typography>
+                  {isEditing ? (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="metal_value"
+                      type="number"
+                      value={editedItem.metal_value || 0}
+                      onChange={handleInputChange}
+                      margin="dense"
+                      InputProps={{
+                        startAdornment: <InputAdornment position="start">$</InputAdornment>
+                      }}
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      ${formatPrice(item.metal_value || 0)}
+                    </Typography>
+                  )}
                 </Grid>
+                
+                {/* Dimensions - Editable */}
                 <Grid item xs={6}>
                   <Typography variant="caption" color="textSecondary">
-                    Retail Price
+                    Dimensions
                   </Typography>
-                  <Typography variant="body2">
-                    ${formatPrice(item.retail_price || 0)}
+                  {isEditing ? (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="dimensions"
+                      value={editedItem.dimensions || ''}
+                      onChange={handleInputChange}
+                      margin="dense"
+                      placeholder="e.g., 25mm x 15mm"
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      {item.dimensions || 'N/A'}
+                    </Typography>
+                  )}
+                </Grid>
+                
+                {/* Gemstone - Editable */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Gemstone
                   </Typography>
+                  {isEditing ? (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="gemstone"
+                      value={editedItem.gemstone || ''}
+                      onChange={handleInputChange}
+                      margin="dense"
+                      placeholder="e.g., Diamond"
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      {item.gemstone || 'None'}
+                    </Typography>
+                  )}
+                </Grid>
+                
+                {/* Stone Weight - Editable */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Stone Weight
+                  </Typography>
+                  {isEditing ? (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="stone_weight"
+                      value={editedItem.stone_weight || ''}
+                      onChange={handleInputChange}
+                      margin="dense"
+                      InputProps={{
+                        endAdornment: <InputAdornment position="end">ct</InputAdornment>
+                      }}
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      {item.stone_weight ? `${item.stone_weight} ct` : 'N/A'}
+                    </Typography>
+                  )}
+                </Grid>
+                
+                {/* Stone Color/Clarity - Editable */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Stone Color/Clarity
+                  </Typography>
+                  {isEditing ? (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="stone_color_clarity"
+                      value={editedItem.stone_color_clarity || ''}
+                      onChange={handleInputChange}
+                      margin="dense"
+                      placeholder="e.g., G/VS1"
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      {item.stone_color_clarity || 'N/A'}
+                    </Typography>
+                  )}
+                </Grid>
+                
+                {/* Serial Number - Editable */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Serial Number
+                  </Typography>
+                  {isEditing ? (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="serial_number"
+                      value={editedItem.serial_number || ''}
+                      onChange={handleInputChange}
+                      margin="dense"
+                      InputProps={{
+                        style: { fontFamily: 'monospace' }
+                      }}
+                    />
+                  ) : (
+                    <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                      {item.serial_number || 'N/A'}
+                    </Typography>
+                  )}
+                </Grid>
+                
+                {/* Age/Year - Editable */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Age/Year
+                  </Typography>
+                  {isEditing ? (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="age_year"
+                      value={editedItem.age_year || ''}
+                      onChange={handleInputChange}
+                      margin="dense"
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      {item.age_year || 'Unknown'}
+                    </Typography>
+                  )}
+                </Grid>
+                
+                {/* Certification - Editable */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Certification
+                  </Typography>
+                  {isEditing ? (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="certification"
+                      value={editedItem.certification || ''}
+                      onChange={handleInputChange}
+                      margin="dense"
+                      placeholder="e.g., GIA"
+                    />
+                  ) : (
+                    <Typography variant="body2">
+                      {item.certification || 'None'}
+                    </Typography>
+                  )}
                 </Grid>
               </Grid>
             </Paper>
@@ -454,127 +735,135 @@ function JewelryEdit() {
                 </Select>
               </FormControl>
               
-              {/* Customer Selection */}
-              <Autocomplete
-                options={customers}
-                getOptionLabel={(option) => `${option.first_name} ${option.last_name} (${option.phone || 'No Phone'})`}
-                value={customer}
-                onChange={handleCustomerSelect}
-                inputValue={searchTerm}
-                onInputChange={handleCustomerSearch}
-                isOptionEqualToValue={(option, value) => option.id === value.id}
-                renderInput={(params) => (
+              {/* Pricing Information */}
+              <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+                Pricing Information
+              </Typography>
+
+              {/* Cost Basis */}
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="caption" color="textSecondary" gutterBottom display="block">
+                  Cost Basis
+                </Typography>
+                {isEditing ? (
                   <TextField
-                    {...params}
-                    label="Select Customer"
-                    margin="normal"
                     fullWidth
-                  />
-                )}
-              />
-              
-              {/* Price Details */}
-              <Box sx={{ mt: 3 }}>
-                <TextField
-                  fullWidth
-                  label="Selling Price"
-                  type="number"
-                  value={sellingPrice}
-                  onChange={handleSellingPriceChange}
-                  margin="normal"
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                  }}
-                />
-                
-                {/* Discount Section */}
-                <Box sx={{ display: 'flex', alignItems: 'flex-start', mt: 2 }}>
-                  <TextField
-                    label="Discount"
+                    size="small"
+                    name="cost_basis"
                     type="number"
-                    value={discount}
-                    onChange={handleDiscountChange}
-                    sx={{ mr: 2, flex: 2 }}
+                    value={editedItem.cost_basis || 0}
+                    onChange={handleInputChange}
+                    margin="dense"
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>
+                    }}
                   />
-                  <FormControl sx={{ flex: 1 }}>
-                    <InputLabel>Type</InputLabel>
-                    <Select
-                      value={discountType}
-                      onChange={handleDiscountTypeChange}
-                      label="Type"
-                    >
-                      <MenuItem value="percentage">%</MenuItem>
-                      <MenuItem value="amount">$</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Box>
+                ) : (
+                  <Typography variant="body1" fontWeight="medium">
+                    ${formatPrice(item.cost_basis || 0)}
+                  </Typography>
+                )}
               </Box>
-              
-              {/* Totals Summary */}
-              <Box sx={{ mt: 3, bgcolor: 'grey.50', p: 2, borderRadius: 1 }}>
-                <Grid container spacing={1}>
+
+              {/* Metal Value */}
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="caption" color="textSecondary" gutterBottom display="block">
+                  Metal Value
+                </Typography>
+                {isEditing ? (
+                  <TextField
+                    fullWidth
+                    size="small"
+                    name="metal_value"
+                    type="number"
+                    value={editedItem.metal_value || 0}
+                    onChange={handleInputChange}
+                    margin="dense"
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>
+                    }}
+                  />
+                ) : (
+                  <Typography variant="body1">
+                    ${formatPrice(item.metal_value || 0)}
+                  </Typography>
+                )}
+              </Box>
+
+              {/* Retail Price */}
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="caption" color="textSecondary" gutterBottom display="block">
+                  Retail Price
+                </Typography>
+                {isEditing ? (
+                  <TextField
+                    fullWidth
+                    size="small"
+                    name="retail_price"
+                    type="number"
+                    value={editedItem.retail_price || 0}
+                    onChange={handleInputChange}
+                    margin="dense"
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>
+                    }}
+                  />
+                ) : (
+                  <Typography variant="body1" color="success.main" fontWeight="medium">
+                    ${formatPrice(item.retail_price || 0)}
+                  </Typography>
+                )}
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+
+              {/* Markup Information */}
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="subtitle2" color="textSecondary">
+                  Markup Analysis
+                </Typography>
+                
+                <Grid container spacing={2} sx={{ mt: 1 }}>
+                  {/* Cost to Metal Value */}
                   <Grid item xs={6}>
-                    <Typography variant="body2">Base Price:</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" align="right">
-                      ${formatPrice(sellingPrice)}
+                    <Typography variant="caption" color="textSecondary">
+                      Metal Value / Cost
                     </Typography>
-                  </Grid>
-                  
-                  <Grid item xs={6}>
                     <Typography variant="body2">
-                      Discount ({discountType === 'percentage' ? `${discount}%` : `$${formatPrice(discount)}`}):
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" align="right" color="error">
-                      -${formatPrice(discountType === 'percentage' ? (sellingPrice * (discount / 100)) : discount)}
+                      {calculatePercentage(item.metal_value, item.cost_basis)}
                     </Typography>
                   </Grid>
                   
+                  {/* Retail to Cost Markup */}
                   <Grid item xs={6}>
-                    <Typography variant="body2">Subtotal:</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" align="right">
-                      ${formatPrice(totalAmount - tax.amount)}
+                    <Typography variant="caption" color="textSecondary">
+                      Retail / Cost
+                    </Typography>
+                    <Typography variant="body2" color="success.main">
+                      {calculatePercentage(item.retail_price, item.cost_basis)}
                     </Typography>
                   </Grid>
                   
+                  {/* Profit Margin */}
                   <Grid item xs={6}>
-                    <Typography variant="body2">Tax ({(tax.rate * 100).toFixed(0)}%):</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" align="right">
-                      ${formatPrice(tax.amount)}
+                    <Typography variant="caption" color="textSecondary">
+                      Profit Margin
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      {calculateProfitMargin(item.retail_price, item.cost_basis)}
                     </Typography>
                   </Grid>
                   
+                  {/* Profit Amount */}
                   <Grid item xs={6}>
-                    <Typography variant="subtitle1" fontWeight="bold">Total:</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="subtitle1" align="right" fontWeight="bold">
-                      ${formatPrice(totalAmount)}
+                    <Typography variant="caption" color="textSecondary">
+                      Profit Amount
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      ${formatPrice((item.retail_price || 0) - (item.cost_basis || 0))}
                     </Typography>
                   </Grid>
                 </Grid>
-              </Box>
-              
-              {/* Add to Cart Button */}
-              <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  size="large"
-                  startIcon={<AddShoppingCartIcon />}
-                  onClick={handleAddToCart}
-                  disabled={addingToCart || !customer}
-                  sx={{ minWidth: 200 }}
-                >
-                  {addingToCart ? <CircularProgress size={24} color="inherit" /> : 'Add to Cart'}
-                </Button>
               </Box>
             </Paper>
           </Grid>
@@ -596,15 +885,6 @@ function JewelryEdit() {
       </Snackbar>
     </Container>
   );
-}
-
-// Utility function for debouncing
-function debounce(func, wait) {
-  let timeout;
-  return function(...args) {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func.apply(this, args), wait);
-  };
 }
 
 export default JewelryEdit;

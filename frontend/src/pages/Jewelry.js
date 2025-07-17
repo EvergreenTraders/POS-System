@@ -35,7 +35,7 @@ function Jewelry() {
   const [jewelryItems, setJewelryItems] = useState([]);
 
   const handleEditClick = (item) => {
-    navigate('/jewelry-edit', { state: { itemId: item.id } });
+    navigate('/jewelry-edit', { state: { itemId: item.item_id } });
   };
 
   useEffect(() => {
