@@ -1544,6 +1544,7 @@ function GemEstimator() {
 
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedItemIndex, setSelectedItemIndex] = useState(null);
+  const [itemToEdit, setItemToEdit] = useState(null);
   const [itemDetails, setItemDetails] = useState({
     brand: '',
     additionalInfo: '',
@@ -1553,12 +1554,17 @@ function GemEstimator() {
 
   const handleOpenDialog = (index) => {
     setSelectedItemIndex(index);
+    // Store the item being edited
+    setItemToEdit(estimatedItems[index]);
+    
+    // Get existing details from the item if available
+    const currentItem = estimatedItems[index];
     setItemDetails(prev => ({
       ...prev,
-      brand: prev.brand || '',
-      additionalInfo: prev.additionalInfo || '',
-      isVintage: prev.isVintage || false,
-      stamps: prev.stamps || ''
+      brand: currentItem.brand || prev.brand || '',
+      additionalInfo: currentItem.damages || prev.additionalInfo || '',
+      isVintage: currentItem.vintage || prev.isVintage || false,
+      stamps: currentItem.stamps || prev.stamps || ''
     }));
     setOpenDialog(true);
   };
@@ -1566,6 +1572,7 @@ function GemEstimator() {
   const handleCloseDialog = () => {
     setOpenDialog(false);
     setSelectedItemIndex(null);
+    setItemToEdit(null); // Clear the item being edited
   };
 
   const handleDetailChange = (field, value) => {
@@ -1591,6 +1598,8 @@ function GemEstimator() {
       return updatedItems;
     });
     setOpenDialog(false);
+    setSelectedItemIndex(null);
+    setItemToEdit(null); // Clear the item being edited
   };
 
   const calculateTotalGemWeight = () => {
@@ -2494,18 +2503,35 @@ function GemEstimator() {
             {addMetal
               // Filter out the item being edited (if any)
               .filter(metal => {
-                if (!location.state?.itemToEdit) return true;
+                // Check for items being edited via navigation
+                if (location.state?.itemToEdit) {
+                  // Check if this is the item being edited by comparing key properties
+                  const isEditingThisItem = (
+                    metal.preciousMetalType === location.state.itemToEdit.preciousMetalType &&
+                    metal.weight === location.state.itemToEdit.weight &&
+                    metal.purity?.id === location.state.itemToEdit.purity?.id ||
+                    metal.purity?.value === location.state.itemToEdit.metal_purity ||
+                    metal.estimatedValue === location.state.itemToEdit.estimatedValue
+                  );
+                  
+                  // Return false to filter out items that are being edited
+                  if (isEditingThisItem) return false;
+                }
                 
-                // Check if this is the item being edited by comparing key properties
-                const isEditingThisItem = (
-                  metal.preciousMetalType === location.state.itemToEdit.preciousMetalType &&
-                  metal.weight === location.state.itemToEdit.weight &&
-                  metal.purity?.id === location.state.itemToEdit.purity?.id &&
-                  metal.estimatedValue === location.state.itemToEdit.estimatedValue
-                );
+                // Check for items being edited via dialog
+                if (itemToEdit && selectedItemIndex !== null) {
+                  // Check metal properties against the metal in the editing item
+                  const dialogEditItem = itemToEdit;
+                  if (dialogEditItem.precious_metal_type === metal.preciousMetalType &&
+                      dialogEditItem.metal_weight === metal.weight &&
+                      (dialogEditItem.metal_purity === metal.purity?.value || 
+                       dialogEditItem.metal_purity === metal.purity?.purity)) {
+                    return false;
+                  }
+                }
                 
-                // Return true to keep items that are NOT being edited
-                return !isEditingThisItem;
+                // If not being edited in either way, keep the item
+                return true;
               })
               .map((metal, index) => (
                 <Grid item xs={12} key={index}>
@@ -2536,7 +2562,34 @@ function GemEstimator() {
         </Grid>
 
             <Grid container spacing={2} sx={{ mt: 0.25 }}>
-                {diamondSummary.map((diamond, index) => (
+                {diamondSummary
+                  // Filter out diamonds being edited
+                  .filter(diamond => {
+                    // If editing via dialog and this diamond is in the item being edited, filter it out
+                    if (itemToEdit && selectedItemIndex !== null) {
+                      if (itemToEdit.diamonds && itemToEdit.diamonds.some(d => 
+                        d.shape === diamond.shape && 
+                        d.weight === diamond.weight && 
+                        d.clarity === diamond.clarity
+                      )) {
+                        return false;
+                      }
+                    }
+                    
+                    // If editing via navigation
+                    if (location.state?.itemToEdit && location.state.itemToEdit.diamonds) {
+                      if (location.state.itemToEdit.diamonds.some(d => 
+                        d.shape === diamond.shape && 
+                        d.weight === diamond.weight && 
+                        d.clarity === diamond.clarity
+                      )) {
+                        return false;
+                      }
+                    }
+                    
+                    return true;
+                  })
+                  .map((diamond, index) => (
                     <Grid item xs={12} key={index}>
                         <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative'}}>
                           <div>
@@ -2566,7 +2619,34 @@ function GemEstimator() {
             </Grid>
             
             <Grid container spacing={2} sx={{ mt: 0.25 }}>
-                {stoneSummary.map((stone, index) => (
+                {stoneSummary
+                  // Filter out stones being edited
+                  .filter(stone => {
+                    // If editing via dialog and this stone is in the item being edited, filter it out
+                    if (itemToEdit && selectedItemIndex !== null) {
+                      if (itemToEdit.stones && itemToEdit.stones.some(s => 
+                        s.name === stone.name && 
+                        s.weight === stone.weight && 
+                        s.shape === stone.shape
+                      )) {
+                        return false;
+                      }
+                    }
+                    
+                    // If editing via navigation
+                    if (location.state?.itemToEdit && location.state.itemToEdit.stones) {
+                      if (location.state.itemToEdit.stones.some(s => 
+                        s.name === stone.name && 
+                        s.weight === stone.weight && 
+                        s.shape === stone.shape
+                      )) {
+                        return false;
+                      }
+                    }
+                    
+                    return true;
+                  })
+                  .map((stone, index) => (
                     <Grid item xs={12} key={index}>
                         <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative'}}>
                           <div>
@@ -2629,7 +2709,29 @@ function GemEstimator() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {estimatedItems.map((item, index) => (
+                  {estimatedItems
+                    // Filter out the item being edited
+                    .filter((item, index) => {
+                      // If no item is being edited, show all items
+                      if (!itemToEdit && !location.state?.itemToEdit) return true;
+                      
+                      // If an item is currently being edited in the dialog, don't show it
+                      if (itemToEdit && index === selectedItemIndex) return false;
+                      
+                      // Check if this matches the item being edited from navigation
+                      if (location.state?.itemToEdit) {
+                        // Compare key properties to identify the same item
+                        const isEditingThisItem = (
+                          item.precious_metal_type === location.state.itemToEdit.precious_metal_type &&
+                          item.metal_weight === location.state.itemToEdit.metal_weight &&
+                          item.metal_purity === location.state.itemToEdit.metal_purity
+                        );
+                        return !isEditingThisItem;
+                      }
+                      
+                      return true;
+                    })
+                    .map((item, index) => (
                     <TableRow 
                       key={index}
                       sx={{ 
