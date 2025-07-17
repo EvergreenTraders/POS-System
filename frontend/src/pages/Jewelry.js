@@ -34,6 +34,10 @@ function Jewelry() {
   const [loading, setLoading] = useState(true);
   const [jewelryItems, setJewelryItems] = useState([]);
 
+  const handleEditClick = (item) => {
+    navigate('/jewelry-edit', { state: { itemId: item.item_id } });
+  };
+
   useEffect(() => {
     fetchJewelryItems();
   }, []);
@@ -195,6 +199,7 @@ function Jewelry() {
                   <TableCell>Weight</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Date</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -228,6 +233,19 @@ function Jewelry() {
                       <TableCell>{item.metal_weight}g</TableCell>
                       <TableCell>{item.status}</TableCell>
                       <TableCell>{new Date(item.created_at).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        <Button 
+                          variant="contained" 
+                          color="primary"
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation(); // Prevent row selection
+                            handleEditClick(item);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))
                 )}

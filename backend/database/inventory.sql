@@ -1,7 +1,15 @@
 DO $$ 
+
+-- Alter existing jewelry table to drop damages column and rename free_text to notes
 BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'jewelry') THEN
-        ALTER TABLE jewelry ADD COLUMN IF NOT EXISTS free_text VARCHAR(255);
+    -- Drop damages column
+    ALTER TABLE jewelry DROP COLUMN IF EXISTS damages;
+    
+    -- Rename free_text column to notes if it exists, otherwise add notes column
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'jewelry' AND column_name = 'free_text') THEN
+        ALTER TABLE jewelry RENAME COLUMN free_text TO notes;
+    ELSE
+        ALTER TABLE jewelry ADD COLUMN notes TEXT;
     END IF;
 END $$;
 
@@ -13,10 +21,10 @@ CREATE TABLE IF NOT EXISTS jewelry (
     short_desc TEXT,
     category VARCHAR(50) NOT NULL,
     brand VARCHAR(100),
-    damages TEXT,
     vintage BOOLEAN DEFAULT false,
     stamps TEXT,
     images JSONB DEFAULT '[]',
+    notes TEXT,
     
     -- Metal details
     metal_weight DECIMAL(10,2) NOT NULL,
@@ -147,22 +155,6 @@ CREATE TABLE IF NOT EXISTS jewelry_secondary_gems (
 
 -- Create index on item_id for faster lookups
 CREATE INDEX idx_jewelry_secondary_gems_item_id ON jewelry_secondary_gems(item_id);
-
--- Drop all secondary_gem columns from the jewelry table as they are now stored in the jewelry_secondary_gems table
-ALTER TABLE jewelry
-  DROP COLUMN secondary_gem_type,
-  DROP COLUMN secondary_gem_category,
-  DROP COLUMN secondary_gem_size,
-  DROP COLUMN secondary_gem_quantity,
-  DROP COLUMN secondary_gem_shape,
-  DROP COLUMN secondary_gem_weight,
-  DROP COLUMN secondary_gem_color,
-  DROP COLUMN secondary_gem_exact_color,
-  DROP COLUMN secondary_gem_clarity,
-  DROP COLUMN secondary_gem_cut,
-  DROP COLUMN secondary_gem_lab_grown,
-  DROP COLUMN secondary_gem_authentic,
-  DROP COLUMN secondary_gem_value;
 
 -- Create trigger function for secondary_gems updated_at
 CREATE OR REPLACE FUNCTION update_jewelry_secondary_gems_timestamp() RETURNS TRIGGER AS $$
