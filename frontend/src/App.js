@@ -25,6 +25,7 @@ import CustomerEditor from './pages/CustomerEditor';
 import CustomerTicket from './pages/CustomerTicket';
 import CustomerReporting from './pages/CustomerReporting';
 import Cart from './pages/Cart';
+import JewelryEdit from './pages/JewelryEdit';
 
 const theme = createTheme({
   palette: {
@@ -346,6 +347,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <Cart />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/jewelry-edit"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <JewelryEdit />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
