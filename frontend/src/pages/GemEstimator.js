@@ -373,6 +373,67 @@ function GemEstimator() {
     // Check if we're in edit mode and have an item to edit
     if (location.state?.editMode && location.state?.itemToEdit) {
       const itemToEdit = location.state.itemToEdit;
+     
+      // Direct fill for primary gem fields if they exist on itemToEdit
+      // Check if we have direct primary gem properties
+      if (itemToEdit.primary_gem_category) {
+        console.log('Direct primary gem data found in itemToEdit:', itemToEdit);
+        
+        // Set the appropriate gem type
+        if (itemToEdit.primary_gem_category.toLowerCase() === 'diamond') {
+          setAddedGemTypes(prev => ({
+            ...prev,
+            primary: 'diamond'
+          }));
+          
+          // Set primary diamond form directly from itemToEdit
+          const diamondFormData = {
+            shape: itemToEdit.primary_gem_shape || 'Round',
+            clarity: itemToEdit.primary_gem_clarity || 'Flawless',
+            color: itemToEdit.primary_gem_color || 'Colorless',
+            quantity: itemToEdit.primary_gem_quantity || 1,
+            weight: itemToEdit.primary_gem_weight || 0,
+            cut: itemToEdit.primary_gem_cut || '',
+            labGrown: itemToEdit.primary_gem_lab_grown || false,
+            exactColor: itemToEdit.primary_gem_exact_color || 'D',
+            size: itemToEdit.primary_gem_size || ''
+          };
+          
+          setPrimaryDiamondForm(diamondFormData);          
+          // Directly set the state variables that control the dropdown values
+          setExactColor(diamondFormData.exactColor);
+          
+          // Set the estimated value for primary diamond if available
+          if (itemToEdit.primary_gem_value !== undefined) {
+            setEstimatedValues(prev => ({
+              ...prev,
+              primaryDiamond: parseFloat(itemToEdit.primary_gem_value) || 0
+            }));
+          } 
+          
+        } else {
+          setAddedGemTypes(prev => ({
+            ...prev,
+            primary: 'stone'
+          }));
+          
+          // Set primary stone form directly from itemToEdit
+          const stoneFormData = {
+            stoneName: itemToEdit.primary_gem_type || '',
+            shape: itemToEdit.primary_gem_shape || 'Round',
+            color: itemToEdit.primary_gem_color || '',
+            quantity: itemToEdit.primary_gem_quantity || 1,
+            weight: itemToEdit.primary_gem_weight || 0,
+            dimensions: {
+              length: itemToEdit.primary_gem_length || '',
+              width: itemToEdit.primary_gem_width || '',
+              height: itemToEdit.primary_gem_height || ''
+            }
+          };
+          
+          setPrimaryStoneForm(stoneFormData);
+        }
+      }
       
       // Set form values based on the item being edited
       if (itemToEdit.metal_weight) {
@@ -416,18 +477,21 @@ function GemEstimator() {
           priceEstimates: itemToEdit.price_estimates || {}
         };
         setAddMetal([metalItem]);
-      }
-      
-      // If there are stones/gems, handle them
-      if (itemToEdit.diamonds && itemToEdit.diamonds.length > 0) {
-        setDiamondSummary(itemToEdit.diamonds);
-      }
-      
-      if (itemToEdit.stones && itemToEdit.stones.length > 0) {
-        setStoneSummary(itemToEdit.stones);
-      }
+      }   
     }
   }, [location.state]);
+  
+  // Effect to update selectedClarityIndex when diamondClarity is loaded and we're in edit mode
+  useEffect(() => {
+    if (diamondClarity.length > 0 && location.state?.editMode && location.state?.itemToEdit?.primary_gem_clarity) {
+      const clarityToMatch = location.state.itemToEdit.primary_gem_clarity;
+      const clarityIndex = diamondClarity.findIndex(c => c.name === clarityToMatch);
+      
+      if (clarityIndex !== -1) {
+        setSelectedClarityIndex(clarityIndex);
+      }
+    }
+  }, [diamondClarity, location.state]);
 
   useEffect(() => {
     const fetchAllData = async () => {

@@ -1038,7 +1038,7 @@ const CustomerTicket = () => {
           customer,
           editMode: true,
           itemToEdit: itemToEdit.originalData,
-         // returnToTicket: true,
+          // returnToTicket: true,
           ticketItemId: itemId
         } 
       });
@@ -1046,19 +1046,32 @@ const CustomerTicket = () => {
       // If it's jewelry but not from estimator, still go to jewelry estimator
       // Try to parse data from the description
       const description = itemToEdit.description || '';
+      
+      // Create a more complete itemToEdit object that includes gem data
+      const editItemData = {
+        free_text: description,
+        category: itemToEdit.category,
+        price: itemToEdit.price || itemToEdit.value,
+        transaction_type: activeTab === 0 ? 'pawn' : 
+                        activeTab === 1 ? 'buy' : 
+                        activeTab === 3 ? 'retail' : 'buy',
+        // Include metal data if available
+        metal_weight: itemToEdit.metal_weight,
+        precious_metal_type: itemToEdit.precious_metal_type,
+        metal_purity: itemToEdit.metal_purity,
+        price_estimates: itemToEdit.price_estimates,
+        
+        // Include diamond and stone data if available
+        diamonds: itemToEdit.diamonds || [],
+        stones: itemToEdit.stones || []
+      };
+      
       navigate('/gem-estimator', { 
         state: { 
           customer,
           editMode: true,
-          itemToEdit: {
-            free_text: description,
-            category: itemToEdit.category,
-            price: itemToEdit.price || itemToEdit.value,
-            transaction_type: activeTab === 0 ? 'pawn' : 
-                            activeTab === 1 ? 'buy' : 
-                            activeTab === 3 ? 'retail' : 'buy'
-          },
-       //   returnToTicket: true,
+          itemToEdit: editItemData,
+          // returnToTicket: true,
           ticketItemId: itemId
         }
       });
