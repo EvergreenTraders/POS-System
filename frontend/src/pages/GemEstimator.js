@@ -403,6 +403,21 @@ function GemEstimator() {
           // Directly set the state variables that control the dropdown values
           setExactColor(diamondFormData.exactColor);
           
+          // Update shape index to match the selected shape if diamondShapes is loaded
+          if (diamondShapes.length > 0) {
+            const shapeIndex = diamondShapes.findIndex(shape => shape.name === diamondFormData.shape);
+            if (shapeIndex !== -1) {
+              setCurrentShapeIndex(shapeIndex);
+              
+              // Also fetch the diamond sizes for this shape
+              const selectedShape = diamondShapes[shapeIndex];
+              // Use the shape's ID if available, otherwise use shapeIndex + 1 as a fallback
+              const shapeId = selectedShape?.id || (shapeIndex + 1);
+              // Fetch the sizes for the selected shape
+              fetchDiamondSizes(shapeId);
+            }
+          }
+          
           // Set the estimated value for primary diamond if available
           if (itemToEdit.primary_gem_value !== undefined) {
             setEstimatedValues(prev => ({
@@ -492,6 +507,45 @@ function GemEstimator() {
       }
     }
   }, [diamondClarity, location.state]);
+  
+  // Effect to fetch diamond sizes when diamondShapes are loaded in edit mode
+  useEffect(() => {
+    if (diamondShapes.length > 0 && location.state?.editMode && location.state?.itemToEdit?.primary_gem_shape && 
+        location.state?.itemToEdit?.primary_gem_category?.toLowerCase() === 'diamond') {
+      const shapeToMatch = location.state.itemToEdit.primary_gem_shape;
+      const shapeIndex = diamondShapes.findIndex(shape => shape.name === shapeToMatch);
+      
+      if (shapeIndex !== -1) {
+        // Use the shape's ID if available, otherwise use shapeIndex + 1 as a fallback
+        const selectedShape = diamondShapes[shapeIndex];
+        const shapeId = selectedShape?.id || (shapeIndex + 1);
+        
+        // Fetch diamond sizes for the selected shape
+        fetchDiamondSizes(shapeId);
+      }
+    }
+  }, [diamondShapes, location.state]);
+
+  // Effect to update currentShapeIndex when diamondShapes loads and we're in edit mode
+  useEffect(() => {
+    if (diamondShapes.length > 0 && location.state?.editMode && location.state?.itemToEdit?.primary_gem_shape) {
+      // Check if we have a diamond as primary gem
+      if (location.state.itemToEdit.primary_gem_category?.toLowerCase() === 'diamond') {
+        const shapeToMatch = location.state.itemToEdit.primary_gem_shape;
+        const shapeIndex = diamondShapes.findIndex(shape => shape.name === shapeToMatch);
+        
+        if (shapeIndex !== -1) {
+          setCurrentShapeIndex(shapeIndex);
+          
+          // Also fetch the sizes for this shape
+          const selectedShape = diamondShapes[shapeIndex];
+          if (selectedShape && selectedShape.id) {
+            fetchDiamondSizes(selectedShape.id);
+          }
+        }
+      }
+    }
+  }, [diamondShapes, location.state]);
 
   useEffect(() => {
     const fetchAllData = async () => {
@@ -554,6 +608,7 @@ function GemEstimator() {
         // Fetch Diamond Shapes
         const shapesResponse = await axios.get(`${API_BASE_URL}/diamond_shape`);
         const shapesWithImages = shapesResponse.data.map(shape => ({
+          id: shape.id, // Preserve the original ID from the database
           name: shape.shape,
           image: shape.image_path.replace('.jpg', '.png')
         }));
@@ -613,7 +668,10 @@ function GemEstimator() {
     };
 
     fetchAllData();
-    fetchDiamondSizes(1);
+    
+    // Only fetch default diamond sizes (round) if we're not in edit mode
+    if (!location.state?.editMode) 
+      fetchDiamondSizes(1);
     fetchUserPreference();
     if(isCaratConversionEnabled) 
         fetchCaratConversion();
@@ -695,22 +753,56 @@ function GemEstimator() {
   };
 
   // Diamond shape navigation
-  const handleNextShape = () => {
-    setCurrentShapeIndex((prevIndex) => {
-      const nextIndex = Math.min(prevIndex + 1, diamondShapes.length - 1);
-      setCurrentForm(prev => ({ ...prev, shape: diamondShapes[nextIndex].name })); // Update dropdown
-      fetchDiamondSizes(nextIndex+1);
-      return nextIndex;
-    });
-  };
-
   const handlePrevShape = () => {
-    setCurrentShapeIndex((prevIndex) => {
-      const prevIndexValue = Math.max(prevIndex - 1, 0);
-      setCurrentForm(prev => ({ ...prev, shape: diamondShapes[prevIndexValue].name })); // Update dropdown
-      fetchDiamondSizes(prevIndex);
-      return prevIndexValue;
-    });
+    if (currentShapeIndex > 0) {
+      const newIndex = currentShapeIndex - 1;
+      const newShape = diamondShapes[newIndex];
+      
+      // Update the shape index
+      setCurrentShapeIndex(newIndex);
+      
+      // Update the form with the new shape
+      if (newShape) {        
+        // Use the shape's actual ID or fallback to index+1
+        const shapeId = newShape.id || (newIndex + 1);
+        
+        // Update the current form's shape
+        setCurrentForm(prev => ({
+          ...prev,
+          shape: newShape.name,
+          size: ''  // Reset size when changing shape
+        }));
+        
+        // Also fetch the sizes for this shape
+        fetchDiamondSizes(shapeId);
+      }
+    }
+  };
+  
+  const handleNextShape = () => {
+    if (currentShapeIndex < diamondShapes.length - 1) {
+      const newIndex = currentShapeIndex + 1;
+      const newShape = diamondShapes[newIndex];
+      
+      // Update the shape index
+      setCurrentShapeIndex(newIndex);
+      
+      // Update the form with the new shape
+      if (newShape) {        
+        // Use the shape's actual ID or fallback to index+1
+        const shapeId = newShape.id || (newIndex + 1);
+        
+        // Update the current form's shape
+        setCurrentForm(prev => ({
+          ...prev,
+          shape: newShape.name,
+          size: ''  // Reset size when changing shape
+        }));
+        
+        // Also fetch the sizes for this shape
+        fetchDiamondSizes(shapeId);
+      }
+    }
   };
 
   // Image gallery navigation
@@ -943,18 +1035,28 @@ function GemEstimator() {
     // If shape is changed, fetch corresponding sizes
     if (name === 'shape') {      
       // Find the shape object
-      const selectedShape = diamondShapes.find((shape, index) => {
-        if (shape.name === value) {
-          shape.id = index + 1; // Store the ID based on index
-          return true;
-        }
-        return false;
-      });
+      const selectedShape = diamondShapes.find((shape) => shape.name === value);
+      
       if (selectedShape) {
-        fetchDiamondSizes(selectedShape.id);
-        setCurrentShapeIndex(diamondShapes.findIndex(shape => shape.name === selectedShape.name));
-        setCurrentForm(prev => ({ ...prev, image: selectedShape.image })); // Update image
-      } else {
+        
+        // Find the index of the selected shape
+        const newShapeIndex = diamondShapes.findIndex(shape => shape.name === selectedShape.name);        
+        // Use the shape's actual ID from the database if available, otherwise use index+1
+        const shapeId = selectedShape.id || (newShapeIndex + 1);
+        
+        // Update the currentShapeIndex first so the UI image updates immediately
+        setCurrentShapeIndex(newShapeIndex);
+        
+        // Also update the currentForm.shape to ensure it's synchronized
+        setCurrentForm(prev => ({
+          ...prev,
+          shape: value,
+          shapeId: shapeId  // Store the shape ID for reference
+        }));
+        
+        // Then fetch diamond sizes and update the form
+        fetchDiamondSizes(shapeId);
+              } else {
         console.error("No shape found for:", value);
       }
     }
@@ -1929,7 +2031,12 @@ function GemEstimator() {
                       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                         {diamondShapes.length > 0 && (
                           <>
-                            <img src={diamondShapes[currentShapeIndex]?.image} alt={diamondShapes[currentShapeIndex]?.name} style={{ width: '100px', height: '100px' }} />
+                            {/* Find the image based on the current selected shape in the form */}
+                            {(() => {
+                              const currentShape = getCurrentForm().shape || 'Round';
+                              const shapeObj = diamondShapes.find(s => s.name === currentShape) || diamondShapes[currentShapeIndex];
+                              return <img src={shapeObj?.image} alt={shapeObj?.name} style={{ width: '100px', height: '100px' }} />;
+                            })()}
                             <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
                               <IconButton onClick={handlePrevShape} disabled={currentShapeIndex === 0}>
                                 <ArrowBackIcon />
