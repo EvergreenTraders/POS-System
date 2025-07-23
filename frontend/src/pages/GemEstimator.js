@@ -174,7 +174,7 @@ function GemEstimator() {
         primary_gem_shape: primaryStone?.shape || '',
         primary_gem_quantity: primaryStone?.quantity || 0,
         primary_gem_authentic: primaryStone?.authentic || false,
-        primary_gem_type: primaryStone?.type || '',
+        primary_gem_type: primaryStone?.name || '',
         primary_gem_color: primaryStone?.color || '',
         primary_gem_weight: primaryStone?.weight || 0,
         primary_gem_value: primaryStone?.estimatedValue || 0
@@ -379,8 +379,9 @@ function GemEstimator() {
       if (itemToEdit.primary_gem_category) {
         console.log('Direct primary gem data found in itemToEdit:', itemToEdit);
         
-        // Set the appropriate gem type
-        if (itemToEdit.primary_gem_category.toLowerCase() === 'diamond') {
+        // Set the appropriate gem type - with type checking
+        const primaryGemCategory = itemToEdit.primary_gem_category;
+        if (primaryGemCategory.toLowerCase() === 'diamond') {
           setAddedGemTypes(prev => ({
             ...prev,
             primary: 'diamond'
@@ -434,19 +435,23 @@ function GemEstimator() {
           
           // Set primary stone form directly from itemToEdit
           const stoneFormData = {
-            stoneName: itemToEdit.primary_gem_type || '',
+            name: itemToEdit.primary_gem_type || '',
             shape: itemToEdit.primary_gem_shape || 'Round',
             color: itemToEdit.primary_gem_color || '',
             quantity: itemToEdit.primary_gem_quantity || 1,
             weight: itemToEdit.primary_gem_weight || 0,
-            dimensions: {
-              length: itemToEdit.primary_gem_length || '',
-              width: itemToEdit.primary_gem_width || '',
-              height: itemToEdit.primary_gem_height || ''
-            }
+            authentic: itemToEdit.primary_gem_authentic || false,
+            valuationType: 'each'
           };
           
           setPrimaryStoneForm(stoneFormData);
+          // Set the estimated value for primary stone if available
+          if (itemToEdit.primary_gem_value !== undefined) {
+            setEstimatedValues(prev => ({
+              ...prev,
+              primaryGemstone: parseFloat(itemToEdit.primary_gem_value) || 0
+            }));
+          }
         }
       }
       
@@ -512,19 +517,60 @@ function GemEstimator() {
   useEffect(() => {
     if (diamondShapes.length > 0 && location.state?.editMode && location.state?.itemToEdit?.primary_gem_shape && 
         location.state?.itemToEdit?.primary_gem_category?.toLowerCase() === 'diamond') {
-      const shapeToMatch = location.state.itemToEdit.primary_gem_shape;
-      const shapeIndex = diamondShapes.findIndex(shape => shape.name === shapeToMatch);
-      
-      if (shapeIndex !== -1) {
-        // Use the shape's ID if available, otherwise use shapeIndex + 1 as a fallback
-        const selectedShape = diamondShapes[shapeIndex];
-        const shapeId = selectedShape?.id || (shapeIndex + 1);
+        const shapeToMatch = location.state.itemToEdit.primary_gem_shape;
+        if (shapeToMatch) {
+          const shapeIndex = diamondShapes.findIndex(shape => shape.name === shapeToMatch);
+          
+          if (shapeIndex !== -1) {
+            // Use the shape's ID if available, otherwise use shapeIndex + 1 as a fallback
+            const selectedShape = diamondShapes[shapeIndex];
+            const shapeId = selectedShape?.id || (shapeIndex + 1);
+            
+            // Fetch diamond sizes for the selected shape
+            fetchDiamondSizes(shapeId);
+          }
+        }
+      }
+  }, [diamondShapes, location.state]);
+  
+  // Effect to update stone color when stoneColors are loaded in edit mode
+  useEffect(() => {
+    // Make sure we have stoneColors loaded and we're in edit mode
+    if (stoneColors.length > 0 && location.state?.editMode && location.state?.itemToEdit) {
+      // Make sure we have a primary gem category and it's a stone
+      const primaryGemCategory = location.state.itemToEdit.primary_gem_category;
+      if (primaryGemCategory && typeof primaryGemCategory === 'string' && 
+          primaryGemCategory.toLowerCase() === 'stone') {
         
-        // Fetch diamond sizes for the selected shape
-        fetchDiamondSizes(shapeId);
+        // Get the color to match, but make sure it's not undefined
+        const colorToMatch = location.state.itemToEdit.primary_gem_color;
+        if (colorToMatch && typeof colorToMatch === 'string') {
+          // Find matching color, checking that color.name is a string
+          const matchingColor = stoneColors.find(color => 
+            color.name && typeof color.name === 'string' && 
+            color.name.toLowerCase() === colorToMatch.toLowerCase()
+          );
+          
+          if (matchingColor) {
+            // Update the primary stone form with the correct color ID
+            setPrimaryStoneForm(prev => ({
+              ...prev,
+              color: colorToMatch,
+              color_id: matchingColor.id
+            }));
+          }
+          
+          // Also update the estimated value if available
+          if (location.state.itemToEdit.primary_gem_value !== undefined) {
+            setEstimatedValues(prev => ({
+              ...prev,
+              primaryGemstone: parseFloat(location.state.itemToEdit.primary_gem_value) || 0
+            }));
+          }
+        }
       }
     }
-  }, [diamondShapes, location.state]);
+  }, [stoneColors, location.state]);
 
   // Effect to update currentShapeIndex when diamondShapes loads and we're in edit mode
   useEffect(() => {
@@ -694,7 +740,7 @@ function GemEstimator() {
 
   const fetchDiamondSizes = async (diamondShapeId) => {
     try {
-      const response = await axios.get(`http://localhost:5000/api/diamond_size_weight/${diamondShapeId}`);
+      const response = await axios.get(`${API_BASE_URL}/diamond_size_weight/${diamondShapeId}`);
       setDiamondSizes(response.data);
     } catch (error) {
       console.error('Error fetching diamond sizes:', error);
@@ -1219,7 +1265,7 @@ function GemEstimator() {
     const newStone = {
       name: currentForm.name,
       shape: currentForm.shape,
-      weight: currentForm.weight+' ct',
+      weight: currentForm.weight,
       color: currentForm.color,
       quantity: currentForm.quantity,
       authentic: currentForm.authentic,
@@ -1292,7 +1338,12 @@ function GemEstimator() {
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Type *</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
             {colorSpecificStoneTypes
-              .filter(stone => stone.color_id === getCurrentStoneForm().color_id)
+              .filter(stone => {
+                const currentForm = getCurrentStoneForm();
+                // Make sure we have a color_id on both sides to compare
+                return stone.color_id && currentForm && currentForm.color_id && 
+                       stone.color_id === currentForm.color_id;
+              })
               .map((stone) => (
                 <Paper
                   key={stone.type}
