@@ -542,21 +542,64 @@ function GemEstimator() {
       if (primaryGemCategory && typeof primaryGemCategory === 'string' && 
           primaryGemCategory.toLowerCase() === 'stone') {
         
-        // Get the color to match, but make sure it's not undefined
+        // Get the color to match from the item being edited
         const colorToMatch = location.state.itemToEdit.primary_gem_color;
         if (colorToMatch && typeof colorToMatch === 'string') {
-          // Find matching color, checking that color.name is a string
-          const matchingColor = stoneColors.find(color => 
-            color.name && typeof color.name === 'string' && 
-            color.name.toLowerCase() === colorToMatch.toLowerCase()
-          );
           
-          if (matchingColor) {
-            // Update the primary stone form with the correct color ID
+          // Try to find an exact match first (case insensitive)
+          // Check both color.name and color.color properties
+          let matchingColor = stoneColors.find(color => {
+            if (color.name && typeof color.name === 'string' && 
+                color.name.toLowerCase() === colorToMatch.toLowerCase()) {
+              return true;
+            }
+            if (color.color && typeof color.color === 'string' && 
+                color.color.toLowerCase() === colorToMatch.toLowerCase()) {
+              return true;
+            }
+            return false;
+          });
+          // If no exact match, try to find a partial match
+          if (!matchingColor) {
+            matchingColor = stoneColors.find(color => {
+              // Check name property
+              if (color.name && typeof color.name === 'string' && 
+                 (color.name.toLowerCase().includes(colorToMatch.toLowerCase()) || 
+                  colorToMatch.toLowerCase().includes(color.name.toLowerCase()))) {
+                return true;
+              }
+              // Check color property
+              if (color.color && typeof color.color === 'string' && 
+                 (color.color.toLowerCase().includes(colorToMatch.toLowerCase()) || 
+                  colorToMatch.toLowerCase().includes(color.color.toLowerCase()))) {
+                return true;
+              }
+              return false;
+            });
+          }
+          
+          // If still no match, use the first color as default
+          if (!matchingColor && stoneColors.length > 0) {
+            matchingColor = stoneColors[0];
+            console.log('No matching color found, using default:', matchingColor.name);
+          }
+          
+          if (matchingColor) {            
+            // Determine which property to use as the color value
+            let colorValue;
+            if (matchingColor.color) {
+              colorValue = matchingColor.color;
+            } else if (matchingColor.name) {
+              colorValue = matchingColor.name;
+            } else {
+              colorValue = colorToMatch; // Fallback to original if nothing else is available
+            }
+                        
+            // Update the primary stone form with the correct color and color ID
             setPrimaryStoneForm(prev => ({
               ...prev,
-              color: colorToMatch,
-              color_id: matchingColor.id
+              color: colorValue,
+              color_id: matchingColor.id || prev.color_id
             }));
           }
           
@@ -748,7 +791,7 @@ function GemEstimator() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState('primary_gem_diamond');
+  const [activeTab, setActiveTab] = useState(location.state?.itemToEdit?.primary_gem_category?.toLowerCase() === 'stone' ? 'primary_gem_stone' : 'primary_gem_diamond');
 
   const getCurrentForm = () => {
     return activeTab.startsWith('primary') ? primaryDiamondForm : secondaryDiamondForm;
