@@ -243,24 +243,39 @@ function GemEstimator() {
       // Flag to identify this as coming from the jewelry estimator
       sourceEstimator: 'jewelry',
       // Store original data for future edits
-      originalData: { ...jewelryItem }
+      originalData: { ...jewelryItem },
+      // Add timestamp to identify newly added items
+      _timestamp: Date.now(),
+      // If editing from a ticket, store the original ticket item ID
+      originalTicketItemId: editMode ? ticketItemId : null
     };
 
-    // If we're in edit mode and need to return to the ticket
+    // Add to estimated items regardless of edit mode
+    setEstimatedItems(prev => {
+      const newItems = [...prev, itemWithPrices];      
+      // Save to sessionStorage to persist through navigation
+      sessionStorage.setItem('gemEstimatorItems', JSON.stringify(newItems));
+      
+      return newItems;
+    });
+    
+    // Navigate back to customer ticket if in edit mode
     if (editMode && returnToTicket && location.state?.customer) {
-      navigate('/customer-ticket', { 
-        state: { 
-          customer: location.state.customer,
-          updatedItem: itemWithPrices,
-          ticketItemId: ticketItemId,
-          fromEstimator: 'jewelry'
-        } 
-      });
+      // Add a slight delay to ensure state update completes
+      setTimeout(() => {
+        navigate('/customer-ticket', { 
+          state: { 
+            customer: location.state.customer,
+            updatedItem: itemWithPrices,
+            ticketItemId: ticketItemId,
+            fromEstimator: 'jewelry',
+            // Pass the full items array to ensure it's available
+            estimatedItems: [...estimatedItems, itemWithPrices]
+          } 
+        });
+      }, 100); // Small delay to ensure state updates
       return;
     }
-    
-    // Add to estimated items if not in edit mode
-    setEstimatedItems(prev => [...prev, itemWithPrices]);
 
     // Reset form state
     setAddMetal([]);
@@ -324,8 +339,24 @@ function GemEstimator() {
   const [secondaryStoneForm, setSecondaryStoneForm] = useState(initialStoneForm);
 
   const [estimatedItems, setEstimatedItems] = useState(() => {
-    // Initialize from location state if available (coming back from checkout)
-    return location.state?.items || [];
+    // First try to get items from location state (highest priority)
+    if (location.state?.items && location.state.items.length > 0) {
+      return location.state.items;
+    }
+    
+    // Then try to load from sessionStorage (to persist through navigation)
+    try {
+      const savedItems = sessionStorage.getItem('gemEstimatorItems');
+      if (savedItems) {
+        const parsedItems = JSON.parse(savedItems);
+        return parsedItems;
+      }
+    } catch (error) {
+      console.error('Error loading saved items:', error);
+    }
+    
+    // Default to empty array if nothing is found
+    return [];
   });
 
   const [estimatedValues, setEstimatedValues] = useState({
@@ -2975,23 +3006,34 @@ function GemEstimator() {
                 </TableHead>
                 <TableBody>
                   {estimatedItems
-                    // Filter out the item being edited
+                    // Modified filter to properly handle items in edit mode
                     .filter((item, index) => {
+                      console.log("Filtering item:", item, "at index:", index);
+                      
+                      // Always show items that were just added (they won't have an ID yet or will have a new timestamp)
+                      const isNewlyAdded = item._timestamp && (Date.now() - item._timestamp < 10000);
+                      if (isNewlyAdded) {
+                        console.log("Keeping newly added item");
+                        return true;
+                      }
+
                       // If no item is being edited, show all items
-                      if (!itemToEdit && !location.state?.itemToEdit) return true;
+                      if (!itemToEdit && !location.state?.itemToEdit) {
+                        console.log("No edit mode, showing all items");
+                        return true;
+                      }
                       
-                      // If an item is currently being edited in the dialog, don't show it
-                      if (itemToEdit && index === selectedItemIndex) return false;
+                      // If an item is currently being edited in the dialog, don't show the original
+                      if (itemToEdit && index === selectedItemIndex) {
+                        return false;
+                      }
                       
-                      // Check if this matches the item being edited from navigation
-                      if (location.state?.itemToEdit) {
-                        // Compare key properties to identify the same item
-                        const isEditingThisItem = (
-                          item.precious_metal_type === location.state.itemToEdit.precious_metal_type &&
-                          item.metal_weight === location.state.itemToEdit.metal_weight &&
-                          item.metal_purity === location.state.itemToEdit.metal_purity
-                        );
-                        return !isEditingThisItem;
+                      // For items from navigation, only hide the exact one being edited
+                      // by comparing ID instead of properties
+                      if (location.state?.itemToEdit && location.state?.ticketItemId) {
+                        if (item.originalTicketItemId === location.state.ticketItemId) {
+                          return false;
+                        }
                       }
                       
                       return true;
