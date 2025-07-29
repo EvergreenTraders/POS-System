@@ -133,8 +133,11 @@ function GemEstimator() {
   };
 
   const handleFinishEstimation = () => {
+    // Get the most recent metal data - use the latest from addMetal array
+    const latestMetalData = addMetal.length > 0 ? {...addMetal[addMetal.length - 1]} : {};
+    
     const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
-    const totalWeight = parseFloat(addMetal[0]?.weight || 0) + gemWeightInGrams;
+    const totalWeight = parseFloat(latestMetalData.weight || 0) + gemWeightInGrams;
 
     // Get all secondary diamonds and stones
     const secondaryDiamonds = diamondSummary.filter(d => !d.isPrimary);
@@ -147,15 +150,15 @@ function GemEstimator() {
     // Create new item with all required jewelry fields
     const jewelryItem = {
       // Basic item details
-      metal_weight: addMetal[0]?.weight,
-      precious_metal_type: addMetal[0]?.preciousMetalType,
-      non_precious_metal_type: addMetal[0]?.nonPreciousMetalType || null,
-      metal_purity: addMetal[0]?.purity?.purity || addMetal[0]?.purity?.value,
-      category: addMetal[0]?.metalCategory,
-      jewelry_color: addMetal[0]?.jewelryColor,
-      metal_spot_price: addMetal[0]?.spotPrice,
-      est_metal_value: addMetal[0]?.estimatedValue?.toFixed(2),
-      purity_value: addMetal[0]?.purity?.value,
+      metal_weight: latestMetalData.weight,
+      precious_metal_type: latestMetalData.preciousMetalType,
+      non_precious_metal_type: latestMetalData.nonPreciousMetalType || null,
+      metal_purity: latestMetalData.purity?.purity || latestMetalData.purity?.value,
+      category: latestMetalData.metalCategory,
+      jewelry_color: latestMetalData.jewelryColor,
+      metal_spot_price: latestMetalData.spotPrice,
+      est_metal_value: latestMetalData.estimatedValue?.toFixed(2),
+      purity_value: latestMetalData.purity?.value,
 
       // Primary gem details
       primary_gem_category: addedGemTypes.primary || null,
@@ -226,9 +229,9 @@ function GemEstimator() {
       free_text: freeText || '',
       
       // Additional jewelry details - update short_desc to handle multiple secondary gems
-      short_desc: addMetal[0] ? `${addMetal[0].weight}g ${addMetal[0].purity?.purity || addMetal[0].purity?.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
+      short_desc: latestMetalData.weight ? `${latestMetalData.weight}g ${latestMetalData.purity?.purity || latestMetalData.purity?.value} ${latestMetalData.preciousMetalType} ${latestMetalData.metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
 
-      long_desc: addMetal[0] ? `${addMetal[0].purity?.purity || addMetal[0].purity?.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}` : ''
+      long_desc: latestMetalData.purity ? `${latestMetalData.purity?.purity || latestMetalData.purity?.value} ${latestMetalData.preciousMetalType} ${latestMetalData.metalCategory}` : ''
     };
     console.log("jewelryItem", jewelryItem);
 
