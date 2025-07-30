@@ -273,28 +273,16 @@ function GemEstimator() {
       originalTicketItemId: editMode ? ticketItemId : null
     };
 
-    // Always add the current item to the estimatedItems array first
+    // Add the current item to the estimatedItems array
     setEstimatedItems(prev => {
-      // Create the updated items array
       let updatedItems;
       
       if (editMode) {
-        // For edit mode: find and replace the existing item
-        const existingItemIndex = prev.findIndex(item => 
-          item.originalTicketItemId === ticketItemId || 
-          (item._timestamp && item._timestamp === itemWithPrices._timestamp)
-        );
-        
-        if (existingItemIndex !== -1) {
-          // Replace existing item
-          updatedItems = [...prev];
-          updatedItems[existingItemIndex] = itemWithPrices;
-        } else {
-          // Add as new item if not found
-          updatedItems = [...prev, itemWithPrices];
-        }
+        // In edit mode, we want to replace any existing items or simply add this as the only item
+        // This ensures the estimated items list only contains the edited item
+        updatedItems = [itemWithPrices]; // Just keep the edited item, discard others
       } else {
-        // Normal add for non-edit mode
+        // Normal add for non-edit mode - append to existing items
         updatedItems = [...prev, itemWithPrices];
       }
       
@@ -313,12 +301,6 @@ function GemEstimator() {
           } 
         });
       } else {
-        // For both edit and non-edit modes, show success message
-        const message = editMode 
-          ? 'Item successfully updated in estimated items list' 
-          : 'Item successfully added to estimated items list';
-        showSnackbar(message, 'success');
-        
         // Clear the summary lists immediately
         setAddMetal([]);
         setDiamondSummary([]);
@@ -399,6 +381,13 @@ function GemEstimator() {
   const [secondaryStoneForm, setSecondaryStoneForm] = useState(initialStoneForm);
 
   const [estimatedItems, setEstimatedItems] = useState(() => {
+    // When in edit mode, start with an empty array - items will be added after editing
+    if (location.state?.editMode && location.state?.ticketItemId) {
+      // Clear any previous items in sessionStorage for a clean edit experience
+      sessionStorage.removeItem('gemEstimatorItems');
+      return [];
+    }
+    
     // First try to get items from location state (highest priority)
     if (location.state?.items && location.state.items.length > 0) {
       return location.state.items;
@@ -2025,11 +2014,11 @@ function GemEstimator() {
     });
     
     if (editMode && ticketItemId) {
-      // If in edit mode, pass updatedItem and ticketItemId to trigger replacement
-      // Get the item that matches the ticketItemId
-      const editedItem = processedItems.find(item => item.originalTicketItemId === ticketItemId);
-      
-      if (editedItem) {
+      // In edit mode, we now only have one item (the edited one)
+      // No need to search, just use the first item in the processed items
+      if (processedItems.length > 0) {
+        const editedItem = processedItems[0]; // Use the first item
+        
         navigate('/customer-ticket', {
           state: {
             customer: customerData,
