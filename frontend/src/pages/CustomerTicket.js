@@ -335,12 +335,29 @@ const CustomerTicket = () => {
       const updatedItem = location.state.updatedItem;
       const ticketItemId = location.state.ticketItemId;
       const isDuplicate = location.state?.isDuplicate || false;
-      
+  
       // Create a base item with common properties from the updated item
+      
+      // Extract gem shape - using optional chaining for cleaner code
+      const gemShape = updatedItem?.primary_gem_shape || 
+                      updatedItem?.diamonds?.[0]?.shape || 
+                      updatedItem?.stones?.[0]?.shape || 
+                      updatedItem?.originalData?.primary_gem_shape || 
+                      'Round';
+      
+      // Create gem description component
+      const gemDescription = gemShape ? ` ${gemShape}` : '';
+      
+      // Extract metal category with optional chaining for cleaner code
+      const metalCategory = updatedItem?.metal_category || 
+                           updatedItem?.category || 
+                           updatedItem?.originalData?.metal_category || 
+                           'Jewelry';
+      
       const baseItem = {
         id: ticketItemId,
-        description: `${updatedItem.metal_weight}g ${updatedItem.metal_purity} ${updatedItem.precious_metal_type} ${updatedItem.metal_category}${updatedItem.free_text ? ` - ${updatedItem.free_text}` : ''}`,
-        category: updatedItem.metal_category || 'Jewelry',
+        description: `${updatedItem.metal_weight || '0'}g ${updatedItem.metal_purity || ''} ${updatedItem.precious_metal_type || ''} ${metalCategory}${gemDescription}${updatedItem.free_text ? ` - ${updatedItem.free_text}` : ''}`,
+        category: metalCategory,
         // Store the original estimator data for editing
         originalData: { ...updatedItem },
         sourceEstimator: 'jewelry'
@@ -1038,7 +1055,7 @@ const CustomerTicket = () => {
           customer,
           editMode: true,
           itemToEdit: itemToEdit.originalData,
-          // returnToTicket: true,
+          returnToTicket: true,
           ticketItemId: itemId
         } 
       });
@@ -1071,7 +1088,7 @@ const CustomerTicket = () => {
           customer,
           editMode: true,
           itemToEdit: editItemData,
-          // returnToTicket: true,
+          returnToTicket: true,
           ticketItemId: itemId
         }
       });

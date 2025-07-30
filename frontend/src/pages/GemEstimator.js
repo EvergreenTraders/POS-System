@@ -29,7 +29,9 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Divider
+  Divider,
+  Snackbar,
+  Alert
 } from '@mui/material';
 import config from '../config';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -66,6 +68,23 @@ function GemEstimator() {
   const [returnToTicket, setReturnToTicket] = useState(location.state?.returnToTicket || false);
   const [ticketItemId, setTicketItemId] = useState(location.state?.ticketItemId || null);
   const [priceEstimates, setPriceEstimates] = useState({ pawn: 0, buy: 0, melt: 0, retail: 0 });
+  
+  // Snackbar state
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'info'
+  });
+  
+  // Function to show snackbar messages
+  const showSnackbar = (message, severity = 'info') => {
+    setSnackbar({ open: true, message, severity });
+  };
+  
+  // Function to hide snackbar
+  const handleCloseSnackbar = () => {
+    setSnackbar({ ...snackbar, open: false });
+  };
   const [customer, setCustomer] = useState(location.state?.customer || null);
   const [transactionType, setTransactionType] = useState(location.state?.itemToEdit?.transaction_type || 'buy');
   const [freeText, setFreeText] = useState(location.state?.itemToEdit?.free_text || '');
@@ -133,6 +152,7 @@ function GemEstimator() {
   };
 
   const handleFinishEstimation = () => {
+    // Store the summary data before clearing it
     // Get the most recent metal data - use the latest from addMetal array
     const latestMetalData = addMetal.length > 0 ? {...addMetal[addMetal.length - 1]} : {};
     
@@ -253,30 +273,67 @@ function GemEstimator() {
       originalTicketItemId: editMode ? ticketItemId : null
     };
 
-    // Add to estimated items regardless of edit mode
+    // Always add the current item to the estimatedItems array first
     setEstimatedItems(prev => {
-      const newItems = [...prev, itemWithPrices];      
-      // Save to sessionStorage to persist through navigation
-      sessionStorage.setItem('gemEstimatorItems', JSON.stringify(newItems));
+      // Create the updated items array
+      let updatedItems;
       
-      return newItems;
-    });
-    
-    // Navigate back to customer ticket if in edit mode
-    if (editMode && returnToTicket && location.state?.customer) {
-      // Add a slight delay to ensure state update completes
-      setTimeout(() => {
+      if (editMode) {
+        // For edit mode: find and replace the existing item
+        const existingItemIndex = prev.findIndex(item => 
+          item.originalTicketItemId === ticketItemId || 
+          (item._timestamp && item._timestamp === itemWithPrices._timestamp)
+        );
+        
+        if (existingItemIndex !== -1) {
+          // Replace existing item
+          updatedItems = [...prev];
+          updatedItems[existingItemIndex] = itemWithPrices;
+        } else {
+          // Add as new item if not found
+          updatedItems = [...prev, itemWithPrices];
+        }
+      } else {
+        // Normal add for non-edit mode
+        updatedItems = [...prev, itemWithPrices];
+      }
+      
+      // Save to sessionStorage to persist through navigation
+      sessionStorage.setItem('gemEstimatorItems', JSON.stringify(updatedItems));
+      
+      // In edit mode, don't automatically navigate back to CustomerTicket
+      // User will need to explicitly hit "Add to Ticket" to return
+      if (!editMode && returnToTicket && location.state?.customer) {
+        // Only navigate automatically in non-edit mode
         navigate('/customer-ticket', { 
           state: { 
             customer: location.state.customer,
-            updatedItem: itemWithPrices,
-            ticketItemId: ticketItemId,
-            fromEstimator: 'jewelry',
-            // Pass the full items array to ensure it's available
-            estimatedItems: [...estimatedItems, itemWithPrices]
+            from: 'gemEstimator',
+            estimatedItems: updatedItems
           } 
         });
-      }, 100); // Small delay to ensure state updates
+      } else {
+        // For both edit and non-edit modes, show success message
+        const message = editMode 
+          ? 'Item successfully updated in estimated items list' 
+          : 'Item successfully added to estimated items list';
+        showSnackbar(message, 'success');
+        
+        // Clear the summary lists immediately
+        setAddMetal([]);
+        setDiamondSummary([]);
+        setStoneSummary([]);
+        setFreeText('');
+        setMetalFormState({});
+        setTotalMetalValue(0);
+      }
+      
+      // Return the updated array for the state update
+      return updatedItems;
+    });
+    
+    // Early return to prevent form reset if we're navigating back
+    if (editMode && returnToTicket && location.state?.customer) {
       return;
     }
 
@@ -1967,6 +2024,27 @@ function GemEstimator() {
       };
     });
     
+    if (editMode && ticketItemId) {
+      // If in edit mode, pass updatedItem and ticketItemId to trigger replacement
+      // Get the item that matches the ticketItemId
+      const editedItem = processedItems.find(item => item.originalTicketItemId === ticketItemId);
+      
+      if (editedItem) {
+        navigate('/customer-ticket', {
+          state: {
+            customer: customerData,
+            updatedItem: editedItem, // Pass the single updated item
+            ticketItemId: ticketItemId, // Pass the original ticket item ID
+            fromEstimator: 'jewelry', // Special flag for the jewelry estimator
+            from: 'gemEstimator' // Keep original from flag for backward compatibility
+          }
+        });
+        showSnackbar('Item updated successfully', 'success');
+        return;
+      }
+    }
+    
+    // Default behavior for non-edit mode or if edited item not found
     navigate('/customer-ticket', {
       state: {
         customer: customerData,
@@ -3011,18 +3089,14 @@ function GemEstimator() {
                   {estimatedItems
                     // Modified filter to properly handle items in edit mode
                     .filter((item, index) => {
-                      console.log("Filtering item:", item, "at index:", index);
-                      
                       // Always show items that were just added (they won't have an ID yet or will have a new timestamp)
                       const isNewlyAdded = item._timestamp && (Date.now() - item._timestamp < 10000);
                       if (isNewlyAdded) {
-                        console.log("Keeping newly added item");
                         return true;
                       }
 
                       // If no item is being edited, show all items
                       if (!itemToEdit && !location.state?.itemToEdit) {
-                        console.log("No edit mode, showing all items");
                         return true;
                       }
                       
@@ -3277,6 +3351,22 @@ function GemEstimator() {
           </Button>
         </DialogActions>
       </Dialog>
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert 
+          onClose={handleCloseSnackbar} 
+          severity={snackbar.severity} 
+          sx={{ width: '100%' }}
+          variant="filled"
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }
