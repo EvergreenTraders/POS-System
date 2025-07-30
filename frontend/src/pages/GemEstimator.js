@@ -1894,18 +1894,14 @@ function GemEstimator() {
 
   const handleOpenDialog = (index) => {
     setSelectedItemIndex(index);
-    // Store the item being edited
-    setItemToEdit(estimatedItems[index]);
-    
-    // Get existing details from the item if available
     const currentItem = estimatedItems[index];
-    setItemDetails(prev => ({
-      ...prev,
-      brand: currentItem.brand || prev.brand || '',
-      additionalInfo: currentItem.damages || prev.additionalInfo || '',
-      isVintage: currentItem.vintage || prev.isVintage || false,
-      stamps: currentItem.stamps || prev.stamps || ''
-    }));
+    
+    setItemDetails({
+      brand: currentItem.brand || '',
+      additionalInfo: currentItem.notes || '',  // Initialize additionalInfo with the item's notes
+      isVintage: currentItem.vintage || false,
+      stamps: currentItem.stamps || ''
+    });
     setOpenDialog(true);
   };
 
