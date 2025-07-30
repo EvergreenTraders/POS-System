@@ -90,6 +90,7 @@ function SystemConfig() {
   const [spotPrices, setSpotPrices] = useState({});
   const [caratConversion, setCaratConversion] = useState(null);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
+  const [isInventoryHoldPeriodEnabled, setIsInventoryHoldPeriodEnabled] = useState(false);
   const [gramsInput, setGramsInput] = useState('');
   const [diamondEstimates, setDiamondEstimates] = useState([]);
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
@@ -243,10 +244,14 @@ function SystemConfig() {
         const response = await axios.get(`${API_BASE_URL}/user_preferences`);
         const cameraPreference = response.data.find(pref => pref.preference_name === 'cameraEnabled');
         setIsCameraEnabled(cameraPreference ? cameraPreference.preference_value === 'true' : false);
+        
         const caratConversionPreference = response.data.find(pref => pref.preference_name === 'caratConversion');
         setIsCaratConversionEnabled(caratConversionPreference ? caratConversionPreference.preference_value === 'true' : false);
+        
+        const inventoryHoldPeriodPreference = response.data.find(pref => pref.preference_name === 'inventoryHoldPeriodEnabled');
+        setIsInventoryHoldPeriodEnabled(inventoryHoldPeriodPreference ? inventoryHoldPeriodPreference.preference_value === 'true' : false);
       } catch (error) {
-        console.error('Error fetching camera preference:', error);
+        console.error('Error fetching user preference:', error);
       }
     };
 
@@ -472,8 +477,8 @@ function SystemConfig() {
     setIsCameraEnabled(newValue);
     try {
       await axios.put(`${API_BASE_URL}/user_preferences`, {
-        name: 'cameraEnabled',
-        value: newValue.toString()
+        preference_name: 'cameraEnabled',
+        preference_value: newValue.toString()
       });
     } catch (error) {
       console.error('Error updating camera preference:', error);
@@ -509,24 +514,44 @@ function SystemConfig() {
   };
 
   const handleCaratConversionToggle = async (event) => {
-    const newValue = event.target.checked;
-    setIsCaratConversionEnabled(newValue);
+    const isEnabled = event.target.checked;
+    setIsCaratConversionEnabled(isEnabled);
     try {
       await axios.put(`${API_BASE_URL}/user_preferences`, {
-        name: 'caratConversion',
-        value: newValue.toString()
+        preference_name: 'caratConversion',
+        preference_value: isEnabled.toString()
       });
     } catch (error) {
-      console.error('Error updating carat conversion:', error);
-      setIsCaratConversionEnabled(!newValue); 
+      console.error('Error updating carat conversion preference:', error);
+      // Revert on error
+      setIsCaratConversionEnabled(!isEnabled);
       setSnackbar({
         open: true,
-        message: 'Failed to update carat conversion',
+        message: 'Failed to update carat conversion preference',
         severity: 'error',
       });
     }
   };
 
+  const handleInventoryHoldPeriodToggle = async (event) => {
+    const isEnabled = event.target.checked;
+    setIsInventoryHoldPeriodEnabled(isEnabled);
+    try {
+      await axios.put(`${API_BASE_URL}/user_preferences`, {
+        preference_name: 'inventoryHoldPeriodEnabled',
+        preference_value: isEnabled.toString()
+      });
+    } catch (error) {
+      console.error('Error updating inventory hold period preference:', error);
+      // Revert on error
+      setIsInventoryHoldPeriodEnabled(!isEnabled);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update inventory hold period preference',
+        severity: 'error',
+      });
+    }
+  };
 
   const handleInventoryHoldPeriodChange = async (event) => {
     const newDays = parseInt(event.target.value);
@@ -637,21 +662,34 @@ function SystemConfig() {
           </ConfigSection>
 
           <ConfigSection>
+            <Box display="flex" alignItems="center" mb={2}>
+              <Typography variant="h6" gutterBottom>
+                Inventory Hold Period
+              </Typography>
+              <Switch
+                checked={isInventoryHoldPeriodEnabled}
+                onChange={handleInventoryHoldPeriodToggle}
+                color="primary"
+                inputProps={{ 'aria-label': 'toggle inventory hold period' }}
+                sx={{ ml: 2 }}
+              />
+            </Box>
             <Grid container spacing={3}>
               <Grid item xs={12} md={6}>
-              <TextField
-                label="Hold Period Duration"
-                type="number"
-                value={inventoryHoldPeriod.days}
-                onChange={(e) => setInventoryHoldPeriod(prev => ({ ...prev, days: e.target.value }))}
-                onBlur={(e) => handleInventoryHoldPeriodChange(e)}
-                InputProps={{
-                  endAdornment: <InputAdornment position="end">days</InputAdornment>,
-                }}
-                helperText="Number of days to keep inventory items in HOLD status"
-                fullWidth
-              />
-          </Grid>
+                <TextField
+                  label="Hold Period Duration"
+                  type="number"
+                  value={inventoryHoldPeriod.days}
+                  onChange={(e) => setInventoryHoldPeriod(prev => ({ ...prev, days: e.target.value }))}
+                  onBlur={(e) => handleInventoryHoldPeriodChange(e)}
+                  InputProps={{
+                    endAdornment: <InputAdornment position="end">days</InputAdornment>,
+                  }}
+                  helperText="Number of days to keep inventory items in HOLD status"
+                  fullWidth
+                  disabled={!isInventoryHoldPeriodEnabled}
+                />
+              </Grid>
             </Grid>
           </ConfigSection>
 

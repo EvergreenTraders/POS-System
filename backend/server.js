@@ -632,10 +632,10 @@ app.get('/api/user_preferences', async (req, res) => {
 // PUT route for updating user preferences
 app.put('/api/user_preferences', async (req, res) => {
   try {
-    const { name, value } = req.body;
+    const { preference_name, preference_value } = req.body;
     const result = await pool.query(
       'UPDATE user_preferences SET preference_value = $2 WHERE preference_name = $1 RETURNING *',
-      [name, value]
+      [preference_name, preference_value]
     );
     res.json(result.rows);
   } catch (error) {
@@ -1507,48 +1507,56 @@ app.get('/api/inventory-hold-period/config', async (req, res) => {
 });
 
 app.put('/api/inventory-hold-period/config', async (req, res) => {
-  const client = await pool.connect();
   try {
     const { days } = req.body;
 
-    await client.query('BEGIN');
+    // Validate days value
+    if (days <= 0) {
+      return res.status(400).json({ error: 'Hold period days must be greater than 0' });
+    }
 
-    // Update configuration or insert if none exists
-    const updateResult = await client.query(`
-      UPDATE inventory_hold_period
-      SET days = $1
-      RETURNING *
-    `, [days]);
+    // Check if the inventory hold period feature is enabled
+    const preferenceResult = await pool.query(
+      "SELECT preference_value FROM user_preferences WHERE preference_name = 'inventoryHoldPeriodEnabled'"
+    );
+    
+    const isEnabled = preferenceResult.rows.length > 0 && preferenceResult.rows[0].preference_value === 'true';
 
-    // If no rows were updated, insert new configuration
+    // Check if a record already exists
+    const checkResult = await pool.query('SELECT * FROM inventory_hold_period');
+    
     let result;
-    if (updateResult.rowCount === 0) {
-      result = await client.query(`
-        INSERT INTO inventory_hold_period (days)
-        VALUES ($1)
-        RETURNING *
-      `, [days]);
+    if (checkResult.rows.length === 0) {
+      // Insert new record
+      result = await pool.query(
+        'INSERT INTO inventory_hold_period (days) VALUES ($1) RETURNING *',
+        [days]
+      );
     } else {
-      result = updateResult;
+      // Update existing record
+      result = await pool.query(
+        'UPDATE inventory_hold_period SET days = $1, updated_at = CURRENT_TIMESTAMP RETURNING *',
+        [days]
+      );
+      
+      // Only update items if the feature is enabled
+      if (isEnabled) {
+        // Update items that have been in HOLD status for longer than the new days value
+        // This sets them to AVAILABLE status
+        await pool.query(`
+          UPDATE jewelry
+          SET status = 'AVAILABLE' 
+          WHERE status = 'HOLD' 
+          AND CURRENT_TIMESTAMP - updated_at > interval '${days} days'
+        `);
+      }
     }
 
-    // Update any inventory items that should no longer be on hold
-    await client.query(`
-      UPDATE transactions 
-      SET inventory_status = 'AVAILABLE' 
-      WHERE inventory_status = 'HOLD' 
-      AND created_at < NOW() - INTERVAL '1 day' * $1
-    `, [days]);
-
-    await client.query('COMMIT');
     res.json(result.rows[0]);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error creating inventory hold period config:', err);
-    res.status(500).json({ error: 'Failed to create inventory hold period configuration' });
-    } finally {
-        client.release();
-    }
+  } catch (error) {
+    console.error('Error updating inventory hold period config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 // Customer Preferences Configuration API Endpoints
