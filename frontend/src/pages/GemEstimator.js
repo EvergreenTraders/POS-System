@@ -87,7 +87,7 @@ function GemEstimator() {
   };
   const [customer, setCustomer] = useState(location.state?.customer || null);
   const [transactionType, setTransactionType] = useState(location.state?.itemToEdit?.transaction_type || 'buy');
-  const [freeText, setFreeText] = useState(location.state?.itemToEdit?.free_text || '');
+  const [freeText, setFreeText] = useState(location.state?.itemToEdit?.notes || '');
   const [diamondSummary, setDiamondSummary] = useState([]);
   const [stoneSummary, setStoneSummary] = useState([]);
 
@@ -246,7 +246,7 @@ function GemEstimator() {
       })),
       
       // Free text description if available
-      free_text: freeText || '',
+      notes: freeText || '',
       
       // Additional jewelry details - update short_desc to handle multiple secondary gems
       short_desc: latestMetalData.weight ? `${latestMetalData.weight}g ${latestMetalData.purity?.purity || latestMetalData.purity?.value} ${latestMetalData.preciousMetalType} ${latestMetalData.metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
@@ -563,8 +563,8 @@ function GemEstimator() {
         }
         
         // If there's free text, set it
-        if (itemToEdit.free_text) {
-          setFreeText(itemToEdit.free_text);
+        if (itemToEdit.notes) {
+          setFreeText(itemToEdit.notes);
         }
         
         // Add item to the addMetal state to display it
@@ -1902,9 +1902,6 @@ function GemEstimator() {
       isVintage: currentItem.vintage || false,
       stamps: currentItem.stamps || ''
     });
-
-
-    
     
     setOpenDialog(true);
   };
@@ -1922,6 +1919,18 @@ function GemEstimator() {
       ...prev,
       [field]: value
     }));
+    
+    // If additionalInfo field is being changed, also update the notes field in estimatedItems
+    if (field === 'additionalInfo') {
+      setEstimatedItems(prevItems => {
+        const updatedItems = [...prevItems];
+        updatedItems[selectedItemIndex] = {
+          ...updatedItems[selectedItemIndex],
+          notes: value  // Update notes with the same value
+        };
+        return updatedItems;
+      });
+    }
   };
 
   const handleDetailSave = () => {
@@ -1930,7 +1939,7 @@ function GemEstimator() {
       const updatedItem = {
         ...updatedItems[selectedItemIndex],
         brand: itemDetails.brand,
-        damages: itemDetails.additionalInfo,
+        notes: itemDetails.additionalInfo,
         vintage: itemDetails.isVintage,
         stamps: itemDetails.stamps
       };
@@ -2008,7 +2017,7 @@ function GemEstimator() {
       return {
         ...item, // Include all item properties
         price: item.price_estimates[item.transaction_type],
-        free_text: item.free_text,
+        notes: item.notes,
         images: itemImages
       };
     });
@@ -2048,7 +2057,7 @@ function GemEstimator() {
     const updatedItems = estimatedItems.map((item) => ({
       ...item,
       price: item.price_estimates[item.transaction_type],
-      free_text: item.free_text
+      notes: item.notes
     }));
 
     sessionStorage.setItem('estimationState', JSON.stringify({
@@ -3144,13 +3153,21 @@ function GemEstimator() {
                                   if (itemIndex !== -1) {
                                     updatedItems[itemIndex] = {
                                       ...updatedItems[itemIndex],
-                                      free_text: newValue
+                                      notes: newValue
                                     };
+                                    
+                                    // If this item's details dialog is currently open, update additionalInfo there too
+                                    if (openDialog && selectedItemIndex === itemIndex) {
+                                      setItemDetails(prev => ({
+                                        ...prev,
+                                        additionalInfo: newValue
+                                      }));
+                                    }
                                   }
                                   return updatedItems;
                                 });
                               }}
-                              value={item.free_text || ''}
+                              value={item.notes || ''}
                               sx={{ mt: 0.2, '& .MuiInputBase-input': { fontSize: '0.875rem' } }}
                               fullWidth
                             />

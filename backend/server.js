@@ -55,7 +55,7 @@ async function generateTransactionId() {
     // Get the latest transaction ID
     const result = await client.query(
       'SELECT transaction_id FROM transactions WHERE transaction_id LIKE $1 ORDER BY transaction_id DESC LIMIT 1',
-      ['TSD%']
+      ['F%']
     );
 
     let nextNumber = 1; // Start from 1 if no existing IDs
@@ -72,11 +72,11 @@ async function generateTransactionId() {
     let transactionId;
     
     while (!isUnique) {
-      if (nextNumber > 999999) {
+      if (nextNumber > 9999999) {
         nextNumber = 1; // Reset if we exceed 6 digits
       }
       
-      transactionId = `TSD${nextNumber.toString().padStart(6, '0')}`;
+      transactionId = `F${nextNumber.toString().padStart(7, '0')}`;
       
       // Check if this ID exists
       const existingId = await client.query(
@@ -1320,7 +1320,6 @@ app.post('/api/jewelry', async (req, res) => {
           short_desc,
           category,
           brand,
-          damages,
           vintage,
           stamps,
           images,
@@ -1351,8 +1350,8 @@ app.post('/api/jewelry', async (req, res) => {
           location,
           condition,
           metal_spot_price,
-          free_text
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
+          notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
         RETURNING *`;
 
       const jewelryValues = [
@@ -1361,38 +1360,37 @@ app.post('/api/jewelry', async (req, res) => {
         item.short_desc || '',                             // 3
         item.category || '',                                // 4
         item.brand || '',                                       // 5
-        item.damages || '',                                     // 6
-        item.vintage || false,                                 // 7
-        item.stamps || '',                                     // 8
-        JSON.stringify(item.images || []),                      // 9 - Ensure proper JSON string format
-        parseFloat(item.metal_weight) || 0,                       // 10
-        item.precious_metal_type || '',                           // 11
-        item.non_precious_metal_type || '',                       // 12
-        item.metal_purity || '',                                  // 13
-        item.jewelry_color || '',                                 // 14
-        parseFloat(item.purity_value) || 0,                // 15
-        parseFloat(item.est_metal_value) || 0,                       // 16
-        item.primary_gem_type || null,                             // 17
-        item.primary_gem_category || null,                      // 18
-        parseFloat(item.primary_gem_size) || null,                             // 19
-        parseInt(item.primary_gem_quantity) || 0,                // 20
-        item.primary_gem_shape || null,                            // 21
-        parseFloat(item.primary_gem_weight) || 0,                // 22
-        item.primary_gem_color || null,                            // 23
-        item.primary_gem_exact_color || null,                      // 24
-        item.primary_gem_clarity || null,                          // 25
-        item.primary_gem_cut || null,                              // 26
-        item.primary_gem_lab_grown || false,                     // 27
-        item.primary_gem_authentic || false,                     // 28
-        parseFloat(item.primary_gem_value) || 0,                 // 29
-        item.buy_price,    // 30
-        item.pawn_price,   // 31
-        item.retail_price, // 32
-        status,         //33
-        'SOUTH STORE',          // 34
-        'GOOD',          // 35
+        item.vintage || false,                                 // 6
+        item.stamps || '',                                     // 7
+        JSON.stringify(item.images || []),                      // 8 - Ensure proper JSON string format
+        parseFloat(item.metal_weight) || 0,                       // 9
+        item.precious_metal_type || '',                           // 10
+        item.non_precious_metal_type || '',                       // 11
+        item.metal_purity || '',                                  // 12
+        item.jewelry_color || '',                                 // 13
+        parseFloat(item.purity_value) || 0,                // 14
+        parseFloat(item.est_metal_value) || 0,                       // 15
+        item.primary_gem_type || null,                             // 16
+        item.primary_gem_category || null,                      // 17
+        parseFloat(item.primary_gem_size) || null,                             // 18
+        parseInt(item.primary_gem_quantity) || 0,                // 19
+        item.primary_gem_shape || null,                            // 20
+        parseFloat(item.primary_gem_weight) || 0,                // 21
+        item.primary_gem_color || null,                            // 22
+        item.primary_gem_exact_color || null,                      // 23
+        item.primary_gem_clarity || null,                          // 24
+        item.primary_gem_cut || null,                              // 25
+        item.primary_gem_lab_grown || false,                     // 26
+        item.primary_gem_authentic || false,                     // 27
+        parseFloat(item.primary_gem_value) || 0,                 // 28
+        item.buy_price,    // 29
+        item.pawn_price,   // 30
+        item.retail_price, // 31
+        status,         //32
+        'SOUTH STORE',          // 33
+        'GOOD',          // 34
         item.metal_spot_price,
-        item.free_text
+        item.notes
       ];
 
       const result = await client.query(jewelryQuery, jewelryValues);
