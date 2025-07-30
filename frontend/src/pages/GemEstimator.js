@@ -1902,6 +1902,10 @@ function GemEstimator() {
       isVintage: currentItem.vintage || false,
       stamps: currentItem.stamps || ''
     });
+
+
+    
+    
     setOpenDialog(true);
   };
 
