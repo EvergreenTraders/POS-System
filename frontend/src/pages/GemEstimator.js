@@ -29,7 +29,9 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Divider
+  Divider,
+  Snackbar,
+  Alert
 } from '@mui/material';
 import config from '../config';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -39,6 +41,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import CloudUpload from '@mui/icons-material/CloudUpload';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import KeyboardBackspaceIcon from '@mui/icons-material/KeyboardBackspace';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
@@ -65,6 +68,24 @@ function GemEstimator() {
   const [returnToTicket, setReturnToTicket] = useState(location.state?.returnToTicket || false);
   const [ticketItemId, setTicketItemId] = useState(location.state?.ticketItemId || null);
   const [priceEstimates, setPriceEstimates] = useState({ pawn: 0, buy: 0, melt: 0, retail: 0 });
+  
+  // Snackbar state
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'info'
+  });
+  
+  // Function to show snackbar messages
+  const showSnackbar = (message, severity = 'info') => {
+    setSnackbar({ open: true, message, severity });
+  };
+  
+  // Function to hide snackbar
+  const handleCloseSnackbar = () => {
+    setSnackbar({ ...snackbar, open: false });
+  };
+  const [customer, setCustomer] = useState(location.state?.customer || null);
   const [transactionType, setTransactionType] = useState(location.state?.itemToEdit?.transaction_type || 'buy');
   const [freeText, setFreeText] = useState(location.state?.itemToEdit?.notes || '');
   const [diamondSummary, setDiamondSummary] = useState([]);
@@ -131,8 +152,12 @@ function GemEstimator() {
   };
 
   const handleFinishEstimation = () => {
+    // Store the summary data before clearing it
+    // Get the most recent metal data - use the latest from addMetal array
+    const latestMetalData = addMetal.length > 0 ? {...addMetal[addMetal.length - 1]} : {};
+    
     const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
-    const totalWeight = parseFloat(addMetal[0]?.weight || 0) + gemWeightInGrams;
+    const totalWeight = parseFloat(latestMetalData.weight || 0) + gemWeightInGrams;
 
     // Get all secondary diamonds and stones
     const secondaryDiamonds = diamondSummary.filter(d => !d.isPrimary);
@@ -145,15 +170,15 @@ function GemEstimator() {
     // Create new item with all required jewelry fields
     const jewelryItem = {
       // Basic item details
-      metal_weight: addMetal[0]?.weight,
-      precious_metal_type: addMetal[0]?.preciousMetalType,
-      non_precious_metal_type: addMetal[0]?.nonPreciousMetalType || null,
-      metal_purity: addMetal[0]?.purity?.purity || addMetal[0]?.purity?.value,
-      category: addMetal[0]?.metalCategory,
-      jewelry_color: addMetal[0]?.jewelryColor,
-      metal_spot_price: addMetal[0]?.spotPrice,
-      est_metal_value: addMetal[0]?.estimatedValue?.toFixed(2),
-      purity_value: addMetal[0]?.purity?.value,
+      metal_weight: latestMetalData.weight,
+      precious_metal_type: latestMetalData.preciousMetalType,
+      non_precious_metal_type: latestMetalData.nonPreciousMetalType || null,
+      metal_purity: latestMetalData.purity?.purity || latestMetalData.purity?.value,
+      category: latestMetalData.metalCategory,
+      jewelry_color: latestMetalData.jewelryColor,
+      metal_spot_price: latestMetalData.spotPrice,
+      est_metal_value: latestMetalData.estimatedValue?.toFixed(2),
+      purity_value: latestMetalData.purity?.value,
 
       // Primary gem details
       primary_gem_category: addedGemTypes.primary || null,
@@ -172,7 +197,7 @@ function GemEstimator() {
         primary_gem_shape: primaryStone?.shape || '',
         primary_gem_quantity: primaryStone?.quantity || 0,
         primary_gem_authentic: primaryStone?.authentic || false,
-        primary_gem_type: primaryStone?.type || '',
+        primary_gem_type: primaryStone?.name || '',
         primary_gem_color: primaryStone?.color || '',
         primary_gem_weight: primaryStone?.weight || 0,
         primary_gem_value: primaryStone?.estimatedValue || 0
@@ -224,9 +249,9 @@ function GemEstimator() {
       notes: freeText || '',
       
       // Additional jewelry details - update short_desc to handle multiple secondary gems
-      short_desc: addMetal[0] ? `${addMetal[0].weight}g ${addMetal[0].purity?.purity || addMetal[0].purity?.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
+      short_desc: latestMetalData.weight ? `${latestMetalData.weight}g ${latestMetalData.purity?.purity || latestMetalData.purity?.value} ${latestMetalData.preciousMetalType} ${latestMetalData.metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
 
-      long_desc: addMetal[0] ? `${addMetal[0].purity?.purity || addMetal[0].purity?.value} ${addMetal[0].preciousMetalType} ${addMetal[0].metalCategory}` : ''
+      long_desc: latestMetalData.purity ? `${latestMetalData.purity?.purity || latestMetalData.purity?.value} ${latestMetalData.preciousMetalType} ${latestMetalData.metalCategory}` : ''
     };
     console.log("jewelryItem", jewelryItem);
 
@@ -241,24 +266,58 @@ function GemEstimator() {
       // Flag to identify this as coming from the jewelry estimator
       sourceEstimator: 'jewelry',
       // Store original data for future edits
-      originalData: { ...jewelryItem }
+      originalData: { ...jewelryItem },
+      // Add timestamp to identify newly added items
+      _timestamp: Date.now(),
+      // If editing from a ticket, store the original ticket item ID
+      originalTicketItemId: editMode ? ticketItemId : null
     };
 
-    // If we're in edit mode and need to return to the ticket
+    // Add the current item to the estimatedItems array
+    setEstimatedItems(prev => {
+      let updatedItems;
+      
+      if (editMode) {
+        // In edit mode, we want to replace any existing items or simply add this as the only item
+        // This ensures the estimated items list only contains the edited item
+        updatedItems = [itemWithPrices]; // Just keep the edited item, discard others
+      } else {
+        // Normal add for non-edit mode - append to existing items
+        updatedItems = [...prev, itemWithPrices];
+      }
+      
+      // Save to sessionStorage to persist through navigation
+      sessionStorage.setItem('gemEstimatorItems', JSON.stringify(updatedItems));
+      
+      // In edit mode, don't automatically navigate back to CustomerTicket
+      // User will need to explicitly hit "Add to Ticket" to return
+      if (!editMode && returnToTicket && location.state?.customer) {
+        // Only navigate automatically in non-edit mode
+        navigate('/customer-ticket', { 
+          state: { 
+            customer: location.state.customer,
+            from: 'gemEstimator',
+            estimatedItems: updatedItems
+          } 
+        });
+      } else {
+        // Clear the summary lists immediately
+        setAddMetal([]);
+        setDiamondSummary([]);
+        setStoneSummary([]);
+        setFreeText('');
+        setMetalFormState({});
+        setTotalMetalValue(0);
+      }
+      
+      // Return the updated array for the state update
+      return updatedItems;
+    });
+    
+    // Early return to prevent form reset if we're navigating back
     if (editMode && returnToTicket && location.state?.customer) {
-      navigate('/customer-ticket', { 
-        state: { 
-          customer: location.state.customer,
-          updatedItem: itemWithPrices,
-          ticketItemId: ticketItemId,
-          fromEstimator: 'jewelry'
-        } 
-      });
       return;
     }
-    
-    // Add to estimated items if not in edit mode
-    setEstimatedItems(prev => [...prev, itemWithPrices]);
 
     // Reset form state
     setAddMetal([]);
@@ -322,8 +381,31 @@ function GemEstimator() {
   const [secondaryStoneForm, setSecondaryStoneForm] = useState(initialStoneForm);
 
   const [estimatedItems, setEstimatedItems] = useState(() => {
-    // Initialize from location state if available (coming back from checkout)
-    return location.state?.items || [];
+    // When in edit mode, start with an empty array - items will be added after editing
+    if (location.state?.editMode && location.state?.ticketItemId) {
+      // Clear any previous items in sessionStorage for a clean edit experience
+      sessionStorage.removeItem('gemEstimatorItems');
+      return [];
+    }
+    
+    // First try to get items from location state (highest priority)
+    if (location.state?.items && location.state.items.length > 0) {
+      return location.state.items;
+    }
+    
+    // Then try to load from sessionStorage (to persist through navigation)
+    try {
+      const savedItems = sessionStorage.getItem('gemEstimatorItems');
+      if (savedItems) {
+        const parsedItems = JSON.parse(savedItems);
+        return parsedItems;
+      }
+    } catch (error) {
+      console.error('Error loading saved items:', error);
+    }
+    
+    // Default to empty array if nothing is found
+    return [];
   });
 
   const [estimatedValues, setEstimatedValues] = useState({
@@ -371,6 +453,87 @@ function GemEstimator() {
     // Check if we're in edit mode and have an item to edit
     if (location.state?.editMode && location.state?.itemToEdit) {
       const itemToEdit = location.state.itemToEdit;
+     
+      // Direct fill for primary gem fields if they exist on itemToEdit
+      // Check if we have direct primary gem properties
+      if (itemToEdit.primary_gem_category) {
+        console.log('Direct primary gem data found in itemToEdit:', itemToEdit);
+        
+        // Set the appropriate gem type - with type checking
+        const primaryGemCategory = itemToEdit.primary_gem_category;
+        if (primaryGemCategory.toLowerCase() === 'diamond') {
+          setAddedGemTypes(prev => ({
+            ...prev,
+            primary: 'diamond'
+          }));
+          
+          // Set primary diamond form directly from itemToEdit
+          const diamondFormData = {
+            shape: itemToEdit.primary_gem_shape || 'Round',
+            clarity: itemToEdit.primary_gem_clarity || 'Flawless',
+            color: itemToEdit.primary_gem_color || 'Colorless',
+            quantity: itemToEdit.primary_gem_quantity || 1,
+            weight: itemToEdit.primary_gem_weight || 0,
+            cut: itemToEdit.primary_gem_cut || '',
+            labGrown: itemToEdit.primary_gem_lab_grown || false,
+            exactColor: itemToEdit.primary_gem_exact_color || 'D',
+            size: itemToEdit.primary_gem_size || ''
+          };
+          
+          setPrimaryDiamondForm(diamondFormData);          
+          // Directly set the state variables that control the dropdown values
+          setExactColor(diamondFormData.exactColor);
+          
+          // Update shape index to match the selected shape if diamondShapes is loaded
+          if (diamondShapes.length > 0) {
+            const shapeIndex = diamondShapes.findIndex(shape => shape.name === diamondFormData.shape);
+            if (shapeIndex !== -1) {
+              setCurrentShapeIndex(shapeIndex);
+              
+              // Also fetch the diamond sizes for this shape
+              const selectedShape = diamondShapes[shapeIndex];
+              // Use the shape's ID if available, otherwise use shapeIndex + 1 as a fallback
+              const shapeId = selectedShape?.id || (shapeIndex + 1);
+              // Fetch the sizes for the selected shape
+              fetchDiamondSizes(shapeId);
+            }
+          }
+          
+          // Set the estimated value for primary diamond if available
+          if (itemToEdit.primary_gem_value !== undefined) {
+            setEstimatedValues(prev => ({
+              ...prev,
+              primaryDiamond: parseFloat(itemToEdit.primary_gem_value) || 0
+            }));
+          } 
+          
+        } else {
+          setAddedGemTypes(prev => ({
+            ...prev,
+            primary: 'stone'
+          }));
+          
+          // Set primary stone form directly from itemToEdit
+          const stoneFormData = {
+            name: itemToEdit.primary_gem_type || '',
+            shape: itemToEdit.primary_gem_shape || 'Round',
+            color: itemToEdit.primary_gem_color || '',
+            quantity: itemToEdit.primary_gem_quantity || 1,
+            weight: itemToEdit.primary_gem_weight || 0,
+            authentic: itemToEdit.primary_gem_authentic || false,
+            valuationType: 'each'
+          };
+          
+          setPrimaryStoneForm(stoneFormData);
+          // Set the estimated value for primary stone if available
+          if (itemToEdit.primary_gem_value !== undefined) {
+            setEstimatedValues(prev => ({
+              ...prev,
+              primaryGemstone: parseFloat(itemToEdit.primary_gem_value) || 0
+            }));
+          }
+        }
+      }
       
       // Set form values based on the item being edited
       if (itemToEdit.metal_weight) {
@@ -414,18 +577,144 @@ function GemEstimator() {
           priceEstimates: itemToEdit.price_estimates || {}
         };
         setAddMetal([metalItem]);
-      }
-      
-      // If there are stones/gems, handle them
-      if (itemToEdit.diamonds && itemToEdit.diamonds.length > 0) {
-        setDiamondSummary(itemToEdit.diamonds);
-      }
-      
-      if (itemToEdit.stones && itemToEdit.stones.length > 0) {
-        setStoneSummary(itemToEdit.stones);
-      }
+      }   
     }
   }, [location.state]);
+  
+  // Effect to update selectedClarityIndex when diamondClarity is loaded and we're in edit mode
+  useEffect(() => {
+    if (diamondClarity.length > 0 && location.state?.editMode && location.state?.itemToEdit?.primary_gem_clarity) {
+      const clarityToMatch = location.state.itemToEdit.primary_gem_clarity;
+      const clarityIndex = diamondClarity.findIndex(c => c.name === clarityToMatch);
+      
+      if (clarityIndex !== -1) {
+        setSelectedClarityIndex(clarityIndex);
+      }
+    }
+  }, [diamondClarity, location.state]);
+  
+  // Effect to fetch diamond sizes when diamondShapes are loaded in edit mode
+  useEffect(() => {
+    if (diamondShapes.length > 0 && location.state?.editMode && location.state?.itemToEdit?.primary_gem_shape && 
+        location.state?.itemToEdit?.primary_gem_category?.toLowerCase() === 'diamond') {
+        const shapeToMatch = location.state.itemToEdit.primary_gem_shape;
+        if (shapeToMatch) {
+          const shapeIndex = diamondShapes.findIndex(shape => shape.name === shapeToMatch);
+          
+          if (shapeIndex !== -1) {
+            // Use the shape's ID if available, otherwise use shapeIndex + 1 as a fallback
+            const selectedShape = diamondShapes[shapeIndex];
+            const shapeId = selectedShape?.id || (shapeIndex + 1);
+            
+            // Fetch diamond sizes for the selected shape
+            fetchDiamondSizes(shapeId);
+          }
+        }
+      }
+  }, [diamondShapes, location.state]);
+  
+  // Effect to update stone color when stoneColors are loaded in edit mode
+  useEffect(() => {
+    // Make sure we have stoneColors loaded and we're in edit mode
+    if (stoneColors.length > 0 && location.state?.editMode && location.state?.itemToEdit) {
+      // Make sure we have a primary gem category and it's a stone
+      const primaryGemCategory = location.state.itemToEdit.primary_gem_category;
+      if (primaryGemCategory && typeof primaryGemCategory === 'string' && 
+          primaryGemCategory.toLowerCase() === 'stone') {
+        
+        // Get the color to match from the item being edited
+        const colorToMatch = location.state.itemToEdit.primary_gem_color;
+        if (colorToMatch && typeof colorToMatch === 'string') {
+          
+          // Try to find an exact match first (case insensitive)
+          // Check both color.name and color.color properties
+          let matchingColor = stoneColors.find(color => {
+            if (color.name && typeof color.name === 'string' && 
+                color.name.toLowerCase() === colorToMatch.toLowerCase()) {
+              return true;
+            }
+            if (color.color && typeof color.color === 'string' && 
+                color.color.toLowerCase() === colorToMatch.toLowerCase()) {
+              return true;
+            }
+            return false;
+          });
+          // If no exact match, try to find a partial match
+          if (!matchingColor) {
+            matchingColor = stoneColors.find(color => {
+              // Check name property
+              if (color.name && typeof color.name === 'string' && 
+                 (color.name.toLowerCase().includes(colorToMatch.toLowerCase()) || 
+                  colorToMatch.toLowerCase().includes(color.name.toLowerCase()))) {
+                return true;
+              }
+              // Check color property
+              if (color.color && typeof color.color === 'string' && 
+                 (color.color.toLowerCase().includes(colorToMatch.toLowerCase()) || 
+                  colorToMatch.toLowerCase().includes(color.color.toLowerCase()))) {
+                return true;
+              }
+              return false;
+            });
+          }
+          
+          // If still no match, use the first color as default
+          if (!matchingColor && stoneColors.length > 0) {
+            matchingColor = stoneColors[0];
+            console.log('No matching color found, using default:', matchingColor.name);
+          }
+          
+          if (matchingColor) {            
+            // Determine which property to use as the color value
+            let colorValue;
+            if (matchingColor.color) {
+              colorValue = matchingColor.color;
+            } else if (matchingColor.name) {
+              colorValue = matchingColor.name;
+            } else {
+              colorValue = colorToMatch; // Fallback to original if nothing else is available
+            }
+                        
+            // Update the primary stone form with the correct color and color ID
+            setPrimaryStoneForm(prev => ({
+              ...prev,
+              color: colorValue,
+              color_id: matchingColor.id || prev.color_id
+            }));
+          }
+          
+          // Also update the estimated value if available
+          if (location.state.itemToEdit.primary_gem_value !== undefined) {
+            setEstimatedValues(prev => ({
+              ...prev,
+              primaryGemstone: parseFloat(location.state.itemToEdit.primary_gem_value) || 0
+            }));
+          }
+        }
+      }
+    }
+  }, [stoneColors, location.state]);
+
+  // Effect to update currentShapeIndex when diamondShapes loads and we're in edit mode
+  useEffect(() => {
+    if (diamondShapes.length > 0 && location.state?.editMode && location.state?.itemToEdit?.primary_gem_shape) {
+      // Check if we have a diamond as primary gem
+      if (location.state.itemToEdit.primary_gem_category?.toLowerCase() === 'diamond') {
+        const shapeToMatch = location.state.itemToEdit.primary_gem_shape;
+        const shapeIndex = diamondShapes.findIndex(shape => shape.name === shapeToMatch);
+        
+        if (shapeIndex !== -1) {
+          setCurrentShapeIndex(shapeIndex);
+          
+          // Also fetch the sizes for this shape
+          const selectedShape = diamondShapes[shapeIndex];
+          if (selectedShape && selectedShape.id) {
+            fetchDiamondSizes(selectedShape.id);
+          }
+        }
+      }
+    }
+  }, [diamondShapes, location.state]);
 
   useEffect(() => {
     const fetchAllData = async () => {
@@ -488,6 +777,7 @@ function GemEstimator() {
         // Fetch Diamond Shapes
         const shapesResponse = await axios.get(`${API_BASE_URL}/diamond_shape`);
         const shapesWithImages = shapesResponse.data.map(shape => ({
+          id: shape.id, // Preserve the original ID from the database
           name: shape.shape,
           image: shape.image_path.replace('.jpg', '.png')
         }));
@@ -547,7 +837,10 @@ function GemEstimator() {
     };
 
     fetchAllData();
-    fetchDiamondSizes(1);
+    
+    // Only fetch default diamond sizes (round) if we're not in edit mode
+    if (!location.state?.editMode) 
+      fetchDiamondSizes(1);
     fetchUserPreference();
     if(isCaratConversionEnabled) 
         fetchCaratConversion();
@@ -570,7 +863,7 @@ function GemEstimator() {
 
   const fetchDiamondSizes = async (diamondShapeId) => {
     try {
-      const response = await axios.get(`http://localhost:5000/api/diamond_size_weight/${diamondShapeId}`);
+      const response = await axios.get(`${API_BASE_URL}/diamond_size_weight/${diamondShapeId}`);
       setDiamondSizes(response.data);
     } catch (error) {
       console.error('Error fetching diamond sizes:', error);
@@ -578,7 +871,7 @@ function GemEstimator() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState('primary_gem_diamond');
+  const [activeTab, setActiveTab] = useState(location.state?.itemToEdit?.primary_gem_category?.toLowerCase() === 'stone' ? 'primary_gem_stone' : 'primary_gem_diamond');
 
   const getCurrentForm = () => {
     return activeTab.startsWith('primary') ? primaryDiamondForm : secondaryDiamondForm;
@@ -629,22 +922,56 @@ function GemEstimator() {
   };
 
   // Diamond shape navigation
-  const handleNextShape = () => {
-    setCurrentShapeIndex((prevIndex) => {
-      const nextIndex = Math.min(prevIndex + 1, diamondShapes.length - 1);
-      setCurrentForm(prev => ({ ...prev, shape: diamondShapes[nextIndex].name })); // Update dropdown
-      fetchDiamondSizes(nextIndex+1);
-      return nextIndex;
-    });
-  };
-
   const handlePrevShape = () => {
-    setCurrentShapeIndex((prevIndex) => {
-      const prevIndexValue = Math.max(prevIndex - 1, 0);
-      setCurrentForm(prev => ({ ...prev, shape: diamondShapes[prevIndexValue].name })); // Update dropdown
-      fetchDiamondSizes(prevIndex);
-      return prevIndexValue;
-    });
+    if (currentShapeIndex > 0) {
+      const newIndex = currentShapeIndex - 1;
+      const newShape = diamondShapes[newIndex];
+      
+      // Update the shape index
+      setCurrentShapeIndex(newIndex);
+      
+      // Update the form with the new shape
+      if (newShape) {        
+        // Use the shape's actual ID or fallback to index+1
+        const shapeId = newShape.id || (newIndex + 1);
+        
+        // Update the current form's shape
+        setCurrentForm(prev => ({
+          ...prev,
+          shape: newShape.name,
+          size: ''  // Reset size when changing shape
+        }));
+        
+        // Also fetch the sizes for this shape
+        fetchDiamondSizes(shapeId);
+      }
+    }
+  };
+  
+  const handleNextShape = () => {
+    if (currentShapeIndex < diamondShapes.length - 1) {
+      const newIndex = currentShapeIndex + 1;
+      const newShape = diamondShapes[newIndex];
+      
+      // Update the shape index
+      setCurrentShapeIndex(newIndex);
+      
+      // Update the form with the new shape
+      if (newShape) {        
+        // Use the shape's actual ID or fallback to index+1
+        const shapeId = newShape.id || (newIndex + 1);
+        
+        // Update the current form's shape
+        setCurrentForm(prev => ({
+          ...prev,
+          shape: newShape.name,
+          size: ''  // Reset size when changing shape
+        }));
+        
+        // Also fetch the sizes for this shape
+        fetchDiamondSizes(shapeId);
+      }
+    }
   };
 
   // Image gallery navigation
@@ -877,18 +1204,28 @@ function GemEstimator() {
     // If shape is changed, fetch corresponding sizes
     if (name === 'shape') {      
       // Find the shape object
-      const selectedShape = diamondShapes.find((shape, index) => {
-        if (shape.name === value) {
-          shape.id = index + 1; // Store the ID based on index
-          return true;
-        }
-        return false;
-      });
+      const selectedShape = diamondShapes.find((shape) => shape.name === value);
+      
       if (selectedShape) {
-        fetchDiamondSizes(selectedShape.id);
-        setCurrentShapeIndex(diamondShapes.findIndex(shape => shape.name === selectedShape.name));
-        setCurrentForm(prev => ({ ...prev, image: selectedShape.image })); // Update image
-      } else {
+        
+        // Find the index of the selected shape
+        const newShapeIndex = diamondShapes.findIndex(shape => shape.name === selectedShape.name);        
+        // Use the shape's actual ID from the database if available, otherwise use index+1
+        const shapeId = selectedShape.id || (newShapeIndex + 1);
+        
+        // Update the currentShapeIndex first so the UI image updates immediately
+        setCurrentShapeIndex(newShapeIndex);
+        
+        // Also update the currentForm.shape to ensure it's synchronized
+        setCurrentForm(prev => ({
+          ...prev,
+          shape: value,
+          shapeId: shapeId  // Store the shape ID for reference
+        }));
+        
+        // Then fetch diamond sizes and update the form
+        fetchDiamondSizes(shapeId);
+              } else {
         console.error("No shape found for:", value);
       }
     }
@@ -1051,7 +1388,7 @@ function GemEstimator() {
     const newStone = {
       name: currentForm.name,
       shape: currentForm.shape,
-      weight: currentForm.weight+' ct',
+      weight: currentForm.weight,
       color: currentForm.color,
       quantity: currentForm.quantity,
       authentic: currentForm.authentic,
@@ -1124,7 +1461,12 @@ function GemEstimator() {
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Type *</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
             {colorSpecificStoneTypes
-              .filter(stone => stone.color_id === getCurrentStoneForm().color_id)
+              .filter(stone => {
+                const currentForm = getCurrentStoneForm();
+                // Make sure we have a color_id on both sides to compare
+                return stone.color_id && currentForm && currentForm.color_id && 
+                       stone.color_id === currentForm.color_id;
+              })
               .map((stone) => (
                 <Paper
                   key={stone.type}
@@ -1542,6 +1884,7 @@ function GemEstimator() {
 
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedItemIndex, setSelectedItemIndex] = useState(null);
+  const [itemToEdit, setItemToEdit] = useState(null);
   const [itemDetails, setItemDetails] = useState({
     brand: '',
     additionalInfo: '',
@@ -1566,6 +1909,7 @@ function GemEstimator() {
   const handleCloseDialog = () => {
     setOpenDialog(false);
     setSelectedItemIndex(null);
+    setItemToEdit(null); // Clear the item being edited
   };
 
   const handleDetailChange = (field, value) => {
@@ -1603,6 +1947,8 @@ function GemEstimator() {
       return updatedItems;
     });
     setOpenDialog(false);
+    setSelectedItemIndex(null);
+    setItemToEdit(null); // Clear the item being edited
   };
 
   const calculateTotalGemWeight = () => {
@@ -1632,6 +1978,10 @@ function GemEstimator() {
 
     // Convert total carats to grams
     return totalCarats * parseFloat(caratConversion.grams);
+  };
+
+  const handleBackToTicket = () => {
+    navigate('/customer-ticket', { state: { customer } });
   };
 
   const handleAddToTicket = () => {
@@ -1672,6 +2022,27 @@ function GemEstimator() {
       };
     });
     
+    if (editMode && ticketItemId) {
+      // In edit mode, we now only have one item (the edited one)
+      // No need to search, just use the first item in the processed items
+      if (processedItems.length > 0) {
+        const editedItem = processedItems[0]; // Use the first item
+        
+        navigate('/customer-ticket', {
+          state: {
+            customer: customerData,
+            updatedItem: editedItem, // Pass the single updated item
+            ticketItemId: ticketItemId, // Pass the original ticket item ID
+            fromEstimator: 'jewelry', // Special flag for the jewelry estimator
+            from: 'gemEstimator' // Keep original from flag for backward compatibility
+          }
+        });
+        showSnackbar('Item updated successfully', 'success');
+        return;
+      }
+    }
+    
+    // Default behavior for non-edit mode or if edited item not found
     navigate('/customer-ticket', {
       state: {
         customer: customerData,
@@ -1784,14 +2155,27 @@ function GemEstimator() {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+    <Container maxWidth="lg" sx={{ pt: 4 }}>
+      {/* Back to Ticket Button */}
+      {location.state?.customer && (
+        <Button
+          variant="outlined"
+          color="primary"
+          startIcon={<KeyboardBackspaceIcon />}
+          onClick={handleBackToTicket}
+          sx={{ mb: 2 }}
+        >
+          Back to Ticket
+        </Button>
+      )}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         {/* Metal Estimation Section */}
         <Grid item xs={12} md={3}>
         <MetalEstimator 
                 onMetalValueChange={handleTotalMetalValueChange}
                 onAddMetal={handleAddMetal}
-                setMetalFormState={handleMetalFormChange} />
+                setMetalFormState={handleMetalFormChange}
+                initialData={location.state?.itemToEdit} />
         </Grid>
 
         {/* Diamond Estimation Section */}
@@ -1851,7 +2235,12 @@ function GemEstimator() {
                       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                         {diamondShapes.length > 0 && (
                           <>
-                            <img src={diamondShapes[currentShapeIndex]?.image} alt={diamondShapes[currentShapeIndex]?.name} style={{ width: '100px', height: '100px' }} />
+                            {/* Find the image based on the current selected shape in the form */}
+                            {(() => {
+                              const currentShape = getCurrentForm().shape || 'Round';
+                              const shapeObj = diamondShapes.find(s => s.name === currentShape) || diamondShapes[currentShapeIndex];
+                              return <img src={shapeObj?.image} alt={shapeObj?.name} style={{ width: '100px', height: '100px' }} />;
+                            })()}
                             <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
                               <IconButton onClick={handlePrevShape} disabled={currentShapeIndex === 0}>
                                 <ArrowBackIcon />
@@ -2486,7 +2875,40 @@ function GemEstimator() {
 
             <Typography variant="h6" sx={{ mt: 2 }}>SUMMARY</Typography>
             <Grid container spacing={2} >
-            {addMetal.map((metal, index) => (
+            {addMetal
+              // Filter out the item being edited (if any)
+              .filter(metal => {
+                // Check for items being edited via navigation
+                if (location.state?.itemToEdit) {
+                  // Check if this is the item being edited by comparing key properties
+                  const isEditingThisItem = (
+                    metal.preciousMetalType === location.state.itemToEdit.preciousMetalType &&
+                    metal.weight === location.state.itemToEdit.weight &&
+                    metal.purity?.id === location.state.itemToEdit.purity?.id ||
+                    metal.purity?.value === location.state.itemToEdit.metal_purity ||
+                    metal.estimatedValue === location.state.itemToEdit.estimatedValue
+                  );
+                  
+                  // Return false to filter out items that are being edited
+                  if (isEditingThisItem) return false;
+                }
+                
+                // Check for items being edited via dialog
+                if (itemToEdit && selectedItemIndex !== null) {
+                  // Check metal properties against the metal in the editing item
+                  const dialogEditItem = itemToEdit;
+                  if (dialogEditItem.precious_metal_type === metal.preciousMetalType &&
+                      dialogEditItem.metal_weight === metal.weight &&
+                      (dialogEditItem.metal_purity === metal.purity?.value || 
+                       dialogEditItem.metal_purity === metal.purity?.purity)) {
+                    return false;
+                  }
+                }
+                
+                // If not being edited in either way, keep the item
+                return true;
+              })
+              .map((metal, index) => (
                 <Grid item xs={12} key={index}>
                     <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative' }}>
                       <div>
@@ -2515,7 +2937,34 @@ function GemEstimator() {
         </Grid>
 
             <Grid container spacing={2} sx={{ mt: 0.25 }}>
-                {diamondSummary.map((diamond, index) => (
+                {diamondSummary
+                  // Filter out diamonds being edited
+                  .filter(diamond => {
+                    // If editing via dialog and this diamond is in the item being edited, filter it out
+                    if (itemToEdit && selectedItemIndex !== null) {
+                      if (itemToEdit.diamonds && itemToEdit.diamonds.some(d => 
+                        d.shape === diamond.shape && 
+                        d.weight === diamond.weight && 
+                        d.clarity === diamond.clarity
+                      )) {
+                        return false;
+                      }
+                    }
+                    
+                    // If editing via navigation
+                    if (location.state?.itemToEdit && location.state.itemToEdit.diamonds) {
+                      if (location.state.itemToEdit.diamonds.some(d => 
+                        d.shape === diamond.shape && 
+                        d.weight === diamond.weight && 
+                        d.clarity === diamond.clarity
+                      )) {
+                        return false;
+                      }
+                    }
+                    
+                    return true;
+                  })
+                  .map((diamond, index) => (
                     <Grid item xs={12} key={index}>
                         <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative'}}>
                           <div>
@@ -2545,7 +2994,34 @@ function GemEstimator() {
             </Grid>
             
             <Grid container spacing={2} sx={{ mt: 0.25 }}>
-                {stoneSummary.map((stone, index) => (
+                {stoneSummary
+                  // Filter out stones being edited
+                  .filter(stone => {
+                    // If editing via dialog and this stone is in the item being edited, filter it out
+                    if (itemToEdit && selectedItemIndex !== null) {
+                      if (itemToEdit.stones && itemToEdit.stones.some(s => 
+                        s.name === stone.name && 
+                        s.weight === stone.weight && 
+                        s.shape === stone.shape
+                      )) {
+                        return false;
+                      }
+                    }
+                    
+                    // If editing via navigation
+                    if (location.state?.itemToEdit && location.state.itemToEdit.stones) {
+                      if (location.state.itemToEdit.stones.some(s => 
+                        s.name === stone.name && 
+                        s.weight === stone.weight && 
+                        s.shape === stone.shape
+                      )) {
+                        return false;
+                      }
+                    }
+                    
+                    return true;
+                  })
+                  .map((stone, index) => (
                     <Grid item xs={12} key={index}>
                         <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative'}}>
                           <div>
@@ -2608,7 +3084,36 @@ function GemEstimator() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {estimatedItems.map((item, index) => (
+                  {estimatedItems
+                    // Modified filter to properly handle items in edit mode
+                    .filter((item, index) => {
+                      // Always show items that were just added (they won't have an ID yet or will have a new timestamp)
+                      const isNewlyAdded = item._timestamp && (Date.now() - item._timestamp < 10000);
+                      if (isNewlyAdded) {
+                        return true;
+                      }
+
+                      // If no item is being edited, show all items
+                      if (!itemToEdit && !location.state?.itemToEdit) {
+                        return true;
+                      }
+                      
+                      // If an item is currently being edited in the dialog, don't show the original
+                      if (itemToEdit && index === selectedItemIndex) {
+                        return false;
+                      }
+                      
+                      // For items from navigation, only hide the exact one being edited
+                      // by comparing ID instead of properties
+                      if (location.state?.itemToEdit && location.state?.ticketItemId) {
+                        if (item.originalTicketItemId === location.state.ticketItemId) {
+                          return false;
+                        }
+                      }
+                      
+                      return true;
+                    })
+                    .map((item, index) => (
                     <TableRow 
                       key={index}
                       sx={{ 
@@ -2852,6 +3357,22 @@ function GemEstimator() {
           </Button>
         </DialogActions>
       </Dialog>
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert 
+          onClose={handleCloseSnackbar} 
+          severity={snackbar.severity} 
+          sx={{ width: '100%' }}
+          variant="filled"
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }

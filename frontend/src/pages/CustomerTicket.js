@@ -335,12 +335,29 @@ const CustomerTicket = () => {
       const updatedItem = location.state.updatedItem;
       const ticketItemId = location.state.ticketItemId;
       const isDuplicate = location.state?.isDuplicate || false;
-      
+  
       // Create a base item with common properties from the updated item
+      
+      // Extract gem shape - using optional chaining for cleaner code
+      const gemShape = updatedItem?.primary_gem_shape || 
+                      updatedItem?.diamonds?.[0]?.shape || 
+                      updatedItem?.stones?.[0]?.shape || 
+                      updatedItem?.originalData?.primary_gem_shape || 
+                      'Round';
+      
+      // Create gem description component
+      const gemDescription = gemShape ? ` ${gemShape}` : '';
+      
+      // Extract metal category with optional chaining for cleaner code
+      const metalCategory = updatedItem?.metal_category || 
+                           updatedItem?.category || 
+                           updatedItem?.originalData?.metal_category || 
+                           'Jewelry';
+      
       const baseItem = {
         id: ticketItemId,
-        description: `${updatedItem.metal_weight}g ${updatedItem.metal_purity} ${updatedItem.precious_metal_type} ${updatedItem.metal_category}${updatedItem.free_text ? ` - ${updatedItem.free_text}` : ''}`,
-        category: updatedItem.metal_category || 'Jewelry',
+        description: `${updatedItem.metal_weight || '0'}g ${updatedItem.metal_purity || ''} ${updatedItem.precious_metal_type || ''} ${metalCategory}${gemDescription}${updatedItem.free_text ? ` - ${updatedItem.free_text}` : ''}`,
+        category: metalCategory,
         // Store the original estimator data for editing
         originalData: { ...updatedItem },
         sourceEstimator: 'jewelry'
@@ -1038,7 +1055,7 @@ const CustomerTicket = () => {
           customer,
           editMode: true,
           itemToEdit: itemToEdit.originalData,
-         // returnToTicket: true,
+          returnToTicket: true,
           ticketItemId: itemId
         } 
       });
@@ -1046,19 +1063,32 @@ const CustomerTicket = () => {
       // If it's jewelry but not from estimator, still go to jewelry estimator
       // Try to parse data from the description
       const description = itemToEdit.description || '';
+      
+      // Create a more complete itemToEdit object that includes gem data
+      const editItemData = {
+        free_text: description,
+        category: itemToEdit.category,
+        price: itemToEdit.price || itemToEdit.value,
+        transaction_type: activeTab === 0 ? 'pawn' : 
+                        activeTab === 1 ? 'buy' : 
+                        activeTab === 3 ? 'retail' : 'buy',
+        // Include metal data if available
+        metal_weight: itemToEdit.metal_weight,
+        precious_metal_type: itemToEdit.precious_metal_type,
+        metal_purity: itemToEdit.metal_purity,
+        price_estimates: itemToEdit.price_estimates,
+        
+        // Include diamond and stone data if available
+        diamonds: itemToEdit.diamonds || [],
+        stones: itemToEdit.stones || []
+      };
+      
       navigate('/gem-estimator', { 
         state: { 
           customer,
           editMode: true,
-          itemToEdit: {
-            free_text: description,
-            category: itemToEdit.category,
-            price: itemToEdit.price || itemToEdit.value,
-            transaction_type: activeTab === 0 ? 'pawn' : 
-                            activeTab === 1 ? 'buy' : 
-                            activeTab === 3 ? 'retail' : 'buy'
-          },
-       //   returnToTicket: true,
+          itemToEdit: editItemData,
+          returnToTicket: true,
           ticketItemId: itemId
         }
       });
@@ -1389,9 +1419,164 @@ const CustomerTicket = () => {
     // Calculate totals before checkout
     calculateTotal();
     
-    // Proceed to checkout with all items from all tabs
-    // This is a placeholder for future implementation
-    alert('Proceeding to checkout with all items');
+    // Get all valid items from all tabs
+    const allItems = [];
+    
+    // Add pawn items
+    const validPawnItems = pawnItems.filter(item => item.description || item.value);
+    validPawnItems.forEach(item => {
+      allItems.push({
+        ...item,
+        transaction_type: 'pawn',
+        customer: customer ? {
+          id: customer.id,
+          name: `${customer.first_name} ${customer.last_name}`,
+          phone: customer.phone || 'N/A',
+          email: customer.email || 'N/A'
+        } : null,
+        employee: user ? {
+          id: user.id,
+          name: `${user.firstName} ${user.lastName}`,
+          role: user.role || 'Employee'
+        } : null
+      });
+    });
+    
+    // Add buy items
+    const validBuyItems = buyItems.filter(item => item.description || item.price);
+    validBuyItems.forEach(item => {
+      allItems.push({
+        ...item,
+        transaction_type: 'buy',
+        customer: customer ? {
+          id: customer.id,
+          name: `${customer.first_name} ${customer.last_name}`,
+          phone: customer.phone || 'N/A',
+          email: customer.email || 'N/A'
+        } : null,
+        employee: user ? {
+          id: user.id,
+          name: `${user.firstName} ${user.lastName}`,
+          role: user.role || 'Employee'
+        } : null
+      });
+    });
+    
+    // Add trade items
+    const validTradeItems = tradeItems.filter(item => item.tradeItem || item.storeItem);
+    validTradeItems.forEach(item => {
+      allItems.push({
+        ...item,
+        transaction_type: 'trade',
+        customer: customer ? {
+          id: customer.id,
+          name: `${customer.first_name} ${customer.last_name}`,
+          phone: customer.phone || 'N/A',
+          email: customer.email || 'N/A'
+        } : null,
+        employee: user ? {
+          id: user.id,
+          name: `${user.firstName} ${user.lastName}`,
+          role: user.role || 'Employee'
+        } : null
+      });
+    });
+    
+    // Add sale items
+    const validSaleItems = saleItems.filter(item => item.description || item.price);
+    validSaleItems.forEach(item => {
+      allItems.push({
+        ...item,
+        transaction_type: 'sale',
+        customer: customer ? {
+          id: customer.id,
+          name: `${customer.first_name} ${customer.last_name}`,
+          phone: customer.phone || 'N/A',
+          email: customer.email || 'N/A'
+        } : null,
+        employee: user ? {
+          id: user.id,
+          name: `${user.firstName} ${user.lastName}`,
+          role: user.role || 'Employee'
+        } : null
+      });
+    });
+    
+    // Add repair items
+    const validRepairItems = repairItems.filter(item => item.description || item.issue || item.fee);
+    validRepairItems.forEach(item => {
+      allItems.push({
+        ...item,
+        transaction_type: 'repair',
+        customer: customer ? {
+          id: customer.id,
+          name: `${customer.first_name} ${customer.last_name}`,
+          phone: customer.phone || 'N/A',
+          email: customer.email || 'N/A'
+        } : null,
+        employee: user ? {
+          id: user.id,
+          name: `${user.firstName} ${user.lastName}`,
+          role: user.role || 'Employee'
+        } : null
+      });
+    });
+    
+    // Add payment items
+    const validPaymentItems = paymentItems.filter(item => item.amount || item.method);
+    validPaymentItems.forEach(item => {
+      allItems.push({
+        ...item,
+        transaction_type: 'payment',
+        customer: customer ? {
+          id: customer.id,
+          name: `${customer.first_name} ${customer.last_name}`,
+          phone: customer.phone || 'N/A',
+          email: customer.email || 'N/A'
+        } : null,
+        employee: user ? {
+          id: user.id,
+          name: `${user.firstName} ${user.lastName}`,
+          role: user.role || 'Employee'
+        } : null
+      });
+    });
+    
+    // Add refund items
+    const validRefundItems = refundItems.filter(item => item.amount || item.method || item.reason);
+    validRefundItems.forEach(item => {
+      allItems.push({
+        ...item,
+        transaction_type: 'refund',
+        customer: customer ? {
+          id: customer.id,
+          name: `${customer.first_name} ${customer.last_name}`,
+          phone: customer.phone || 'N/A',
+          email: customer.email || 'N/A'
+        } : null,
+        employee: user ? {
+          id: user.id,
+          name: `${user.firstName} ${user.lastName}`,
+          role: user.role || 'Employee'
+        } : null
+      });
+    });
+    
+    if (allItems.length === 0) {
+      showSnackbar('No valid items to proceed to checkout', 'warning');
+      return;
+    }
+    
+    // Save all items to session storage for checkout
+    sessionStorage.setItem('checkoutItems', JSON.stringify(allItems));
+    
+    // Save customer data to session storage
+    if (customer) {
+      sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
+    }
+    
+    // Navigate to checkout
+    navigate('/checkout');
   };
 
   // Format date for display
