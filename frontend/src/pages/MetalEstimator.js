@@ -269,7 +269,7 @@ const useSpotPriceCalculator = (metalSpotPrice, metalFormState) => {
   };
 };
 
-const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState, initialData = null }) => {
+const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState, initialData = null, buttonText = 'Add Metal' }) => {
   // Add a state to track initialization status
   const [isInitialized, setIsInitialized] = useState(false);
   
@@ -445,14 +445,18 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState, ini
       // Set the metal type ID once at initialization
       const preciousType = initialData.precious_metal_type || initialData.preciousMetalType;
       if (preciousType) {
-        const metalType = preciousMetalTypes.find(type => 
-          type.type === preciousType
-        );
+        // Try to find the matching metal type
+        const metalType = preciousMetalTypes.find(type => type.type === preciousType);
+        
         if (metalType) {
+          // Update the form with the found metal type ID
           setForm(prev => ({
             ...prev,
             preciousMetalTypeId: metalType.id
           }));
+          
+          // Fetch purities for this metal type
+          fetchPurities(metalType.id);
         }
       }
     }
@@ -1008,7 +1012,7 @@ const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState, ini
         ref={addButtonRef}
         disabled={!form.preciousMetalType || !form.purity || !form.metalCategory || !form.weight || (form.type === 'Gold' && !form.jewelryColor)}
       >
-        Add Metal
+        {buttonText}
       </Button>
 
       <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>

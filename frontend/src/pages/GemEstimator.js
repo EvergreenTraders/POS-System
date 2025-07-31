@@ -65,6 +65,7 @@ function GemEstimator() {
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [from, setFrom] = useState(location.state?.from || '');
   const [editMode, setEditMode] = useState(location.state?.editMode || false);
+  const [editingGemOnly, setEditingGemOnly] = useState(location.state?.editingGemOnly || false);
   const [returnToTicket, setReturnToTicket] = useState(location.state?.returnToTicket || false);
   const [ticketItemId, setTicketItemId] = useState(location.state?.ticketItemId || null);
   const [priceEstimates, setPriceEstimates] = useState({ pawn: 0, buy: 0, melt: 0, retail: 0 });
@@ -338,6 +339,14 @@ function GemEstimator() {
     secondary: null // can be 'diamond' or 'stone'
   });
 
+  // Define activeTab state - default to primary_gem_stone
+  const [activeTab, setActiveTab] = useState('primary_gem_stone');
+
+  // Handle tab change from the RadioGroup controls
+  const handleTabChange = (event) => {
+    setActiveTab(event.target.value);
+  };
+
   // Primary gem form
   const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
     shape: 'Round',
@@ -450,7 +459,13 @@ function GemEstimator() {
 
   // Effect to handle edit mode data when component mounts
   useEffect(() => {
-    // Check if we're in edit mode and have an item to edit
+    // If we're editing gem only, force activeTab to primary_gem
+    if (location.state?.editingGemOnly) {
+      // If the current gem type is diamond, set to primary_gem_diamond, otherwise default to primary_gem_stone
+      const gemType = addedGemTypes.primary === 'diamond' ? 'primary_gem_diamond' : 'primary_gem_stone';
+      setActiveTab(gemType);
+    }
+    
     if (location.state?.editMode && location.state?.itemToEdit) {
       const itemToEdit = location.state.itemToEdit;
      
@@ -870,8 +885,6 @@ function GemEstimator() {
       setDiamondSizes([]);
     }
   };
-
-  const [activeTab, setActiveTab] = useState(location.state?.itemToEdit?.primary_gem_category?.toLowerCase() === 'stone' ? 'primary_gem_stone' : 'primary_gem_diamond');
 
   const getCurrentForm = () => {
     return activeTab.startsWith('primary') ? primaryDiamondForm : secondaryDiamondForm;
@@ -1721,7 +1734,24 @@ function GemEstimator() {
             }
           }}
         />
-        <Button 
+        {/* Only show the tab switching button if not editing a gem only */}
+        {/* {!location.state?.editingGemOnly && (
+          <Button 
+            variant="contained" 
+            color="primary" 
+            onClick={() => {
+              if (activeTab.startsWith('primary')) {
+                setActiveTab('secondary_gem_stone');
+              } else {
+                setActiveTab('primary_gem_stone');
+              }
+            }}
+            sx={{ ml: 2 }} 
+          >
+            {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
+          </Button>
+        )} */}
+         <Button 
           variant="contained" 
           color="primary" 
           onClick={() => {
@@ -1739,68 +1769,22 @@ function GemEstimator() {
     </Grid>
   );
 
+  // Rendering functions
   const renderTabButtons = () => {
-    if (activeTab.startsWith('primary')) {
+    // Check if editingGemOnly flag is set in location.state
+    const editingGemOnly = location.state?.editingGemOnly || false;
+    
+    // When editing gem only, always render the primary gem tab
+    if (editingGemOnly) {
       return (
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
           <Typography variant="h6">
-            ESTIMATE PRIMARY GEM
+            ESTIMATE GEM VALUE
           </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <FormControl sx={{ mr: 2 }}>
-              <RadioGroup 
-                row 
-                value={activeTab} 
-                onChange={handleTabChange}
-              >
-                <FormControlLabel 
-                  value="primary_gem_diamond" 
-                  control={<Radio />} 
-                  label="Diamond" 
-                />
-                <FormControlLabel 
-                  value="primary_gem_stone" 
-                  control={<Radio />} 
-                  label="Stone" 
-                />
-              </RadioGroup>
-            </FormControl>
-          </Box>
-        </Box>
-      );
-    } else {
-      return (
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h6">
-            EST. SECONDARY GEM
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <FormControl sx={{ mr: 2 }}>
-              <RadioGroup 
-                row 
-                value={activeTab} 
-                onChange={handleTabChange}
-              >
-                <FormControlLabel 
-                  value="secondary_gem_diamond" 
-                  control={<Radio />} 
-                  label="Diamond" 
-                />
-                <FormControlLabel 
-                  value="secondary_gem_stone" 
-                  control={<Radio />} 
-                  label="Stone" 
-                />
-              </RadioGroup>
-            </FormControl>
-          </Box>
+          {/* Removed radio buttons as they shouldn't appear here */}
         </Box>
       );
     }
-  };
-
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
   };
 
   const handleNextTab = () => {
