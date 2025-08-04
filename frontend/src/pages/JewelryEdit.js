@@ -31,7 +31,8 @@ import {
   DialogActions,
   Tabs,
   Tab,
-  Checkbox
+  Checkbox,
+  Slider
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
@@ -71,11 +72,59 @@ const calculateProfitMargin = (retailPrice, costBasis) => {
   return `${margin.toFixed(0)}%`;
 };
 
+
 function JewelryEdit() {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser } = useAuth();
   const API_BASE_URL = config.apiUrl;
+
+  
+  // State variables
+  const [item, setItem] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [gemDialogOpen, setGemDialogOpen] = useState(false);
+  const [gemTab, setGemTab] = useState('diamond'); // Controls which gem tab is active
+  const [gemData, setGemData] = useState({
+    diamond: {
+      shape: 'Round',
+      weight: '',
+      color: '',
+      clarity: '',
+      cut: '',
+      labGrown: false,
+      quantity: '1',
+      size: '',
+      color: 'Colorless',
+      exactColor: 'D'
+    },
+    stone: {
+      type: '',
+      weight: '',
+      shape: 'Round',
+      color: '',
+      quantity: '1',
+      size: ''
+    },
+    estimatedValue: ''
+  });
+  
+  // State for diamond shape navigation
+  const [currentShapeIndex, setCurrentShapeIndex] = useState(0);
+  
+  // Diamond data states - initialized as empty arrays/values
+  const [diamondShapes, setDiamondShapes] = useState([]);
+  const [diamondClarity, setDiamondClarity] = useState([]);
+  const [selectedClarityIndex, setSelectedClarityIndex] = useState(0);
+  const [diamondCuts, setDiamondCuts] = useState([]);
+  const [diamondColors, setDiamondColors] = useState([]);
+  const [diamondSizes, setDiamondSizes] = useState([]);
+  const [colorScale, setColorScale] = useState([]);
+  
+  
+  // State for stone types and colors from API
+  const [stoneTypes, setStoneTypes] = useState([]);
+  const [stoneColors, setStoneColors] = useState([]);
 
   // Handler for editing metal details
   const handleEditMetal = () => {
@@ -118,81 +167,104 @@ function JewelryEdit() {
   // Handler for editing gem details
   const handleEditGem = () => {
     // Initialize gem data based on existing item data
+    setGemDialogOpen(true);
     if (item) {
-      // Check if there are diamonds
-      if (item.diamonds && item.diamonds.length > 0) {
-        const primaryDiamond = item.diamonds.find(d => d.primary) || item.diamonds[0];
+      console.log('Editing gem with item data:', item);   
+                               
+      if (item.primary_gem_category) {
         
-        // Determine color category based on color
-        const color = primaryDiamond.color || 'D';
-        let colorCategory = 'Colorless';
-        if (color >= 'D' && color <= 'F') colorCategory = 'Colorless';
-        else if (color >= 'G' && color <= 'J') colorCategory = 'Near Colorless';
-        else if (color >= 'K' && color <= 'M') colorCategory = 'Faint Color';
-        else if (color >= 'N' && color <= 'R') colorCategory = 'Very Light Color';
-        else if (color >= 'S' && color <= 'Z') colorCategory = 'Light Color';
+        // Determine if it's a diamond or stone based on primary_gem_category
+        const isDiamond = item.primary_gem_category && 
+                         item.primary_gem_category.toLowerCase() === 'diamond';
         
-        // Find the shape index for navigation
-        const shapeIndex = diamondShapes.findIndex(
-          s => s.name.toLowerCase() === (primaryDiamond.shape || '').toLowerCase()
-        );
-        if (shapeIndex !== -1) {
-          setCurrentShapeIndex(shapeIndex);
-          // Fetch sizes for this diamond shape
-          const shapeId = diamondShapes[shapeIndex].id || (shapeIndex + 1);
-          fetchDiamondSizes(shapeId);
+        // Switch to the correct tab first (diamond or stone) based on category
+        setGemTab(isDiamond ? 'diamond' : 'stone');
+        
+        // Then fill all fields for both diamond and stone tabs
+        if (isDiamond) {
+          // Set the diamond shape index for UI
+          if (item.primary_gem_shape && diamondShapes.length > 0) {
+            const shapeIndex = diamondShapes.findIndex(
+              s => s.name && s.name.toLowerCase() === item.primary_gem_shape.toLowerCase()
+            );
+            if (shapeIndex !== -1) {
+              setCurrentShapeIndex(shapeIndex);
+              const shapeId = diamondShapes[shapeIndex].id || (shapeIndex + 1);
+              
+              // Fetch diamond sizes for this shape and then set the size afterwards
+              fetchDiamondSizes(shapeId).then(() => {
+                // Match the primary gem size in the next render cycle after sizes are loaded
+                setTimeout(() => {
+                  // Find matching size in diamondSizes array
+                  if (item.primary_gem_size && diamondSizes.length > 0) {
+                      // Try to find an exact match or the closest size
+                      const sizeValue = String(item.primary_gem_size) + ' mm';
+                      
+                      // Check for exact match first (accounting for string/number conversion)
+                      const exactMatch = diamondSizes.find(s => String(s.size) === sizeValue);
+                      
+                      if (exactMatch) {
+                        handleGemDataChange('diamond', 'size', exactMatch.size);
+                    }
+                  }
+                }, 100); // Short delay to ensure diamondSizes is updated
+              });
+            }
+          }
+          
+          // Set the clarity index for UI
+          if (item.primary_gem_clarity && diamondClarity.length > 0) {
+            const clarityIndex = diamondClarity.findIndex(
+              c => c.name && c.name.toLowerCase() === item.primary_gem_clarity.toLowerCase()
+            );
+            if (clarityIndex !== -1) {
+              setSelectedClarityIndex(clarityIndex);
+            }
+          }
+          
+          // Set diamond gem data directly from item properties
+          setGemData(prev => ({
+            ...prev,
+            diamond: {
+              shape: item.primary_gem_shape || 'Round',
+              weight: item.primary_gem_weight || '',
+              color: item.primary_gem_color || '',
+              clarity: item.primary_gem_clarity || '',
+              cut: item.primary_gem_cut || '',
+              lab: item.primary_gem_lab_grown,
+              quantity: item.primary_gem_quantity || '1',
+              size: item.primary_gem_size || '',
+              exactColor: item.primary_gem_exact_color || 'D'
+            },
+            estimatedValue: item.primary_gem_value || '0'
+          }));
+          // Tab is already set above
+        } else {
+          // Handle stone type
+          // Set stone gem data directly from item properties
+          setGemData(prev => ({
+            ...prev,
+            stone: {
+              type: item.primary_gem_type || '',
+              weight: item.primary_gem_weight || '',
+              shape: item.primary_gem_shape || 'Round',
+              color: item.primary_gem_color || '',
+              quantity: item.primary_gem_quantity || '1',
+              size: item.primary_gem_size || ''
+            },
+            estimatedValue: item.primary_gem_value || '0'
+          }));
+          // Tab is already set above
         }
-        
-        // Find the clarity index for image selection
-        const clarityIndex = diamondClarity.findIndex(
-          c => c.name.toLowerCase() === (primaryDiamond.clarity || '').toLowerCase()
-        );
-        if (clarityIndex !== -1) {
-          setSelectedClarityIndex(clarityIndex);
-        }
-        
-        setGemData(prev => ({
-          ...prev,
-          diamond: {
-            shape: primaryDiamond.shape || 'Round',
-            weight: primaryDiamond.weight || '',
-            color: primaryDiamond.color || '',
-            clarity: primaryDiamond.clarity || '',
-            cut: primaryDiamond.cut || '',
-            lab: primaryDiamond.lab || primaryDiamond.labGrown || false,
-            quantity: primaryDiamond.quantity || '1',
-            size: primaryDiamond.size || '',
-            colorCategory: colorCategory,
-            exactColor: primaryDiamond.color || 'D'
-          },
-          estimatedValue: primaryDiamond.value || '0'
-        }));
+      }
+      // If no primary gem found, default to diamond tab
+      } else {
         setGemTab('diamond');
       } 
-      // Check if there are stones
-      else if (item.stones && item.stones.length > 0) {
-        const primaryStone = item.stones.find(s => s.primary) || item.stones[0];
-        setGemData(prev => ({
-          ...prev,
-          stone: {
-            type: primaryStone.type || '',
-            weight: primaryStone.weight || '',
-            shape: primaryStone.shape || 'Round',
-            color: primaryStone.color || '',
-            quantity: primaryStone.quantity || '1',
-            size: primaryStone.size || ''
-          },
-          estimatedValue: primaryStone.value || '0'
-        }));
-        setGemTab('stone');
-      }
-    }
-  
-    // Open gem dialog
-    setGemDialogOpen(true);
-  };
 
-  // Handler for closing gem dialog
+    }
+
+  // // Handler for closing gem dialog
   const handleGemDialogClose = () => {
     setGemDialogOpen(false);
   };
@@ -207,32 +279,14 @@ function JewelryEdit() {
       }
     }
     
-    // For color category selection, also update the exact color based on the category
-    if (gemType === 'diamond' && field === 'colorCategory') {
-      const exactColor = value === 'Colorless' ? 'D' :
-                         value === 'Near Colorless' ? 'G' :
-                         value === 'Faint Color' ? 'K' :
-                         value === 'Very Light Color' ? 'N' :
-                         value === 'Light Color' ? 'S' : 'D';
-                         
-      setGemData(prevData => ({
-        ...prevData,
-        diamond: {
-          ...prevData.diamond,
-          [field]: value,
-          exactColor: exactColor
-        }
-      }));
-    } else {
-      // Standard field update
-      setGemData(prevData => ({
-        ...prevData,
-        [gemType]: {
-          ...prevData[gemType],
-          [field]: value
-        }
-      }));
-    }
+    // Update the appropriate gem data field
+    setGemData(prev => ({
+      ...prev,
+      [gemType]: {
+        ...prev[gemType],
+        [field]: value
+      }
+    }));
   };
   
   // Handler for diamond shape navigation
@@ -321,55 +375,14 @@ function JewelryEdit() {
       return newItem;
     });
   
-    setGemDialogOpen(false);
     setSnackbar({
       open: true,
       message: 'Gem details updated successfully',
       severity: 'success'
     });
   };
-
-  // State variables
-  const [item, setItem] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [gemDialogOpen, setGemDialogOpen] = useState(false);
-  const [gemTab, setGemTab] = useState('diamond'); // Controls which gem tab is active
-  const [gemData, setGemData] = useState({
-    diamond: {
-      shape: 'Round',
-      weight: '',
-      color: '',
-      clarity: '',
-      cut: '',
-      labGrown: false,
-      quantity: '1',
-      size: '',
-      colorCategory: 'Colorless',
-      exactColor: 'D'
-    },
-    stone: {
-      type: '',
-      weight: '',
-      shape: 'Round',
-      color: '',
-      quantity: '1',
-      size: ''
-    },
-    estimatedValue: ''
-  });
   
-  // State for diamond shape navigation
-  const [currentShapeIndex, setCurrentShapeIndex] = useState(0);
-  
-  // Diamond data states - initialized as empty arrays/values
-  const [diamondShapes, setDiamondShapes] = useState([]);
-  const [diamondClarity, setDiamondClarity] = useState([]);
-  const [selectedClarityIndex, setSelectedClarityIndex] = useState(0);
-  const [diamondCuts, setDiamondCuts] = useState([]);
-  const [diamondColors, setDiamondColors] = useState([]);
-  const [diamondSizes, setDiamondSizes] = useState([]);
-  
-  // Fetch diamond data on component mount
+  // Fetch gem data (diamonds and stones) on component mount
   useEffect(() => {
     const fetchDiamondData = async () => {
       try {
@@ -403,25 +416,42 @@ function JewelryEdit() {
         // Fetch Diamond Colors
         const diamondColorResponse = await axios.get(`${API_BASE_URL}/diamond_color`);
         setDiamondColors(diamondColorResponse.data);
+        
+        // Generate dynamic colorScale from diamond color ranges
+        let minColor = 'Z';
+        let maxColor = 'A';
+        diamondColorResponse.data.forEach(color => {
+          if (color.range && color.range.includes('-')) {
+            const [start, end] = color.range.split('-');
+            // Update min and max color based on ranges
+            if (start < minColor) minColor = start;
+            if (end > maxColor) maxColor = end;
+          }
+        });
+        
+        // Create array of all colors from min to max
+        const generatedColorScale = [];
+        for (let charCode = minColor.charCodeAt(0); charCode <= maxColor.charCodeAt(0); charCode++) {
+          generatedColorScale.push(String.fromCharCode(charCode));
+        }
+        
+        // Set the dynamic color scale
+        setColorScale(generatedColorScale);
       } catch (error) {
         console.error('Error fetching diamond data:', error);
-        // Fallback to default shapes if API fails
-        setDiamondShapes([
-          { id: 1, name: 'Round', image: '/diamond-shapes/round.png' },
-          { id: 2, name: 'Princess', image: '/diamond-shapes/princess.png' },
-          { id: 3, name: 'Emerald', image: '/diamond-shapes/emerald.png' },
-          { id: 4, name: 'Asscher', image: '/diamond-shapes/asscher.png' },
-          { id: 5, name: 'Cushion', image: '/diamond-shapes/cushion.png' },
-          { id: 6, name: 'Marquise', image: '/diamond-shapes/marquise.png' },
-          { id: 7, name: 'Oval', image: '/diamond-shapes/oval.png' },
-          { id: 8, name: 'Radiant', image: '/diamond-shapes/radiant.png' },
-          { id: 9, name: 'Pear', image: '/diamond-shapes/pear.png' },
-          { id: 10, name: 'Heart', image: '/diamond-shapes/heart.png' }
-        ]);
+        setSnackbar({
+          open: true,
+          message: 'Failed to load diamond shapes from API. Please try again later.',
+          severity: 'error'
+        });
+        // Set empty array instead of hardcoded fallback - always rely on API
+        setDiamondShapes([]);
       }
     };
     
+    // Fetch both diamond and stone data in parallel
     fetchDiamondData();
+    fetchStoneData();
   }, []);
   
   // Function to fetch diamond sizes based on shape ID
@@ -429,9 +459,34 @@ function JewelryEdit() {
     try {
       const response = await axios.get(`${API_BASE_URL}/diamond_size_weight/${diamondShapeId}`);
       setDiamondSizes(response.data);
+      return response.data;
     } catch (error) {
       console.error('Error fetching diamond sizes:', error);
       setDiamondSizes([]);
+      return [];
+    }
+  };
+  
+  // Function to fetch stone types and colors
+  const fetchStoneData = async () => {
+    try {
+      // Fetch stone types
+      const typeResponse = await axios.get(`${API_BASE_URL}/stone_types`);
+      setStoneTypes(typeResponse.data);
+      
+      // Fetch stone colors
+      const colorResponse = await axios.get(`${API_BASE_URL}/stone_color`);
+      setStoneColors(colorResponse.data);
+    } catch (error) {
+      console.error('Error fetching stone data:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to load stone data from API. Please try again later.',
+        severity: 'error'
+      });
+      // Set empty arrays as fallback
+      setStoneTypes([]);
+      setStoneColors([]);
     }
   };
   const [snackbar, setSnackbar] = useState({
@@ -644,37 +699,38 @@ function JewelryEdit() {
       stone_color_clarity: item.stone_color_clarity || '',
       serial_number: item.serial_number || '',
       age_year: item.age_year || '',
-      certification: item.certification || ''
     });
+    
+    // Exit edit mode
     setIsEditing(false);
+    
+    // Notification
+    setSnackbar({
+      open: true,
+      message: 'Editing cancelled',
+      severity: 'info'
+    });
   };
 
   const calculateTotals = () => {
     let discountedPrice = sellingPrice;
-    
+      
     // Apply discount
     if (discountType === 'percentage') {
-      discountedPrice = sellingPrice - (sellingPrice * (discount / 100));
+      discountedPrice = sellingPrice * (1 - discount / 100);
     } else {
       discountedPrice = sellingPrice - discount;
     }
-    
+      
     // Ensure price doesn't go negative
     discountedPrice = Math.max(0, discountedPrice);
-    
+      
     // Calculate tax
     const taxAmount = discountedPrice * tax.rate;
     setTax(prev => ({ ...prev, amount: taxAmount }));
-    
+      
     // Set total amount
     setTotalAmount(discountedPrice + taxAmount);
-  };
-
-  const formatPrice = (price) => {
-    if (typeof price !== 'number' || isNaN(price)) {
-      return '0.00';
-    }
-    return price.toFixed(2);
   };
 
   // Render loading state
@@ -1208,9 +1264,9 @@ function JewelryEdit() {
           {snackbar.message}
         </Alert>
       </Snackbar>
-
-      {/* Gem Editing Dialog */}
-      <Dialog
+      
+        {/* Gem Editing Dialog */}
+        <Dialog
         open={gemDialogOpen}
         onClose={handleGemDialogClose}
         maxWidth="md"
@@ -1245,11 +1301,6 @@ function JewelryEdit() {
 
           {/* Shape Section */}
           <Grid container spacing={2}>
-            <Grid item xs={12}>
-              <Typography variant="subtitle1" sx={{ mb: 1 }}>
-                Shape <span style={{ color: 'red' }}>*</span>
-              </Typography>
-            </Grid>
             
             {/* Diamond Shape Image and Navigation */}
             <Grid item xs={4}>
@@ -1300,88 +1351,146 @@ function JewelryEdit() {
             
             <Grid item xs={8}>
               {/* Shape Selection */}
-              <Box sx={{ mb: 2 }}>
-                <TextField
-                  select
-                  fullWidth
-                  label="Select Shape"
-                  value={gemTab === 'diamond' ? gemData.diamond.shape || 'Round' : gemData.stone.shape || ''}
-                  onChange={(e) => handleGemDataChange(gemTab, 'shape', e.target.value)}
-                >
-                  {['Round', 'Oval', 'Emerald', 'Princess', 'Cushion', 'Marquise', 'Pear', 'Heart', 'Asscher', 'Other'].map(shape => (
-                    <MenuItem key={shape} value={shape}>{shape}</MenuItem>
-                  ))}
-                </TextField>
-              </Box>
-              
-              {/* Size */}
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="subtitle1" sx={{ mb: 1 }}>
-                  Size
-                </Typography>
-                <TextField
-                  select
-                  fullWidth
-                  label="Size"
-                  value={gemTab === 'diamond' ? gemData.diamond.size || '' : gemData.stone.size || ''}
-                  onChange={(e) => {
-                    const selectedSize = e.target.value;
-                    const selectedSizeObj = diamondSizes.find(sizeObj => sizeObj.size === selectedSize);
-                    
-                    if (selectedSizeObj && gemTab === 'diamond') {
-                      // Update both size and weight based on selection
-                      setGemData(prev => ({
-                        ...prev,
-                        diamond: {
-                          ...prev.diamond,
-                          size: selectedSize,
-                          weight: selectedSizeObj.weight || prev.diamond.weight
+              {/* Shape and Size in a single row */}
+              <Grid container spacing={2} sx={{ mb: 2 }}>
+                <Grid item xs={6}>
+                  <TextField
+                    select
+                    fullWidth
+                    label="Select Shape"
+                    value={gemTab === 'diamond' ? gemData.diamond.shape || 'Round' : gemData.stone.shape || ''}
+                    onChange={(e) => {
+                      const newShape = e.target.value;
+                      handleGemDataChange(gemTab, 'shape', newShape);
+                      
+                      // If it's a diamond, fetch the corresponding sizes for this shape
+                      if (gemTab === 'diamond') {
+                        // Make sure diamondShapes is an array before using find
+                        if (Array.isArray(diamondShapes)) {
+                          const shapeObj = diamondShapes.find(s => s.shape === newShape);
+                          if (shapeObj && shapeObj.id) {
+                            fetchDiamondSizes(shapeObj.id);
+                          } else {
+                            // If no shape ID found, reset diamond sizes
+                            setDiamondSizes([]);
+                          }
                         }
-                      }));
-                    } else {
-                      // Just update size for non-diamond or if no weight found
-                      handleGemDataChange(gemTab, 'size', selectedSize);
-                    }
-                  }}
-                >
-                  <MenuItem value="">Select Size</MenuItem>
-                  {diamondSizes.map(sizeObj => (
-                    <MenuItem key={sizeObj.size} value={sizeObj.size}>
-                      {sizeObj.size}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Box>
-            </Grid>
-          </Grid>
-
-          {/* Quantity and Weight */}
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={6}>
-              <Typography variant="subtitle1">Quantity</Typography>
-              <TextField
-                fullWidth
-                type="number"
-                value={gemTab === 'diamond' ? gemData.diamond.quantity || '1' : gemData.stone.quantity || '1'}
-                onChange={(e) => handleGemDataChange(gemTab, 'quantity', e.target.value)}
-                InputProps={{
-                  inputProps: { min: 1 }
-                }}
-              />
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="subtitle1">
-                Weight (carats) <span style={{ color: 'red' }}>*</span>
-              </Typography>
-              <TextField
-                fullWidth
-                type="number"
-                value={gemTab === 'diamond' ? gemData.diamond.weight || '0' : gemData.stone.weight || '0'}
-                onChange={(e) => handleGemDataChange(gemTab, 'weight', e.target.value)}
-                InputProps={{
-                  inputProps: { min: 0, step: 0.01 }
-                }}
-              />
+                      }
+                    }}
+                  >
+                    {diamondShapes.map(shape => (
+                      <MenuItem key={shape.id} value={shape.name}>{shape.name}</MenuItem>
+                    ))}
+                  </TextField>
+                </Grid>
+                
+                <Grid item xs={6}>
+                  <TextField
+                    select
+                    fullWidth
+                    label="Size"
+                    value={gemTab === 'diamond' ? (gemData.diamond.size || '') : (gemData.stone.size || '')}
+                    onChange={(e) => {
+                      const selectedSize = e.target.value;
+                      
+                      if (gemTab === 'diamond' && Array.isArray(diamondSizes)) {
+                        // Fix: Use strict comparison for size to ensure correct object is found
+                        const selectedSizeObj = diamondSizes.find(sizeObj => 
+                          sizeObj && String(sizeObj.size) === String(selectedSize)
+                        );
+                        
+                        if (selectedSizeObj) {
+                          // Update both size and weight based on selection
+                          setGemData(prev => ({
+                            ...prev,
+                            diamond: {
+                              ...prev.diamond,
+                              size: selectedSize,
+                              weight: selectedSizeObj.weight || prev.diamond.weight
+                            }
+                          }));
+                        } else {
+                          // Just update size without weight if no match found
+                          handleGemDataChange('diamond', 'size', selectedSize);
+                        }
+                      } else {
+                        // Handle stone size change
+                        handleGemDataChange(gemTab, 'size', selectedSize);
+                      }
+                    }}
+                  >
+                    <MenuItem value="">Select Size</MenuItem>
+                    {Array.isArray(diamondSizes) && diamondSizes.length > 0 ? (
+                      diamondSizes.map(sizeObj => (
+                        <MenuItem key={sizeObj.id || sizeObj.size} value={sizeObj.size}>
+                          {sizeObj.size}
+                        </MenuItem>
+                      ))
+                    ) : (
+                      <MenuItem value="" disabled>No sizes available</MenuItem>
+                    )}
+                  </TextField>
+                </Grid>
+              </Grid>
+              {/* Cut and Lab Grown placed beside Quantity and Weight */}
+              <Grid container spacing={2} sx={{ mt: 2, pl: 2 }}>
+                <Grid item xs={3}>
+                  <TextField
+                    fullWidth
+                    label="Quantity"
+                    type="number"
+                    value={gemTab === 'diamond' ? gemData.diamond.quantity || '1' : gemData.stone.quantity || '1'}
+                    onChange={(e) => handleGemDataChange(gemTab, 'quantity', e.target.value)}
+                    InputProps={{
+                      inputProps: { min: 1 }
+                    }}
+                  />
+                </Grid>
+                <Grid item xs={3}>
+                  <TextField
+                    fullWidth
+                    label="Weight (carats) *"
+                    type="number"
+                    value={gemTab === 'diamond' ? gemData.diamond.weight || '0' : gemData.stone.weight || '0'}
+                    onChange={(e) => handleGemDataChange(gemTab, 'weight', e.target.value)}
+                    InputProps={{
+                      inputProps: { min: 0, step: 0.01 }
+                    }}
+                  />
+                </Grid>
+                {gemTab === 'diamond' && (
+                  <>
+                    <Grid item xs={3}>
+                      <TextField
+                        select
+                        fullWidth
+                        label="Cut"
+                        value={gemData.diamond.cut || ''}
+                        onChange={(e) => handleGemDataChange('diamond', 'cut', e.target.value)}
+                      >
+                        {diamondCuts.map((cut) => (
+                          <MenuItem key={cut.name} value={cut.name}>
+                            {cut.name}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    </Grid>
+                    <Grid item xs={3}>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={gemData.diamond.lab || false}
+                            onChange={(e) => handleGemDataChange('diamond', 'lab', e.target.checked)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        }
+                        label="Lab Grown"
+                        sx={{ m: 0, width: '100%' }}
+                      />
+                    </Grid>
+                  </>
+                )}
+              </Grid>
             </Grid>
           </Grid>
 
@@ -1396,7 +1505,7 @@ function JewelryEdit() {
                 </Grid>
               </Grid>
               
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 2 }}>
                 {diamondColors.map((color) => (
                   <Paper
                     key={color.name}
@@ -1413,7 +1522,20 @@ function JewelryEdit() {
                       backgroundColor: color.color || '#fff',
                       transition: 'all 0.3s ease',
                     }}
-                    onClick={() => handleGemDataChange('diamond', 'color', color.name)}
+                    onClick={() => {
+                      // Update color
+                      handleGemDataChange('diamond', 'color', color.name);
+                      
+                      // Map color to exact color based on color.range
+                      // Example: if range is 'D-F', use the first letter as exact color
+                      let exactColor = 'D'; // Default
+                      if (color.range && color.range.includes('-')) {
+                        exactColor = color.range.split('-')[0];
+                      }
+                      
+                      // Update exact color
+                      handleGemDataChange('diamond', 'exactColor', exactColor);
+                      }}
                   >
                     <Typography variant="caption" align="center">
                       {color.name}
@@ -1425,33 +1547,85 @@ function JewelryEdit() {
                 ))}
               </Box>
               
-              {/* Diamond Cut Selection */}
-              <Box sx={{ mt: 3, mb: 2 }}>
-                <Typography variant="subtitle1" sx={{ mb: 1 }}>
-                  Cut <span style={{ color: 'red' }}>*</span>
-                </Typography>
-                <TextField
-                  select
-                  fullWidth
-                  value={gemData.diamond.cut || ''}
-                  onChange={(e) => handleGemDataChange('diamond', 'cut', e.target.value)}
-                >
-                  {diamondCuts.map((cut) => (
-                    <MenuItem key={cut.name} value={cut.name}>
-                      {cut.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={gemData.diamond.lab || false}
-                      onChange={(e) => handleGemDataChange('diamond', 'lab', e.target.checked)}
-                    />
-                  }
-                  label="Lab Grown"
-                  sx={{ mt: 1 }}
+              {/* Color Scale Slider */}
+              <Box sx={{ width: '100%', px: 2, mt: 2, mb: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography>
+                    Exact Color: {gemData.diamond.exactColor || 'D'}
+                  </Typography>
+                </Box>
+                <Slider
+                  value={colorScale.indexOf(gemData.diamond.exactColor || 'D')}
+                  onChange={(e, newValue) => {
+                    const selectedColor = colorScale[newValue];
+                    handleGemDataChange('diamond', 'exactColor', selectedColor);
+                    
+                    
+                    // Find the corresponding diamond color to update the color field
+                    // Match based on the range containing the exact color
+                    const matchingColor = diamondColors.find(color => {
+                      if (color.range && color.range.includes('-')) {
+                        const [start, end] = color.range.split('-');
+                        // Check if the selected color is within this range
+                        return selectedColor >= start && selectedColor <= end;
+                      }
+                      return false;
+                    });
+                    
+                    // If we found a matching color, update the color field
+                    if (matchingColor) {
+                      handleGemDataChange('diamond', 'color', matchingColor.name);
+                    }
+                  }}
+                  valueLabelDisplay="on"
+                  valueLabelFormat={(value) => colorScale[value]}
+                  step={1}
+                  marks={colorScale.map((color, index) => ({
+                    value: index,
+                    label: index % 2 === 0 ? color : ''
+                  }))}
+                  min={0}
+                  max={colorScale.length - 1}
+                  tabIndex={0}
+                  sx={{
+                    height: 8,
+                    '& .MuiSlider-thumb': {
+                      height: 24,
+                      width: 24,
+                      backgroundColor: '#fff',
+                      border: '2px solid currentColor',
+                      '&:focus, &:hover': {
+                        boxShadow: '0 0 0 8px rgba(25, 118, 210, 0.16)'
+                      },
+                      '&:focus': {
+                        outline: '2px solid #1976d2',
+                        outlineOffset: '2px'
+                      }
+                    },
+                    '& .MuiSlider-valueLabel': {
+                      backgroundColor: '#1976d2',
+                      fontSize: '14px',
+                      fontWeight: 'bold'
+                    },
+                    '& .MuiSlider-track': {
+                      border: 'none',
+                      height: 8
+                    },
+                    '& .MuiSlider-rail': {
+                      opacity: 0.5,
+                      backgroundColor: '#bfbfbf',
+                      height: 8
+                    },
+                    '& .MuiSlider-mark': {
+                      backgroundColor: '#bfbfbf',
+                      height: 12,
+                      width: 2,
+                      marginTop: -2
+                    },
+                    '& .MuiSlider-markActive': {
+                      backgroundColor: 'currentColor',
+                    }
+                  }}
                 />
               </Box>
               
@@ -1511,12 +1685,8 @@ function JewelryEdit() {
                 </Box>
               </Box>
               
-              {/* Exact Color */}
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="body1">
-                  Exact Color: {gemData.diamond.exactColor || gemData.diamond.color || 'D'}
-                </Typography>
-              </Box>
+              {/* Cut & Lab Grown fields moved beside Size and Weight */}
+             
             </>
           )}
 
@@ -1532,28 +1702,39 @@ function JewelryEdit() {
                   onChange={(e) => handleGemDataChange('stone', 'type', e.target.value)}
                   required
                 >
-                  {['Ruby', 'Sapphire', 'Emerald', 'Amethyst', 'Aquamarine', 'Citrine', 'Garnet', 'Opal', 'Pearl', 'Peridot', 'Topaz', 'Turquoise', 'Other'].map(type => (
-                    <MenuItem key={type} value={type}>{type}</MenuItem>
-                  ))}
+                  <MenuItem value="">Select Stone Type</MenuItem>
+                  {stoneTypes.length > 0 ? (
+                    stoneTypes.map(type => (
+                      <MenuItem key={type.id} value={type.type}>{type.type}</MenuItem>
+                    ))
+                  ) : null
+                    }
                 </TextField>
               </Grid>
               <Grid item xs={12}>
                 <TextField
                   fullWidth
+                  select
                   label="Color"
                   value={gemData.stone.color || ''}
                   onChange={(e) => handleGemDataChange('stone', 'color', e.target.value)}
-                />
+                >
+                  <MenuItem value="">Select Color</MenuItem>
+                  {stoneColors.length > 0 ? (
+                    stoneColors.map(color => (
+                      <MenuItem key={color.id} value={color.color}>{color.color}</MenuItem>
+                    ))
+                  ) : null}
+                </TextField>
               </Grid>
             </Grid>
           )}
 
-          {/* Value Estimation - Hidden in the exact replica as it's not in the image */}
-          <Box sx={{ display: 'none', mt: 3, p: 2, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
-            <Typography variant="subtitle1" sx={{ mb: 2 }}>Estimated Value</Typography>
+          {/* Est. Primary Gem Value */}
+          <Box sx={{ mt: 4 }}>
             <TextField
               fullWidth
-              label="Estimated Value ($)"
+              label="Est. Primary Gem Value"
               type="number"
               value={gemData.estimatedValue || ''}
               onChange={(e) => setGemData(prev => ({ ...prev, estimatedValue: e.target.value }))}
@@ -1581,14 +1762,15 @@ function JewelryEdit() {
                     quantity: gemData.stone.quantity || 1
                   }] };
               handleGemSave(gemInfo);
-            }} 
-            variant="contained" 
+            }}
+            variant="contained"
             color="primary"
           >
             Save
           </Button>
         </DialogActions>
       </Dialog>
+    
     </Container>
   );
 }

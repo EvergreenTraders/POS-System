@@ -339,8 +339,8 @@ function GemEstimator() {
     secondary: null // can be 'diamond' or 'stone'
   });
 
-  // Define activeTab state - default to primary_gem_stone
-  const [activeTab, setActiveTab] = useState('primary_gem_stone');
+  // Define activeTab state
+  const [activeTab, setActiveTab] = useState('primary_gem_diamond');
 
   // Handle tab change from the RadioGroup controls
   const handleTabChange = (event) => {
