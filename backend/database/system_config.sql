@@ -13,7 +13,8 @@ BEGIN
         );
         INSERT INTO user_preferences (preference_name, preference_value) VALUES 
             ('cameraEnabled', TRUE),
-            ('caratConversion', TRUE);
+            ('caratConversion', TRUE),
+            ('inventoryHoldPeriodEnabled', TRUE);
     END IF;
 
     -- live pricing
