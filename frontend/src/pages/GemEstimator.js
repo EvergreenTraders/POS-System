@@ -459,15 +459,19 @@ function GemEstimator() {
 
   // Effect to handle edit mode data when component mounts
   useEffect(() => {
-    // If we're editing gem only, force activeTab to primary_gem
-    if (location.state?.editingGemOnly) {
-      // If the current gem type is diamond, set to primary_gem_diamond, otherwise default to primary_gem_stone
-      const gemType = addedGemTypes.primary === 'diamond' ? 'primary_gem_diamond' : 'primary_gem_stone';
-      setActiveTab(gemType);
-    }
-    
     if (location.state?.editMode && location.state?.itemToEdit) {
       const itemToEdit = location.state.itemToEdit;
+      
+      // Set the active tab based on the primary gem category if available
+      if (itemToEdit.primary_gem_category) {
+        const gemCategory = itemToEdit.primary_gem_category.toLowerCase();
+        const gemType = gemCategory === 'diamond' ? 'primary_gem_diamond' : 'primary_gem_stone';
+        setActiveTab(gemType);
+      } else if (location.state?.editingGemOnly) {
+        // Fallback to addedGemTypes if primary_gem_category is not available but we're editing gems
+        const gemType = addedGemTypes.primary === 'diamond' ? 'primary_gem_diamond' : 'primary_gem_stone';
+        setActiveTab(gemType);
+      }
      
       // Direct fill for primary gem fields if they exist on itemToEdit
       // Check if we have direct primary gem properties

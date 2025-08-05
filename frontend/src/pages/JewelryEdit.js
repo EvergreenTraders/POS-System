@@ -248,14 +248,38 @@ function JewelryEdit() {
             ...prev,
             stone: {
               type: item.primary_gem_type || '',
+              name: item.primary_gem_type || '',  // Match the form field name used in stone tab
               weight: item.primary_gem_weight || '',
               shape: item.primary_gem_shape || 'Round',
               color: item.primary_gem_color || '',
               quantity: item.primary_gem_quantity || '1',
-              size: item.primary_gem_size || ''
-            },
-            estimatedValue: item.primary_gem_value || '0'
+              size: item.primary_gem_size || '',
+              authentic: item.primary_gem_authentic || false,
+              estimatedValue: item.primary_gem_value || '0'  // Include estimatedValue directly in the stone object
+            }
           }));
+          
+          // If the stone has a shape and we have diamondShapes loaded (used for stone shapes too)
+          if (item.primary_gem_shape && diamondShapes.length > 0) {
+            const shapeIndex = diamondShapes.findIndex(
+              s => s.name && s.name.toLowerCase() === item.primary_gem_shape.toLowerCase()
+            );
+            if (shapeIndex !== -1) {
+              setCurrentShapeIndex(shapeIndex);
+            }
+          }
+          
+          // If the stone has a color, update the filtered stone types
+          if (item.primary_gem_color && stoneColors.length > 0) {
+            const selectedColor = stoneColors.find(
+              c => c.color && c.color.toLowerCase() === item.primary_gem_color.toLowerCase()
+            );
+            if (selectedColor) {
+              // Filter stone types for this color
+              const filteredTypes = stoneTypes.filter(type => type.color_id === selectedColor.id);
+              setFilteredStoneTypes(filteredTypes);
+            }
+          }
           // Tab is already set above
         }
       }
