@@ -230,11 +230,11 @@ function JewelryEdit() {
 
         // If we have a precious metal type ID, fetch purities for it
         if (item && item.precious_metal_type_id) {
-          fetchPurities(item.precious_metal_type_id);
-        } else if (processedPreciousTypes.length > 0) {
-          // If no specific metal type ID but we have metal types, fetch purities for the first one
-          fetchPurities(processedPreciousTypes[0].id);
-        }
+            fetchPurities(item.precious_metal_type_id);
+          } else if (processedPreciousTypes.length > 0) {
+            // If no specific metal type ID but we have metal types, fetch purities for the first one
+            fetchPurities(processedPreciousTypes[0].id);
+          }
       } catch (error) {
         console.error('Error fetching metal data:', error);
       }
@@ -741,10 +741,10 @@ function JewelryEdit() {
       if (!foundItem) {
         throw new Error(`Item with ID ${itemId} not found`);
       }
-            
+      
       // Set the jewelry item data to state
       setItem(foundItem);
-
+      
       // Set initial edited item state for form
       setEditedItem({
         ...foundItem,
@@ -1203,7 +1203,7 @@ function JewelryEdit() {
                   </Typography>
                   {renderEditableField(
                     'precious_metal_type',
-                    item.metal_type || 'N/A',
+                    item.precious_metal_type || 'N/A',
                     <FormControl fullWidth>
                       <Select
                         name="precious_metal_type"
@@ -1225,8 +1225,7 @@ function JewelryEdit() {
                           setItem(prev => ({
                             ...prev,
                             precious_metal_type_id: e.target.value,
-                            precious_metal_type: typeValue,
-                            metal_type: typeValue
+                            precious_metal_type: typeValue                          
                           }));
                           
                           // Fetch purities for the selected metal type
@@ -1296,19 +1295,7 @@ function JewelryEdit() {
                     </FormControl>
                   )}
                 </Grid>
-                <Grid item xs={6}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={<EditIcon />}
-                      onClick={handleEditMetal}
-                    >
-                      Edit Metal
-                    </Button>
-                  </Box>
-                </Grid>
-                
+
                 {/* Purity and Purity Value - Side by side with auto-update */}
                 <Grid container item xs={12} spacing={2}>
                   <Grid item xs={6}>
@@ -1432,40 +1419,6 @@ function JewelryEdit() {
                   )}
                 </Grid>
                 
-                {/* Metal Value - Double-click to edit */}
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="textSecondary">
-                    Metal Value
-                  </Typography>
-                  {renderEditableField(
-                    'metal_value',
-                    `$${formatPrice(item.metal_value || 0)}`,
-                    <TextField
-                      fullWidth
-                      size="small"
-                      name="metal_value"
-                      type="number"
-                      value={editingField === 'metal_value' ? editedItem.metal_value || 0 : item.metal_value || 0}
-                      onChange={(e) => {
-                        setEditedItem(prev => ({
-                          ...prev,
-                          metal_value: e.target.value
-                        }));
-                      }}
-                      margin="dense"
-                      InputProps={{
-                        startAdornment: <InputAdornment position="start">$</InputAdornment>
-                      }}
-                      inputRef={(el) => {
-                        if (editingField === 'metal_value') inlineInputRef.current = el;
-                      }}
-                      onKeyDown={(e) => handleInlineEditComplete(e, 'metal_value')}
-                      onBlur={(e) => handleInlineEditComplete(e, 'metal_value')}
-                      autoFocus
-                    />
-                  )}
-                </Grid>
-                
                 {/* Metal Category - Double-click to edit */}
                 <Grid item xs={6}>
                   <Typography variant="caption" color="textSecondary">
@@ -1473,7 +1426,7 @@ function JewelryEdit() {
                   </Typography>
                   {renderEditableField(
                     'metal_category',
-                    item.metal_category || 'N/A',
+                    item.category || 'N/A',
                     <FormControl fullWidth>
                       <Select
                         name="metal_category"
@@ -1524,7 +1477,7 @@ function JewelryEdit() {
                   </Typography>
                   {renderEditableField(
                     'spot_price',
-                    `$${formatPrice(item.spot_price || 0)}`,
+                    `$${formatPrice(item.metal_spot_price || 0)}`,
                     <TextField
                       fullWidth
                       size="small"
@@ -1604,7 +1557,7 @@ function JewelryEdit() {
                   </Typography>
                   {renderEditableField(
                     'jewelry_color',
-                    item.metal_color || 'N/A',
+                    item.jewelry_color || 'N/A',
                     <FormControl fullWidth>
                       <Select
                         name="jewelry_color"
@@ -1649,40 +1602,20 @@ function JewelryEdit() {
                     </FormControl>
                   )}
                 </Grid>
-                
-                {/* Spot Price - Double-click to edit */}
+
                 <Grid item xs={6}>
-                  <Typography variant="caption" color="textSecondary">
-                    Spot Price
-                  </Typography>
-                  {renderEditableField(
-                    'spot_price',
-                    `$${formatPrice(item.spot_price || 0)}`,
-                    <TextField
-                      fullWidth
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <Button
+                      variant="outlined"
                       size="small"
-                      name="spot_price"
-                      type="number"
-                      value={editingField === 'spot_price' ? editedItem.spot_price || 0 : item.spot_price || 0}
-                      onChange={(e) => {
-                        setEditedItem(prev => ({
-                          ...prev,
-                          spot_price: e.target.value
-                        }));
-                      }}
-                      margin="dense"
-                      InputProps={{
-                        startAdornment: <InputAdornment position="start">$</InputAdornment>
-                      }}
-                      inputRef={(el) => {
-                        if (editingField === 'spot_price') inlineInputRef.current = el;
-                      }}
-                      onKeyDown={(e) => handleInlineEditComplete(e, 'spot_price')}
-                      onBlur={(e) => handleInlineEditComplete(e, 'spot_price')}
-                      autoFocus
-                    />
-                  )}
+                      startIcon={<EditIcon />}
+                      onClick={handleEditMetal}
+                    >
+                      Edit Metal
+                    </Button>
+                  </Box>
                 </Grid>
+                
                 
                 {/* Gemstone Details with Edit Button */}
                 <Grid item xs={12}>
