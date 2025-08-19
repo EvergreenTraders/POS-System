@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import debounce from 'lodash/debounce';
@@ -72,6 +72,58 @@ const calculateProfitMargin = (retailPrice, costBasis) => {
   return `${margin.toFixed(0)}%`;
 };
 
+// Metal API utility functions
+const API_BASE_URL = config.apiUrl;
+const API_ENDPOINTS = {
+  // Fix endpoints to match exact API paths that MetalEstimator.js uses
+  PRECIOUS_METAL_TYPE: `${API_BASE_URL}/precious_metal_type`,
+  NON_PRECIOUS_METAL_TYPE: `${API_BASE_URL}/non_precious_metal_type`,
+  METAL_CATEGORY: `${API_BASE_URL}/metal_category`,
+  METAL_PURITY: `${API_BASE_URL}/metal_purity`,
+  METAL_COLOR: `${API_BASE_URL}/metal_color`,
+  LIVE_SPOT_PRICES: `${API_BASE_URL}/spot_prices/live`,
+  LIVE_PRICING: `${API_BASE_URL}/live_pricing`
+};
+
+const useMetalAPI = () => {
+  const fetchData = async (endpoint) => {
+    try {
+      const response = await axios.get(endpoint);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching data from ${endpoint}:`, error);
+      return [];
+    }
+  };
+
+  const fetchAllMetalData = async () => {
+    try {
+      const [preciousMetalTypes, nonPreciousMetalTypes, categories, colors] = await Promise.all([
+        fetchData(API_ENDPOINTS.PRECIOUS_METAL_TYPE),
+        fetchData(API_ENDPOINTS.NON_PRECIOUS_METAL_TYPE),
+        fetchData(API_ENDPOINTS.METAL_CATEGORY),
+        fetchData(API_ENDPOINTS.METAL_COLOR),
+      ]);
+
+      return {
+        preciousMetalTypes: preciousMetalTypes || [],
+        nonPreciousMetalTypes: nonPreciousMetalTypes || [],
+        categories: categories || [],
+        colors: colors || []
+      };
+    } catch (error) {
+      console.error('Error fetching all metal data:', error);
+      return {
+        preciousMetalTypes: [],
+        nonPreciousMetalTypes: [],
+        categories: [],
+        colors: []
+      };
+    }
+  };
+
+  return { fetchData, fetchAllMetalData };
+};
 
 function JewelryEdit() {
   const navigate = useNavigate();
@@ -85,6 +137,10 @@ function JewelryEdit() {
   const [loading, setLoading] = useState(true);
   const [gemDialogOpen, setGemDialogOpen] = useState(false);
   const [gemTab, setGemTab] = useState('diamond'); // Controls which gem tab is active
+  // States to track inline editing
+  const [editingField, setEditingField] = useState(null);
+  const inlineInputRef = useRef(null);
+  
   const [gemData, setGemData] = useState({
     diamond: {
       shape: 'Round',
@@ -127,6 +183,65 @@ function JewelryEdit() {
   // State for stone types and colors from API
   const [stoneTypes, setStoneTypes] = useState([]);
   const [stoneColors, setStoneColors] = useState([]);
+
+  // State for metal data from API
+  const [preciousMetalTypes, setPreciousMetalTypes] = useState([]);
+  const [nonPreciousMetalTypes, setNonPreciousMetalTypes] = useState([]);
+  const [metalCategories, setMetalCategories] = useState([]);
+  const [metalPurities, setMetalPurities] = useState([]);
+  const [metalColors, setMetalColors] = useState([]);
+
+  // Initialize metal API hooks
+  const { fetchData, fetchAllMetalData } = useMetalAPI();
+
+  // Function to fetch metal purities based on metal type
+  const fetchPurities = async (metalTypeId) => {
+    try {
+      const response = await axios.get(`${API_ENDPOINTS.METAL_PURITY}/${metalTypeId}`);
+      setMetalPurities(response.data || []);
+      return response.data || [];
+    } catch (error) {
+      console.error('Error fetching metal purities:', error);
+      setMetalPurities([]);
+      return [];
+    }
+  };
+
+  // Fetch metal data on component mount
+  useEffect(() => {
+    const fetchMetalData = async () => {
+      try {
+        const {
+          preciousMetalTypes,
+          nonPreciousMetalTypes,
+          categories,
+          colors
+        } = await fetchAllMetalData();
+
+        // Make sure the data is properly formatted and has expected fields
+        const processedPreciousTypes = Array.isArray(preciousMetalTypes) ? preciousMetalTypes : [];
+        const processedNonPreciousTypes = Array.isArray(nonPreciousMetalTypes) ? nonPreciousMetalTypes : [];
+        const processedCategories = Array.isArray(categories) ? categories : [];
+
+        setPreciousMetalTypes(processedPreciousTypes);
+        setNonPreciousMetalTypes(processedNonPreciousTypes);
+        setMetalCategories(processedCategories);
+        setMetalColors(Array.isArray(colors) ? colors : []);
+
+        // If we have a precious metal type ID, fetch purities for it
+        if (item && item.precious_metal_type_id) {
+          fetchPurities(item.precious_metal_type_id);
+        } else if (processedPreciousTypes.length > 0) {
+          // If no specific metal type ID but we have metal types, fetch purities for the first one
+          fetchPurities(processedPreciousTypes[0].id);
+        }
+      } catch (error) {
+        console.error('Error fetching metal data:', error);
+      }
+    };
+
+    fetchMetalData();
+  }, []); // Remove dependency to ensure it runs only on mount
 
   // Handler for editing metal details
   const handleEditMetal = () => {
@@ -171,7 +286,6 @@ function JewelryEdit() {
     // Initialize gem data based on existing item data
     setGemDialogOpen(true);
     if (item) {
-      console.log('Editing gem with item data:', item);   
                                
       if (item.primary_gem_category) {
         
@@ -630,7 +744,7 @@ function JewelryEdit() {
             
       // Set the jewelry item data to state
       setItem(foundItem);
-  
+
       // Set initial edited item state for form
       setEditedItem({
         ...foundItem,
@@ -642,7 +756,21 @@ function JewelryEdit() {
         stone_color_clarity: foundItem.stone_color_clarity || '',
         serial_number: foundItem.serial_number || '',
         age_year: foundItem.age_year || '',
-        certification: foundItem.certification || ''
+        certification: foundItem.certification || '',
+        // Ensure metal-related fields are properly initialized
+        precious_metal_type_id: foundItem.precious_metal_type_id || '',
+        precious_metal_type: foundItem.precious_metal_type || '',
+        non_precious_metal_type_id: foundItem.non_precious_metal_type_id || '',
+        non_precious_metal_type: foundItem.non_precious_metal_type || '',
+        metal_category_id: foundItem.metal_category_id || '',
+        metal_category: foundItem.metal_category || '',
+        metal_purity_id: foundItem.metal_purity_id || '',
+        metal_purity: foundItem.metal_purity || '',
+        purity_value: foundItem.purity_value || 0,
+        metal_weight: foundItem.metal_weight || 0,
+        est_metal_value: foundItem.est_metal_value || 0,
+        spot_price: foundItem.spot_price || 0,
+        jewelry_color: foundItem.jewelry_color || ''
       });
   
       // Set initial price based on retail price
@@ -776,6 +904,46 @@ function JewelryEdit() {
       message: 'Editing cancelled',
       severity: 'info'
     });
+  };
+
+  // Handle double-click to enable inline editing
+  const handleDoubleClick = (fieldName) => {
+    setEditingField(fieldName);
+    // Focus the input after a small delay to ensure the component has rendered
+    setTimeout(() => {
+      if (inlineInputRef.current) {
+        inlineInputRef.current.focus();
+      }
+    }, 10);
+  };
+
+  // Handle saving the inline edit when pressing Enter or focus out
+  const handleInlineEditComplete = (event, fieldName) => {
+    if (event.key === 'Enter' || event.type === 'blur') {
+      setEditingField(null);
+    }
+  };
+
+  // Render field based on edit state
+  const renderEditableField = (fieldName, displayValue, editComponent) => {
+    return editingField === fieldName ? (
+      editComponent
+    ) : (
+      <Box 
+        sx={{ 
+          p: 1, 
+          cursor: 'pointer', 
+          border: '1px dashed transparent',
+          '&:hover': { border: '1px dashed #ccc', borderRadius: '4px' },
+          minHeight: '32px',
+          display: 'flex',
+          alignItems: 'center'
+        }} 
+        onDoubleClick={() => handleDoubleClick(fieldName)}
+      >
+        {displayValue}
+      </Box>
+    );
   };
 
   const calculateTotals = () => {
@@ -1027,17 +1195,109 @@ function JewelryEdit() {
                   )}
                 </Grid>
                 
-                {/* Metal Type with Edit Button */}
+                {/* Metal Type with Edit Button and Double-Click Editing */}
+                                {/* Precious Metal Type - Double-click to edit */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Precious Metal Type
+                  </Typography>
+                  {renderEditableField(
+                    'precious_metal_type',
+                    item.metal_type || 'N/A',
+                    <FormControl fullWidth>
+                      <Select
+                        name="precious_metal_type"
+                        value={editingField === 'precious_metal_type' ? 
+                          (editedItem.precious_metal_type_id || '') : 
+                          (item.precious_metal_type_id || '')}
+                        onChange={(e) => {
+                          const selectedType = preciousMetalTypes.find(type => type.id.toString() === e.target.value.toString());
+                          // Update both editedItem and item states to ensure display persists
+                          const typeValue = selectedType ? selectedType.type : '';
+                          setEditedItem(prev => ({
+                            ...prev,
+                            precious_metal_type_id: e.target.value,
+                            precious_metal_type: typeValue,
+                            metal_type: typeValue
+                          }));
+                          
+                          // Also update the main item state so display persists after edit
+                          setItem(prev => ({
+                            ...prev,
+                            precious_metal_type_id: e.target.value,
+                            precious_metal_type: typeValue,
+                            metal_type: typeValue
+                          }));
+                          
+                          // Fetch purities for the selected metal type
+                          fetchPurities(e.target.value);
+                        }}
+                        inputRef={(el) => {
+                          if (editingField === 'precious_metal_type') inlineInputRef.current = el;
+                        }}
+                        onKeyDown={(e) => handleInlineEditComplete(e, 'precious_metal_type')}
+                        onBlur={(e) => handleInlineEditComplete(e, 'precious_metal_type')}
+                        autoFocus
+                      >
+                       {preciousMetalTypes.map((type) => (
+                          <MenuItem key={type.id} value={type.id}>
+                            {type.type}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
+                </Grid>
+                
+                {/* Non-Precious Metal Type - Double-click to edit */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Non-Precious Metal Type
+                  </Typography>
+                  {renderEditableField(
+                    'non_precious_metal_type',
+                    item.non_precious_metal_type || 'N/A',
+                    <FormControl fullWidth>
+                      <Select
+                        name="non_precious_metal_type"
+                        value={editingField === 'non_precious_metal_type' ? 
+                          (editedItem.non_precious_metal_type_id || '') : 
+                          (item.non_precious_metal_type_id || '')}
+                        onChange={(e) => {
+                          const selectedType = nonPreciousMetalTypes.find(type => type.id.toString() === e.target.value.toString());
+                          // Update both editedItem and item states to ensure display persists
+                          const typeValue = selectedType ? selectedType.type : '';
+                          setEditedItem(prev => ({
+                            ...prev,
+                            non_precious_metal_type_id: e.target.value,
+                            non_precious_metal_type: typeValue
+                          }));
+                          
+                          // Also update the main item state so display persists after edit
+                          setItem(prev => ({
+                            ...prev,
+                            non_precious_metal_type_id: e.target.value,
+                            non_precious_metal_type: typeValue
+                          }));
+                        }}
+                        inputRef={(el) => {
+                          if (editingField === 'non_precious_metal_type') inlineInputRef.current = el;
+                        }}
+                        onKeyDown={(e) => handleInlineEditComplete(e, 'non_precious_metal_type')}
+                        onBlur={(e) => handleInlineEditComplete(e, 'non_precious_metal_type')}
+                        autoFocus
+                      >
+                         {nonPreciousMetalTypes.map((type) => (
+                          <MenuItem key={type.id} value={type.id}>
+                            {type.type}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
+                </Grid>
                 <Grid item xs={6}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <Box>
-                      <Typography variant="caption" color="textSecondary">
-                        Metal Type
-                      </Typography>
-                      <Typography variant="body2">
-                        {item.metal_type || 'N/A'}
-                      </Typography>
-                    </Box>
                     <Button
                       variant="outlined"
                       size="small"
@@ -1049,48 +1309,378 @@ function JewelryEdit() {
                   </Box>
                 </Grid>
                 
-                {/* Purity - Read-only for now */}
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="textSecondary">
-                    Purity
-                  </Typography>
-                  <Typography variant="body2">
-                    {item.metal_purity}
-                  </Typography>
+                {/* Purity and Purity Value - Side by side with auto-update */}
+                <Grid container item xs={12} spacing={2}>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="textSecondary">
+                      Purity
+                    </Typography>
+                    {renderEditableField(
+                      'metal_purity',
+                      item.metal_purity || 'N/A',
+                      <FormControl fullWidth size="small" margin="dense">
+                        <Select
+                          name="metal_purity"
+                          value={editingField === 'metal_purity' ? 
+                            (editedItem.metal_purity_id || '') : 
+                            (item.metal_purity_id || '')}
+                          onChange={(e) => {
+                            // Find the selected purity by ID and extract all its properties
+                            const selectedPurity = metalPurities.find(p => p.id === e.target.value);
+                            
+                            if (selectedPurity) {
+                              // Update both purity and purity value together
+                              setEditedItem(prev => ({
+                                ...prev,
+                                metal_purity_id: e.target.value,
+                                metal_purity: selectedPurity.purity,
+                                purity_value: selectedPurity.value || 0
+                              }));
+                              
+                              // Immediately update the item state to show the updated value
+                              setItem(prev => ({
+                                ...prev,
+                                metal_purity_id: e.target.value,
+                                metal_purity: selectedPurity.purity,
+                                purity_value: selectedPurity.value || 0
+                              }));
+                            }
+                            
+                            // If we're done editing the purity, complete the edit
+                            handleInlineEditComplete({ key: 'Enter' }, 'metal_purity');
+                          }}
+                          inputRef={(el) => {
+                            if (editingField === 'metal_purity') inlineInputRef.current = el;
+                          }}
+                          onKeyDown={(e) => handleInlineEditComplete(e, 'metal_purity')}
+                          onBlur={(e) => handleInlineEditComplete(e, 'metal_purity')}
+                          autoFocus
+                        >
+                          {metalPurities.map((purity) => (
+                            <MenuItem key={purity.id} value={purity.id}>
+                              {purity.purity}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    )}
+                  </Grid>
+                  
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="textSecondary">
+                      Purity Value
+                    </Typography>
+                    {renderEditableField(
+                      'purity_value',
+                      item.purity_value || '0',
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="purity_value"
+                        type="number"
+                        value={editingField === 'purity_value' ? editedItem.purity_value || 0 : item.purity_value || 0}
+                        onChange={(e) => {
+                          setEditedItem(prev => ({
+                            ...prev,
+                            purity_value: parseFloat(e.target.value) || 0
+                          }));
+                        }}
+                        margin="dense"
+                        inputRef={(el) => {
+                          if (editingField === 'purity_value') inlineInputRef.current = el;
+                        }}
+                        onKeyDown={(e) => handleInlineEditComplete(e, 'purity_value')}
+                        onBlur={(e) => handleInlineEditComplete(e, 'purity_value')}
+                        autoFocus
+                        disabled={editingField !== 'purity_value'}
+                      />
+                    )}
+                  </Grid>
                 </Grid>
                 
-                {/* Metal Weight - Read-only for now */}
+                {/* Metal Weight - Double-click to edit */}
                 <Grid item xs={6}>
                   <Typography variant="caption" color="textSecondary">
                     Metal Weight
                   </Typography>
-                  <Typography variant="body2">
-                    {item.metal_weight}g
-                  </Typography>
+                  {renderEditableField(
+                    'metal_weight',
+                    `${item.metal_weight || ''}g`,
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="metal_weight"
+                      type="number"
+                      value={editingField === 'metal_weight' ? editedItem.metal_weight || '' : item.metal_weight || ''}
+                      onChange={(e) => {
+                        setEditedItem(prev => ({
+                          ...prev,
+                          metal_weight: e.target.value
+                        }));
+                      }}
+                      margin="dense"
+                      InputProps={{
+                        endAdornment: <InputAdornment position="end">g</InputAdornment>
+                      }}
+                      inputRef={(el) => {
+                        if (editingField === 'metal_weight') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'metal_weight')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'metal_weight')}
+                      autoFocus
+                    />
+                  )}
                 </Grid>
                 
-                {/* Metal Value - Editable */}
+                {/* Metal Value - Double-click to edit */}
                 <Grid item xs={6}>
                   <Typography variant="caption" color="textSecondary">
                     Metal Value
                   </Typography>
-                  {isEditing ? (
+                  {renderEditableField(
+                    'metal_value',
+                    `$${formatPrice(item.metal_value || 0)}`,
                     <TextField
                       fullWidth
                       size="small"
                       name="metal_value"
                       type="number"
-                      value={editedItem.metal_value || 0}
-                      onChange={handleInputChange}
+                      value={editingField === 'metal_value' ? editedItem.metal_value || 0 : item.metal_value || 0}
+                      onChange={(e) => {
+                        setEditedItem(prev => ({
+                          ...prev,
+                          metal_value: e.target.value
+                        }));
+                      }}
                       margin="dense"
                       InputProps={{
                         startAdornment: <InputAdornment position="start">$</InputAdornment>
                       }}
+                      inputRef={(el) => {
+                        if (editingField === 'metal_value') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'metal_value')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'metal_value')}
+                      autoFocus
                     />
-                  ) : (
-                    <Typography variant="body2">
-                      ${formatPrice(item.metal_value || 0)}
-                    </Typography>
+                  )}
+                </Grid>
+                
+                {/* Metal Category - Double-click to edit */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Metal Category
+                  </Typography>
+                  {renderEditableField(
+                    'metal_category',
+                    item.metal_category || 'N/A',
+                    <FormControl fullWidth>
+                      <Select
+                        name="metal_category"
+                        value={editingField === 'metal_category' ? 
+                          (editedItem.metal_category_id || '') : 
+                          (item.metal_category_id || '')}
+                        onChange={(e) => {
+                          const selectedCategory = metalCategories.find(cat => cat.id.toString() === e.target.value.toString());
+                          // Update both editedItem and item states to ensure display persists
+                          const categoryValue = selectedCategory ? selectedCategory.category : '';
+                          setEditedItem(prev => ({
+                            ...prev,
+                            metal_category_id: e.target.value,
+                            metal_category: categoryValue
+                          }));
+                          
+                          // Also update the main item state so display persists after edit
+                          setItem(prev => ({
+                            ...prev,
+                            metal_category_id: e.target.value,
+                            metal_category: categoryValue
+                          }));
+                        }}
+                        inputRef={(el) => {
+                          if (editingField === 'metal_category') inlineInputRef.current = el;
+                        }}
+                        onKeyDown={(e) => handleInlineEditComplete(e, 'metal_category')}
+                        onBlur={(e) => handleInlineEditComplete(e, 'metal_category')}
+                        autoFocus
+                      >
+                        <MenuItem value="" style={{ color: '#000000' }}>Select a metal category</MenuItem>
+                        {metalCategories && metalCategories.length > 0 ? metalCategories.map((category) => (
+                          <MenuItem key={category.id} value={category.id.toString()} style={{ color: '#000000' }}>
+                            {category.category}
+                          </MenuItem>
+                        )) : (
+                          <MenuItem disabled style={{ color: '#666666' }}>No metal categories available</MenuItem>
+                        )}
+                      </Select>
+                    </FormControl>
+                  )}
+                </Grid>
+                
+                {/* Spot Price - Double-click to edit */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Spot Price
+                  </Typography>
+                  {renderEditableField(
+                    'spot_price',
+                    `$${formatPrice(item.spot_price || 0)}`,
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="spot_price"
+                      type="number"
+                      value={editingField === 'spot_price' ? editedItem.spot_price || 0 : item.spot_price || 0}
+                      onChange={(e) => {
+                        setEditedItem(prev => ({
+                          ...prev,
+                          spot_price: parseFloat(e.target.value) || 0
+                        }));
+                        
+                        // Also update the main item state so display persists after edit
+                        setItem(prev => ({
+                          ...prev,
+                          spot_price: parseFloat(e.target.value) || 0
+                        }));
+                      }}
+                      margin="dense"
+                      InputProps={{
+                        startAdornment: <InputAdornment position="start">$</InputAdornment>
+                      }}
+                      inputRef={(el) => {
+                        if (editingField === 'spot_price') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'spot_price')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'spot_price')}
+                      autoFocus
+                    />
+                  )}
+                </Grid>
+                
+                {/* Estimated Metal Value - Double-click to edit */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Est. Metal Value
+                  </Typography>
+                  {renderEditableField(
+                    'est_metal_value',
+                    `$${formatPrice(item.est_metal_value || 0)}`,
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="est_metal_value"
+                      type="number"
+                      value={editingField === 'est_metal_value' ? editedItem.est_metal_value || 0 : item.est_metal_value || 0}
+                      onChange={(e) => {
+                        setEditedItem(prev => ({
+                          ...prev,
+                          est_metal_value: parseFloat(e.target.value) || 0
+                        }));
+                        
+                        // Also update the main item state so display persists after edit
+                        setItem(prev => ({
+                          ...prev,
+                          est_metal_value: parseFloat(e.target.value) || 0
+                        }));
+                      }}
+                      margin="dense"
+                      InputProps={{
+                        startAdornment: <InputAdornment position="start">$</InputAdornment>
+                      }}
+                      inputRef={(el) => {
+                        if (editingField === 'est_metal_value') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'est_metal_value')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'est_metal_value')}
+                      autoFocus
+                    />
+                  )}
+                </Grid>
+
+                {/* Jewelry Color - Double-click to edit */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Jewelry Color
+                  </Typography>
+                  {renderEditableField(
+                    'jewelry_color',
+                    item.metal_color || 'N/A',
+                    <FormControl fullWidth>
+                      <Select
+                        name="jewelry_color"
+                        value={editingField === 'jewelry_color' ? 
+                          (editedItem.metal_color_id || '') : 
+                          (item.metal_color_id || '')}
+                        onChange={(e) => {
+                          const selectedColor = metalColors.find(color => color.id.toString() === e.target.value.toString());
+                          // Update both editedItem and item states to ensure display persists
+                          const colorValue = selectedColor ? selectedColor.color : '';
+                          setEditedItem(prev => ({
+                            ...prev,
+                            metal_color_id: e.target.value,
+                            metal_color: colorValue,
+                            jewelry_color: colorValue
+                          }));
+                          
+                          // Also update the main item state so display persists after edit
+                          setItem(prev => ({
+                            ...prev,
+                            metal_color_id: e.target.value,
+                            metal_color: colorValue,
+                            jewelry_color: colorValue
+                          }));
+                        }}
+                        inputRef={(el) => {
+                          if (editingField === 'jewelry_color') inlineInputRef.current = el;
+                        }}
+                        onKeyDown={(e) => handleInlineEditComplete(e, 'jewelry_color')}
+                        onBlur={(e) => handleInlineEditComplete(e, 'jewelry_color')}
+                        autoFocus
+                      >
+                        <MenuItem value="" style={{ color: '#000000' }}>Select a jewelry color</MenuItem>
+                        {metalColors && metalColors.length > 0 ? metalColors.map((color) => (
+                          <MenuItem key={color.id} value={color.id.toString()} style={{ color: '#000000' }}>
+                            {color.color}
+                          </MenuItem>
+                        )) : (
+                          <MenuItem disabled style={{ color: '#666666' }}>No colors available</MenuItem>
+                        )}
+                      </Select>
+                    </FormControl>
+                  )}
+                </Grid>
+                
+                {/* Spot Price - Double-click to edit */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">
+                    Spot Price
+                  </Typography>
+                  {renderEditableField(
+                    'spot_price',
+                    `$${formatPrice(item.spot_price || 0)}`,
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="spot_price"
+                      type="number"
+                      value={editingField === 'spot_price' ? editedItem.spot_price || 0 : item.spot_price || 0}
+                      onChange={(e) => {
+                        setEditedItem(prev => ({
+                          ...prev,
+                          spot_price: e.target.value
+                        }));
+                      }}
+                      margin="dense"
+                      InputProps={{
+                        startAdornment: <InputAdornment position="start">$</InputAdornment>
+                      }}
+                      inputRef={(el) => {
+                        if (editingField === 'spot_price') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'spot_price')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'spot_price')}
+                      autoFocus
+                    />
                   )}
                 </Grid>
                 
