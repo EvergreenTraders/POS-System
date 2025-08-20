@@ -1347,37 +1347,6 @@ function JewelryEdit() {
             >
               Back to Inventory
             </Button>
-            {isEditing ? (
-                  <>
-                    <Button
-                      variant="outlined"
-                      color="secondary"
-                      onClick={handleCancel}
-                      startIcon={<CancelIcon />}
-                      disabled={isSaving}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="contained"
-                      color="primary"
-                      onClick={handleSaveItem}
-                      startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                      disabled={isSaving}
-                    >
-                      {isSaving ? 'Saving...' : 'Save Changes'}
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={() => setIsEditing(true)}
-                    startIcon={<EditIcon />}
-                  >
-                    Edit Item
-                  </Button>
-                )}
           </Box>
         </Box>
 
@@ -1431,56 +1400,35 @@ function JewelryEdit() {
               
               {/* Editable Fields in Grid Layout */}
               <Grid container spacing={2}>
-                {/* Inventory Status - Editable */}
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="textSecondary">
-                    Inventory Status *
-                  </Typography>
-                  {isEditing ? (
-                    <TextField
-                      select
-                      fullWidth
-                      size="small"
-                      name="inventory_status"
-                      value={editedItem.inventory_status || 'HOLD'}
-                      onChange={handleInputChange}
-                      margin="dense"
-                    >
-                      <MenuItem value="HOLD">HOLD</MenuItem>
-                      <MenuItem value="IN-PROCESS">IN-PROCESS</MenuItem>
-                      <MenuItem value="IN-STOCK">IN-STOCK</MenuItem>
-                    </TextField>
-                  ) : (
-                    <Typography variant="body2">
-                      {item.inventory_status || 'HOLD'}
-                    </Typography>
-                  )}
-                </Grid>
                 
-                {/* Description - Editable */}
+                {/* Description - Double-click to edit */}
                 <Grid item xs={12}>
                   <Typography variant="caption" color="textSecondary">
                     Description *
                   </Typography>
-                  {isEditing ? (
+                  {renderEditableField(
+                    'short_desc',
+                    item.short_desc || 'No description available',
                     <TextField
                       fullWidth
                       size="small"
                       name="short_desc"
                       value={editedItem.short_desc || ''}
                       onChange={handleInputChange}
+                      inputRef={(el) => {
+                        if (editingField === 'short_desc') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'short_desc')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'short_desc')}
+                      autoFocus
                       margin="dense"
                     />
-                  ) : (
-                    <Typography variant="body1">
-                      {item.short_desc || 'No description available'}
-                    </Typography>
                   )}
                 </Grid>
                 
                 {/* Metal Type with Edit Button and Double-Click Editing */}
                                 {/* Precious Metal Type - Double-click to edit */}
-                <Grid item xs={6}>
+                <Grid item xs={4}>
                   <Typography variant="caption" color="textSecondary">
                     Precious Metal Type
                   </Typography>
@@ -1532,7 +1480,7 @@ function JewelryEdit() {
                 </Grid>
                 
                 {/* Non-Precious Metal Type - Double-click to edit */}
-                <Grid item xs={6}>
+                <Grid item xs={4}>
                   <Typography variant="caption" color="textSecondary">
                     Non-Precious Metal Type
                   </Typography>
@@ -1578,10 +1526,43 @@ function JewelryEdit() {
                     </FormControl>
                   )}
                 </Grid>
+                                
+                {/* Metal Weight - Double-click to edit */}
+                <Grid item xs={4}>
+                  <Typography variant="caption" color="textSecondary">
+                    Metal Weight
+                  </Typography>
+                  {renderEditableField(
+                    'metal_weight',
+                    `${item.metal_weight || ''}g`,
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="metal_weight"
+                      type="number"
+                      value={editingField === 'metal_weight' ? editedItem.metal_weight || '' : item.metal_weight || ''}
+                      onChange={(e) => {
+                        setEditedItem(prev => ({
+                          ...prev,
+                          metal_weight: e.target.value
+                        }));
+                      }}
+                      margin="dense"
+                      InputProps={{
+                        endAdornment: <InputAdornment position="end">g</InputAdornment>
+                      }}
+                      inputRef={(el) => {
+                        if (editingField === 'metal_weight') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'metal_weight')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'metal_weight')}
+                      autoFocus
+                    />
+                  )}
+                </Grid>
 
                 {/* Purity and Purity Value - Side by side with auto-update */}
-                <Grid container item xs={12} spacing={2}>
-                  <Grid item xs={6}>
+                  <Grid item xs={4}>
                     <Typography variant="caption" color="textSecondary">
                       Purity
                     </Typography>
@@ -1636,7 +1617,7 @@ function JewelryEdit() {
                     )}
                   </Grid>
                   
-                  <Grid item xs={6}>
+                  <Grid item xs={4}>
                     <Typography variant="caption" color="textSecondary">
                       Purity Value
                     </Typography>
@@ -1666,44 +1647,9 @@ function JewelryEdit() {
                       />
                     )}
                   </Grid>
-                </Grid>
-                
-                {/* Metal Weight - Double-click to edit */}
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="textSecondary">
-                    Metal Weight
-                  </Typography>
-                  {renderEditableField(
-                    'metal_weight',
-                    `${item.metal_weight || ''}g`,
-                    <TextField
-                      fullWidth
-                      size="small"
-                      name="metal_weight"
-                      type="number"
-                      value={editingField === 'metal_weight' ? editedItem.metal_weight || '' : item.metal_weight || ''}
-                      onChange={(e) => {
-                        setEditedItem(prev => ({
-                          ...prev,
-                          metal_weight: e.target.value
-                        }));
-                      }}
-                      margin="dense"
-                      InputProps={{
-                        endAdornment: <InputAdornment position="end">g</InputAdornment>
-                      }}
-                      inputRef={(el) => {
-                        if (editingField === 'metal_weight') inlineInputRef.current = el;
-                      }}
-                      onKeyDown={(e) => handleInlineEditComplete(e, 'metal_weight')}
-                      onBlur={(e) => handleInlineEditComplete(e, 'metal_weight')}
-                      autoFocus
-                    />
-                  )}
-                </Grid>
                 
                 {/* Metal Category - Double-click to edit */}
-                <Grid item xs={6}>
+                <Grid item xs={4}>
                   <Typography variant="caption" color="textSecondary">
                     Metal Category
                   </Typography>
@@ -1754,7 +1700,7 @@ function JewelryEdit() {
                 </Grid>
                 
                 {/* Spot Price - Double-click to edit */}
-                <Grid item xs={6}>
+                <Grid item xs={4}>
                   <Typography variant="caption" color="textSecondary">
                     Spot Price
                   </Typography>
@@ -1792,49 +1738,9 @@ function JewelryEdit() {
                     />
                   )}
                 </Grid>
-                
-                {/* Estimated Metal Value - Double-click to edit */}
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="textSecondary">
-                    Est. Metal Value
-                  </Typography>
-                  {renderEditableField(
-                    'est_metal_value',
-                    `$${formatPrice(item.est_metal_value || 0)}`,
-                    <TextField
-                      fullWidth
-                      size="small"
-                      name="est_metal_value"
-                      type="number"
-                      value={editingField === 'est_metal_value' ? editedItem.est_metal_value || 0 : item.est_metal_value || 0}
-                      onChange={(e) => {
-                        setEditedItem(prev => ({
-                          ...prev,
-                          est_metal_value: parseFloat(e.target.value) || 0
-                        }));
-                        
-                        // Also update the main item state so display persists after edit
-                        setItem(prev => ({
-                          ...prev,
-                          est_metal_value: parseFloat(e.target.value) || 0
-                        }));
-                      }}
-                      margin="dense"
-                      InputProps={{
-                        startAdornment: <InputAdornment position="start">$</InputAdornment>
-                      }}
-                      inputRef={(el) => {
-                        if (editingField === 'est_metal_value') inlineInputRef.current = el;
-                      }}
-                      onKeyDown={(e) => handleInlineEditComplete(e, 'est_metal_value')}
-                      onBlur={(e) => handleInlineEditComplete(e, 'est_metal_value')}
-                      autoFocus
-                    />
-                  )}
-                </Grid>
 
-                {/* Jewelry Color - Double-click to edit */}
-                <Grid item xs={6}>
+                  {/* Jewelry Color - Double-click to edit */}
+                  <Grid item xs={4}>
                   <Typography variant="caption" color="textSecondary">
                     Jewelry Color
                   </Typography>
@@ -1885,6 +1791,48 @@ function JewelryEdit() {
                     </FormControl>
                   )}
                 </Grid>
+                
+                {/* Estimated Metal Value - Double-click to edit */}
+                <Grid item xs={4}>
+                  <Typography variant="caption" color="textSecondary">
+                    Est. Metal Value
+                  </Typography>
+                  {renderEditableField(
+                    'est_metal_value',
+                    `$${formatPrice(item.est_metal_value || 0)}`,
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="est_metal_value"
+                      type="number"
+                      value={editingField === 'est_metal_value' ? editedItem.est_metal_value || 0 : item.est_metal_value || 0}
+                      onChange={(e) => {
+                        setEditedItem(prev => ({
+                          ...prev,
+                          est_metal_value: parseFloat(e.target.value) || 0
+                        }));
+                        
+                        // Also update the main item state so display persists after edit
+                        setItem(prev => ({
+                          ...prev,
+                          est_metal_value: parseFloat(e.target.value) || 0
+                        }));
+                      }}
+                      margin="dense"
+                      InputProps={{
+                        startAdornment: <InputAdornment position="start">$</InputAdornment>
+                      }}
+                      inputRef={(el) => {
+                        if (editingField === 'est_metal_value') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'est_metal_value')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'est_metal_value')}
+                      autoFocus
+                    />
+                  )}
+                </Grid>
+
+
 
                 <Grid item xs={6}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1898,7 +1846,6 @@ function JewelryEdit() {
                     </Button>
                   </Box>
                 </Grid>
-                
                 
                 {/* Gemstone Details with Edit Button */}
                 <Grid item xs={12}>
@@ -1931,7 +1878,7 @@ function JewelryEdit() {
                   {gemTab === 'diamond' ? (
                     // Diamond fields
                     <Grid container spacing={2}>
-                      <Grid item xs={6}>
+                      <Grid item xs={4}>
                         <Typography variant="caption" color="textSecondary">
                           Diamond Shape
                         </Typography>
@@ -1968,14 +1915,15 @@ function JewelryEdit() {
                           </FormControl>
                         )}
                       </Grid>
-                      <Grid item xs={6}>
+                      <Grid item xs={4}>
                         <Typography variant="caption" color="textSecondary">
-                          Carat Weight
+                          Diamond Weight
                         </Typography>
                         {renderEditableField(
                           'diamond_weight',
                           item.diamond_weight ? `${item.diamond_weight} ct` : 'N/A',
                           diamondSizes.length > 0 ? (
+
                             <FormControl fullWidth size="small" margin="dense">
                               <Select
                                 name="diamond_weight"
@@ -2023,7 +1971,7 @@ function JewelryEdit() {
                           )
                         )}
                       </Grid>
-                      <Grid item xs={6}>
+                      <Grid item xs={4}>
                         <Typography variant="caption" color="textSecondary">
                           Color
                         </Typography>
@@ -2060,7 +2008,7 @@ function JewelryEdit() {
                           </FormControl>
                         )}
                       </Grid>
-                      <Grid item xs={6}>
+                      <Grid item xs={4}>
                         <Typography variant="caption" color="textSecondary">
                           Clarity
                         </Typography>
@@ -2097,7 +2045,32 @@ function JewelryEdit() {
                           </FormControl>
                         )}
                       </Grid>
-                      <Grid item xs={6}>
+                      
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Quantity
+                        </Typography>
+                        {renderEditableField(
+                          'diamond_quantity',
+                          item.diamond_quantity || '1',
+                          <TextField
+                            fullWidth
+                            size="small"
+                            name="diamond_quantity"
+                            type="number"
+                            value={editedItem?.diamond_quantity || item.diamond_quantity || '1'}
+                            onChange={handleInputChange}
+                            inputProps={{ min: 1, step: 1 }}
+                            onBlur={(e) => handleInlineEditComplete(e, 'diamond_quantity')}
+                            inputRef={(el) => {
+                              if (editingField === 'diamond_quantity') inlineInputRef.current = el;
+                            }}
+                            margin="dense"
+                          />
+                        )}
+                      </Grid>
+                      
+                      <Grid item xs={4}>
                         <Typography variant="caption" color="textSecondary">
                           Cut
                         </Typography>
@@ -2134,37 +2107,63 @@ function JewelryEdit() {
                           </FormControl>
                         )}
                       </Grid>
-                      <Grid item xs={6}>
+                      <Grid item xs={4}>
                         <Typography variant="caption" color="textSecondary">
                           Lab Grown
                         </Typography>
                         {renderEditableField(
-                          'lab_grown',
-                          item.lab_grown ? 'Yes' : 'No',
+                          'diamond_lab_grown',
+                          item.diamond_lab_grown ? 'Yes' : 'No',
                           <FormControl fullWidth size="small">
                             <Select
-                              name="lab_grown"
-                              value={editedItem?.lab_grown !== undefined ? editedItem.lab_grown : (item.lab_grown ? true : false)}
+                              name="diamond_lab_grown"
+                              value={editedItem?.diamond_lab_grown !== undefined ? editedItem.diamond_lab_grown : (item.diamond_lab_grown ? true : false)}
                               onChange={(e) => {
                                 setEditedItem(prev => ({
                                   ...prev,
-                                  lab_grown: e.target.value
+                                  diamond_lab_grown: e.target.value
                                 }));
                                 setItem(prev => ({
                                   ...prev,
-                                  lab_grown: e.target.value
+                                  diamond_lab_grown: e.target.value
                                 }));
                               }}
                               inputRef={(el) => {
-                                if (editingField === 'lab_grown') inlineInputRef.current = el;
+                                if (editingField === 'diamond_lab_grown') inlineInputRef.current = el;
                               }}
-                              onKeyDown={(e) => handleInlineEditComplete(e, 'lab_grown')}
-                              onBlur={(e) => handleInlineEditComplete(e, 'lab_grown')}
+                              onKeyDown={(e) => handleInlineEditComplete(e, 'diamond_lab_grown')}
+                              onBlur={(e) => handleInlineEditComplete(e, 'diamond_lab_grown')}
                             >
                               <MenuItem value={true}>Yes</MenuItem>
                               <MenuItem value={false}>No</MenuItem>
                             </Select>
                           </FormControl>
+                        )}
+                      </Grid>
+
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Estimated Value
+                        </Typography>
+                        {renderEditableField(
+                          'diamond_value',
+                          item.diamond_value ? `$${item.diamond_value.toLocaleString()}` : 'N/A',
+                          <TextField
+                            fullWidth
+                            size="small"
+                            name="diamond_value"
+                            type="number"
+                            value={editedItem?.diamond_value || item.diamond_value || ''}
+                            onChange={handleInputChange}
+                            InputProps={{
+                              startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                            }}
+                            onBlur={(e) => handleInlineEditComplete(e, 'diamond_value')}
+                            inputRef={(el) => {
+                              if (editingField === 'diamond_value') inlineInputRef.current = el;
+                            }}
+                            margin="dense"
+                          />
                         )}
                       </Grid>
                     </Grid>
@@ -2411,153 +2410,214 @@ function JewelryEdit() {
           {/* Sale Details Section */}
           <Grid item xs={12} md={6}>
             <Paper elevation={0} sx={{ p: 2, bgcolor: 'background.default', height: '100%' }}>
-              <Typography variant="h6" sx={{ mb: 2 }}>
-                Sale Details
-              </Typography>
-              
-              {/* Transaction Type */}
-              <FormControl fullWidth margin="normal">
-                <InputLabel>Transaction Type</InputLabel>
-                <Select
-                  value={transactionType}
-                  onChange={(e) => setTransactionType(e.target.value)}
-                  label="Transaction Type"
-                >
-                  <MenuItem value="sell">Sell</MenuItem>
-                  <MenuItem value="retail">Retail</MenuItem>
-                </Select>
-              </FormControl>
               
               {/* Pricing Information */}
               <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
                 Pricing Information
               </Typography>
 
-              {/* Cost Basis */}
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="caption" color="textSecondary" gutterBottom display="block">
-                  Cost Basis
-                </Typography>
-                {isEditing ? (
-                  <TextField
-                    fullWidth
-                    size="small"
-                    name="cost_basis"
-                    type="number"
-                    value={editedItem.cost_basis || 0}
-                    onChange={handleInputChange}
-                    margin="dense"
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>
-                    }}
-                  />
-                ) : (
-                  <Typography variant="body1" fontWeight="medium">
-                    ${formatPrice(item.cost_basis || 0)}
-                  </Typography>
-                )}
-              </Box>
-
-              {/* Metal Value */}
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="caption" color="textSecondary" gutterBottom display="block">
-                  Metal Value
-                </Typography>
-                {isEditing ? (
-                  <TextField
-                    fullWidth
-                    size="small"
-                    name="metal_value"
-                    type="number"
-                    value={editedItem.metal_value || 0}
-                    onChange={handleInputChange}
-                    margin="dense"
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>
-                    }}
-                  />
-                ) : (
-                  <Typography variant="body1">
-                    ${formatPrice(item.metal_value || 0)}
-                  </Typography>
-                )}
-              </Box>
-
-              {/* Retail Price */}
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="caption" color="textSecondary" gutterBottom display="block">
-                  Retail Price
-                </Typography>
-                {isEditing ? (
-                  <TextField
-                    fullWidth
-                    size="small"
-                    name="retail_price"
-                    type="number"
-                    value={editedItem.retail_price || 0}
-                    onChange={handleInputChange}
-                    margin="dense"
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>
-                    }}
-                  />
-                ) : (
-                  <Typography variant="body1" color="success.main" fontWeight="medium">
-                    ${formatPrice(item.retail_price || 0)}
-                  </Typography>
-                )}
-              </Box>
-
-              <Divider sx={{ my: 2 }} />
-
-              {/* Markup Information */}
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="subtitle2" color="textSecondary">
-                  Markup Analysis
-                </Typography>
-                
-                <Grid container spacing={2} sx={{ mt: 1 }}>
-                  {/* Cost to Metal Value */}
-                  <Grid item xs={6}>
-                    <Typography variant="caption" color="textSecondary">
-                      Metal Value / Cost
-                    </Typography>
-                    <Typography variant="body2">
-                      {calculatePercentage(item.metal_value, item.cost_basis)}
+              {/* Pricing Table (3x3 format) */}
+              <Box sx={{ mb: 3, border: '1px solid #e0e0e0', borderRadius: '4px', p: 2, bgcolor: '#f9f9f9' }}>
+                {/* Row 1: Cost Values */}
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={4}>
+                    <Typography variant="subtitle2" align="center" gutterBottom>
+                      Category
                     </Typography>
                   </Grid>
-                  
-                  {/* Retail to Cost Markup */}
-                  <Grid item xs={6}>
-                    <Typography variant="caption" color="textSecondary">
-                      Retail / Cost
-                    </Typography>
-                    <Typography variant="body2" color="success.main">
-                      {calculatePercentage(item.retail_price, item.cost_basis)}
+                  <Grid item xs={4}>
+                    <Typography variant="subtitle2" align="center" gutterBottom>
+                      Metal
                     </Typography>
                   </Grid>
-                  
-                  {/* Profit Margin */}
-                  <Grid item xs={6}>
-                    <Typography variant="caption" color="textSecondary">
-                      Profit Margin
-                    </Typography>
-                    <Typography variant="body2" fontWeight="medium">
-                      {calculateProfitMargin(item.retail_price, item.cost_basis)}
-                    </Typography>
-                  </Grid>
-                  
-                  {/* Profit Amount */}
-                  <Grid item xs={6}>
-                    <Typography variant="caption" color="textSecondary">
-                      Profit Amount
-                    </Typography>
-                    <Typography variant="body2" fontWeight="medium">
-                      ${formatPrice((item.retail_price || 0) - (item.cost_basis || 0))}
+                  <Grid item xs={4}>
+                    <Typography variant="subtitle2" align="center" gutterBottom>
+                      Gem
                     </Typography>
                   </Grid>
                 </Grid>
+
+                {/* Row 1: Cost Values */}
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={4}>
+                    <Typography variant="body2" color="textSecondary" align="right">
+                      Cost Value:
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="metal_cost"
+                        type="number"
+                        value={editedItem.metal_cost || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.metal_cost || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="gem_cost"
+                        type="number"
+                        value={editedItem.gem_cost || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.gem_cost || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                </Grid>
+
+                {/* Row 2: Melt Values */}
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={4}>
+                    <Typography variant="body2" color="textSecondary" align="right">
+                      Melt Value:
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="metal_melt_value"
+                        type="number"
+                        value={editedItem.metal_melt_value || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.metal_melt_value || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="gem_melt_value"
+                        type="number"
+                        value={editedItem.gem_melt_value || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.gem_melt_value || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                </Grid>
+
+                {/* Row 3: Suggested Retail */}
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={4}>
+                    <Typography variant="body2" color="textSecondary" align="right">
+                      Suggested Retail:
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="metal_suggested_retail"
+                        type="number"
+                        value={editedItem.metal_suggested_retail || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.metal_suggested_retail || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="gem_suggested_retail"
+                        type="number"
+                        value={editedItem.gem_suggested_retail || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.gem_suggested_retail || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                </Grid>
+
+                {/* Row 4: Total Retail Value - Always Editable */}
+                <Grid item xs={12}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mt: 2, pt: 2, borderTop: '1px dashed #ccc' }}>
+                    <Typography variant="subtitle1" color="primary" fontWeight="bold" sx={{ mr: 2, minWidth: '150px' }}>
+                      Total Retail Value:
+                    </Typography>
+                    <Box sx={{ flexGrow: 1 }}>
+                      {renderEditableField(
+                        'retail_price',
+                        item.retail_price ? `$${parseFloat(item.retail_price).toFixed(2)}` : '$0.00',
+                        <TextField
+                          fullWidth
+                          size="small"
+                          name="retail_price"
+                          value={editedItem?.retail_price || item.retail_price || ''}
+                          onChange={handleInputChange}
+                          inputRef={(el) => {
+                            if (editingField === 'retail_price') inlineInputRef.current = el;
+                          }}
+                          onKeyDown={(e) => handleInlineEditComplete(e, 'retail_price')}
+                          onBlur={(e) => handleInlineEditComplete(e, 'retail_price')}
+                          type="number"
+                          InputProps={{
+                            startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                          }}
+                          inputProps={{ step: 0.01, min: 0 }}
+                          margin="dense"
+                        />
+                      )}
+                    </Box>
+                  </Box>
+                </Grid>
               </Box>
+
             </Paper>
           </Grid>
         </Grid>
