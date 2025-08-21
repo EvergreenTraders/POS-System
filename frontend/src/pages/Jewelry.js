@@ -182,7 +182,7 @@ function Jewelry() {
             <Button
               variant="contained"
               color="primary"
-              onClick={() => navigate('/gem-estimator')}
+              onClick={() => navigate('/jewel-estimator')}
             >
               Estimator 
             </Button>

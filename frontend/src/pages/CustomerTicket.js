@@ -472,8 +472,8 @@ const CustomerTicket = () => {
       window.history.replaceState({}, document.title);
     }
     
-    // If we have estimated items and they're from gemEstimator
-    else if (estimatedItems.length > 0 && from === 'gemEstimator') {
+    // If we have estimated items and they're from jewelEstimator
+    else if (estimatedItems.length > 0 && from === 'jewelEstimator') {
       // Skip if we've already processed this state
       const stateHash = JSON.stringify({estimatedItems, from});
       if (processedStateRef.current === stateHash) {
@@ -810,10 +810,10 @@ const CustomerTicket = () => {
       setItems(items.filter(item => item.id !== newId));
     }, 100); // Small delay to ensure state update completes
     
-    // Then navigate to gem-estimator if it's a jewelry item
+    // Then navigate to jewel-estimator if it's a jewelry item
     if (itemToDuplicate.sourceEstimator === 'jewelry' && itemToDuplicate.originalData) {
       // Include a special flag to identify this is a duplicate operation
-      navigate('/gem-estimator', { 
+      navigate('/jewel-estimator', { 
         state: { 
           customer,
           editMode: true, 
@@ -825,7 +825,7 @@ const CustomerTicket = () => {
     } else if (itemToDuplicate.category?.toLowerCase().includes('jewelry')) {
       // If it's jewelry but not from estimator, still go to jewelry estimator
       const description = itemToDuplicate.description || '';
-      navigate('/gem-estimator', { 
+      navigate('/jewel-estimator', { 
         state: { 
           customer,
           editMode: true, 
@@ -1038,7 +1038,7 @@ const CustomerTicket = () => {
   };
 
   const handleJewelryEstimatorClick = () => {
-    navigate('/gem-estimator', { state: { customer } });
+    navigate('/jewel-estimator', { state: { customer } });
   };
   
   // Handler for editing an item in the jewelry estimator
@@ -1050,7 +1050,7 @@ const CustomerTicket = () => {
     
     // If the item came from the jewelry estimator, navigate there with the original data
     if (itemToEdit.sourceEstimator === 'jewelry' && itemToEdit.originalData) {
-      navigate('/gem-estimator', { 
+      navigate('/jewel-estimator', { 
         state: { 
           customer,
           editMode: true,
@@ -1083,7 +1083,7 @@ const CustomerTicket = () => {
         stones: itemToEdit.stones || []
       };
       
-      navigate('/gem-estimator', { 
+      navigate('/jewel-estimator', { 
         state: { 
           customer,
           editMode: true,

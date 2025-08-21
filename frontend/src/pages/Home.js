@@ -577,7 +577,7 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                   color="secondary"
                   fullWidth
                   startIcon={<DiamondIcon />}
-                  onClick={() => navigate('/gem-estimator')}
+                  onClick={() => navigate('/jewel-estimator')}
                   sx={{ py: 1 }}
                 >
                   Jewelry Estimator
