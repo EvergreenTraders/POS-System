@@ -1332,22 +1332,16 @@ function JewelryEdit() {
 
       <Paper elevation={2} sx={{ p: 3 }}>
         {/* Header Section */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h5" component="h1">
-            Jewelry Item Management
-          </Typography>
-          
-          {/* Edit/Save Buttons */}
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <Button 
-              variant="contained" 
-              color="primary"
-              onClick={handleBackToInventory}
-              startIcon={<ArrowBackIcon />}
-            >
-              Back to Inventory
-            </Button>
-          </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', mb: 3 }}>
+          {/* Back to Inventory Button - Right Aligned */}
+          <Button 
+            variant="contained" 
+            color="primary"
+            onClick={handleBackToInventory}
+            startIcon={<ArrowBackIcon />}
+          >
+            Back to Inventory
+          </Button>
         </Box>
 
         <Grid container spacing={3}>
