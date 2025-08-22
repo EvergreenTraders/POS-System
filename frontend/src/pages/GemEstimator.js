@@ -44,7 +44,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../context/AuthContext';
 
-function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData }) {
+function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData = null, hideButtons = false }) {
   const API_BASE_URL = config.apiUrl;
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -207,6 +207,75 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
 
   // Effect to handle edit mode data when component mounts
   useEffect(() => {
+    // Initialize from initialData prop (when used in dialogs/other components)
+    if (initialData) {
+      console.log('Initializing GemEstimator with data:', initialData);
+      
+      // Determine if we have diamond or stone as primary gem
+      let primaryGemType = null;
+      
+      // First check primary_gem_category
+      if (initialData.primary_gem_category) {
+        primaryGemType = initialData.primary_gem_category.toLowerCase();
+      } 
+      // Check if we have direct gem fields populated
+      else if (initialData.diamond_shape || initialData.diamond_weight) {
+        primaryGemType = 'diamond';
+      } 
+      else if (initialData.stone_type || initialData.stone_name) {
+        primaryGemType = 'stone';
+      }
+      
+      // Set the active tab based on detected gem type
+      if (primaryGemType) {
+        const gemType = primaryGemType === 'diamond' ? 'primary_gem_diamond' : 'primary_gem_stone';
+        setActiveTab(gemType);
+        
+        // Set the gem type in our tracking state
+        setAddedGemTypes(prev => ({
+          ...prev,
+          primary: primaryGemType
+        }));
+        
+        if (primaryGemType === 'diamond') {
+          // Get the exactColor value first
+          const savedExactColor = initialData.primary_gem_exact_color || initialData.diamond_exact_color || 'D';
+          
+          // Set the exactColor state for the color slider
+          setExactColor(savedExactColor);
+          
+          // Initialize diamond form
+          setPrimaryDiamondForm({
+            shape: initialData.primary_gem_shape || initialData.diamond_shape || '',
+            clarity: initialData.primary_gem_clarity || initialData.diamond_clarity || '',
+            // Use the saved color directly, we'll update it when diamondColors loads
+            color: initialData.primary_gem_color || initialData.diamond_color || '',
+            quantity: initialData.primary_gem_quantity || initialData.diamond_quantity || 1,
+            weight: initialData.primary_gem_weight || initialData.diamond_weight || 0,
+            cut: initialData.primary_gem_cut || initialData.diamond_cut || '',
+            labGrown: initialData.primary_gem_lab_grown || initialData.diamond_lab_grown || false,
+            exactColor: savedExactColor,
+            size: initialData.primary_gem_size || initialData.diamond_size || ''
+          });
+          
+          // Store the saved exact color for use in a useEffect
+          // We'll need to update the color category once diamondColors is loaded
+          if (savedExactColor) {
+            sessionStorage.setItem('pendingExactColor', savedExactColor);
+          }
+          
+          // Set estimated value if available
+          if (initialData.primary_gem_value !== undefined || initialData.diamond_value !== undefined) {
+            setEstimatedValues(prev => ({
+              ...prev,
+              primaryDiamond: parseFloat(initialData.primary_gem_value || initialData.diamond_value || 0)
+            }));
+          }
+        }
+      }
+    }
+    
+    // Handle initializing from location state (legacy approach)
     if (location.state?.editMode && location.state?.itemToEdit) {
       const itemToEdit = location.state.itemToEdit;
       
@@ -1052,9 +1121,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
 
       {/* Size Section */}
       <Grid container spacing={1} sx={{ mt: 0 }}>
-        <Grid item>
-          <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
-        </Grid>
         {getCurrentStoneForm().quantity > 1 && (
           <Grid item xs>
             <FormControl sx={{ minWidth: 120 }}>
@@ -1448,9 +1514,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
 
                   <Grid item xs={12} md={5}>
                     <Grid container sx={{ mb: 0.5, alignItems: 'center' }}>
-                      <Grid item>
-                        <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
-                      </Grid>
                       {getCurrentForm().quantity > 1 && (
                         <Grid item xs>
                           <FormControl variant="outlined" sx={{ width: "50%", mb: 0 }}>

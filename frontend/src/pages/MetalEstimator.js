@@ -265,7 +265,7 @@ const useSpotPriceCalculator = (metalSpotPrice, metalFormState) => {
   };
 };
 
-const MetalEstimator = ({ onMetalValueChange, onAddMetal, setMetalFormState, initialData = null, buttonText = 'Add Metal' }) => {
+const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, setMetalFormState, initialData = null, buttonText = 'Add Metal', hideButtons = false }) => {
   // Add a state to track initialization status
   const [isInitialized, setIsInitialized] = useState(false);
   

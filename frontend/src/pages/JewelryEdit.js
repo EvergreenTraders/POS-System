@@ -45,6 +45,7 @@ import ColorLensIcon from '@mui/icons-material/ColorLens';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
 import MetalEstimator from './MetalEstimator';
+import GemEstimator from './GemEstimator';
 
 // Utility functions for pricing analysis and image handling
 const formatPrice = (price) => {
@@ -135,7 +136,9 @@ function JewelryEdit() {
   // State variables
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [metalDialogOpen, setMetalDialogOpen] = useState(false);
   const [gemDialogOpen, setGemDialogOpen] = useState(false);
+  const [combinedDialogOpen, setCombinedDialogOpen] = useState(false);
   const [gemTab, setGemTab] = useState('diamond'); // Controls which gem tab is active
   // States to track inline editing
   const [editingField, setEditingField] = useState(null);
@@ -244,10 +247,32 @@ function JewelryEdit() {
     fetchMetalData();
   }, []); // Remove dependency to ensure it runs only on mount
 
-  // Handler for editing metal details
+  
+  // Handler for editing jewelry item (combined metal and gem)
+  const handleEditJewelryItem = () => {
+    setCombinedDialogOpen(true);
+  };
+  
+  // Handler for editing metal details - retained for other code that might reference it
   const handleEditMetal = () => {
-    // Open metal edit dialog instead of navigating
     setMetalDialogOpen(true);
+  };
+  
+  // Handler for metal value changes - retained for other code that might reference it
+  const handleMetalValueChange = (value) => {
+    // Required by MetalEstimator
+  };
+  
+  // Handler for saving changes from combined dialog
+  const handleCombinedSave = () => {
+    // Here you would update both metal and gem data
+    setCombinedDialogOpen(false);
+    // Show success message or notification
+  };
+  
+  // Handler for canceling combined dialog
+  const handleCombinedCancel = () => {
+    setCombinedDialogOpen(false);
   };
 
   // Handler for when metal data is saved in the dialog
@@ -272,138 +297,12 @@ function JewelryEdit() {
     setMetalDialogOpen(false);
   };
   
-  // Handler for metal value changes
-  const handleMetalValueChange = (value) => {
-    // This function is required by MetalEstimator
-  };
 
   // Handler for canceling metal edit
   const handleMetalCancel = () => {
     setMetalDialogOpen(false);
   };
 
-  // Handler for editing gem details
-  const handleEditGem = () => {
-    // Initialize gem data based on existing item data
-    setGemDialogOpen(true);
-    if (item) {
-                               
-      if (item.primary_gem_category) {
-        
-        // Determine if it's a diamond or stone based on primary_gem_category
-        const isDiamond = item.primary_gem_category && 
-                         item.primary_gem_category.toLowerCase() === 'diamond';
-        
-        // Switch to the correct tab first (diamond or stone) based on category
-        setGemTab(isDiamond ? 'diamond' : 'stone');
-        
-        // Then fill all fields for both diamond and stone tabs
-        if (isDiamond) {
-          // Set the diamond shape index for UI
-          if (item.primary_gem_shape && diamondShapes.length > 0) {
-            const shapeIndex = diamondShapes.findIndex(
-              s => s.name && s.name.toLowerCase() === item.primary_gem_shape.toLowerCase()
-            );
-            if (shapeIndex !== -1) {
-              setCurrentShapeIndex(shapeIndex);
-              const shapeId = diamondShapes[shapeIndex].id || (shapeIndex + 1);
-              
-              // Fetch diamond sizes for this shape and then set the size afterwards
-              fetchDiamondSizes(shapeId).then(() => {
-                // Match the primary gem size in the next render cycle after sizes are loaded
-                setTimeout(() => {
-                  // Find matching size in diamondSizes array
-                  if (item.primary_gem_size && diamondSizes.length > 0) {
-                      // Try to find an exact match or the closest size
-                      const sizeValue = String(item.primary_gem_size) + ' mm';
-                      
-                      // Check for exact match first (accounting for string/number conversion)
-                      const exactMatch = diamondSizes.find(s => String(s.size) === sizeValue);
-                      
-                      if (exactMatch) {
-                        handleGemDataChange('diamond', 'size', exactMatch.size);
-                    }
-                  }
-                }, 100); // Short delay to ensure diamondSizes is updated
-              });
-            }
-          }
-          
-          // Set the clarity index for UI
-          if (item.primary_gem_clarity && diamondClarity.length > 0) {
-            const clarityIndex = diamondClarity.findIndex(
-              c => c.name && c.name.toLowerCase() === item.primary_gem_clarity.toLowerCase()
-            );
-            if (clarityIndex !== -1) {
-              setSelectedClarityIndex(clarityIndex);
-            }
-          }
-          
-          // Set diamond gem data directly from item properties
-          setGemData(prev => ({
-            ...prev,
-            diamond: {
-              shape: item.primary_gem_shape || 'Round',
-              weight: item.primary_gem_weight || '',
-              color: item.primary_gem_color || '',
-              clarity: item.primary_gem_clarity || '',
-              cut: item.primary_gem_cut || '',
-              lab: item.primary_gem_lab_grown,
-              quantity: item.primary_gem_quantity || '1',
-              size: item.primary_gem_size || '',
-              exactColor: item.primary_gem_exact_color || 'D'
-            },
-            estimatedValue: item.primary_gem_value || '0'
-          }));
-          // Tab is already set above
-        } else {
-          // Handle stone type
-          // Set stone gem data directly from item properties
-          setGemData(prev => ({
-            ...prev,
-            stone: {
-              type: item.primary_gem_type || '',
-              name: item.primary_gem_type || '',  // Match the form field name used in stone tab
-              weight: item.primary_gem_weight || '',
-              shape: item.primary_gem_shape || 'Round',
-              color: item.primary_gem_color || '',
-              quantity: item.primary_gem_quantity || '1',
-              size: item.primary_gem_size || '',
-              authentic: item.primary_gem_authentic || false,
-              estimatedValue: item.primary_gem_value || '0'  // Include estimatedValue directly in the stone object
-            }
-          }));
-          
-          // If the stone has a shape and we have diamondShapes loaded (used for stone shapes too)
-          if (item.primary_gem_shape && diamondShapes.length > 0) {
-            const shapeIndex = diamondShapes.findIndex(
-              s => s.name && s.name.toLowerCase() === item.primary_gem_shape.toLowerCase()
-            );
-            if (shapeIndex !== -1) {
-              setCurrentShapeIndex(shapeIndex);
-            }
-          }
-          
-          // If the stone has a color, update the filtered stone types
-          if (item.primary_gem_color && stoneColors.length > 0) {
-            const selectedColor = stoneColors.find(
-              c => c.color && c.color.toLowerCase() === item.primary_gem_color.toLowerCase()
-            );
-            if (selectedColor) {
-              // Filter stone types for this color
-              const filteredTypes = stoneTypes.filter(type => type.color_id === selectedColor.id);
-              setFilteredStoneTypes(filteredTypes);
-            }
-          }
-          // Tab is already set above
-        }
-      }
-      // If no primary gem found, default to diamond tab
-      } else {
-        setGemTab('diamond');
-      } 
-
-    }
 
   // // Handler for closing gem dialog
   const handleGemDialogClose = () => {
@@ -848,7 +747,6 @@ function JewelryEdit() {
   const [discount, setDiscount] = useState(0);
   const [discountType, setDiscountType] = useState('percentage'); // 'percentage' or 'amount'
   const [transactionType, setTransactionType] = useState('retail'); // 'sell' or 'retail'
-  const [metalDialogOpen, setMetalDialogOpen] = useState(false);
   const [updatedMetalData, setUpdatedMetalData] = useState(null);
 
   // Effects
@@ -1290,43 +1188,74 @@ function JewelryEdit() {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      {/* Metal Estimator Dialog */}
+      {/* Gem Estimator Dialog */}
       <Dialog
-        open={metalDialogOpen}
-        onClose={handleMetalCancel}
-        maxWidth="md"
+        open={gemDialogOpen}
+        onClose={() => setGemDialogOpen(false)}
+        maxWidth="lg"
         fullWidth
         PaperProps={{ sx: { maxHeight: '90vh' } }}
       >
-        <DialogTitle>Edit Metal Details</DialogTitle>
+        <DialogTitle>Edit Gemstone Details</DialogTitle>
         <DialogContent dividers>
-          {metalDialogOpen && (
-            <MetalEstimator
-              initialData={{
-                // Pass both category and metalCategory to ensure proper initialization
-                category: item?.category || 'Jewelry',
-                metalCategory: item?.category || 'Jewelry',
-                // Pass all other metal properties
-                weight: item?.metal_weight || '',
-                preciousMetalType: item?.metal_type || 'Gold',
-                preciousMetalTypeId: item?.precious_metal_type_id || 1,
-                nonPreciousMetalType: item?.non_precious_metal_type || '',
-                jewelryColor: item?.jewelry_color || 'Yellow',
-                purity: { 
-                  purity: item?.metal_purity || '', 
-                  value: item?.purity_value || 0 
-                },
-                spotPrice: item?.spot_price || 0,
-                estimatedValue: item?.metal_value || 0
-              }}
-              onMetalValueChange={handleMetalValueChange}
-              onAddMetal={handleMetalSave}
-              buttonText="Save Metal"
+          {gemDialogOpen && (
+            <GemEstimator 
+              initialData={item} 
+              onSave={(updatedData) => {
+                // Handle saving gem data
+                setGemDialogOpen(false);
+              }} 
+              onCancel={() => setGemDialogOpen(false)} 
             />
           )}
         </DialogContent>
         <DialogActions>
           <Button onClick={handleMetalCancel}>Cancel</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Combined Jewelry Item Dialog */}
+      <Dialog
+        open={combinedDialogOpen}
+        onClose={handleCombinedCancel}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{ sx: { maxHeight: '90vh' } }}
+      >
+        <DialogTitle>Edit Jewelry Item</DialogTitle>
+        <DialogContent dividers>
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={5} md={4}> {/* 40% width for MetalEstimator */}
+                {combinedDialogOpen && (
+                  <MetalEstimator 
+                    initialData={{
+                      precious_metal_type: item?.precious_metal_type || '',
+                      metal_weight: item?.metal_weight || 0,
+                      non_precious_metal_type: item?.non_precious_metal_type || '',
+                      metal_purity: item?.metal_purity || '', 
+                      purity_value: item?.purity_value || 0,
+                      metal_spot_price: parseFloat(item?.metal_spot_price) || 0,
+                      estimated_value: parseFloat(item?.est_metal_value) || 0,
+                      color: item?.jewelry_color || '',
+                      metal_category: item?.category || ''
+                    }}
+                    hideButtons={true} /* Hide internal buttons */
+                  />
+                )}
+            </Grid>
+            <Grid item xs={12} sm={7} md={8}> {/* 60% width for GemEstimator */}
+                {combinedDialogOpen && (
+                  <GemEstimator 
+                    initialData={item} 
+                    hideButtons={true} /* Hide internal buttons */
+                  />
+                )}
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCombinedCancel} startIcon={<CancelIcon />}>Cancel</Button>
+          <Button onClick={handleCombinedSave} variant="contained" color="primary" startIcon={<SaveIcon />}>Save Changes</Button>
         </DialogActions>
       </Dialog>
 
@@ -1830,13 +1759,15 @@ function JewelryEdit() {
 
                 <Grid item xs={6}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+
                     <Button
-                      variant="outlined"
+                      variant="contained"
+                      color="secondary"
                       size="small"
                       startIcon={<EditIcon />}
-                      onClick={handleEditMetal}
+                      onClick={handleEditJewelryItem}
                     >
-                      Edit Metal
+                      Edit Jewelry Item
                     </Button>
                   </Box>
                 </Grid>
@@ -1845,16 +1776,8 @@ function JewelryEdit() {
                 <Grid item xs={12}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, mt: 2 }}>
                     <Typography variant="subtitle2" fontWeight="medium">
-                      Gemstone Details
+                      Primary Gem Details
                     </Typography>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={<EditIcon />}
-                      onClick={handleEditGem}
-                    >
-                      Edit Primary Gem
-                    </Button>
                   </Box>
                     {/* Tab selector for Diamond/Stone */}
                     <Box sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
@@ -2640,10 +2563,10 @@ function JewelryEdit() {
       >
         <DialogContent>
           {/* Primary Gem Header */}
-          <Typography variant="h6" sx={{ mb: 3, fontWeight: 'bold' }}>EST. PRIMARY GEM</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 'bold' }}>EST. PRIMARY GEM</Typography>
           
           {/* Diamond/Stone Selection */}
-          <Box sx={{ mb: 3, display: 'flex', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <FormControl component="fieldset">
               <RadioGroup row value={gemTab} onChange={(e, newValue) => setGemTab(newValue)}>
                 <FormControlLabel 
