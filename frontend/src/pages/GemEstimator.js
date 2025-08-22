@@ -248,7 +248,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
           setPrimaryDiamondForm({
             shape: initialData.primary_gem_shape || initialData.diamond_shape || '',
             clarity: initialData.primary_gem_clarity || initialData.diamond_clarity || '',
-            // Use the saved color directly, we'll update it when diamondColors loads
             color: initialData.primary_gem_color || initialData.diamond_color || '',
             quantity: initialData.primary_gem_quantity || initialData.diamond_quantity || 1,
             weight: initialData.primary_gem_weight || initialData.diamond_weight || 0,
@@ -258,12 +257,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
             size: initialData.primary_gem_size || initialData.diamond_size || ''
           });
           
-          // Store the saved exact color for use in a useEffect
-          // We'll need to update the color category once diamondColors is loaded
-          if (savedExactColor) {
-            sessionStorage.setItem('pendingExactColor', savedExactColor);
-          }
-          
           // Set estimated value if available
           if (initialData.primary_gem_value !== undefined || initialData.diamond_value !== undefined) {
             setEstimatedValues(prev => ({
@@ -271,12 +264,35 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
               primaryDiamond: parseFloat(initialData.primary_gem_value || initialData.diamond_value || 0)
             }));
           }
+        } else if (primaryGemType === 'stone') {
+          // Initialize stone form with available data
+          setPrimaryStoneForm({
+            name: initialData.primary_gem_name || initialData.stone_name || '',
+            type: initialData.primary_gem_type || initialData.stone_type || '',
+            shape: initialData.primary_gem_shape || initialData.stone_shape || '',
+            color: initialData.primary_gem_color || initialData.stone_color || '',
+            color_id: initialData.primary_gem_color_id || initialData.stone_color_id || 5, // Default Red's ID
+            quantity: initialData.primary_gem_quantity || initialData.stone_quantity || 1,
+            weight: initialData.primary_gem_weight || initialData.stone_weight || 0,
+            width: initialData.primary_gem_width || initialData.stone_width || '',
+            depth: initialData.primary_gem_depth || initialData.stone_depth || '',
+            authentic: initialData.primary_gem_authentic || initialData.stone_authentic || false,
+            valuationType: initialData.primary_gem_valuation_type || 'each'
+          });
+          
+          // Set estimated value if available
+          if (initialData.primary_gem_value !== undefined || initialData.stone_value !== undefined) {
+            setEstimatedValues(prev => ({
+              ...prev,
+              primaryGemstone: parseFloat(initialData.primary_gem_value || initialData.stone_value || 0)
+            }));
+          }
+        }
         }
       }
-    }
     
     // Handle initializing from location state (legacy approach)
-    if (location.state?.editMode && location.state?.itemToEdit) {
+    if (!initialData && location.state?.editMode && location.state?.itemToEdit) {
       const itemToEdit = location.state.itemToEdit;
       
       // Set the active tab based on the primary gem category if available
@@ -293,7 +309,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
       // Direct fill for primary gem fields if they exist on itemToEdit
       // Check if we have direct primary gem properties
       if (itemToEdit.primary_gem_category) {
-        console.log('Direct primary gem data found in itemToEdit:', itemToEdit);
         
         // Set the appropriate gem type - with type checking
         const primaryGemCategory = itemToEdit.primary_gem_category;
@@ -341,26 +356,31 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
               ...prev,
               primaryDiamond: parseFloat(itemToEdit.primary_gem_value) || 0
             }));
-          } 
-          
-        } else {
+          }
+        } else if (primaryGemCategory.toLowerCase() === 'stone') {
+          // Set stone as the primary gem type
           setAddedGemTypes(prev => ({
             ...prev,
             primary: 'stone'
           }));
           
-          // Set primary stone form directly from itemToEdit
+          // Initialize the stone form data
           const stoneFormData = {
-            name: itemToEdit.primary_gem_type || '',
-            shape: itemToEdit.primary_gem_shape || 'Round',
+            name: itemToEdit.primary_gem_name || '',
+            type: itemToEdit.primary_gem_type || '',
+            shape: itemToEdit.primary_gem_shape || '',
             color: itemToEdit.primary_gem_color || '',
+            color_id: itemToEdit.primary_gem_color_id || null,
             quantity: itemToEdit.primary_gem_quantity || 1,
             weight: itemToEdit.primary_gem_weight || 0,
-            authentic: itemToEdit.primary_gem_authentic || false,
-            valuationType: 'each'
+            width: itemToEdit.primary_gem_width || '',
+            depth: itemToEdit.primary_gem_depth || '',
+            valuationType: itemToEdit.primary_gem_valuation_type || 'each'
           };
           
+          // Set the primary stone form
           setPrimaryStoneForm(stoneFormData);
+          
           // Set the estimated value for primary stone if available
           if (itemToEdit.primary_gem_value !== undefined) {
             setEstimatedValues(prev => ({
@@ -370,10 +390,8 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
           }
         }
       }
-      
-
     }
-  }, [location.state]);
+  }, [location.state, diamondShapes]);
   
   // Effect to update selectedClarityIndex when diamondClarity is loaded and we're in edit mode
   useEffect(() => {
@@ -415,11 +433,9 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
       const primaryGemCategory = location.state.itemToEdit.primary_gem_category;
       if (primaryGemCategory && typeof primaryGemCategory === 'string' && 
           primaryGemCategory.toLowerCase() === 'stone') {
-        
         // Get the color to match from the item being edited
         const colorToMatch = location.state.itemToEdit.primary_gem_color;
         if (colorToMatch && typeof colorToMatch === 'string') {
-          
           // Try to find an exact match first (case insensitive)
           // Check both color.name and color.color properties
           let matchingColor = stoneColors.find(color => {
@@ -613,8 +629,9 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
     fetchAllData();
     
     // Only fetch default diamond sizes (round) if we're not in edit mode
-    if (!location.state?.editMode) 
+    if (!location.state?.editMode) {
       fetchDiamondSizes(1);
+    }
     fetchUserPreference();
     if(isCaratConversionEnabled) 
         fetchCaratConversion();
