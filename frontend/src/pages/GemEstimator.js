@@ -209,7 +209,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
   useEffect(() => {
     // Initialize from initialData prop (when used in dialogs/other components)
     if (initialData) {
-      console.log('Initializing GemEstimator with data:', initialData);
       
       // Determine if we have diamond or stone as primary gem
       let primaryGemType = null;
@@ -1565,7 +1564,7 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
                           <Select
                             fullWidth
                             displayEmpty
-                            value={getCurrentForm().size || ''}
+                            value={getCurrentForm().size + ' mm' || ''}
                             name="size"
                             inputRef={sizeRef}
                             onChange={(e) => {

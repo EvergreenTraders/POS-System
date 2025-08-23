@@ -1834,6 +1834,43 @@ function JewelryEdit() {
                       </Grid>
                       <Grid item xs={4}>
                         <Typography variant="caption" color="textSecondary">
+                          Diamond Size
+                        </Typography>
+                        {renderEditableField(
+                          'diamond_size',
+                          item.diamond_size ? `${item.diamond_size} mm` : 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name="diamond_size"
+                              value={editedItem?.diamond_size || item.diamond_size || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, 'diamond_size')}
+                              onClose={() => handleInlineEditComplete(null, 'diamond_size')}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === 'diamond_size') inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select diamond size
+                              </MenuItem>
+                              {diamondSizes.map((size) => (
+                                <MenuItem 
+                                  key={size.id} 
+                                  value={size.size}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {size.size}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
                           Diamond Weight
                         </Typography>
                         {renderEditableField(
