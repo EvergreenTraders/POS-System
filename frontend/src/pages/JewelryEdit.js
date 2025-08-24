@@ -1469,6 +1469,11 @@ function JewelryEdit() {
                           ...prev,
                           metal_weight: e.target.value
                         }));
+                         // Also update the main item state so display persists after edit
+                         setItem(prev => ({
+                          ...prev,
+                          metal_weight: e.target.value
+                        }));
                       }}
                       margin="dense"
                       InputProps={{
@@ -1558,6 +1563,10 @@ function JewelryEdit() {
                             ...prev,
                             purity_value: parseFloat(e.target.value) || 0
                           }));
+                          setItem(prev => ({
+                            ...prev,
+                            purity_value: parseFloat(e.target.value) || 0
+                          }));
                         }}
                         margin="dense"
                         inputRef={(el) => {
@@ -1594,13 +1603,12 @@ function JewelryEdit() {
                             metal_category_id: e.target.value,
                             metal_category: categoryValue
                           }));
-                          
-                          // Also update the main item state so display persists after edit
                           setItem(prev => ({
                             ...prev,
                             metal_category_id: e.target.value,
                             metal_category: categoryValue
                           }));
+                          
                         }}
                         inputRef={(el) => {
                           if (editingField === 'metal_category') inlineInputRef.current = el;
@@ -1683,7 +1691,6 @@ function JewelryEdit() {
                           setEditedItem(prev => ({
                             ...prev,
                             metal_color_id: e.target.value,
-                            metal_color: colorValue,
                             jewelry_color: colorValue
                           }));
                           
@@ -1691,7 +1698,6 @@ function JewelryEdit() {
                           setItem(prev => ({
                             ...prev,
                             metal_color_id: e.target.value,
-                            metal_color: colorValue,
                             jewelry_color: colorValue
                           }));
                         }}
