@@ -34,8 +34,24 @@ function Jewelry() {
   const [loading, setLoading] = useState(true);
   const [jewelryItems, setJewelryItems] = useState([]);
 
-  const handleEditClick = (item) => {
-    navigate('/jewelry-edit', { state: { itemId: item.item_id } });
+  const handleEditClick = async (item) => {
+    try {
+      // Fetch all secondary gem details for this item in one request
+      const response = await axios.get(`${API_BASE_URL}/jewelry_secondary_gems/${item.item_id}`);
+      const secondaryGems = response.data || [];
+      
+      // Navigate with both item ID and all secondary gem data
+      navigate('/jewelry-edit', { 
+        state: { 
+          itemId: item.item_id,
+          secondaryGems: secondaryGems
+        } 
+      });
+    } catch (error) {
+      console.error('Error fetching secondary gem details:', error);
+      // Still navigate even if secondary gem fetch fails
+      navigate('/jewelry-edit', { state: { itemId: item.item_id } });
+    }
   };
 
   useEffect(() => {

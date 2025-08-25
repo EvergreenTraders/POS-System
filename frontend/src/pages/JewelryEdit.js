@@ -724,7 +724,7 @@ function JewelryEdit() {
   useEffect(() => {
     const fetchData = async () => {
       if (location.state?.itemId) {
-        await fetchJewelryItem(location.state.itemId);
+        await fetchJewelryItem(location.state.itemId, location.state?.secondaryGems);
       } else {
         setLoading(false);
         setSnackbar({
@@ -884,7 +884,7 @@ function JewelryEdit() {
   }, [sellingPrice, discount, discountType]);
 
   // Fetch functions
-  const fetchJewelryItem = async (itemId) => {
+  const fetchJewelryItem = async (itemId, secondaryGems = []) => {
     try {
       setLoading(true);
       
@@ -901,9 +901,15 @@ function JewelryEdit() {
       if (!foundItem) {
         throw new Error(`Item with ID ${itemId} not found`);
       }
+
+      // Create a copy of the item with secondary gems
+      const itemWithGems = {
+        ...foundItem,
+        secondaryGems: Array.isArray(secondaryGems) ? secondaryGems : []
+      };
       
       // Set the jewelry item data to state
-      setItem(foundItem);
+      setItem(itemWithGems);
       
       // Set initial edited item state for form
       setEditedItem({
@@ -929,7 +935,9 @@ function JewelryEdit() {
         metal_weight: foundItem.metal_weight || 0,
         est_metal_value: foundItem.est_metal_value || 0,
         spot_price: foundItem.spot_price || 0,
-        jewelry_color: foundItem.jewelry_color || ''
+        jewelry_color: foundItem.jewelry_color || '',
+        // Include secondary gems in the edited item
+        secondaryGems: Array.isArray(secondaryGems) ? secondaryGems : []
       });
   
       // Set initial price based on retail price
@@ -938,7 +946,7 @@ function JewelryEdit() {
       // Success notification
       setSnackbar({
         open: true,
-        message: `Loaded jewelry item ${itemId} successfully`,
+        message: `Loaded jewelry item ${itemId} with ${secondaryGems?.length || 0} secondary gems`,
         severity: 'success'
       });
     } catch (error) {
@@ -2329,19 +2337,19 @@ function JewelryEdit() {
                           Quantity
                         </Typography>
                         {renderEditableField(
-                          'stone_quantity',
-                          item.stone_quantity || '1',
+                          'primary_gem_quantity',
+                          item.primary_gem_quantity || '1',
                           <TextField
                             fullWidth
                             size="small"
-                            name="stone_quantity"
-                            value={editedItem?.stone_quantity || item.stone_quantity || '1'}
+                            name="primary_gem_quantity"
+                            value={editedItem?.primary_gem_quantity || item.primary_gem_quantity || '1'}
                             onChange={handleInputChange}
                             inputRef={(el) => {
-                              if (editingField === 'stone_quantity') inlineInputRef.current = el;
+                              if (editingField === 'primary_gem_quantity') inlineInputRef.current = el;
                             }}
-                            onKeyDown={(e) => handleInlineEditComplete(e, 'stone_quantity')}
-                            onBlur={(e) => handleInlineEditComplete(e, 'stone_quantity')}
+                            onKeyDown={(e) => handleInlineEditComplete(e, 'primary_gem_quantity')}
+                            onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_quantity')}
                             type="number"
                             inputProps={{ min: 1, step: 1 }}
                             margin="dense"
