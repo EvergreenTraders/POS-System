@@ -2441,6 +2441,7 @@ function JewelEstimator() {
             <Grid container spacing={2} >
             {addMetal
               // Filter out the item being edited (if any)
+            
               .filter(metal => {
                 // Check for items being edited via navigation
                 if (location.state?.itemToEdit) {
@@ -2477,13 +2478,13 @@ function JewelEstimator() {
                     <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative' }}>
                       <div>
                         <Typography variant="subtitle2">Metal</Typography>
-                        <Typography variant="body2">Precious Metal Type: {metal.preciousMetalType}</Typography>
-                        <Typography variant="body2">Non Precious Metal Type: {metal.nonPreciousMetalType}</Typography>
-                        <Typography variant="body2">Purity: {metal.purity.purity || metal.purity.value}</Typography>
-                        <Typography variant="body2">Category: {metal.metalCategory}</Typography>
-                        <Typography variant="body2">Color: {metal.jewelryColor}</Typography>
-                        <Typography variant="body2">Weight: {metal.weight}g</Typography>
-                        <Typography variant="body2">Estimated Value: ${metal.estimatedValue.toFixed(2)}</Typography>
+                        <Typography variant="body2">Precious Metal Type: {metal.precious_metal_type}</Typography>
+                        <Typography variant="body2">Non Precious Metal Type: {metal.non_precious_metal_type}</Typography>
+                        <Typography variant="body2">Purity: {metal.metal_purity || metal.purity_value}</Typography>
+                        <Typography variant="body2">Category: {metal.metal_category}</Typography>
+                        <Typography variant="body2">Color: {metal.color}</Typography>
+                        <Typography variant="body2">Weight: {metal.metal_weight}g</Typography>
+                        <Typography variant="body2">Estimated Value: ${metal.estimated_value.toFixed(2)}</Typography>
                         </div>
                         <IconButton variant="outlined" onClick={() => handleDeleteMetal(index)}
                                 sx={{
