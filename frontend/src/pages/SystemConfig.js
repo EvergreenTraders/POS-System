@@ -54,6 +54,39 @@ function SystemConfig() {
     message: '',
     severity: 'success',
   });
+  
+  // Pricing Calculator state
+  const [calculatorSettings, setCalculatorSettings] = useState({
+    weight: '',
+    purity: '0.999',
+    marketPrice: '',
+    hasColoredStones: false,
+    extraMarkup: '20',
+    hasDiamonds: false,
+    diamondValue: '0',
+    result: null,
+  });
+  
+  // Default config for reset button
+  const defaultWeightMarkupConfig = [
+    { weight: 5, markup: 150 },
+    { weight: 15, markup: 100 },
+    { weight: 30, markup: 75 },
+    { weight: 60, markup: 50 },
+    { weight: 100, markup: 40 },
+  ];
+  
+  // Load config from localStorage
+  const loadStoredConfig = () => {
+    try {
+      const saved = localStorage.getItem('thresholds');
+      const parsed = saved ? JSON.parse(saved) : null;
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    } catch {}
+    return defaultWeightMarkupConfig;
+  };
+
+  const [weightMarkupConfig, setWeightMarkupConfig] = useState(loadStoredConfig);
 
   const [generalSettings, setGeneralSettings] = useState({
     businessName: 'Evergreen POS',
@@ -593,6 +626,172 @@ function SystemConfig() {
     setSnackbar({ ...snackbar, open: false });
   };
 
+  // Convert input values to numbers
+  const toNum = v => parseFloat(String(v).replace(',', '.'));
+
+  const handleCalculatorChange = (event) => {
+    const { name, value, type, checked } = event.target;
+    setCalculatorSettings(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+      // Reset result when inputs change
+      result: null
+    }));
+  };
+
+  const handleWeightMarkupChange = (index, field, value) => {
+    const newConfig = [...weightMarkupConfig];
+    newConfig[index] = {
+      ...newConfig[index],
+      [field]: toNum(value)
+    };
+    setWeightMarkupConfig(newConfig);
+  };
+
+  const readThresholdsFromForm = () => {
+    const thresholds = [...weightMarkupConfig];
+    return thresholds
+      .filter(r => Number.isFinite(r.weight) && Number.isFinite(r.markup) && r.weight > 0)
+      .sort((a, b) => a.weight - b.weight);
+  };
+
+  const saveWeightMarkupConfig = () => {
+    try {
+      const thresholds = readThresholdsFromForm();
+      if (thresholds.length < 2) {
+        setSnackbar({
+          open: true,
+          message: 'Please enter at least 2 valid thresholds.',
+          severity: 'warning'
+        });
+        return;
+      }
+
+      // Save to localStorage
+      localStorage.setItem('thresholds', JSON.stringify(thresholds));
+      setWeightMarkupConfig(thresholds);
+
+      setSnackbar({
+        open: true,
+        message: 'Configuration saved successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving weight markup configuration:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save weight markup configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const resetWeightMarkupConfig = () => {
+    const newConfig = [...defaultWeightMarkupConfig];
+    setWeightMarkupConfig(newConfig);
+    localStorage.setItem('thresholds', JSON.stringify(newConfig));
+    setSnackbar({
+      open: true,
+      message: 'Defaults restored.',
+      severity: 'success'
+    });
+  };
+
+  // Find the appropriate markup based on weight
+  const getMarkup = (weight, thresholds) => {
+    if (!thresholds.length) return 0;
+    thresholds.sort((a, b) => a.weight - b.weight);
+    
+    if (weight <= thresholds[0].weight) return thresholds[0].markup;
+    
+    for (let i = 0; i < thresholds.length - 1; i++) {
+      const a = thresholds[i], b = thresholds[i + 1];
+      if (weight >= a.weight && weight <= b.weight) {
+        const ratio = (weight - a.weight) / (b.weight - a.weight);
+        return a.markup + ratio * (b.markup - a.markup);
+      }
+    }
+    
+    return thresholds[thresholds.length - 1].markup;
+  };
+
+  const calculatePrice = () => {
+    try {
+      const thresholds = readThresholdsFromForm();
+      const { weight, purity, marketPrice, hasColoredStones, extraMarkup, hasDiamonds, diamondValue } = calculatorSettings;
+      
+      // Validate inputs
+      if (!weight || isNaN(toNum(weight)) || toNum(weight) <= 0 ||
+          !marketPrice || isNaN(toNum(marketPrice)) || toNum(marketPrice) <= 0) {
+        setSnackbar({
+          open: true,
+          message: 'Enter both weight and market price (numbers > 0).',
+          severity: 'warning'
+        });
+        return;
+      }
+
+      if (thresholds.length < 2) {
+        setSnackbar({
+          open: true,
+          message: 'Configure at least 2 weight thresholds.',
+          severity: 'warning'
+        });
+        return;
+      }
+      
+      const itemWeight = toNum(weight);
+      const goldPrice = toNum(marketPrice);
+      
+      // Purity is now stored directly as a decimal value
+      const purityValue = parseFloat(purity);
+      
+      // Get markup using the interpolation function
+      let markup = getMarkup(itemWeight, thresholds);
+      const notes = [];
+      
+      // Add extra markup for colored stones if checked
+      if (hasColoredStones && extraMarkup && !isNaN(toNum(extraMarkup))) {
+        markup += toNum(extraMarkup);
+        notes.push('coloured-stone markup');
+      }
+      
+      // Calculate the gold content weight and market value
+      const goldContentWeight = itemWeight * purityValue;
+      // Round to 2 decimal places to match the standalone calculator
+      const metalMarketValue = Math.round(goldContentWeight * goldPrice * 100) / 100;
+      
+      // Calculate retail price with markup - round to match standalone calculator
+      let retailPrice = Math.round(metalMarketValue * (1 + markup / 100) * 100) / 100;
+      
+      // Add diamond value if checked
+      if (hasDiamonds && diamondValue && !isNaN(toNum(diamondValue))) {
+        const diamondValueNum = toNum(diamondValue);
+        retailPrice += diamondValueNum;
+        notes.push(`diamond value $${diamondValueNum.toFixed(2)}`);
+      }
+      
+      // Update state with result
+      setCalculatorSettings(prev => ({
+        ...prev,
+        result: {
+          metalMarketValue: metalMarketValue.toFixed(2),
+          retailPrice: retailPrice.toFixed(2),
+          appliedMarkup: markup.toFixed(2),
+          notes: notes
+        }
+      }));
+      
+    } catch (error) {
+      console.error('Error calculating price:', error);
+      setSnackbar({
+        open: true,
+        message: 'An error occurred during calculation',
+        severity: 'error'
+      });
+    }
+  };
+
   return (
     <Container>
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
@@ -600,6 +799,7 @@ function SystemConfig() {
           <Tab label="General" />
           <Tab label="Security" />
           <Tab label="Notifications" />
+          <Tab label="Pricing Calculator" />
         </Tabs>
       </Box>
 
@@ -1019,6 +1219,237 @@ function SystemConfig() {
               </Grid>
             </Grid>
           </ConfigSection>
+        </StyledPaper>
+      </TabPanel>
+      
+      <TabPanel value={activeTab} index={3}>
+        <StyledPaper elevation={2}>
+          <Grid container spacing={3}>
+            {/* Configuration Block - Left Side */}
+            <Grid item xs={12} md={6}>
+              <ConfigSection>
+                <Typography variant="h5" gutterBottom>
+                  Configuration (Weight in grams → Markup %)
+                </Typography>
+                
+                <TableContainer component={Paper}>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Weight (g)</TableCell>
+                        <TableCell>Markup %</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {weightMarkupConfig.map((config, index) => (
+                        <TableRow key={index}>
+                          <TableCell>
+                            <TextField
+                              fullWidth
+                              value={config.weight}
+                              onChange={(e) => handleWeightMarkupChange(index, 'weight', e.target.value)}
+                              inputProps={{ inputMode: 'numeric' }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              fullWidth
+                              value={config.markup}
+                              onChange={(e) => handleWeightMarkupChange(index, 'markup', e.target.value)}
+                              inputProps={{ inputMode: 'numeric' }}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                
+                <Box mt={2} display="flex" gap={2}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={saveWeightMarkupConfig}
+                  >
+                    Save Configuration
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    onClick={resetWeightMarkupConfig}
+                  >
+                    Reset to Default
+                  </Button>
+                </Box>
+              </ConfigSection>
+            </Grid>
+            
+            {/* Calculate Price Block - Right Side */}
+            <Grid item xs={12} md={6}>
+              <ConfigSection>
+                <Typography variant="h5" gutterBottom>
+                  Calculate Price
+                </Typography>
+                
+                <Box mb={2}>
+                  <Typography component="label" htmlFor="calc-weight" variant="body1" display="block" gutterBottom>
+                    Weight (g):
+                  </Typography>
+                  <TextField
+                    id="calc-weight"
+                    name="weight"
+                    value={calculatorSettings.weight}
+                    onChange={handleCalculatorChange}
+                    fullWidth
+                    type="number"
+                    inputProps={{ 
+                      inputMode: 'numeric',
+                      step: 'any' 
+                    }}
+                  />
+                </Box>
+                
+                <Box mb={2}>
+                  <Typography component="label" htmlFor="calc-purity" variant="body1" display="block" gutterBottom>
+                    Purity:
+                  </Typography>
+                  <TextField
+                    id="calc-purity"
+                    name="purity"
+                    select
+                    value={calculatorSettings.purity}
+                    onChange={handleCalculatorChange}
+                    fullWidth
+                    SelectProps={{
+                      native: true,
+                    }}
+                  >
+                    <option value="0.999">24K (99.9%)</option>
+                    <option value="0.917">22K (91.7%)</option>
+                    <option value="0.750">18K (75.0%)</option>
+                    <option value="0.583">14K (58.3%)</option>
+                    <option value="0.417">10K (41.7%)</option>
+                    <option value="0.375">9K (37.5%)</option>
+                  </TextField>
+                </Box>
+                
+                <Box mb={2}>
+                  <Typography component="label" htmlFor="calc-market-price" variant="body1" display="block" gutterBottom>
+                    Market Price per g (pure gold, $):
+                  </Typography>
+                  <TextField
+                    id="calc-market-price"
+                    name="marketPrice"
+                    value={calculatorSettings.marketPrice}
+                    onChange={handleCalculatorChange}
+                    fullWidth
+                    type="number"
+                    inputProps={{ 
+                      inputMode: 'numeric',
+                      step: 'any' 
+                    }}
+                  />
+                </Box>
+                
+                <Box mb={2}>
+                  <Box display="flex" alignItems="center">
+                    <Checkbox
+                      id="stone-check"
+                      name="hasColoredStones"
+                      checked={calculatorSettings.hasColoredStones}
+                      onChange={handleCalculatorChange}
+                    />
+                    <Typography component="label" htmlFor="stone-check">
+                      Coloured stone(s)
+                    </Typography>
+                    <Box ml={2}>
+                      <Typography component="span" mr={1}>
+                        Extra Markup %:
+                      </Typography>
+                      <TextField
+                        id="extra-markup"
+                        name="extraMarkup"
+                        value={calculatorSettings.extraMarkup}
+                        onChange={handleCalculatorChange}
+                        sx={{ width: '150px' }}
+                        type="number"
+                        inputProps={{ step: 'any' }}
+                      />
+                    </Box>
+                  </Box>
+                </Box>
+                
+                <Box mb={3}>
+                  <Box display="flex" alignItems="center">
+                    <Checkbox
+                      id="diamond-check"
+                      name="hasDiamonds"
+                      checked={calculatorSettings.hasDiamonds}
+                      onChange={handleCalculatorChange}
+                    />
+                    <Typography component="label" htmlFor="diamond-check">
+                      Diamond(s)
+                    </Typography>
+                    <Box ml={2}>
+                      <Typography component="span" mr={1}>
+                        Diamond Value ($):
+                      </Typography>
+                      <TextField
+                        id="diamond-value"
+                        name="diamondValue"
+                        value={calculatorSettings.diamondValue}
+                        onChange={handleCalculatorChange}
+                        sx={{ width: '150px' }}
+                        type="number"
+                        inputProps={{ step: 'any' }}
+                      />
+                    </Box>
+                  </Box>
+                </Box>
+                
+                <Box>
+                  <Button
+                    variant="outlined"
+                    onClick={calculatePrice}
+                  >
+                    Calculate
+                  </Button>
+                </Box>
+                
+                {calculatorSettings.result && (
+                  <Box mt={4}>
+                    <Typography variant="body1" component="div">
+                      <Box fontWeight="bold" component="span">
+                        Market metal value: 
+                      </Box>
+                      <Box component="span" fontWeight="bold">
+                        ${calculatorSettings.result.metalMarketValue}
+                      </Box>
+                    </Typography>
+                    
+                    <Typography variant="body1" component="div">
+                      <Box component="span">
+                        Retail price: 
+                      </Box>
+                      <Box component="span" fontWeight="bold">
+                        ${calculatorSettings.result.retailPrice}
+                      </Box>
+                      <Box component="span">
+                        {' '}(Markup {calculatorSettings.result.appliedMarkup}%)
+                      </Box>
+                    </Typography>
+                    
+                    {calculatorSettings.result.notes && calculatorSettings.result.notes.length > 0 && (
+                      <Typography variant="body1" component="div">
+                        <Box component="span">
+                          Includes: {calculatorSettings.result.notes.join(', ')}
+                        </Box>
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </ConfigSection>
+            </Grid>
+          </Grid>
         </StyledPaper>
       </TabPanel>
 

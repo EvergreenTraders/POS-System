@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import debounce from 'lodash/debounce';
@@ -45,6 +45,7 @@ import ColorLensIcon from '@mui/icons-material/ColorLens';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
 import MetalEstimator from './MetalEstimator';
+import GemEstimator from './GemEstimator';
 
 // Utility functions for pricing analysis and image handling
 const formatPrice = (price) => {
@@ -72,6 +73,58 @@ const calculateProfitMargin = (retailPrice, costBasis) => {
   return `${margin.toFixed(0)}%`;
 };
 
+// Metal API utility functions
+const API_BASE_URL = config.apiUrl;
+const API_ENDPOINTS = {
+  // Fix endpoints to match exact API paths that MetalEstimator.js uses
+  PRECIOUS_METAL_TYPE: `${API_BASE_URL}/precious_metal_type`,
+  NON_PRECIOUS_METAL_TYPE: `${API_BASE_URL}/non_precious_metal_type`,
+  METAL_CATEGORY: `${API_BASE_URL}/metal_category`,
+  METAL_PURITY: `${API_BASE_URL}/metal_purity`,
+  METAL_COLOR: `${API_BASE_URL}/metal_color`,
+  LIVE_SPOT_PRICES: `${API_BASE_URL}/spot_prices/live`,
+  LIVE_PRICING: `${API_BASE_URL}/live_pricing`
+};
+
+const useMetalAPI = () => {
+  const fetchData = async (endpoint) => {
+    try {
+      const response = await axios.get(endpoint);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching data from ${endpoint}:`, error);
+      return [];
+    }
+  };
+
+  const fetchAllMetalData = async () => {
+    try {
+      const [preciousMetalTypes, nonPreciousMetalTypes, categories, colors] = await Promise.all([
+        fetchData(API_ENDPOINTS.PRECIOUS_METAL_TYPE),
+        fetchData(API_ENDPOINTS.NON_PRECIOUS_METAL_TYPE),
+        fetchData(API_ENDPOINTS.METAL_CATEGORY),
+        fetchData(API_ENDPOINTS.METAL_COLOR),
+      ]);
+
+      return {
+        preciousMetalTypes: preciousMetalTypes || [],
+        nonPreciousMetalTypes: nonPreciousMetalTypes || [],
+        categories: categories || [],
+        colors: colors || []
+      };
+    } catch (error) {
+      console.error('Error fetching all metal data:', error);
+      return {
+        preciousMetalTypes: [],
+        nonPreciousMetalTypes: [],
+        categories: [],
+        colors: []
+      };
+    }
+  };
+
+  return { fetchData, fetchAllMetalData };
+};
 
 function JewelryEdit() {
   const navigate = useNavigate();
@@ -83,8 +136,16 @@ function JewelryEdit() {
   // State variables
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [metalDialogOpen, setMetalDialogOpen] = useState(false);
   const [gemDialogOpen, setGemDialogOpen] = useState(false);
+  const [combinedDialogOpen, setCombinedDialogOpen] = useState(false);
   const [gemTab, setGemTab] = useState('diamond'); // Controls which gem tab is active
+  const [secondaryGemTab, setSecondaryGemTab] = useState('diamond'); // Controls which secondary gem tab is active
+  const [isSecondaryGem, setIsSecondaryGem] = useState(false); // Tracks whether we're editing primary or secondary gem
+  // States to track inline editing
+  const [editingField, setEditingField] = useState(null);
+  const inlineInputRef = useRef(null);
+  
   const [gemData, setGemData] = useState({
     diamond: {
       shape: 'Round',
@@ -127,11 +188,93 @@ function JewelryEdit() {
   // State for stone types and colors from API
   const [stoneTypes, setStoneTypes] = useState([]);
   const [stoneColors, setStoneColors] = useState([]);
+  const [stoneShapes, setStoneShapes] = useState([]);
 
-  // Handler for editing metal details
+  // State for metal data from API
+  const [preciousMetalTypes, setPreciousMetalTypes] = useState([]);
+  const [nonPreciousMetalTypes, setNonPreciousMetalTypes] = useState([]);
+  const [metalCategories, setMetalCategories] = useState([]);
+  const [metalPurities, setMetalPurities] = useState([]);
+  const [metalColors, setMetalColors] = useState([]);
+
+  // Initialize metal API hooks
+  const { fetchData, fetchAllMetalData } = useMetalAPI();
+
+  // Function to fetch metal purities based on metal type
+  const fetchPurities = async (metalTypeId) => {
+    try {
+      const response = await axios.get(`${API_ENDPOINTS.METAL_PURITY}/${metalTypeId}`);
+      setMetalPurities(response.data || []);
+      return response.data || [];
+    } catch (error) {
+      console.error('Error fetching metal purities:', error);
+      setMetalPurities([]);
+      return [];
+    }
+  };
+
+  // Fetch metal data on component mount
+  useEffect(() => {
+    const fetchMetalData = async () => {
+      try {
+        const {
+          preciousMetalTypes,
+          nonPreciousMetalTypes,
+          categories,
+          colors
+        } = await fetchAllMetalData();
+
+        // Make sure the data is properly formatted and has expected fields
+        const processedPreciousTypes = Array.isArray(preciousMetalTypes) ? preciousMetalTypes : [];
+        const processedNonPreciousTypes = Array.isArray(nonPreciousMetalTypes) ? nonPreciousMetalTypes : [];
+        const processedCategories = Array.isArray(categories) ? categories : [];
+
+        setPreciousMetalTypes(processedPreciousTypes);
+        setNonPreciousMetalTypes(processedNonPreciousTypes);
+        setMetalCategories(processedCategories);
+        setMetalColors(Array.isArray(colors) ? colors : []);
+
+        // If we have a precious metal type ID, fetch purities for it
+        if (item && item.precious_metal_type_id) {
+            fetchPurities(item.precious_metal_type_id);
+          } else if (processedPreciousTypes.length > 0) {
+            // If no specific metal type ID but we have metal types, fetch purities for the first one
+            fetchPurities(processedPreciousTypes[0].id);
+          }
+      } catch (error) {
+        console.error('Error fetching metal data:', error);
+      }
+    };
+
+    fetchMetalData();
+  }, []); // Remove dependency to ensure it runs only on mount
+
+  
+  // Handler for editing jewelry item (combined metal and gem)
+  const handleEditJewelryItem = () => {
+    setCombinedDialogOpen(true);
+  };
+  
+  // Handler for editing metal details - retained for other code that might reference it
   const handleEditMetal = () => {
-    // Open metal edit dialog instead of navigating
     setMetalDialogOpen(true);
+  };
+  
+  // Handler for metal value changes - retained for other code that might reference it
+  const handleMetalValueChange = (value) => {
+    // Required by MetalEstimator
+  };
+  
+  // Handler for saving changes from combined dialog
+  const handleCombinedSave = () => {
+    // Here you would update both metal and gem data
+    setCombinedDialogOpen(false);
+    // Show success message or notification
+  };
+  
+  // Handler for canceling combined dialog
+  const handleCombinedCancel = () => {
+    setCombinedDialogOpen(false);
   };
 
   // Handler for when metal data is saved in the dialog
@@ -156,143 +299,17 @@ function JewelryEdit() {
     setMetalDialogOpen(false);
   };
   
-  // Handler for metal value changes
-  const handleMetalValueChange = (value) => {
-    // This function is required by MetalEstimator
-  };
 
   // Handler for canceling metal edit
   const handleMetalCancel = () => {
     setMetalDialogOpen(false);
   };
 
-  // Handler for editing gem details
-  const handleEditGem = () => {
-    // Initialize gem data based on existing item data
-    setGemDialogOpen(true);
-    if (item) {
-      console.log('Editing gem with item data:', item);   
-                               
-      if (item.primary_gem_category) {
-        
-        // Determine if it's a diamond or stone based on primary_gem_category
-        const isDiamond = item.primary_gem_category && 
-                         item.primary_gem_category.toLowerCase() === 'diamond';
-        
-        // Switch to the correct tab first (diamond or stone) based on category
-        setGemTab(isDiamond ? 'diamond' : 'stone');
-        
-        // Then fill all fields for both diamond and stone tabs
-        if (isDiamond) {
-          // Set the diamond shape index for UI
-          if (item.primary_gem_shape && diamondShapes.length > 0) {
-            const shapeIndex = diamondShapes.findIndex(
-              s => s.name && s.name.toLowerCase() === item.primary_gem_shape.toLowerCase()
-            );
-            if (shapeIndex !== -1) {
-              setCurrentShapeIndex(shapeIndex);
-              const shapeId = diamondShapes[shapeIndex].id || (shapeIndex + 1);
-              
-              // Fetch diamond sizes for this shape and then set the size afterwards
-              fetchDiamondSizes(shapeId).then(() => {
-                // Match the primary gem size in the next render cycle after sizes are loaded
-                setTimeout(() => {
-                  // Find matching size in diamondSizes array
-                  if (item.primary_gem_size && diamondSizes.length > 0) {
-                      // Try to find an exact match or the closest size
-                      const sizeValue = String(item.primary_gem_size) + ' mm';
-                      
-                      // Check for exact match first (accounting for string/number conversion)
-                      const exactMatch = diamondSizes.find(s => String(s.size) === sizeValue);
-                      
-                      if (exactMatch) {
-                        handleGemDataChange('diamond', 'size', exactMatch.size);
-                    }
-                  }
-                }, 100); // Short delay to ensure diamondSizes is updated
-              });
-            }
-          }
-          
-          // Set the clarity index for UI
-          if (item.primary_gem_clarity && diamondClarity.length > 0) {
-            const clarityIndex = diamondClarity.findIndex(
-              c => c.name && c.name.toLowerCase() === item.primary_gem_clarity.toLowerCase()
-            );
-            if (clarityIndex !== -1) {
-              setSelectedClarityIndex(clarityIndex);
-            }
-          }
-          
-          // Set diamond gem data directly from item properties
-          setGemData(prev => ({
-            ...prev,
-            diamond: {
-              shape: item.primary_gem_shape || 'Round',
-              weight: item.primary_gem_weight || '',
-              color: item.primary_gem_color || '',
-              clarity: item.primary_gem_clarity || '',
-              cut: item.primary_gem_cut || '',
-              lab: item.primary_gem_lab_grown,
-              quantity: item.primary_gem_quantity || '1',
-              size: item.primary_gem_size || '',
-              exactColor: item.primary_gem_exact_color || 'D'
-            },
-            estimatedValue: item.primary_gem_value || '0'
-          }));
-          // Tab is already set above
-        } else {
-          // Handle stone type
-          // Set stone gem data directly from item properties
-          setGemData(prev => ({
-            ...prev,
-            stone: {
-              type: item.primary_gem_type || '',
-              name: item.primary_gem_type || '',  // Match the form field name used in stone tab
-              weight: item.primary_gem_weight || '',
-              shape: item.primary_gem_shape || 'Round',
-              color: item.primary_gem_color || '',
-              quantity: item.primary_gem_quantity || '1',
-              size: item.primary_gem_size || '',
-              authentic: item.primary_gem_authentic || false,
-              estimatedValue: item.primary_gem_value || '0'  // Include estimatedValue directly in the stone object
-            }
-          }));
-          
-          // If the stone has a shape and we have diamondShapes loaded (used for stone shapes too)
-          if (item.primary_gem_shape && diamondShapes.length > 0) {
-            const shapeIndex = diamondShapes.findIndex(
-              s => s.name && s.name.toLowerCase() === item.primary_gem_shape.toLowerCase()
-            );
-            if (shapeIndex !== -1) {
-              setCurrentShapeIndex(shapeIndex);
-            }
-          }
-          
-          // If the stone has a color, update the filtered stone types
-          if (item.primary_gem_color && stoneColors.length > 0) {
-            const selectedColor = stoneColors.find(
-              c => c.color && c.color.toLowerCase() === item.primary_gem_color.toLowerCase()
-            );
-            if (selectedColor) {
-              // Filter stone types for this color
-              const filteredTypes = stoneTypes.filter(type => type.color_id === selectedColor.id);
-              setFilteredStoneTypes(filteredTypes);
-            }
-          }
-          // Tab is already set above
-        }
-      }
-      // If no primary gem found, default to diamond tab
-      } else {
-        setGemTab('diamond');
-      } 
 
-    }
-
-  // // Handler for closing gem dialog
+  // Handler for closing gem dialog
   const handleGemDialogClose = () => {
     setGemDialogOpen(false);
+    setIsSecondaryGem(false); // Reset the secondary gem flag when closing dialog
   };
 
   // Handler for gem data changes
@@ -313,6 +330,84 @@ function JewelryEdit() {
         [field]: value
       }
     }));
+    
+    // Also update the corresponding field in the item state for the diamond tab display
+    if (gemType === 'diamond') {
+      // Map gemData.diamond fields to item.primary_gem_* fields
+      const itemFieldMapping = {
+        'shape': 'primary_gem_shape',
+        'weight': 'primary_gem_weight',
+        'color': 'primary_gem_color',
+        'clarity': 'primary_gem_clarity',
+        'cut': 'primary_gem_cut',
+        'lab': 'primary_gem_lab_grown',
+        'quantity': 'primary_gem_quantity',
+        'size': 'primary_gem_size',
+        'exactColor': 'primary_gem_exact_color',
+        'estimatedValue': 'primary_gem_value'
+      };
+      
+      const itemField = itemFieldMapping[field];
+      if (itemField) {
+        // Make sure to preserve all item properties and safely update
+        setItem(prev => {
+          if (!prev) return prev; // Safety check if item is null
+          return {
+            ...prev,
+            [itemField]: value,
+            // Also update primary_gem_* fields for consistency if we're in diamond mode
+            ...(gemTab === 'diamond' ? { [`primary_gem_${field}`]: value } : {})
+          };
+        });
+        // Also update the editedItem if it exists
+        if (editedItem) {
+          setEditedItem(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              [itemField]: value
+            };
+          });
+        }
+      }
+    } else if (gemType === 'stone') {
+      // Map gemData.stone fields to item.primary_gem_* fields
+      const itemFieldMapping = {
+        'type': 'primary_gem_type',
+        'name': 'primary_gem_name',
+        'weight': 'primary_gem_weight',
+        'shape': 'primary_gem_shape',
+        'color': 'primary_gem_color',
+        'quantity': 'primary_gem_quantity',
+        'size': 'primary_gem_size',
+        'authentic': 'primary_gem_authentic',
+        'estimatedValue': 'primary_gem_value'
+      };
+      
+      const itemField = itemFieldMapping[field];
+      if (itemField) {
+        // Make sure to preserve all item properties and safely update
+        setItem(prev => {
+          if (!prev) return prev; // Safety check if item is null
+          return {
+            ...prev,
+            [itemField]: value,
+            // Also update primary_gem_* fields for consistency if we're in stone mode
+            ...(gemTab === 'stone' ? { [`primary_gem_${field}`]: value } : {})
+          };
+        });
+        // Also update the editedItem if it exists
+        if (editedItem) {
+          setEditedItem(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              [itemField]: value
+            };
+          });
+        }
+      }
+    }
   };
   
   // Handler for diamond shape navigation
@@ -368,25 +463,65 @@ function JewelryEdit() {
 
   // Handler for saving gem updates
   const handleGemSave = (updatedGemData) => {
-    // Update the item with new gem data
-    setItem(prev => {
+    // Update both item and editedItem with new gem data
+    const updateState = (prev) => {
       // Get the appropriate gem data
       const newItem = { ...prev };
       
       if (updatedGemData.diamonds) {
         newItem.diamonds = updatedGemData.diamonds;
-        // Update related fields
+        // Get primary diamond data
         const primaryDiamond = updatedGemData.diamonds.find(d => d.primary) || updatedGemData.diamonds[0];
-        newItem.gemstone = 'Diamond';
-        newItem.stone_weight = primaryDiamond.weight;
-        newItem.stone_color_clarity = `${primaryDiamond.color}-${primaryDiamond.clarity}`;
+        
+        // Update general gem fields
+        newItem.gemstone = 'Diamond';        
+        
+        // Set primary gem fields consistently
+        newItem.primary_gem_category = 'diamond';
+        newItem.primary_gem_shape = primaryDiamond.shape;
+        newItem.primary_gem_weight = primaryDiamond.weight;
+        newItem.primary_gem_color = primaryDiamond.color;
+        newItem.primary_gem_clarity = primaryDiamond.clarity;
+        newItem.primary_gem_cut = primaryDiamond.cut;
+        newItem.primary_gem_lab_grown = primaryDiamond.lab;
+        newItem.primary_gem_quantity = primaryDiamond.quantity;
+        newItem.primary_gem_size = primaryDiamond.size;
+        newItem.primary_gem_value = primaryDiamond.estimatedValue;
+        newItem.primary_gem_exact_color = primaryDiamond.exactColor || 'D';
       } else if (updatedGemData.stones) {
         newItem.stones = updatedGemData.stones;
-        // Update related fields
+        // Get primary stone data
         const primaryStone = updatedGemData.stones.find(s => s.primary) || updatedGemData.stones[0];
+        
+        // Update general gem fields
         newItem.gemstone = primaryStone.type;
-        newItem.stone_weight = primaryStone.weight;
-        newItem.stone_color_clarity = primaryStone.color;
+        // Use primary_gem fields instead of stone fields
+        newItem.primary_gem_weight = primaryStone.weight;
+        newItem.primary_gem_color = primaryStone.color;
+        
+        // Update specific stone fields for the form using primary_gem_* naming
+        newItem.primary_gem_type = primaryStone.type || '';
+        newItem.primary_gem_name = primaryStone.name || primaryStone.type || '';
+        newItem.primary_gem_weight = primaryStone.weight || '';
+        newItem.primary_gem_shape = primaryStone.shape || '';
+        newItem.primary_gem_color = primaryStone.color || '';
+        newItem.primary_gem_quantity = primaryStone.quantity || '1';
+        newItem.primary_gem_size = primaryStone.size || '';
+        newItem.primary_gem_authentic = primaryStone.authentic || false;
+        newItem.primary_gem_value = primaryStone.estimatedValue || '0';
+        
+        // No need to clear diamond_* fields - we use primary_gem_* fields instead
+        
+        // Set primary gem fields consistently
+        newItem.primary_gem_category = 'stone';
+        newItem.primary_gem_type = primaryStone.type;
+        newItem.primary_gem_shape = primaryStone.shape;
+        newItem.primary_gem_weight = primaryStone.weight;
+        newItem.primary_gem_color = primaryStone.color;
+        newItem.primary_gem_quantity = primaryStone.quantity;
+        newItem.primary_gem_size = primaryStone.size;
+        newItem.primary_gem_authentic = primaryStone.authentic;
+        newItem.primary_gem_value = primaryStone.estimatedValue;
       }
       
       // Also update the estimated value if provided
@@ -399,7 +534,14 @@ function JewelryEdit() {
       }
       
       return newItem;
-    });
+    };
+    
+    // Update both states with the same data
+    setItem(updateState);
+    setEditedItem(updateState);
+    
+    // Close the dialog
+    handleGemDialogClose();
   
     setSnackbar({
       open: true,
@@ -576,14 +718,13 @@ function JewelryEdit() {
   const [discount, setDiscount] = useState(0);
   const [discountType, setDiscountType] = useState('percentage'); // 'percentage' or 'amount'
   const [transactionType, setTransactionType] = useState('retail'); // 'sell' or 'retail'
-  const [metalDialogOpen, setMetalDialogOpen] = useState(false);
   const [updatedMetalData, setUpdatedMetalData] = useState(null);
 
   // Effects
   useEffect(() => {
     const fetchData = async () => {
       if (location.state?.itemId) {
-        await fetchJewelryItem(location.state.itemId);
+        await fetchJewelryItem(location.state.itemId, location.state?.secondaryGems);
       } else {
         setLoading(false);
         setSnackbar({
@@ -597,12 +738,153 @@ function JewelryEdit() {
     fetchData();
   }, [location.state]);
 
+
   useEffect(() => {
     if (item) {
       // Initialize selling price with retail price
       setSellingPrice(item.retail_price || 0);
+      
+      // Set default tab based on secondary gem type if any
+      if (item.secondaryGems?.length > 0) {
+        const hasStoneGem = item.secondaryGems.some(gem => 
+          gem?.secondary_gem_category?.toLowerCase() === 'stone'
+        );
+        setSecondaryGemTab(hasStoneGem ? 'stone' : 'diamond');
+      }
+      
+      // Initialize gemData based on item's primary gem properties
+      if (item.primary_gem_category) {
+        // Determine if it's a diamond or stone based on primary_gem_category
+        const isDiamond = item.primary_gem_category && 
+                         item.primary_gem_category.toLowerCase() === 'diamond';
+        
+        // Set the gem tab based on the primary gem category
+        setGemTab(isDiamond ? 'diamond' : 'stone');
+
+        // Initialize diamond data if primary gem is a diamond
+        if (isDiamond) {
+          // Set diamond shape index for UI
+          if (item.primary_gem_shape && diamondShapes.length > 0) {
+            const shapeIndex = diamondShapes.findIndex(
+              s => s.name && s.name.toLowerCase() === item.primary_gem_shape.toLowerCase()
+            );
+            if (shapeIndex !== -1) {
+              setCurrentShapeIndex(shapeIndex);
+            }
+          }
+          
+          // Set clarity index for UI
+          if (item.primary_gem_clarity && diamondClarity.length > 0) {
+            const clarityIndex = diamondClarity.findIndex(
+              c => c.name && c.name.toLowerCase() === item.primary_gem_clarity.toLowerCase()
+            );
+            if (clarityIndex !== -1) {
+              setSelectedClarityIndex(clarityIndex);
+            }
+          }
+          
+          // Set diamond data
+          setGemData(prev => ({
+            ...prev,
+            diamond: {
+              shape: item.primary_gem_shape || 'Round',
+              weight: item.primary_gem_weight || '',
+              color: item.primary_gem_color || '',
+              clarity: item.primary_gem_clarity || '',
+              cut: item.primary_gem_cut || '',
+              lab: item.primary_gem_lab_grown,
+              quantity: item.primary_gem_quantity || '1',
+              size: item.primary_gem_size || '',
+              exactColor: item.primary_gem_exact_color || ''
+            },
+            estimatedValue: item.primary_gem_value || '0'
+          }));
+          
+        } else {
+          // Handle stone type
+          setGemData(prev => ({
+            ...prev,
+            stone: {
+              type: item.primary_gem_type || '',
+              name: item.primary_gem_type || '',
+              weight: item.primary_gem_weight || '',
+              shape: item.primary_gem_shape || '',
+              color: item.primary_gem_color || '',
+              quantity: item.primary_gem_quantity || '1',
+              size: item.primary_gem_size || '',
+              authentic: item.primary_gem_authentic || false,
+              estimatedValue: item.primary_gem_value || '0'
+            }
+          }));
+        }
+      }
+      console.log("item:",item);
+      // Initialize secondary gem data if available
+      if (item.secondary_gem_category) {
+        // Determine if secondary gem is diamond or stone
+        const isSecondaryDiamond = item.secondary_gem_category.toLowerCase() === 'diamond';
+        
+        // Set secondary gem tab based on the category
+        setSecondaryGemTab(isSecondaryDiamond ? 'diamond' : 'stone');
+        
+        // Initialize secondary gem data in both item and editedItem states
+        if (isSecondaryDiamond) {
+          const secondaryDiamondValues = {
+            secondary_gem_shape: item.secondary_gem_shape || '',
+            secondary_gem_weight: item.secondary_gem_weight || '',
+            secondary_gem_color: item.secondary_gem_color || '',
+            secondary_gem_clarity: item.secondary_gem_clarity || '',
+            secondary_gem_cut: item.secondary_gem_cut || '',
+            secondary_gem_lab_grown: item.secondary_gem_lab_grown || false,
+            secondary_gem_quantity: item.secondary_gem_quantity || '1',
+            secondary_gem_size: item.secondary_gem_size || '',
+            secondary_gem_value: item.secondary_gem_value || ''
+          };
+          
+          // Update item state
+          setItem(prev => ({
+            ...prev,
+            ...secondaryDiamondValues
+          }));
+          
+          // Update editedItem state
+          setEditedItem(prev => ({
+            ...prev,
+            ...secondaryDiamondValues
+          }));
+          
+          // Log to help debug
+          console.log('Secondary Diamond Gem initialized:', secondaryDiamondValues);
+          
+        } else {
+          const secondaryStoneValues = {
+            secondary_gem_type: item.secondary_gem_type || '',
+            secondary_gem_shape: item.secondary_gem_shape || '',
+            secondary_gem_color: item.secondary_gem_color || '',
+            secondary_gem_weight: item.secondary_gem_weight || '',
+            secondary_gem_quantity: item.secondary_gem_quantity || '1',
+            secondary_gem_authentic: item.secondary_gem_authentic || false,
+            secondary_gem_value: item.secondary_gem_value || ''
+          };
+          
+          // Update item state
+          setItem(prev => ({
+            ...prev,
+            ...secondaryStoneValues
+          }));
+          
+          // Update editedItem state
+          setEditedItem(prev => ({
+            ...prev,
+            ...secondaryStoneValues
+          }));
+          
+          // Log to help debug
+          console.log('Secondary Stone Gem initialized:', secondaryStoneValues);
+        }
+      }
     }
-  }, [item]);
+  }, [item, diamondShapes, diamondClarity]);
 
   useEffect(() => {
     // Calculate tax and total amount when selling price or discount changes
@@ -610,7 +892,7 @@ function JewelryEdit() {
   }, [sellingPrice, discount, discountType]);
 
   // Fetch functions
-  const fetchJewelryItem = async (itemId) => {
+  const fetchJewelryItem = async (itemId, secondaryGems = []) => {
     try {
       setLoading(true);
       
@@ -627,10 +909,16 @@ function JewelryEdit() {
       if (!foundItem) {
         throw new Error(`Item with ID ${itemId} not found`);
       }
-            
+
+      // Create a copy of the item with secondary gems
+      const itemWithGems = {
+        ...foundItem,
+        secondaryGems: Array.isArray(secondaryGems) ? secondaryGems : []
+      };
+      
       // Set the jewelry item data to state
-      setItem(foundItem);
-  
+      setItem(itemWithGems);
+      
       // Set initial edited item state for form
       setEditedItem({
         ...foundItem,
@@ -639,10 +927,25 @@ function JewelryEdit() {
         dimensions: foundItem.dimensions || '',
         gemstone: foundItem.gemstone || '',
         stone_weight: foundItem.stone_weight || '',
-        stone_color_clarity: foundItem.stone_color_clarity || '',
         serial_number: foundItem.serial_number || '',
         age_year: foundItem.age_year || '',
-        certification: foundItem.certification || ''
+        certification: foundItem.certification || '',
+        // Ensure metal-related fields are properly initialized
+        precious_metal_type_id: foundItem.precious_metal_type_id || '',
+        precious_metal_type: foundItem.precious_metal_type || '',
+        non_precious_metal_type_id: foundItem.non_precious_metal_type_id || '',
+        non_precious_metal_type: foundItem.non_precious_metal_type || '',
+        metal_category_id: foundItem.metal_category_id || '',
+        metal_category: foundItem.metal_category || '',
+        metal_purity_id: foundItem.metal_purity_id || '',
+        metal_purity: foundItem.metal_purity || '',
+        purity_value: foundItem.purity_value || 0,
+        metal_weight: foundItem.metal_weight || 0,
+        est_metal_value: foundItem.est_metal_value || 0,
+        spot_price: foundItem.spot_price || 0,
+        jewelry_color: foundItem.jewelry_color || '',
+        // Include secondary gems in the edited item
+        secondaryGems: Array.isArray(secondaryGems) ? secondaryGems : []
       });
   
       // Set initial price based on retail price
@@ -651,7 +954,7 @@ function JewelryEdit() {
       // Success notification
       setSnackbar({
         open: true,
-        message: `Loaded jewelry item ${itemId} successfully`,
+        message: `Loaded jewelry item ${itemId} with ${secondaryGems?.length || 0} secondary gems`,
         severity: 'success'
       });
     } catch (error) {
@@ -709,14 +1012,69 @@ function JewelryEdit() {
     setIsEditing(!isEditing);
   };
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
+  const handleInputChange = (event) => {
+    const { name, value } = event.target;
+    const checkboxValue = event.target.type === 'checkbox' ? event.target.checked : value;
+    const finalValue = event.target.type === 'checkbox' ? checkboxValue : value;
+    
+    // Map old field names to primary_gem_* fields
+    let mappedName = name;
+    let primaryGemName = null;
+    let secondaryGemName = null;
+    
+    // Handle primary gem field mapping
+    if (name.startsWith('diamond_')) {
+      const gemField = name.replace('diamond_', '');
+      primaryGemName = `primary_gem_${gemField}`;
+      
+      // Update gemData for diamond fields
+      setGemData(prev => ({
+        ...prev,
+        diamond: {
+          ...prev.diamond,
+          [gemField]: finalValue
+        }
+      }));
+    } else if (name.startsWith('stone_')) {
+      const gemField = name.replace('stone_', '');
+      primaryGemName = `primary_gem_${gemField}`;
+      
+      // Update gemData for stone fields
+      setGemData(prev => ({
+        ...prev,
+        stone: {
+          ...prev.stone,
+          [gemField]: finalValue
+        }
+      }));
+    } else if (name.startsWith('secondary_diamond_')) {
+      // Map secondary diamond fields to secondary_gem_* fields
+      const gemField = name.replace('secondary_diamond_', '');
+      secondaryGemName = `secondary_gem_${gemField}`;
+    } else if (name.startsWith('secondary_stone_')) {
+      // Map secondary stone fields to secondary_gem_* fields
+      const gemField = name.replace('secondary_stone_', '');
+      secondaryGemName = `secondary_gem_${gemField}`;
+    }
+    
+    // Update editedItem state with the new value
     setEditedItem(prev => ({
       ...prev,
-      [name]: value
+      [name]: finalValue,
+      ...(primaryGemName ? { [primaryGemName]: finalValue } : {}),
+      ...(secondaryGemName ? { [secondaryGemName]: finalValue } : {})
+    }));
+
+    // If we're auto-saving changes immediately, also update the item state
+    setItem(prev => ({
+      ...prev,
+      [name]: finalValue,
+      ...(primaryGemName ? { [primaryGemName]: finalValue } : {}),
+      ...(secondaryGemName ? { [secondaryGemName]: finalValue } : {})
     }));
   };
-  
+
+
   const handleCustomerSelection = (customer) => {
     setSelectedCustomer(customer);
     setSelectedCustomerId(customer.id);
@@ -762,7 +1120,6 @@ function JewelryEdit() {
       dimensions: item.dimensions || '',
       gemstone: item.gemstone || '',
       stone_weight: item.stone_weight || '',
-      stone_color_clarity: item.stone_color_clarity || '',
       serial_number: item.serial_number || '',
       age_year: item.age_year || '',
     });
@@ -776,6 +1133,47 @@ function JewelryEdit() {
       message: 'Editing cancelled',
       severity: 'info'
     });
+  };
+
+  // Handle double-click to enable inline editing
+  const handleDoubleClick = (fieldName) => {
+    setEditingField(fieldName);
+    // Focus the input after a small delay to ensure the component has rendered
+    setTimeout(() => {
+      if (inlineInputRef.current) {
+        inlineInputRef.current.focus();
+      }
+    }, 10);
+  };
+
+  // Handle saving the inline edit when pressing Enter or focus out
+  const handleInlineEditComplete = (event, fieldName) => {
+    // Check if event is null or if it's a valid event with key='Enter' or type='blur'
+    if (!event || event.key === 'Enter' || event.type === 'blur') {
+      setEditingField(null);
+    }
+  };
+
+  // Render field based on edit state
+  const renderEditableField = (fieldName, displayValue, editComponent) => {
+    return editingField === fieldName ? (
+      editComponent
+    ) : (
+      <Box 
+        sx={{ 
+          p: 1, 
+          cursor: 'pointer', 
+          border: '1px dashed transparent',
+          '&:hover': { border: '1px dashed #ccc', borderRadius: '4px' },
+          minHeight: '32px',
+          display: 'flex',
+          alignItems: 'center'
+        }} 
+        onDoubleClick={() => handleDoubleClick(fieldName)}
+      >
+        {displayValue}
+      </Box>
+    );
   };
 
   const calculateTotals = () => {
@@ -839,38 +1237,34 @@ function JewelryEdit() {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      {/* Metal Estimator Dialog */}
+      {/* Gem Estimator Dialog */}
       <Dialog
-        open={metalDialogOpen}
-        onClose={handleMetalCancel}
-        maxWidth="md"
+        open={gemDialogOpen}
+        onClose={() => setGemDialogOpen(false)}
+        maxWidth="lg"
         fullWidth
         PaperProps={{ sx: { maxHeight: '90vh' } }}
       >
-        <DialogTitle>Edit Metal Details</DialogTitle>
+        <DialogTitle>Edit Gemstone Details</DialogTitle>
         <DialogContent dividers>
-          {metalDialogOpen && (
-            <MetalEstimator
+          {gemDialogOpen && (
+            <GemEstimator 
               initialData={{
-                // Pass both category and metalCategory to ensure proper initialization
-                category: item?.category || 'Jewelry',
-                metalCategory: item?.category || 'Jewelry',
-                // Pass all other metal properties
-                weight: item?.metal_weight || '',
-                preciousMetalType: item?.metal_type || 'Gold',
-                preciousMetalTypeId: item?.precious_metal_type_id || 1,
-                nonPreciousMetalType: item?.non_precious_metal_type || '',
-                jewelryColor: item?.jewelry_color || 'Yellow',
-                purity: { 
-                  purity: item?.metal_purity || '', 
-                  value: item?.purity_value || 0 
-                },
-                spotPrice: item?.spot_price || 0,
-                estimatedValue: item?.metal_value || 0
+                ...item,
+                // Pass secondary gems if they exist
+                secondaryGems: item.secondaryGems || []
               }}
-              onMetalValueChange={handleMetalValueChange}
-              onAddMetal={handleMetalSave}
-              buttonText="Save Metal"
+              onSave={(updatedData) => {
+                // Handle saving gem data
+                setGemDialogOpen(false);
+              }}
+              onCancel={() => setGemDialogOpen(false)}
+              onSecondaryGemsChange={(secondaryGems) => {
+                setItem(prev => ({
+                  ...prev,
+                  secondaryGems
+                }));
+              }}
             />
           )}
         </DialogContent>
@@ -879,55 +1273,73 @@ function JewelryEdit() {
         </DialogActions>
       </Dialog>
 
+      {/* Combined Jewelry Item Dialog */}
+      <Dialog
+        open={combinedDialogOpen}
+        onClose={handleCombinedCancel}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{ sx: { maxHeight: '90vh' } }}
+      >
+        <DialogTitle>Edit Jewelry Item</DialogTitle>
+        <DialogContent dividers>
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={5} md={4}> {/* 40% width for MetalEstimator */}
+                {combinedDialogOpen && (
+                  <MetalEstimator 
+                    initialData={{
+                      precious_metal_type: item?.precious_metal_type || '',
+                      metal_weight: item?.metal_weight || 0,
+                      non_precious_metal_type: item?.non_precious_metal_type || '',
+                      metal_purity: item?.metal_purity || '', 
+                      purity_value: item?.purity_value || 0,
+                      metal_spot_price: parseFloat(item?.metal_spot_price) || 0,
+                      estimated_value: parseFloat(item?.est_metal_value) || 0,
+                      color: item?.jewelry_color || '',
+                      metal_category: item?.category || ''
+                    }}
+                    hideButtons={true} /* Hide internal buttons */
+                  />
+                )}
+            </Grid>
+            <Grid item xs={12} sm={7} md={8}> {/* 60% width for GemEstimator */}
+                {combinedDialogOpen && (
+                  <GemEstimator 
+                    initialData={{
+                      ...item,
+                      // Pass secondary gems if they exist
+                      secondaryGems: item.secondaryGems || []
+                    }}
+                    hideButtons={true} /* Hide internal buttons */
+                    onSecondaryGemsChange={(secondaryGems) => {
+                      setItem(prev => ({
+                        ...prev,
+                        secondaryGems
+                      }));
+                    }}
+                  />
+                )}
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCombinedCancel} startIcon={<CancelIcon />}>Cancel</Button>
+          <Button onClick={handleCombinedSave} variant="contained" color="primary" startIcon={<SaveIcon />}>Save Changes</Button>
+        </DialogActions>
+      </Dialog>
+
       <Paper elevation={2} sx={{ p: 3 }}>
         {/* Header Section */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h5" component="h1">
-            Jewelry Item Management
-          </Typography>
-          
-          {/* Edit/Save Buttons */}
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <Button 
-              variant="contained" 
-              color="primary"
-              onClick={handleBackToInventory}
-              startIcon={<ArrowBackIcon />}
-            >
-              Back to Inventory
-            </Button>
-            {isEditing ? (
-                  <>
-                    <Button
-                      variant="outlined"
-                      color="secondary"
-                      onClick={handleCancel}
-                      startIcon={<CancelIcon />}
-                      disabled={isSaving}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="contained"
-                      color="primary"
-                      onClick={handleSaveItem}
-                      startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                      disabled={isSaving}
-                    >
-                      {isSaving ? 'Saving...' : 'Save Changes'}
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={() => setIsEditing(true)}
-                    startIcon={<EditIcon />}
-                  >
-                    Edit Item
-                  </Button>
-                )}
-          </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', mb: 3 }}>
+          {/* Back to Inventory Button - Right Aligned */}
+          <Button 
+            variant="contained" 
+            color="primary"
+            onClick={handleBackToInventory}
+            startIcon={<ArrowBackIcon />}
+          >
+            Back to Inventory
+          </Button>
         </Box>
 
         <Grid container spacing={3}>
@@ -980,336 +1392,1911 @@ function JewelryEdit() {
               
               {/* Editable Fields in Grid Layout */}
               <Grid container spacing={2}>
-                {/* Inventory Status - Editable */}
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="textSecondary">
-                    Inventory Status *
-                  </Typography>
-                  {isEditing ? (
-                    <TextField
-                      select
-                      fullWidth
-                      size="small"
-                      name="inventory_status"
-                      value={editedItem.inventory_status || 'HOLD'}
-                      onChange={handleInputChange}
-                      margin="dense"
-                    >
-                      <MenuItem value="HOLD">HOLD</MenuItem>
-                      <MenuItem value="IN-PROCESS">IN-PROCESS</MenuItem>
-                      <MenuItem value="IN-STOCK">IN-STOCK</MenuItem>
-                    </TextField>
-                  ) : (
-                    <Typography variant="body2">
-                      {item.inventory_status || 'HOLD'}
-                    </Typography>
-                  )}
-                </Grid>
                 
-                {/* Description - Editable */}
+                {/* Description - Double-click to edit */}
                 <Grid item xs={12}>
                   <Typography variant="caption" color="textSecondary">
                     Description *
                   </Typography>
-                  {isEditing ? (
+                  {renderEditableField(
+                    'short_desc',
+                    item.short_desc || 'No description available',
                     <TextField
                       fullWidth
                       size="small"
                       name="short_desc"
                       value={editedItem.short_desc || ''}
                       onChange={handleInputChange}
+                      inputRef={(el) => {
+                        if (editingField === 'short_desc') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'short_desc')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'short_desc')}
+                      autoFocus
                       margin="dense"
                     />
-                  ) : (
-                    <Typography variant="body1">
-                      {item.short_desc || 'No description available'}
-                    </Typography>
                   )}
                 </Grid>
                 
-                {/* Metal Type with Edit Button */}
-                <Grid item xs={6}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <Box>
-                      <Typography variant="caption" color="textSecondary">
-                        Metal Type
-                      </Typography>
-                      <Typography variant="body2">
-                        {item.metal_type || 'N/A'}
-                      </Typography>
-                    </Box>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={<EditIcon />}
-                      onClick={handleEditMetal}
-                    >
-                      Edit Metal
-                    </Button>
-                  </Box>
-                </Grid>
-                
-                {/* Purity - Read-only for now */}
-                <Grid item xs={6}>
+                {/* Metal Type with Edit Button and Double-Click Editing */}
+                                {/* Precious Metal Type - Double-click to edit */}
+                <Grid item xs={4}>
                   <Typography variant="caption" color="textSecondary">
-                    Purity
+                    Precious Metal Type
                   </Typography>
-                  <Typography variant="body2">
-                    {item.metal_purity}
-                  </Typography>
+                  {renderEditableField(
+                    'precious_metal_type',
+                    item.precious_metal_type || 'N/A',
+                    <FormControl fullWidth>
+                      <Select
+                        name="precious_metal_type"
+                        value={editingField === 'precious_metal_type' ? 
+                          (editedItem.precious_metal_type_id || '') : 
+                          (item.precious_metal_type_id || '')}
+                        onChange={(e) => {
+                          const selectedType = preciousMetalTypes.find(type => type.id.toString() === e.target.value.toString());
+                          // Update both editedItem and item states to ensure display persists
+                          const typeValue = selectedType ? selectedType.type : '';
+                          setEditedItem(prev => ({
+                            ...prev,
+                            precious_metal_type_id: e.target.value,
+                            precious_metal_type: typeValue,
+                            metal_type: typeValue
+                          }));
+                          
+                          // Also update the main item state so display persists after edit
+                          setItem(prev => ({
+                            ...prev,
+                            precious_metal_type_id: e.target.value,
+                            precious_metal_type: typeValue                          
+                          }));
+                          
+                          // Fetch purities for the selected metal type
+                          fetchPurities(e.target.value);
+                        }}
+                        inputRef={(el) => {
+                          if (editingField === 'precious_metal_type') inlineInputRef.current = el;
+                        }}
+                        onKeyDown={(e) => handleInlineEditComplete(e, 'precious_metal_type')}
+                        onBlur={(e) => handleInlineEditComplete(e, 'precious_metal_type')}
+                        autoFocus
+                      >
+                       {preciousMetalTypes.map((type) => (
+                          <MenuItem key={type.id} value={type.id}>
+                            {type.type}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
                 </Grid>
                 
-                {/* Metal Weight - Read-only for now */}
-                <Grid item xs={6}>
+                {/* Non-Precious Metal Type - Double-click to edit */}
+                <Grid item xs={4}>
+                  <Typography variant="caption" color="textSecondary">
+                    Non-Precious Metal Type
+                  </Typography>
+                  {renderEditableField(
+                    'non_precious_metal_type',
+                    item.non_precious_metal_type || 'N/A',
+                    <FormControl fullWidth>
+                      <Select
+                        name="non_precious_metal_type"
+                        value={editingField === 'non_precious_metal_type' ? 
+                          (editedItem.non_precious_metal_type_id || '') : 
+                          (item.non_precious_metal_type_id || '')}
+                        onChange={(e) => {
+                          const selectedType = nonPreciousMetalTypes.find(type => type.id.toString() === e.target.value.toString());
+                          // Update both editedItem and item states to ensure display persists
+                          const typeValue = selectedType ? selectedType.type : '';
+                          setEditedItem(prev => ({
+                            ...prev,
+                            non_precious_metal_type_id: e.target.value,
+                            non_precious_metal_type: typeValue
+                          }));
+                          
+                          // Also update the main item state so display persists after edit
+                          setItem(prev => ({
+                            ...prev,
+                            non_precious_metal_type_id: e.target.value,
+                            non_precious_metal_type: typeValue
+                          }));
+                        }}
+                        inputRef={(el) => {
+                          if (editingField === 'non_precious_metal_type') inlineInputRef.current = el;
+                        }}
+                        onKeyDown={(e) => handleInlineEditComplete(e, 'non_precious_metal_type')}
+                        onBlur={(e) => handleInlineEditComplete(e, 'non_precious_metal_type')}
+                        autoFocus
+                      >
+                         {nonPreciousMetalTypes.map((type) => (
+                          <MenuItem key={type.id} value={type.id}>
+                            {type.type}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
+                </Grid>
+                                
+                {/* Metal Weight - Double-click to edit */}
+                <Grid item xs={4}>
                   <Typography variant="caption" color="textSecondary">
                     Metal Weight
                   </Typography>
-                  <Typography variant="body2">
-                    {item.metal_weight}g
-                  </Typography>
-                </Grid>
-                
-                {/* Metal Value - Editable */}
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="textSecondary">
-                    Metal Value
-                  </Typography>
-                  {isEditing ? (
+                  {renderEditableField(
+                    'metal_weight',
+                    `${item.metal_weight || ''}g`,
                     <TextField
                       fullWidth
                       size="small"
-                      name="metal_value"
+                      name="metal_weight"
                       type="number"
-                      value={editedItem.metal_value || 0}
-                      onChange={handleInputChange}
+                      value={editingField === 'metal_weight' ? editedItem.metal_weight || '' : item.metal_weight || ''}
+                      onChange={(e) => {
+                        setEditedItem(prev => ({
+                          ...prev,
+                          metal_weight: e.target.value
+                        }));
+                         // Also update the main item state so display persists after edit
+                         setItem(prev => ({
+                          ...prev,
+                          metal_weight: e.target.value
+                        }));
+                      }}
+                      margin="dense"
+                      InputProps={{
+                        endAdornment: <InputAdornment position="end">g</InputAdornment>
+                      }}
+                      inputRef={(el) => {
+                        if (editingField === 'metal_weight') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'metal_weight')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'metal_weight')}
+                      autoFocus
+                    />
+                  )}
+                </Grid>
+
+                {/* Purity and Purity Value - Side by side with auto-update */}
+                  <Grid item xs={4}>
+                    <Typography variant="caption" color="textSecondary">
+                      Purity
+                    </Typography>
+                    {renderEditableField(
+                      'metal_purity',
+                      item.metal_purity || 'N/A',
+                      <FormControl fullWidth size="small" margin="dense">
+                        <Select
+                          name="metal_purity"
+                          value={editingField === 'metal_purity' ? 
+                            (editedItem.metal_purity_id || '') : 
+                            (item.metal_purity_id || '')}
+                          onChange={(e) => {
+                            // Find the selected purity by ID and extract all its properties
+                            const selectedPurity = metalPurities.find(p => p.id === e.target.value);
+                            
+                            if (selectedPurity) {
+                              // Update both purity and purity value together
+                              setEditedItem(prev => ({
+                                ...prev,
+                                metal_purity_id: e.target.value,
+                                metal_purity: selectedPurity.purity,
+                                purity_value: selectedPurity.value || 0
+                              }));
+                              
+                              // Immediately update the item state to show the updated value
+                              setItem(prev => ({
+                                ...prev,
+                                metal_purity_id: e.target.value,
+                                metal_purity: selectedPurity.purity,
+                                purity_value: selectedPurity.value || 0
+                              }));
+                            }
+                            
+                            // If we're done editing the purity, complete the edit
+                            handleInlineEditComplete({ key: 'Enter' }, 'metal_purity');
+                          }}
+                          inputRef={(el) => {
+                            if (editingField === 'metal_purity') inlineInputRef.current = el;
+                          }}
+                          onKeyDown={(e) => handleInlineEditComplete(e, 'metal_purity')}
+                          onBlur={(e) => handleInlineEditComplete(e, 'metal_purity')}
+                          autoFocus
+                        >
+                          {metalPurities.map((purity) => (
+                            <MenuItem key={purity.id} value={purity.id}>
+                              {purity.purity}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    )}
+                  </Grid>
+                  
+                  <Grid item xs={4}>
+                    <Typography variant="caption" color="textSecondary">
+                      Purity Value
+                    </Typography>
+                    {renderEditableField(
+                      'purity_value',
+                      item.purity_value || '0',
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="purity_value"
+                        type="number"
+                        value={editingField === 'purity_value' ? editedItem.purity_value || 0 : item.purity_value || 0}
+                        onChange={(e) => {
+                          setEditedItem(prev => ({
+                            ...prev,
+                            purity_value: parseFloat(e.target.value) || 0
+                          }));
+                          setItem(prev => ({
+                            ...prev,
+                            purity_value: parseFloat(e.target.value) || 0
+                          }));
+                        }}
+                        margin="dense"
+                        inputRef={(el) => {
+                          if (editingField === 'purity_value') inlineInputRef.current = el;
+                        }}
+                        onKeyDown={(e) => handleInlineEditComplete(e, 'purity_value')}
+                        onBlur={(e) => handleInlineEditComplete(e, 'purity_value')}
+                        autoFocus
+                        disabled={editingField !== 'purity_value'}
+                      />
+                    )}
+                  </Grid>
+                
+                {/* Metal Category - Double-click to edit */}
+                <Grid item xs={4}>
+                  <Typography variant="caption" color="textSecondary">
+                    Metal Category
+                  </Typography>
+                  {renderEditableField(
+                    'metal_category',
+                    item.category || 'N/A',
+                    <FormControl fullWidth>
+                      <Select
+                        name="metal_category"
+                        value={editingField === 'metal_category' ? 
+                          (editedItem.metal_category_id || '') : 
+                          (item.metal_category_id || '')}
+                        onChange={(e) => {
+                          const selectedCategory = metalCategories.find(cat => cat.id.toString() === e.target.value.toString());
+                          // Update both editedItem and item states to ensure display persists
+                          const categoryValue = selectedCategory ? selectedCategory.category : '';
+                          setEditedItem(prev => ({
+                            ...prev,
+                            metal_category_id: e.target.value,
+                            metal_category: categoryValue
+                          }));
+                          setItem(prev => ({
+                            ...prev,
+                            metal_category_id: e.target.value,
+                            metal_category: categoryValue
+                          }));
+                          
+                        }}
+                        inputRef={(el) => {
+                          if (editingField === 'metal_category') inlineInputRef.current = el;
+                        }}
+                        onKeyDown={(e) => handleInlineEditComplete(e, 'metal_category')}
+                        onBlur={(e) => handleInlineEditComplete(e, 'metal_category')}
+                        autoFocus
+                      >
+                        <MenuItem value="" style={{ color: '#000000' }}>Select a metal category</MenuItem>
+                        {metalCategories && metalCategories.length > 0 ? metalCategories.map((category) => (
+                          <MenuItem key={category.id} value={category.id.toString()} style={{ color: '#000000' }}>
+                            {category.category}
+                          </MenuItem>
+                        )) : (
+                          <MenuItem disabled style={{ color: '#666666' }}>No metal categories available</MenuItem>
+                        )}
+                      </Select>
+                    </FormControl>
+                  )}
+                </Grid>
+                
+                {/* Spot Price - Double-click to edit */}
+                <Grid item xs={4}>
+                  <Typography variant="caption" color="textSecondary">
+                    Spot Price
+                  </Typography>
+                  {renderEditableField(
+                    'spot_price',
+                    `$${formatPrice(item.metal_spot_price || 0)}`,
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="spot_price"
+                      type="number"
+                      value={editingField === 'spot_price' ? editedItem.spot_price || 0 : item.spot_price || 0}
+                      onChange={(e) => {
+                        setEditedItem(prev => ({
+                          ...prev,
+                          spot_price: parseFloat(e.target.value) || 0
+                        }));
+                        
+                        // Also update the main item state so display persists after edit
+                        setItem(prev => ({
+                          ...prev,
+                          spot_price: parseFloat(e.target.value) || 0
+                        }));
+                      }}
                       margin="dense"
                       InputProps={{
                         startAdornment: <InputAdornment position="start">$</InputAdornment>
                       }}
+                      inputRef={(el) => {
+                        if (editingField === 'spot_price') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'spot_price')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'spot_price')}
+                      autoFocus
                     />
-                  ) : (
-                    <Typography variant="body2">
-                      ${formatPrice(item.metal_value || 0)}
-                    </Typography>
                   )}
+                </Grid>
+
+                  {/* Jewelry Color - Double-click to edit */}
+                  <Grid item xs={4}>
+                  <Typography variant="caption" color="textSecondary">
+                    Jewelry Color
+                  </Typography>
+                  {renderEditableField(
+                    'jewelry_color',
+                    item.jewelry_color || 'N/A',
+                    <FormControl fullWidth>
+                      <Select
+                        name="jewelry_color"
+                        value={editingField === 'jewelry_color' ? 
+                          (editedItem.metal_color_id || '') : 
+                          (item.metal_color_id || '')}
+                        onChange={(e) => {
+                          const selectedColor = metalColors.find(color => color.id.toString() === e.target.value.toString());
+                          // Update both editedItem and item states to ensure display persists
+                          const colorValue = selectedColor ? selectedColor.color : '';
+                          setEditedItem(prev => ({
+                            ...prev,
+                            metal_color_id: e.target.value,
+                            jewelry_color: colorValue
+                          }));
+                          
+                          // Also update the main item state so display persists after edit
+                          setItem(prev => ({
+                            ...prev,
+                            metal_color_id: e.target.value,
+                            jewelry_color: colorValue
+                          }));
+                        }}
+                        inputRef={(el) => {
+                          if (editingField === 'jewelry_color') inlineInputRef.current = el;
+                        }}
+                        onKeyDown={(e) => handleInlineEditComplete(e, 'jewelry_color')}
+                        onBlur={(e) => handleInlineEditComplete(e, 'jewelry_color')}
+                        autoFocus
+                      >
+                        <MenuItem value="" style={{ color: '#000000' }}>Select a jewelry color</MenuItem>
+                        {metalColors && metalColors.length > 0 ? metalColors.map((color) => (
+                          <MenuItem key={color.id} value={color.id.toString()} style={{ color: '#000000' }}>
+                            {color.color}
+                          </MenuItem>
+                        )) : (
+                          <MenuItem disabled style={{ color: '#666666' }}>No colors available</MenuItem>
+                        )}
+                      </Select>
+                    </FormControl>
+                  )}
+                </Grid>
+                
+                {/* Estimated Metal Value - Double-click to edit */}
+                <Grid item xs={4}>
+                  <Typography variant="caption" color="textSecondary">
+                    Est. Metal Value
+                  </Typography>
+                  {renderEditableField(
+                    'est_metal_value',
+                    `$${formatPrice(item.est_metal_value || 0)}`,
+                    <TextField
+                      fullWidth
+                      size="small"
+                      name="est_metal_value"
+                      type="number"
+                      value={editingField === 'est_metal_value' ? editedItem.est_metal_value || 0 : item.est_metal_value || 0}
+                      onChange={(e) => {
+                        setEditedItem(prev => ({
+                          ...prev,
+                          est_metal_value: parseFloat(e.target.value) || 0
+                        }));
+                        
+                        // Also update the main item state so display persists after edit
+                        setItem(prev => ({
+                          ...prev,
+                          est_metal_value: parseFloat(e.target.value) || 0
+                        }));
+                      }}
+                      margin="dense"
+                      InputProps={{
+                        startAdornment: <InputAdornment position="start">$</InputAdornment>
+                      }}
+                      inputRef={(el) => {
+                        if (editingField === 'est_metal_value') inlineInputRef.current = el;
+                      }}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'est_metal_value')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'est_metal_value')}
+                      autoFocus
+                    />
+                  )}
+                </Grid>
+
+
+
+                <Grid item xs={6}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      size="small"
+                      startIcon={<EditIcon />}
+                      onClick={handleEditJewelryItem}
+                    >
+                      Edit Jewelry Item
+                    </Button>
+                  </Box>
                 </Grid>
                 
                 {/* Gemstone Details with Edit Button */}
                 <Grid item xs={12}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, mt: 2 }}>
                     <Typography variant="subtitle2" fontWeight="medium">
-                      Gemstone Details
+                      Primary Gem Details
                     </Typography>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={<EditIcon />}
-                      onClick={handleEditGem}
-                    >
-                      Edit Primary Gem
-                    </Button>
                   </Box>
-                  <Grid container spacing={2}>
-                    <Grid item xs={6}>
-                      <Typography variant="caption" color="textSecondary">
-                        Gemstone Type
-                      </Typography>
-                      <Typography variant="body2">
-                        {item.gemstone || 'N/A'}
-                      </Typography>
+                    {/* Tab selector for Diamond/Stone */}
+                    <Box sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
+                    <Tabs 
+                      value={gemTab} 
+                      onChange={(e, newValue) => {
+                        // Don't allow switching to stone when primary gem is diamond
+                        if (item?.primary_gem_category?.toLowerCase() === 'diamond' && newValue === 'stone') {
+                          return; // Prevent switching
+                        }
+                        setGemTab(newValue);
+                      }}
+                      aria-label="gem type tabs"
+                    >
+                      <Tab 
+                        label="Diamond" 
+                        value="diamond" 
+                        disabled={gemTab === 'stone' && item?.primary_gem_category}
+                      />
+                      <Tab 
+                        label="Stone" 
+                        value="stone" 
+                        sx={{
+                          cursor: item?.primary_gem_category?.toLowerCase() === 'diamond' ? 'not-allowed' : 'pointer'
+                        }}
+                      />
+                    </Tabs>
+                  </Box>
+                  
+                  {/* Conditional rendering based on gemTab */}
+                  {gemTab === 'diamond' ? (
+                    // Diamond fields
+                    <Grid container spacing={2}>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Diamond Shape
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_shape',
+                          item.primary_gem_shape || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name="primary_gem_shape"
+                              value={editedItem?.primary_gem_shape || item.primary_gem_shape || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_shape')}
+                              onClose={() => handleInlineEditComplete(null, 'primary_gem_shape')}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === 'primary_gem_shape') inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select a shape
+                              </MenuItem>
+                              {diamondShapes.map((shape) => (
+                                <MenuItem 
+                                  key={shape.id} 
+                                  value={shape.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {shape.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Diamond Size
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_size',
+                          item.primary_gem_size ? `${item.primary_gem_size} mm` : 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name="primary_gem_size"
+                              value={editedItem?.primary_gem_size || item.primary_gem_size || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_size')}
+                              onClose={() => handleInlineEditComplete(null, 'primary_gem_size')}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === 'primary_gem_size') inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select diamond size
+                              </MenuItem>
+                              {diamondSizes.map((size) => (
+                                <MenuItem 
+                                  key={size.id} 
+                                  value={size.size}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {size.size}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Diamond Weight
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_weight',
+                          item.primary_gem_weight ? `${item.primary_gem_weight} ct` : 'N/A',
+                          diamondSizes.length > 0 ? (
+
+                            <FormControl fullWidth size="small" margin="dense">
+                              <Select
+                                name="primary_gem_weight"
+                                value={editedItem?.primary_gem_weight || item.primary_gem_weight || ''}
+                                onChange={handleInputChange}
+                                onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_weight')}
+                                onClose={() => handleInlineEditComplete(null, 'primary_gem_weight')}
+                                MenuProps={{ style: { maxHeight: 300 } }}
+                                style={{ backgroundColor: '#fff', color: '#000' }}
+                                inputRef={(el) => {
+                                  if (editingField === 'primary_gem_weight') inlineInputRef.current = el;
+                                }}
+                                displayEmpty
+                              >
+                                <MenuItem value="" disabled>
+                                  Select carat weight
+                                </MenuItem>
+                                {diamondSizes.map((size) => (
+                                  <MenuItem 
+                                    key={size.id} 
+                                    value={size.weight}
+                                    style={{ backgroundColor: '#fff', color: '#000' }}
+                                  >
+                                    {size.weight}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                          ) : (
+                            <TextField
+                              fullWidth
+                              size="small"
+                              name="diamond_weight"
+                              type="number"
+                              value={editedItem?.diamond_weight || item.diamond_weight || ''}
+                              onChange={handleInputChange}
+                              inputRef={(el) => {
+                                if (editingField === 'diamond_weight') inlineInputRef.current = el;
+                              }}
+                              onKeyDown={(e) => handleInlineEditComplete(e, 'diamond_weight')}
+                              onBlur={(e) => handleInlineEditComplete(e, 'diamond_weight')}
+                              margin="dense"
+                              inputProps={{ step: 0.01 }}
+                            />
+                          )
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Color
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_color',
+                          item.primary_gem_color || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name="primary_gem_color"
+                              value={editedItem?.primary_gem_color || item.primary_gem_color || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_color')}
+                              onClose={() => handleInlineEditComplete(null, 'primary_gem_color')}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === 'primary_gem_color') inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select a color
+                              </MenuItem>
+                              {diamondColors.map((color) => (
+                                <MenuItem 
+                                  key={color.id} 
+                                  value={color.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {color.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Clarity
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_clarity',
+                          item.primary_gem_clarity || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name="primary_gem_clarity"
+                              value={editedItem?.primary_gem_clarity || item.primary_gem_clarity || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_clarity')}
+                              onClose={() => handleInlineEditComplete(null, 'primary_gem_clarity')}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === 'primary_gem_clarity') inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select clarity
+                              </MenuItem>
+                              {diamondClarity.map((clarity) => (
+                                <MenuItem 
+                                  key={clarity.id} 
+                                  value={clarity.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {clarity.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Quantity
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_quantity',
+                          item.primary_gem_quantity || '1',
+                          <TextField
+                            fullWidth
+                            size="small"
+                            name="primary_gem_quantity"
+                            type="number"
+                            value={editedItem?.primary_gem_quantity || item.primary_gem_quantity || '1'}
+                            onChange={handleInputChange}
+                            inputProps={{ min: 1, step: 1 }}
+                            onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_quantity')}
+                            inputRef={(el) => {
+                              if (editingField === 'primary_gem_quantity') inlineInputRef.current = el;
+                            }}
+                            margin="dense"
+                          />
+                        )}
+                      </Grid>
+                      
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Cut
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_cut',
+                          item.primary_gem_cut || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name="primary_gem_cut"
+                              value={editedItem?.primary_gem_cut || item.primary_gem_cut || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_cut')}
+                              onClose={() => handleInlineEditComplete(null, 'primary_gem_cut')}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === 'primary_gem_cut') inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select cut
+                              </MenuItem>
+                              {diamondCuts.map((cut) => (
+                                <MenuItem 
+                                  key={cut.id} 
+                                  value={cut.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {cut.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Lab Grown
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_lab_grown',
+                          item.primary_gem_lab_grown ? 'Yes' : 'No',
+                          <FormControl fullWidth size="small">
+                            <Select
+                              name="primary_gem_lab_grown"
+                              value={editedItem?.primary_gem_lab_grown !== undefined ? editedItem.primary_gem_lab_grown : (item.primary_gem_lab_grown ? true : false)}
+                              onChange={(e) => {
+                                setEditedItem(prev => ({
+                                  ...prev,
+                                  primary_gem_lab_grown: e.target.value
+                                }));
+                                setItem(prev => ({
+                                  ...prev,
+                                  primary_gem_lab_grown: e.target.value
+                                }));
+                              }}
+                              inputRef={(el) => {
+                                if (editingField === 'primary_gem_lab_grown') inlineInputRef.current = el;
+                              }}
+                              onKeyDown={(e) => handleInlineEditComplete(e, 'primary_gem_lab_grown')}
+                              onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_lab_grown')}
+                            >
+                              <MenuItem value={true}>Yes</MenuItem>
+                              <MenuItem value={false}>No</MenuItem>
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Estimated Value
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_value',
+                          item.primary_gem_value ? `$${item.primary_gem_value.toLocaleString()}` : 'N/A',
+                          <TextField
+                            fullWidth
+                            size="small"
+                            name="primary_gem_value"
+                            type="number"
+                            value={editedItem?.primary_gem_value || item.primary_gem_value || ''}
+                            onChange={handleInputChange}
+                            InputProps={{
+                              startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                            }}
+                            onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_value')}
+                            inputRef={(el) => {
+                              if (editingField === 'primary_gem_value') inlineInputRef.current = el;
+                            }}
+                            margin="dense"
+                          />
+                        )}
+                      </Grid>
                     </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="caption" color="textSecondary">
-                        Stone Weight
-                      </Typography>
-                      <Typography variant="body2">
-                        {item.stone_weight ? `${item.stone_weight} ct` : 'N/A'}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={12}>
-                      <Typography variant="caption" color="textSecondary">
-                        Color/Clarity
-                      </Typography>
-                      <Typography variant="body2">
-                        {item.stone_color_clarity || 'N/A'}
-                      </Typography>
-                    </Grid>
-                  </Grid>
-                </Grid>
-                
-                {/* Dimensions - Editable */}
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="textSecondary">
-                    Dimensions
-                  </Typography>
-                  {isEditing ? (
-                    <TextField
-                      fullWidth
-                      size="small"
-                      name="dimensions"
-                      value={editedItem.dimensions || ''}
-                      onChange={handleInputChange}
-                      margin="dense"
-                      placeholder="e.g., 25mm x 15mm"
-                    />
                   ) : (
-                    <Typography variant="body2">
-                      {item.dimensions || 'N/A'}
-                    </Typography>
+                    // Stone fields
+                    <Grid container spacing={2}>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Stone Type
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_type',
+                          item.primary_gem_type || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name="primary_gem_type"
+                              value={editedItem?.primary_gem_type || item.primary_gem_type || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_type')}
+                              onClose={() => handleInlineEditComplete(null, 'primary_gem_type')}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === 'primary_gem_type') inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select stone type
+                              </MenuItem>
+                              {stoneTypes.map((type) => (
+                                <MenuItem 
+                                  key={type.id} 
+                                  value={type.type}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {type.type}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Stone Shape
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_shape',
+                          item.primary_gem_shape || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name="primary_gem_shape"
+                              value={editedItem?.primary_gem_shape || item.primary_gem_shape || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_shape')}
+                              onClose={() => handleInlineEditComplete(null, 'primary_gem_shape')}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === 'primary_gem_shape') inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select stone shape
+                              </MenuItem>
+                              {stoneShapes.map((shape) => (
+                                <MenuItem 
+                                  key={shape.id} 
+                                  value={shape.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {shape.name}
+                                </MenuItem>
+                              ))}
+                              {/* Fallback to diamond shapes if no stone shapes available */}
+                              {(!stoneShapes || stoneShapes.length === 0) && diamondShapes.map((shape) => (
+                                <MenuItem 
+                                  key={shape.id} 
+                                  value={shape.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {shape.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Stone Color
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_color',
+                          item.primary_gem_color || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name="primary_gem_color"
+                              value={editedItem?.primary_gem_color || item.primary_gem_color || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_color')}
+                              onClose={() => handleInlineEditComplete(null, 'primary_gem_color')}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === 'primary_gem_color') inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select stone color
+                              </MenuItem>
+                              {stoneColors.map((color) => (
+                                <MenuItem 
+                                  key={color.id} 
+                                  value={color.color}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {color.color}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Stone Weight
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_weight',
+                          item.primary_gem_weight ? `${item.primary_gem_weight} ct` : 'N/A',
+                          <TextField
+                            fullWidth
+                            size="small"
+                            name="primary_gem_weight"
+                            value={editedItem?.primary_gem_weight || item.primary_gem_weight || ''}
+                            onChange={handleInputChange}
+                            inputRef={(el) => {
+                              if (editingField === 'primary_gem_weight') inlineInputRef.current = el;
+                            }}
+                            onKeyDown={(e) => handleInlineEditComplete(e, 'primary_gem_weight')}
+                            onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_weight')}
+                            type="number"
+                            inputProps={{ step: 0.01 }}
+                            margin="dense"
+                          />
+                        )}</Grid>
+                        <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Quantity
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_quantity',
+                          item.primary_gem_quantity || '1',
+                          <TextField
+                            fullWidth
+                            size="small"
+                            name="primary_gem_quantity"
+                            value={editedItem?.primary_gem_quantity || item.primary_gem_quantity || '1'}
+                            onChange={handleInputChange}
+                            inputRef={(el) => {
+                              if (editingField === 'primary_gem_quantity') inlineInputRef.current = el;
+                            }}
+                            onKeyDown={(e) => handleInlineEditComplete(e, 'primary_gem_quantity')}
+                            onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_quantity')}
+                            type="number"
+                            inputProps={{ min: 1, step: 1 }}
+                            margin="dense"
+                          />
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Authentic
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_authentic',
+                          item.primary_gem_authentic ? 'Yes' : 'No',
+                          <FormControl fullWidth size="small">
+                            <Select
+                              name="primary_gem_authentic"
+                              value={editedItem?.primary_gem_authentic !== undefined ? editedItem.primary_gem_authentic : (item.primary_gem_authentic ? true : false)}
+                              onChange={(e) => {
+                                setEditedItem(prev => ({
+                                  ...prev,
+                                  primary_gem_authentic: e.target.value
+                                }));
+                                setItem(prev => ({
+                                  ...prev,
+                                  primary_gem_authentic: e.target.value
+                                }));
+                              }}
+                              inputRef={(el) => {
+                                if (editingField === 'primary_gem_authentic') inlineInputRef.current = el;
+                              }}
+                              onKeyDown={(e) => handleInlineEditComplete(e, 'primary_gem_authentic')}
+                              onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_authentic')}
+                            >
+                              <MenuItem value={true}>Yes</MenuItem>
+                              <MenuItem value={false}>No</MenuItem>
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Estimated Value
+                        </Typography>
+                        {renderEditableField(
+                          'primary_gem_value',
+                          item.primary_gem_value ? `$${parseFloat(item.primary_gem_value).toFixed(2)}` : '$0.00',
+                          <TextField
+                            fullWidth
+                            size="small"
+                            name="primary_gem_value"
+                            value={editedItem?.primary_gem_value || item.primary_gem_value || ''}
+                            onChange={handleInputChange}
+                            inputRef={(el) => {
+                              if (editingField === 'primary_gem_value') inlineInputRef.current = el;
+                            }}
+                            onKeyDown={(e) => handleInlineEditComplete(e, 'primary_gem_value')}
+                            onBlur={(e) => handleInlineEditComplete(e, 'primary_gem_value')}
+                            type="number"
+                            InputProps={{
+                              startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                            }}
+                            inputProps={{ step: 0.01, min: 0 }}
+                            margin="dense"
+                          />
+                        )}
+                      </Grid>
+                    </Grid>
                   )}
                 </Grid>
+
+                {/* Secondary Gems Section */}
+                <Grid item xs={12} sx={{ mt: 3 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, mt: 2 }}>
+                    <Typography variant="subtitle2" fontWeight="medium">
+                      Secondary Gem Details
+                    </Typography>
+                  </Box>
+                  
+                  {/* Tab selector for Secondary Diamond/Stone */}
+                  <Box sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
+                    <Tabs 
+                      value={secondaryGemTab} 
+                      onChange={(e, newValue) => setSecondaryGemTab(newValue)}
+                      aria-label="secondary gem type tabs"
+                    >
+                      <Tab 
+                        label="Diamond" 
+                        value="diamond" 
+                        disabled={item.secondaryGems?.some(gem => 
+                          gem?.secondary_gem_category?.toLowerCase() === 'stone'
+                        )}
+                      />
+                      <Tab label="Stone" value="stone" />
+                    </Tabs>
+                  </Box>
+                  
+                  {/* Render secondary gems based on their category */}
+                  {item.secondaryGems && item.secondaryGems.length > 0 && item.secondaryGems.map((gem, index) => {
+                    const isDiamond = gem?.secondary_gem_category?.toLowerCase() === 'diamond';
+                    
+                    // Skip rendering if the gem's category doesn't match the current tab
+                    if ((isDiamond && secondaryGemTab !== 'diamond') || 
+                        (!isDiamond && secondaryGemTab !== 'stone')) {
+                      return null;
+                    }
+                    
+                    return (
+                      <React.Fragment key={`secondary-gem-${index}`}>
+                        {isDiamond ? (
+                          <Grid container spacing={2} sx={{ mt: 2, border: '1px solid #e0e0e0', p: 2, borderRadius: 1 }}>
+                            <Grid item xs={12}>
+                              <Typography variant="subtitle2">
+                                Secondary Diamond {index + 1}
+                              </Typography>
+                            </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Diamond Shape
+                        </Typography>
+                        {renderEditableField(
+                                `secondary_gem_shape_${index}`,
+                                gem?.secondary_gem_shape || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                                    name={`secondary_gem_shape_${index}`}
+                                    value={editedItem?.[`secondary_gem_shape_${index}`] || gem?.secondary_gem_shape || ''}
+                              onChange={handleInputChange}
+                                    onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_shape_${index}`, index)}
+                                    onClose={() => handleInlineEditComplete(null, `secondary_gem_shape_${index}`, index)}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                      if (editingField === `secondary_gem_shape_${index}`) inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select a shape
+                              </MenuItem>
+                              {diamondShapes.map((shape) => (
+                                <MenuItem 
+                                  key={shape.id} 
+                                  value={shape.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {shape.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Diamond Size
+                        </Typography>
+                        {renderEditableField(
+                                `secondary_gem_size_${index}`,
+                                gem?.secondary_gem_size ? `${gem.secondary_gem_size} mm` : 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                                    name={`secondary_gem_size_${index}`}
+                                    value={editedItem?.[`secondary_gem_size_${index}`] || gem?.secondary_gem_size || ''}
+                              onChange={handleInputChange}
+                                    onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_size_${index}`, index)}
+                                    onClose={() => handleInlineEditComplete(null, `secondary_gem_size_${index}`, index)}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                      if (editingField === `secondary_gem_size_${index}`) inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select diamond size
+                              </MenuItem>
+                              {diamondSizes.map((size) => (
+                                <MenuItem 
+                                  key={size.id} 
+                                  value={size.size}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {size.size}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Diamond Weight
+                        </Typography>
+                        {renderEditableField(
+                                `secondary_gem_weight_${index}`,
+                                gem?.secondary_gem_weight ? `${gem.secondary_gem_weight} ct` : 'N/A',
+                          diamondSizes.length > 0 ? (
+                            <FormControl fullWidth size="small" margin="dense">
+                              <Select
+                                      name={`secondary_gem_weight_${index}`}
+                                      value={editedItem?.[`secondary_gem_weight_${index}`] || gem?.secondary_gem_weight || ''}
+                                onChange={handleInputChange}
+                                      onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_weight_${index}`, index)}
+                                      onClose={() => handleInlineEditComplete(null, `secondary_gem_weight_${index}`, index)}
+                                MenuProps={{ style: { maxHeight: 300 } }}
+                                style={{ backgroundColor: '#fff', color: '#000' }}
+                                inputRef={(el) => {
+                                        if (editingField === `secondary_gem_weight_${index}`) inlineInputRef.current = el;
+                                }}
+                                displayEmpty
+                              >
+                                <MenuItem value="" disabled>
+                                  Select carat weight
+                                </MenuItem>
+                                {diamondSizes.map((size) => (
+                                  <MenuItem 
+                                    key={size.id} 
+                                    value={size.weight}
+                                    style={{ backgroundColor: '#fff', color: '#000' }}
+                                  >
+                                    {size.weight}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                          ) : (
+                            <TextField
+                              fullWidth
+                              size="small"
+                              name={`secondary_gem_weight_${index}`}
+                              type="number"
+                              value={editedItem?.[`secondary_gem_weight_${index}`] || gem?.secondary_gem_weight || ''}
+                              onChange={handleInputChange}
+                              inputRef={(el) => {
+                                if (editingField === `secondary_gem_weight_${index}`) inlineInputRef.current = el;
+                              }}
+                              onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_weight_${index}`, index)}
+                              InputProps={{
+                                endAdornment: <InputAdornment position="end">ct</InputAdornment>,
+                              }}
+                            />
+                          ))}
+                      
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Color
+                        </Typography>
+                        {renderEditableField(
+                          `secondary_gem_color_${index}`,
+                          gem?.secondary_gem_color || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name={`secondary_gem_color_${index}`}
+                              value={editedItem?.[`secondary_gem_color_${index}`] || gem?.secondary_gem_color || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_color_${index}`, index)}
+                              onClose={() => handleInlineEditComplete(null, `secondary_gem_color_${index}`, index)}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === `secondary_gem_color_${index}`) inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select a color
+                              </MenuItem>
+                              {diamondColors.map((color) => (
+                                <MenuItem 
+                                  key={color.id} 
+                                  value={color.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {color.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Clarity
+                        </Typography>
+                        {renderEditableField(
+                          `secondary_gem_clarity_${index}`,
+                          gem?.secondary_gem_clarity || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name={`secondary_gem_clarity_${index}`}
+                              value={editedItem?.[`secondary_gem_clarity_${index}`] || gem?.secondary_gem_clarity || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_clarity_${index}`, index)}
+                              onClose={() => handleInlineEditComplete(null, `secondary_gem_clarity_${index}`, index)}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === `secondary_gem_clarity_${index}`) inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select clarity
+                              </MenuItem>
+                              {diamondClarity.map((clarity) => (
+                                <MenuItem 
+                                  key={clarity.id} 
+                                  value={clarity.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {clarity.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Quantity
+                        </Typography>
+                        {renderEditableField(
+                          `secondary_gem_quantity_${index}`,
+                          gem?.secondary_gem_quantity || '1',
+                          <TextField
+                            fullWidth
+                            size="small"
+                            name={`secondary_gem_quantity_${index}`}
+                            type="number"
+                            value={editedItem?.[`secondary_gem_quantity_${index}`] || gem?.secondary_gem_quantity || '1'}
+                            onChange={handleInputChange}
+                            inputProps={{ min: 1, step: 1 }}
+                            onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_quantity_${index}`, index)}
+                            inputRef={(el) => {
+                              if (editingField === `secondary_gem_quantity_${index}`) inlineInputRef.current = el;
+                            }}
+                            margin="dense"
+                          />
+                        )}
+                      </Grid>
+                      
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Cut
+                        </Typography>
+                        {renderEditableField(
+                          `secondary_gem_cut_${index}`,
+                          gem?.secondary_gem_cut || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name={`secondary_gem_cut_${index}`}
+                              value={editedItem?.[`secondary_gem_cut_${index}`] || gem?.secondary_gem_cut || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_cut_${index}`, index)}
+                              onClose={() => handleInlineEditComplete(null, `secondary_gem_cut_${index}`, index)}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === `secondary_gem_cut_${index}`) inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select cut
+                              </MenuItem>
+                              {diamondCuts.map((cut) => (
+                                <MenuItem 
+                                  key={cut.id} 
+                                  value={cut.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {cut.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Lab Grown
+                        </Typography>
+                        {renderEditableField(
+                          `secondary_gem_lab_grown_${index}`,
+                          gem?.secondary_gem_lab_grown ? 'Yes' : 'No',
+                          <FormControl fullWidth size="small">
+                            <Select
+                              name={`secondary_gem_lab_grown_${index}`}
+                              value={editedItem?.[`secondary_gem_lab_grown_${index}`] !== undefined ? 
+                                editedItem[`secondary_gem_lab_grown_${index}`] : 
+                                (gem?.secondary_gem_lab_grown ? true : false)}
+                              onChange={(e) => {
+                                setEditedItem(prev => ({
+                                  ...prev,
+                                  [`secondary_gem_lab_grown_${index}`]: e.target.value
+                                }));
+                                // Update the specific gem in the array
+                                const updatedGems = [...item.secondaryGems];
+                                updatedGems[index] = {
+                                  ...updatedGems[index],
+                                  secondary_gem_lab_grown: e.target.value
+                                };
+                                setItem(prev => ({
+                                  ...prev,
+                                  secondaryGems: updatedGems
+                                }));
+                              }}
+                              inputRef={(el) => {
+                                if (editingField === `secondary_gem_lab_grown_${index}`) inlineInputRef.current = el;
+                              }}
+                              onKeyDown={(e) => handleInlineEditComplete(e, `secondary_gem_lab_grown_${index}`, index)}
+                              onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_lab_grown_${index}`, index)}
+                            >
+                              <MenuItem value={true}>Yes</MenuItem>
+                              <MenuItem value={false}>No</MenuItem>
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Estimated Value
+                        </Typography>
+                        {renderEditableField(
+                          `secondary_gem_value_${index}`,
+                          gem?.secondary_gem_value ? `$${gem.secondary_gem_value.toLocaleString()}` : 'N/A',
+                          <TextField
+                            fullWidth
+                            size="small"
+                            name={`secondary_gem_value_${index}`}
+                            type="number"
+                            value={editedItem?.[`secondary_gem_value_${index}`] !== undefined ? 
+                              editedItem[`secondary_gem_value_${index}`] : 
+                              (gem?.secondary_gem_value || '')}
+                            onChange={handleInputChange}
+                            InputProps={{
+                              startAdornment: <InputAdornment position="start">$</InputAdornment>
+                            }}
+                            onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_value_${index}`, index)}
+                            inputRef={(el) => {
+                              if (editingField === `secondary_gem_value_${index}`) {
+                                inlineInputRef.current = el;
+                              }
+                            }}
+                            margin="dense"
+                          />
+                        )}
+                      </Grid>
+                          </Grid>
+                        ) : (
+                          <Grid container spacing={2} sx={{ mt: 2, border: '1px solid #e0e0e0', p: 2, borderRadius: 1 }}>
+                            <Grid item xs={12}>
+                              <Typography variant="subtitle2">
+                                Secondary Stone {index + 1}
+                          </Typography>
+                        </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Stone Type
+                        </Typography>
+                        {renderEditableField(
+                          `secondary_gem_type_${index}`,
+                          gem?.secondary_gem_type || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name={`secondary_gem_type_${index}`}
+                              value={editedItem?.[`secondary_gem_type_${index}`] || gem?.secondary_gem_type || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_type_${index}`, index)}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === `secondary_gem_type_${index}`) inlineInputRef.current = el;
+                              }}
+                              displayEmpty>
+                              <MenuItem value="" disabled>
+                                Select stone type
+                              </MenuItem>
+                              {stoneTypes.map((type) => (
+                                <MenuItem 
+                                  key={type.id} 
+                                  value={type.type}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {type.type}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Stone Shape
+                        </Typography>
+                        {renderEditableField(
+                          `secondary_gem_shape_${index}`,
+                          gem?.secondary_gem_shape || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                              name={`secondary_gem_shape_${index}`}
+                              value={editedItem?.[`secondary_gem_shape_${index}`] || gem?.secondary_gem_shape || ''}
+                              onChange={handleInputChange}
+                              onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_shape_${index}`, index)}
+                              onClose={() => handleInlineEditComplete(null, `secondary_gem_shape_${index}`, index)}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                if (editingField === `secondary_gem_shape_${index}`) inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select stone shape
+                              </MenuItem>
+                              {stoneShapes.map((shape) => (
+                                <MenuItem 
+                                  key={shape.id} 
+                                  value={shape.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {shape.name}
+                                </MenuItem>
+                              ))}
+                              {/* Fallback to diamond shapes if no stone shapes available */}
+                              {(!stoneShapes || stoneShapes.length === 0) && diamondShapes.map((shape) => (
+                                <MenuItem 
+                                  key={shape.id} 
+                                  value={shape.name}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {shape.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Stone Color
+                        </Typography>
+                        {renderEditableField(
+                                  `secondary_gem_color_${index}`,
+                                  gem?.secondary_gem_color || 'N/A',
+                          <FormControl fullWidth size="small" margin="dense">
+                            <Select
+                                      name={`secondary_gem_color_${index}`}
+                                      value={editedItem?.[`secondary_gem_color_${index}`] || gem?.secondary_gem_color || ''}
+                              onChange={handleInputChange}
+                                      onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_color_${index}`, index)}
+                                      onClose={() => handleInlineEditComplete(null, `secondary_gem_color_${index}`, index)}
+                              MenuProps={{ style: { maxHeight: 300 } }}
+                              style={{ backgroundColor: '#fff', color: '#000' }}
+                              inputRef={(el) => {
+                                        if (editingField === `secondary_gem_color_${index}`) inlineInputRef.current = el;
+                              }}
+                              displayEmpty
+                            >
+                              <MenuItem value="" disabled>
+                                Select stone color
+                              </MenuItem>
+                              {stoneColors.map((color) => (
+                                <MenuItem 
+                                  key={color.id} 
+                                  value={color.color}
+                                  style={{ backgroundColor: '#fff', color: '#000' }}
+                                >
+                                  {color.color}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                                )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Stone Weight
+                        </Typography>
+                        {renderEditableField(
+                                  `secondary_gem_weight_${index}`,
+                                  gem?.secondary_gem_weight ? `${gem.secondary_gem_weight} ct` : 'N/A',
+                          <TextField
+                            fullWidth
+                            size="small"
+                                    name={`secondary_gem_weight_${index}`}
+                                    value={editedItem?.[`secondary_gem_weight_${index}`] !== undefined ? 
+                                      editedItem[`secondary_gem_weight_${index}`] : 
+                                      (gem?.secondary_gem_weight || '')}
+                            onChange={handleInputChange}
+                            inputRef={(el) => {
+                                      if (editingField === `secondary_gem_weight_${index}`) inlineInputRef.current = el;
+                            }}
+                                    onKeyDown={(e) => handleInlineEditComplete(e, `secondary_gem_weight_${index}`, index)}
+                                    onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_weight_${index}`, index)}
+                            type="number"
+                            inputProps={{ step: 0.01 }}
+                            margin="dense"
+                          />
+                                )}
+                         </Grid>
+                        <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Quantity
+                        </Typography>
+                        {renderEditableField(
+                                  `secondary_gem_quantity_${index}`,
+                                  gem?.secondary_gem_quantity || '1',
+                          <TextField
+                            fullWidth
+                            size="small"
+                                    name={`secondary_gem_quantity_${index}`}
+                                    value={editedItem?.[`secondary_gem_quantity_${index}`] !== undefined ? 
+                                      editedItem[`secondary_gem_quantity_${index}`] : 
+                                      (gem?.secondary_gem_quantity || '1')}
+                            onChange={handleInputChange}
+                            inputRef={(el) => {
+                                      if (editingField === `secondary_gem_quantity_${index}`) inlineInputRef.current = el;
+                            }}
+                                    onKeyDown={(e) => handleInlineEditComplete(e, `secondary_gem_quantity_${index}`, index)}
+                                    onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_quantity_${index}`, index)}
+                            type="number"
+                            inputProps={{ min: 1, step: 1 }}
+                            margin="dense"
+                          />
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Authentic
+                        </Typography>
+                        {renderEditableField(
+                                  `secondary_gem_authentic_${index}`,
+                                  gem?.secondary_gem_authentic ? 'Yes' : 'No',
+                          <FormControl fullWidth size="small">
+                            <Select
+                                      name={`secondary_gem_authentic_${index}`}
+                                      value={editedItem?.[`secondary_gem_authentic_${index}`] !== undefined ? 
+                                        editedItem[`secondary_gem_authentic_${index}`] : 
+                                        (gem?.secondary_gem_authentic || false)}
+                              onChange={(e) => {
+                                setEditedItem(prev => ({
+                                  ...prev,
+                                          [`secondary_gem_authentic_${index}`]: e.target.value
+                                        }));
+                                        // Update the specific gem in the array
+                                        const updatedGems = [...item.secondaryGems];
+                                        updatedGems[index] = {
+                                          ...updatedGems[index],
+                                  secondary_gem_authentic: e.target.value
+                                        };
+                                setItem(prev => ({
+                                  ...prev,
+                                          secondaryGems: updatedGems
+                                }));
+                              }}
+                              inputRef={(el) => {
+                                        if (editingField === `secondary_gem_authentic_${index}`) inlineInputRef.current = el;
+                              }}
+                                      onKeyDown={(e) => handleInlineEditComplete(e, `secondary_gem_authentic_${index}`, index)}
+                                      onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_authentic_${index}`, index)}
+                            >
+                              <MenuItem value={true}>Yes</MenuItem>
+                              <MenuItem value={false}>No</MenuItem>
+                            </Select>
+                          </FormControl>
+                        )}
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="textSecondary">
+                          Estimated Value
+                        </Typography>
+                        {renderEditableField(
+                                  `secondary_gem_value_${index}`,
+                                  gem?.secondary_gem_value ? `$${gem.secondary_gem_value.toLocaleString()}` : 'N/A',
+                          <TextField
+                            fullWidth
+                            size="small"
+                                    name={`secondary_gem_value_${index}`}
+                                    value={editedItem?.[`secondary_gem_value_${index}`] !== undefined ? 
+                                      editedItem[`secondary_gem_value_${index}`] : 
+                                      (gem?.secondary_gem_value || '')}
+                            onChange={handleInputChange}
+                            inputRef={(el) => {
+                                      if (editingField === `secondary_gem_value_${index}`) inlineInputRef.current = el;
+                            }}
+                                    onKeyDown={(e) => handleInlineEditComplete(e, `secondary_gem_value_${index}`, index)}
+                                    onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_value_${index}`, index)}
+                            type="number"
+                            InputProps={{
+                              startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                            }}
+                            inputProps={{ step: 0.01, min: 0 }}
+                            margin="dense"
+                          />
+                        )}
+                      </Grid>
+                            </Grid>
+                          )}
+                        </React.Fragment>
+                      );
+                    })
+                  }
+              </Grid>
               </Grid>
             </Paper>
           </Grid>
-          
-          {/* Sale Details Section */}
-          <Grid item xs={12} md={6}>
+    
+    {/* Sale Details Section */}
+    <Grid item xs={12} md={6}>
             <Paper elevation={0} sx={{ p: 2, bgcolor: 'background.default', height: '100%' }}>
-              <Typography variant="h6" sx={{ mb: 2 }}>
-                Sale Details
-              </Typography>
-              
-              {/* Transaction Type */}
-              <FormControl fullWidth margin="normal">
-                <InputLabel>Transaction Type</InputLabel>
-                <Select
-                  value={transactionType}
-                  onChange={(e) => setTransactionType(e.target.value)}
-                  label="Transaction Type"
-                >
-                  <MenuItem value="sell">Sell</MenuItem>
-                  <MenuItem value="retail">Retail</MenuItem>
-                </Select>
-              </FormControl>
               
               {/* Pricing Information */}
               <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
                 Pricing Information
               </Typography>
 
-              {/* Cost Basis */}
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="caption" color="textSecondary" gutterBottom display="block">
-                  Cost Basis
-                </Typography>
-                {isEditing ? (
-                  <TextField
-                    fullWidth
-                    size="small"
-                    name="cost_basis"
-                    type="number"
-                    value={editedItem.cost_basis || 0}
-                    onChange={handleInputChange}
-                    margin="dense"
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>
-                    }}
-                  />
-                ) : (
-                  <Typography variant="body1" fontWeight="medium">
-                    ${formatPrice(item.cost_basis || 0)}
-                  </Typography>
-                )}
-              </Box>
-
-              {/* Metal Value */}
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="caption" color="textSecondary" gutterBottom display="block">
-                  Metal Value
-                </Typography>
-                {isEditing ? (
-                  <TextField
-                    fullWidth
-                    size="small"
-                    name="metal_value"
-                    type="number"
-                    value={editedItem.metal_value || 0}
-                    onChange={handleInputChange}
-                    margin="dense"
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>
-                    }}
-                  />
-                ) : (
-                  <Typography variant="body1">
-                    ${formatPrice(item.metal_value || 0)}
-                  </Typography>
-                )}
-              </Box>
-
-              {/* Retail Price */}
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="caption" color="textSecondary" gutterBottom display="block">
-                  Retail Price
-                </Typography>
-                {isEditing ? (
-                  <TextField
-                    fullWidth
-                    size="small"
-                    name="retail_price"
-                    type="number"
-                    value={editedItem.retail_price || 0}
-                    onChange={handleInputChange}
-                    margin="dense"
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>
-                    }}
-                  />
-                ) : (
-                  <Typography variant="body1" color="success.main" fontWeight="medium">
-                    ${formatPrice(item.retail_price || 0)}
-                  </Typography>
-                )}
-              </Box>
-
-              <Divider sx={{ my: 2 }} />
-
-              {/* Markup Information */}
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="subtitle2" color="textSecondary">
-                  Markup Analysis
-                </Typography>
-                
-                <Grid container spacing={2} sx={{ mt: 1 }}>
-                  {/* Cost to Metal Value */}
-                  <Grid item xs={6}>
-                    <Typography variant="caption" color="textSecondary">
-                      Metal Value / Cost
-                    </Typography>
-                    <Typography variant="body2">
-                      {calculatePercentage(item.metal_value, item.cost_basis)}
+              {/* Pricing Table (3x3 format) */}
+              <Box sx={{ mb: 3, border: '1px solid #e0e0e0', borderRadius: '4px', p: 2, bgcolor: '#f9f9f9' }}>
+                {/* Row 1: Cost Values */}
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={4}>
+                    <Typography variant="subtitle2" align="center" gutterBottom>
+                      Category
                     </Typography>
                   </Grid>
-                  
-                  {/* Retail to Cost Markup */}
-                  <Grid item xs={6}>
-                    <Typography variant="caption" color="textSecondary">
-                      Retail / Cost
-                    </Typography>
-                    <Typography variant="body2" color="success.main">
-                      {calculatePercentage(item.retail_price, item.cost_basis)}
+                  <Grid item xs={4}>
+                    <Typography variant="subtitle2" align="center" gutterBottom>
+                      Metal
                     </Typography>
                   </Grid>
-                  
-                  {/* Profit Margin */}
-                  <Grid item xs={6}>
-                    <Typography variant="caption" color="textSecondary">
-                      Profit Margin
-                    </Typography>
-                    <Typography variant="body2" fontWeight="medium">
-                      {calculateProfitMargin(item.retail_price, item.cost_basis)}
+                  <Grid item xs={4}>
+                    <Typography variant="subtitle2" align="center" gutterBottom>
+                      Gem
                     </Typography>
                   </Grid>
-                  
-                  {/* Profit Amount */}
-                  <Grid item xs={6}>
-                    <Typography variant="caption" color="textSecondary">
-                      Profit Amount
-                    </Typography>
-                    <Typography variant="body2" fontWeight="medium">
-                      ${formatPrice((item.retail_price || 0) - (item.cost_basis || 0))}
+                </Grid>
+
+                {/* Row 1: Cost Values */}
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={4}>
+                    <Typography variant="body2" color="textSecondary" align="right">
+                      Cost Value:
                     </Typography>
                   </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="metal_cost"
+                        type="number"
+                        value={editedItem.metal_cost || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.metal_cost || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="gem_cost"
+                        type="number"
+                        value={editedItem.gem_cost || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.gem_cost || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                </Grid>
+
+                {/* Row 2: Melt Values */}
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={4}>
+                    <Typography variant="body2" color="textSecondary" align="right">
+                      Melt Value:
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="metal_melt_value"
+                        type="number"
+                        value={editedItem.metal_melt_value || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.metal_melt_value || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="gem_melt_value"
+                        type="number"
+                        value={editedItem.gem_melt_value || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.gem_melt_value || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                </Grid>
+
+                {/* Row 3: Suggested Retail */}
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={4}>
+                    <Typography variant="body2" color="textSecondary" align="right">
+                      Suggested Retail:
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="metal_suggested_retail"
+                        type="number"
+                        value={editedItem.metal_suggested_retail || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.metal_suggested_retail || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                  <Grid item xs={4}>
+                    {isEditing ? (
+                      <TextField
+                        fullWidth
+                        size="small"
+                        name="gem_suggested_retail"
+                        type="number"
+                        value={editedItem.gem_suggested_retail || 0}
+                        onChange={handleInputChange}
+                        margin="dense"
+                        InputProps={{
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>
+                        }}
+                      />
+                    ) : (
+                      <Typography variant="body2" align="center">
+                        ${Number(item.gem_suggested_retail || 0).toFixed(2)}
+                      </Typography>
+                    )}
+                  </Grid>
+                </Grid>
+
+                {/* Row 4: Total Retail Value - Always Editable */}
+                <Grid item xs={12}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mt: 2, pt: 2, borderTop: '1px dashed #ccc' }}>
+                    <Typography variant="subtitle1" color="primary" fontWeight="bold" sx={{ mr: 2, minWidth: '150px' }}>
+                      Total Retail Value:
+                    </Typography>
+                    <Box sx={{ flexGrow: 1 }}>
+                      {renderEditableField(
+                        'retail_price',
+                        item.retail_price ? `$${parseFloat(item.retail_price).toFixed(2)}` : '$0.00',
+                        <TextField
+                          fullWidth
+                          size="small"
+                          name="retail_price"
+                          value={editedItem?.retail_price || item.retail_price || ''}
+                          onChange={handleInputChange}
+                          inputRef={(el) => {
+                            if (editingField === 'retail_price') inlineInputRef.current = el;
+                          }}
+                          onKeyDown={(e) => handleInlineEditComplete(e, 'retail_price')}
+                          onBlur={(e) => handleInlineEditComplete(e, 'retail_price')}
+                          type="number"
+                          InputProps={{
+                            startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                          }}
+                          inputProps={{ step: 0.01, min: 0 }}
+                          margin="dense"
+                        />
+                      )}
+                    </Box>
+                  </Box>
                 </Grid>
               </Box>
             </Paper>
@@ -1340,10 +3327,10 @@ function JewelryEdit() {
       >
         <DialogContent>
           {/* Primary Gem Header */}
-          <Typography variant="h6" sx={{ mb: 3, fontWeight: 'bold' }}>EST. PRIMARY GEM</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 'bold' }}>EST. PRIMARY GEM</Typography>
           
           {/* Diamond/Stone Selection */}
-          <Box sx={{ mb: 3, display: 'flex', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <FormControl component="fieldset">
               <RadioGroup row value={gemTab} onChange={(e, newValue) => setGemTab(newValue)}>
                 <FormControlLabel 
@@ -1384,8 +3371,8 @@ function JewelryEdit() {
                         borderRadius: '4px'
                       }}>
                         <img 
-                          src={diamondShapes[currentShapeIndex].image}
-                          alt={diamondShapes[currentShapeIndex].name}
+                          src={diamondShapes && diamondShapes[currentShapeIndex] ? diamondShapes[currentShapeIndex].image : '/placeholder-diamond.png'}
+                          alt={diamondShapes && diamondShapes[currentShapeIndex] ? diamondShapes[currentShapeIndex].name : 'Diamond shape'}
                           style={{ maxHeight: '120px', maxWidth: '120px' }}
                           onError={(e) => {
                             e.target.src = '/placeholder-diamond.png';

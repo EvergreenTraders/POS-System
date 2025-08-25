@@ -16,7 +16,7 @@ import Jewelry from './pages/Jewelry';
 import CoinsBullions from './pages/CoinsBullions';
 import SystemConfig from './pages/SystemConfig';
 import Employees from './pages/Employees';
-import GemEstimator from './pages/GemEstimator';
+import JewelEstimator from './pages/JewelEstimator';
 import Pawns from './pages/Pawns';
 import Checkout from './pages/Checkout';
 import QuoteManager from './pages/QuoteManager';
@@ -194,11 +194,11 @@ function App() {
                 }
               />
               <Route
-                path="/gem-estimator"
+                path="/jewel-estimator"
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <GemEstimator />
+                      <JewelEstimator />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

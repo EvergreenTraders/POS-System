@@ -520,8 +520,8 @@ const CustomerManager = () => {
       if (location.state?.items?.length > 0) {
         location.state.items.forEach(item => addToCart(item));
         
-        // When coming from GemEstimator, make sure to preserve source as 'estimator'
-        const sourceFrom = location.state.from === 'gem-estimator' ? 'estimator' : (location.state.from || 'customer');
+        // When coming from JewelEstimator, make sure to preserve source as 'estimator'
+        const sourceFrom = location.state.from === 'jewel-estimator' ? 'estimator' : (location.state.from || 'customer');
         
         navigate('/checkout', { 
           state: { 
@@ -645,8 +645,8 @@ const CustomerManager = () => {
     if (location.state?.items?.length > 0) {
       location.state.items.forEach(item => addToCart(item));
       
-      // When coming from GemEstimator, make sure to preserve source as 'estimator'
-      const sourceFrom = location.state.from === 'gem-estimator' ? 'estimator' : (location.state.from || 'customer');
+      // When coming from JewelEstimator, make sure to preserve source as 'estimator'
+      const sourceFrom = location.state.from === 'jewel-estimator' ? 'estimator' : (location.state.from || 'customer');
       
       navigate('/checkout', { 
         state: { 

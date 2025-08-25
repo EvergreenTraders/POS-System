@@ -2443,11 +2443,8 @@ app.get('/api/jewelry_secondary_gems/:item_id', async (req, res) => {
     const query = 'SELECT * FROM jewelry_secondary_gems WHERE item_id = $1';
     const result = await pool.query(query, [item_id]);
     
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Secondary gems not found for this item' });
-    }
-    
-    res.json(result.rows[0]);
+    // Return all matching secondary gems (can be empty array if none found)
+    res.json(result.rows);
   } catch (error) {
     console.error('Error fetching jewelry secondary gems:', error);
     res.status(500).json({ error: error.message });

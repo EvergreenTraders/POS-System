@@ -674,7 +674,7 @@ function Checkout() {
 
         clearCart();
         setTimeout(() => {
-          navigate('/gem-estimator');
+          navigate('/jewel-estimator');
         }, 2000); // Show message for 2 seconds before navigating
       } else {
         throw new Error('Failed to save quote');
@@ -770,7 +770,7 @@ function Checkout() {
       clearCart();
       setCustomer(null);
       // Go back to gem estimator
-      navigate('/gem-estimator');
+      navigate('/jewel-estimator');
     }  
   };
 
