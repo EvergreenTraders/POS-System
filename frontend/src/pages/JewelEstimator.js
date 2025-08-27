@@ -282,7 +282,7 @@ function JewelEstimator() {
       transaction_type: transactionType || 'buy',
       buy_price: priceEstimates.buy,
       pawn_price: priceEstimates.pawn,
-      melt_price: priceEstimates.melt,
+      melt_value: priceEstimates.melt,
       retail_price: priceEstimates.retail,
       
       // Images

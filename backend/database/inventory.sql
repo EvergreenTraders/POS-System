@@ -1,16 +1,9 @@
 DO $$ 
 
--- Alter existing jewelry table to drop damages column and rename free_text to notes
 BEGIN
-    -- Drop damages column
-    ALTER TABLE jewelry DROP COLUMN IF EXISTS damages;
-    
-    -- Rename free_text column to notes if it exists, otherwise add notes column
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'jewelry' AND column_name = 'free_text') THEN
-        ALTER TABLE jewelry RENAME COLUMN free_text TO notes;
-    ELSE
-        ALTER TABLE jewelry ADD COLUMN notes TEXT;
-    END IF;
+    -- Add melt_value column
+    ALTER TABLE jewelry ADD COLUMN melt_value DECIMAL(10,2);
+
 END $$;
 
 -- Create jewelry table for inventory
