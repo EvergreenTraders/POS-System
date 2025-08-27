@@ -129,8 +129,16 @@ function JewelEstimator() {
   };
 
   const handleAddMetal = (newItem) => {
-    // Calculate price estimates when metal is added
-    const estimates = calculatePriceEstimates(newItem.estimatedValue, newItem.preciousMetalTypeId);
+    // Find the metal type from the state
+    const metalType = metalTypes.find(mt => 
+      mt.type === newItem.precious_metal_type
+    );
+
+    // Calculate price estimates with the found metal type ID
+    const estimates = calculatePriceEstimates(newItem.estimated_value, metalType.id);
+    
+    // Set the price estimates
+    setPriceEstimates(estimates);
     
     // Add the metal with its price estimates
     const metalWithEstimates = {
@@ -475,6 +483,21 @@ function JewelEstimator() {
   const [diamondValuationType, setDiamondValuationType] = useState('each');
 
   const [exactColor, setExactColor] = useState('D');
+  const [metalTypes, setMetalTypes] = useState([]);
+
+  // Fetch metal types when component mounts
+  useEffect(() => {
+    const fetchMetalTypes = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/precious_metal_type`);
+        setMetalTypes(response.data);
+      } catch (error) {
+        console.error('Error fetching metal types:', error);
+      }
+    };
+    
+    fetchMetalTypes();
+  }, []);
 
   const colorScale = Array.from({length: 23}, (_, i) => 
     String.fromCharCode(68 + i) // Starting from 'D'
