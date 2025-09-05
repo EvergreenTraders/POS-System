@@ -103,7 +103,6 @@ function Checkout() {
         if (Array.isArray(location.state.items)) {
           location.state.items.forEach(item => addToCart(item));
         }
-        
         // Set checkoutItems for display
         setCheckoutItems(location.state.items);
         
@@ -794,7 +793,7 @@ function Checkout() {
         setIsInitialized(true);
       }
       // Handle items from estimator
-      else if (location.state?.items && location.state?.from === 'estimator') {
+      else if (location.state?.items && location.state?.from === 'jewelry') {
         setCheckoutItems(location.state.items);
         
         // Add each item individually to the cart if not already added
@@ -806,7 +805,6 @@ function Checkout() {
         if (location.state.customer) {
           setCustomer(location.state.customer);
         }
-        
         setIsInitialized(true);
       }
       // Handle items from quote
@@ -980,7 +978,7 @@ function Checkout() {
                       <Grid item xs={12}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                           <Typography variant="subtitle1" sx={{ flexBasis: '30%' }}>
-                            <strong>N:</strong> {`${selectedCustomer.first_name || ''} ${selectedCustomer.last_name || ''}`}
+                            <strong>N:</strong> {`${selectedCustomer.name || ''}`}
                           </Typography>
                           <Typography variant="subtitle1" sx={{ flexBasis: '40%', textAlign: 'center' }}>
                             {selectedCustomer.email && (

@@ -1172,7 +1172,7 @@ app.put('/api/jewelry/:quoteId', async (req, res) => {
         
         // Generate new item ID based on metal category
         const usedIds = new Set();
-        const newItemId = await generateItemId(jewelryItem.category, client, usedIds);
+        const newItemId = await generateItemId(jewelryItem.metal_category, client, usedIds);
       
         // Prepare price update based on transaction type
         let priceUpdate = '';
@@ -1309,7 +1309,7 @@ app.post('/api/jewelry', async (req, res) => {
       } else {
         // Generate unique item ID for non-quote items
         const usedIds = new Set();
-        item_id = await generateItemId(item.category, client, usedIds);
+        item_id = await generateItemId(item.metal_category, client, usedIds);
         status = 'HOLD';
       }
       // Insert jewelry record
@@ -1350,15 +1350,16 @@ app.post('/api/jewelry', async (req, res) => {
           location,
           condition,
           metal_spot_price,
-          notes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
+          notes,
+          melt_value
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
         RETURNING *`;
 
       const jewelryValues = [
         item_id,                                              // 1
         item.long_desc || '',                                    // 2
         item.short_desc || '',                             // 3
-        item.category || '',                                // 4
+        item.metal_category || '',                                // 4
         item.brand || '',                                       // 5
         item.vintage || false,                                 // 6
         item.stamps || '',                                     // 7
@@ -1390,7 +1391,8 @@ app.post('/api/jewelry', async (req, res) => {
         'SOUTH STORE',          // 33
         'GOOD',          // 34
         item.metal_spot_price,
-        item.notes
+        item.notes,
+        item.melt_value
       ];
 
       const result = await client.query(jewelryQuery, jewelryValues);

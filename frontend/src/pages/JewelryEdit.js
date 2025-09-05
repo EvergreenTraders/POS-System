@@ -3142,7 +3142,7 @@ function JewelryEdit() {
                       />
                     ) : (
                       <Typography variant="body2" align="center">
-                        ${Number(item.metal_cost || 0).toFixed(2)}
+                        ${Number(item.est_metal_value || 0).toFixed(2)}
                       </Typography>
                     )}
                   </Grid>
@@ -3162,7 +3162,10 @@ function JewelryEdit() {
                       />
                     ) : (
                       <Typography variant="body2" align="center">
-                        ${Number(item.gem_cost || 0).toFixed(2)}
+                        ${(Number(item.primary_gem_value || 0) + 
+                          (item.secondaryGems || []).reduce((sum, gem) => 
+                            sum + Number(gem.secondary_gem_value || 0), 0)
+                         ).toFixed(2)}
                       </Typography>
                     )}
                   </Grid>

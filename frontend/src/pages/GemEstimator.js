@@ -1564,7 +1564,7 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
                           <Select
                             fullWidth
                             displayEmpty
-                            value={getCurrentForm().size + ' mm' || ''}
+                            value={getCurrentForm().size || ''}
                             name="size"
                             inputRef={sizeRef}
                             onChange={(e) => {
