@@ -1172,7 +1172,7 @@ app.put('/api/jewelry/:quoteId', async (req, res) => {
         
         // Generate new item ID based on metal category
         const usedIds = new Set();
-        const newItemId = await generateItemId(jewelryItem.category, client, usedIds);
+        const newItemId = await generateItemId(jewelryItem.metal_category, client, usedIds);
       
         // Prepare price update based on transaction type
         let priceUpdate = '';
@@ -1309,7 +1309,7 @@ app.post('/api/jewelry', async (req, res) => {
       } else {
         // Generate unique item ID for non-quote items
         const usedIds = new Set();
-        item_id = await generateItemId(item.category, client, usedIds);
+        item_id = await generateItemId(item.metal_category, client, usedIds);
         status = 'HOLD';
       }
       // Insert jewelry record
@@ -1359,7 +1359,7 @@ app.post('/api/jewelry', async (req, res) => {
         item_id,                                              // 1
         item.long_desc || '',                                    // 2
         item.short_desc || '',                             // 3
-        item.category || '',                                // 4
+        item.metal_category || '',                                // 4
         item.brand || '',                                       // 5
         item.vintage || false,                                 // 6
         item.stamps || '',                                     // 7

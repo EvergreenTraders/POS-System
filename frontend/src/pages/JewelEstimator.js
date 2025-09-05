@@ -201,7 +201,6 @@ function JewelEstimator() {
     // Store the summary data before clearing it
     // Get the most recent metal data - use the latest from addMetal array
     const latestMetalData = addMetal.length > 0 ? {...addMetal[addMetal.length - 1]} : {};
-    
     const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
     const totalWeight = parseFloat(latestMetalData.weight || 0) + gemWeightInGrams;
 
@@ -216,15 +215,15 @@ function JewelEstimator() {
     // Create new item with all required jewelry fields
     const jewelryItem = {
       // Basic item details
-      metal_weight: latestMetalData.weight,
-      precious_metal_type: latestMetalData.preciousMetalType,
-      non_precious_metal_type: latestMetalData.nonPreciousMetalType || null,
-      metal_purity: latestMetalData.purity?.purity || latestMetalData.purity?.value,
-      category: latestMetalData.metalCategory,
-      jewelry_color: latestMetalData.jewelryColor,
-      metal_spot_price: latestMetalData.spotPrice,
-      est_metal_value: latestMetalData.estimatedValue?.toFixed(2),
-      purity_value: latestMetalData.purity?.value,
+      metal_weight: latestMetalData.metal_weight,
+      precious_metal_type: latestMetalData.precious_metal_type,
+      non_precious_metal_type: latestMetalData.non_precious_metal_type || null,
+      metal_purity: latestMetalData.metal_purity,
+      metal_category: latestMetalData.metal_category,
+      jewelry_color: latestMetalData.color,
+      metal_spot_price: latestMetalData.metal_spot_price,
+      est_metal_value: latestMetalData.estimated_value?.toFixed(2),
+      purity_value: latestMetalData.purity_value,
 
       // Primary gem details
       primary_gem_category: addedGemTypes.primary || null,
@@ -295,9 +294,9 @@ function JewelEstimator() {
       notes: freeText || '',
       
       // Additional jewelry details - update short_desc to handle multiple secondary gems
-      short_desc: latestMetalData.weight ? `${latestMetalData.weight}g ${latestMetalData.purity?.purity || latestMetalData.purity?.value} ${latestMetalData.preciousMetalType} ${latestMetalData.metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
+      long_desc: latestMetalData.metal_weight ? `${latestMetalData.metal_weight}g ${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
 
-      long_desc: latestMetalData.purity ? `${latestMetalData.purity?.purity || latestMetalData.purity?.value} ${latestMetalData.preciousMetalType} ${latestMetalData.metalCategory}` : ''
+      short_desc: latestMetalData.metal_purity ? `${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}` : ''
     };
     console.log("jewelryItem", jewelryItem);
 
@@ -2773,7 +2772,7 @@ function JewelEstimator() {
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Box>
                             <Typography sx={{ fontWeight: 500, mb: 0.2 }}>
-                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.category}
+                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.metal_category}
                             </Typography>
                             <TextField
                               variant="standard"
