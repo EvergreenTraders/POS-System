@@ -265,11 +265,31 @@ function JewelryEdit() {
     // Required by MetalEstimator
   };
   
+  // State to hold metal form data
+  const [metalFormState, setMetalFormState] = useState(null);
+
   // Handler for saving changes from combined dialog
   const handleCombinedSave = () => {
-    // Here you would update both metal and gem data
+    if (metalFormState) {
+      setItem(prev => ({
+        ...prev,
+        precious_metal_type: metalFormState.preciousMetalType || '',
+        metal_weight: parseFloat(metalFormState.weight) || 0,
+        non_precious_metal_type: metalFormState.nonPreciousMetalType || '',
+        metal_purity: metalFormState.purity?.purity || '',
+        purity_value: parseFloat(metalFormState.purity?.value) || 0,
+        metal_spot_price: parseFloat(metalFormState.spotPrice) || 0,
+        est_metal_value: parseFloat(metalFormState.value) || 0,
+        jewelry_color: metalFormState.jewelryColor || '',
+        category: metalFormState.metalCategory || ''
+      }));
+    }
     setCombinedDialogOpen(false);
-    // Show success message or notification
+    setSnackbar({
+      open: true,
+      message: 'Changes saved successfully',
+      severity: 'success'
+    });
   };
   
   // Handler for canceling combined dialog
@@ -1284,41 +1304,42 @@ function JewelryEdit() {
         <DialogTitle>Edit Jewelry Item</DialogTitle>
         <DialogContent dividers>
           <Grid container spacing={2}>
-            <Grid item xs={12} sm={5} md={4}> {/* 40% width for MetalEstimator */}
-                {combinedDialogOpen && (
-                  <MetalEstimator 
-                    initialData={{
-                      precious_metal_type: item?.precious_metal_type || '',
-                      metal_weight: item?.metal_weight || 0,
-                      non_precious_metal_type: item?.non_precious_metal_type || '',
-                      metal_purity: item?.metal_purity || '', 
-                      purity_value: item?.purity_value || 0,
-                      metal_spot_price: parseFloat(item?.metal_spot_price) || 0,
-                      estimated_value: parseFloat(item?.est_metal_value) || 0,
-                      color: item?.jewelry_color || '',
-                      metal_category: item?.category || ''
-                    }}
-                    hideButtons={true} /* Hide internal buttons */
-                  />
-                )}
+            <Grid item xs={12} sm={5} md={4}>
+              {combinedDialogOpen && (
+                <MetalEstimator 
+                  initialData={{
+                    precious_metal_type: item?.precious_metal_type || '',
+                    metal_weight: item?.metal_weight || 0,
+                    non_precious_metal_type: item?.non_precious_metal_type || '',
+                    metal_purity: item?.metal_purity || '',
+                    purity_value: item?.purity_value || 0,
+                    metal_spot_price: parseFloat(item?.metal_spot_price) || 0,
+                    estimated_value: parseFloat(item?.est_metal_value) || 0,
+                    color: item?.jewelry_color || '',
+                    metal_category: item?.category || ''
+                  }}
+                  hideButtons={true}
+                  setMetalFormState={setMetalFormState}
+                />
+              )}
             </Grid>
-            <Grid item xs={12} sm={7} md={8}> {/* 60% width for GemEstimator */}
-                {combinedDialogOpen && (
-                  <GemEstimator 
-                    initialData={{
-                      ...item,
-                      // Pass secondary gems if they exist
-                      secondaryGems: item.secondaryGems || []
-                    }}
-                    hideButtons={true} /* Hide internal buttons */
-                    onSecondaryGemsChange={(secondaryGems) => {
-                      setItem(prev => ({
-                        ...prev,
-                        secondaryGems
-                      }));
-                    }}
-                  />
-                )}
+            <Grid item xs={12} sm={7} md={8}>
+              {combinedDialogOpen && (
+                <GemEstimator 
+                  initialData={{
+                    ...item,
+                    // Pass secondary gems if they exist
+                    secondaryGems: item.secondaryGems || []
+                  }}
+                  hideButtons={true}
+                  onSecondaryGemsChange={(secondaryGems) => {
+                    setItem(prev => ({
+                      ...prev,
+                      secondaryGems
+                    }));
+                  }}
+                />
+              )}
             </Grid>
           </Grid>
         </DialogContent>
@@ -1575,7 +1596,6 @@ function JewelryEdit() {
                           onChange={(e) => {
                             // Find the selected purity by ID and extract all its properties
                             const selectedPurity = metalPurities.find(p => p.id === e.target.value);
-                            
                             if (selectedPurity) {
                               // Update both purity and purity value together
                               setEditedItem(prev => ({
@@ -1606,7 +1626,7 @@ function JewelryEdit() {
                         >
                           {metalPurities.map((purity) => (
                             <MenuItem key={purity.id} value={purity.id}>
-                              {purity.purity}
+                              {purity.purity || purity.value}
                             </MenuItem>
                           ))}
                         </Select>
@@ -1746,7 +1766,7 @@ function JewelryEdit() {
                   </Typography>
                   {renderEditableField(
                     'jewelry_color',
-                    item.jewelry_color || 'N/A',
+                    item.precious_metal_type?.toLowerCase().includes('gold') ? (item.jewelry_color || 'N/A') : 'N/A',
                     <FormControl fullWidth>
                       <Select
                         name="jewelry_color"
@@ -1777,7 +1797,11 @@ function JewelryEdit() {
                         onBlur={(e) => handleInlineEditComplete(e, 'jewelry_color')}
                         autoFocus
                       >
-                        <MenuItem value="" style={{ color: '#000000' }}>Select a jewelry color</MenuItem>
+                        {item.precious_metal_type?.toLowerCase().includes('gold') ? (
+                          <MenuItem value="" style={{ color: '#000000' }}>Select a jewelry color</MenuItem>
+                        ) : (
+                          <MenuItem value="" style={{ color: '#000000' }} disabled>N/A (Only available for gold)</MenuItem>
+                        )}
                         {metalColors && metalColors.length > 0 ? metalColors.map((color) => (
                           <MenuItem key={color.id} value={color.id.toString()} style={{ color: '#000000' }}>
                             {color.color}
