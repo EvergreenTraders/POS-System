@@ -267,23 +267,67 @@ function JewelryEdit() {
   
   // State to hold metal form data
   const [metalFormState, setMetalFormState] = useState(null);
+  const [gemFormState, setGemFormState] = useState({
+    diamonds: [],
+    stones: []
+  });
 
   // Handler for saving changes from combined dialog
   const handleCombinedSave = () => {
-    if (metalFormState) {
-      setItem(prev => ({
-        ...prev,
-        precious_metal_type: metalFormState.preciousMetalType || '',
-        metal_weight: parseFloat(metalFormState.weight) || 0,
-        non_precious_metal_type: metalFormState.nonPreciousMetalType || '',
-        metal_purity: metalFormState.purity?.purity || '',
-        purity_value: parseFloat(metalFormState.purity?.value) || 0,
-        metal_spot_price: parseFloat(metalFormState.spotPrice) || 0,
-        est_metal_value: parseFloat(metalFormState.value) || 0,
-        jewelry_color: metalFormState.jewelryColor || '',
-        category: metalFormState.metalCategory || ''
-      }));
-    }
+    setItem(prevItem => {
+      // Start with current item state
+      const updatedItem = { ...prevItem };
+      
+      // Update metal data if available
+      if (metalFormState) {
+        updatedItem.precious_metal_type = metalFormState.preciousMetalType || '';
+        updatedItem.metal_weight = parseFloat(metalFormState.weight) || 0;
+        updatedItem.non_precious_metal_type = metalFormState.nonPreciousMetalType || '';
+        updatedItem.metal_purity = metalFormState.purity?.purity || '';
+        updatedItem.purity_value = parseFloat(metalFormState.purity?.value) || 0;
+        updatedItem.metal_spot_price = parseFloat(metalFormState.spotPrice) || 0;
+        updatedItem.est_metal_value = parseFloat(metalFormState.value) || 0;
+        updatedItem.jewelry_color = metalFormState.jewelryColor || '';
+        updatedItem.category = metalFormState.metalCategory || '';
+      }
+
+      // Update gem data if available
+      if (gemFormState) {
+        // Handle primary gem data from diamonds or stones arrays
+        if (gemFormState.diamonds?.length > 0) {
+          const primaryDiamond = gemFormState.diamonds[0];
+          updatedItem.primary_gem_category = 'diamond';
+          updatedItem.primary_gem_shape = primaryDiamond.shape || '';
+          updatedItem.primary_gem_weight = parseFloat(primaryDiamond.weight) || 0;
+          updatedItem.primary_gem_color = primaryDiamond.color || '';
+          updatedItem.primary_gem_clarity = primaryDiamond.clarity || '';
+          updatedItem.primary_gem_cut = primaryDiamond.cut || '';
+          updatedItem.primary_gem_lab_grown = primaryDiamond.labGrown || false;
+          updatedItem.primary_gem_quantity = parseInt(primaryDiamond.quantity) || 1;
+          updatedItem.primary_gem_size = primaryDiamond.size || '';
+          updatedItem.primary_gem_exact_color = primaryDiamond.exactColor || 'D';
+          updatedItem.primary_gem_value = parseFloat(primaryDiamond.estimatedValue) || 0;
+          updatedItem.gemstone = 'Diamond';
+        } 
+        else if (gemFormState.stones?.length > 0) {
+          const primaryStone = gemFormState.stones[0];
+          updatedItem.primary_gem_category = 'stone';
+          updatedItem.primary_gem_type = primaryStone.type || '';
+          updatedItem.primary_gem_name = primaryStone.name || primaryStone.type || '';
+          updatedItem.primary_gem_weight = parseFloat(primaryStone.weight) || 0;
+          updatedItem.primary_gem_shape = primaryStone.shape || '';
+          updatedItem.primary_gem_color = primaryStone.color || '';
+          updatedItem.primary_gem_quantity = parseInt(primaryStone.quantity) || 1;
+          updatedItem.primary_gem_size = primaryStone.size || '';
+          updatedItem.primary_gem_authentic = primaryStone.authentic || false;
+          updatedItem.primary_gem_value = parseFloat(primaryStone.estimatedValue) || 0;
+          updatedItem.gemstone = primaryStone.type || '';
+        }
+      }
+
+      return updatedItem;
+    });
+
     setCombinedDialogOpen(false);
     setSnackbar({
       open: true,
@@ -528,7 +572,7 @@ function JewelryEdit() {
         newItem.primary_gem_quantity = primaryStone.quantity || '1';
         newItem.primary_gem_size = primaryStone.size || '';
         newItem.primary_gem_authentic = primaryStone.authentic || false;
-        newItem.primary_gem_value = primaryStone.estimatedValue || '0';
+        newItem.primary_gem_value = primaryStone.estimatedValue || '';
         
         // No need to clear diamond_* fields - we use primary_gem_* fields instead
         
@@ -1332,6 +1376,7 @@ function JewelryEdit() {
                     secondaryGems: item.secondaryGems || []
                   }}
                   hideButtons={true}
+                  setGemFormState={setGemFormState}
                   onSecondaryGemsChange={(secondaryGems) => {
                     setItem(prev => ({
                       ...prev,

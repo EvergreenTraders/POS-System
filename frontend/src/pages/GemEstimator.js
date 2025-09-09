@@ -77,6 +77,114 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
   const [freeText, setFreeText] = useState(location.state?.itemToEdit?.notes || '');
   const [diamondSummary, setDiamondSummary] = useState([]);
   const [stoneSummary, setStoneSummary] = useState([]);
+  const [isInitialized, setIsInitialized] = useState(false);
+  
+  const [addedGemTypes, setAddedGemTypes] = useState({
+    primary: null,  // can be 'diamond' or 'stone'
+    secondary: null // can be 'diamond' or 'stone'
+  });
+
+
+  // Primary gem form
+  const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
+    shape: 'Round',
+    clarity: 'Flawless',
+    color: 'Colorless',
+    quantity: 1,
+    weight: 0,
+    cut: '',
+    labGrown: false,
+    exactColor: 'D',
+    size: '',
+    estimatedValue: 0
+  });
+
+  // Secondary gem form
+  const [secondaryDiamondForm, setSecondaryDiamondForm] = useState({
+    shape: 'Round',
+    clarity: 'Flawless',
+    color: 'Colorless',
+    quantity: 1,
+    weight: 0,
+    cut: '',
+    labGrown: false,
+    exactColor: 'D',
+    size: '',
+    estimatedValue: 0
+  });
+
+  const initialStoneForm = {
+    name: '',
+    shape: '',
+    color: 'Red',
+    color_id: 5,
+    weight: '',
+    width: '',
+    depth: '',
+    quantity: 1,
+    authentic: false,
+    valuationType: 'each',
+    estimatedValue: 0
+  };
+
+  const [primaryStoneForm, setPrimaryStoneForm] = useState(initialStoneForm);
+  const [secondaryStoneForm, setSecondaryStoneForm] = useState(initialStoneForm);
+
+  // Initialize form state when initialData changes
+  useEffect(() => {
+    if (initialData && !isInitialized) {
+      // Initialize diamond form if there are diamonds in initialData
+      if (initialData.diamonds && initialData.diamonds.length > 0) {
+        const primaryDiamond = initialData.diamonds[0];
+        setPrimaryDiamondForm(prev => ({
+          ...prev,
+          shape: primaryDiamond.shape || 'Round',
+          clarity: primaryDiamond.clarity || 'Flawless',
+          color: primaryDiamond.color || 'Colorless',
+          quantity: primaryDiamond.quantity || 1,
+          weight: primaryDiamond.weight || 0,
+          cut: primaryDiamond.cut || '',
+          labGrown: primaryDiamond.labGrown || false,
+          exactColor: primaryDiamond.exactColor || 'D',
+          size: primaryDiamond.size || '',
+          estimatedValue: primaryDiamond.estimatedValue || 0
+        }));
+        setAddedGemTypes(prev => ({ ...prev, primary: 'diamond' }));
+      }
+
+      // Initialize stone form if there are stones in initialData
+      if (initialData.stones && initialData.stones.length > 0) {
+        const primaryStone = initialData.stones[0];
+        setPrimaryStoneForm(prev => ({
+          ...prev,
+          name: primaryStone.name || '',
+          shape: primaryStone.shape || '',
+          color: primaryStone.color || 'Red',
+          color_id: primaryStone.color_id || 5,
+          weight: primaryStone.weight || '',
+          width: primaryStone.width || '',
+          depth: primaryStone.depth || '',
+          quantity: primaryStone.quantity || 1,
+          authentic: primaryStone.authentic || false,
+          valuationType: primaryStone.valuationType || 'each',
+          estimatedValue: primaryStone.estimatedValue || 0
+        }));
+        setAddedGemTypes(prev => ({ ...prev, primary: 'stone' }));
+      }
+      
+      setIsInitialized(true);
+    }
+  }, [initialData, isInitialized]);
+
+  // Update parent component with form state when it changes
+  useEffect(() => {
+    if (setGemFormState && isInitialized) {
+      setGemFormState({
+        diamonds: addedGemTypes.primary === 'diamond' ? [primaryDiamondForm] : [],
+        stones: addedGemTypes.primary === 'stone' ? [primaryStoneForm] : []
+      });
+    }
+  }, [primaryDiamondForm, primaryStoneForm, addedGemTypes, setGemFormState]);
 
   // Diamond and stone related functions only below
 
@@ -110,11 +218,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
 
 
  
-  const [addedGemTypes, setAddedGemTypes] = useState({
-    primary: null,  // can be 'diamond' or 'stone'
-    secondary: null // can be 'diamond' or 'stone'
-  });
-
   // Define activeTab state
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
 
@@ -122,48 +225,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
   const handleTabChange = (event) => {
     setActiveTab(event.target.value);
   };
-
-  // Primary gem form
-  const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
-    shape: 'Round',
-    clarity: 'Flawless',
-    color: 'Colorless',
-    quantity: 1,
-    weight: 0,
-    cut: '',
-    labGrown: false,
-    exactColor: 'D',
-    size: ''
-  });
-
-  // Secondary gem form
-  const [secondaryDiamondForm, setSecondaryDiamondForm] = useState({
-    shape: 'Round',
-    clarity: 'Flawless',
-    color: 'Colorless',
-    quantity: 1,
-    weight: 0,
-    cut: '',
-    labGrown: false,
-    exactColor: 'D',
-    size: ''
-  });
-
-  const initialStoneForm = {
-    name: '',
-    shape: '',
-    color: 'Red',
-    color_id: 5, // Default to Red's ID
-    weight: '',
-    width: '',
-    depth: '',
-    quantity: 1,
-    authentic: false,
-    valuationType: 'each'
-  };
-
-  const [primaryStoneForm, setPrimaryStoneForm] = useState(initialStoneForm);
-  const [secondaryStoneForm, setSecondaryStoneForm] = useState(initialStoneForm);
 
 
   const [estimatedValues, setEstimatedValues] = useState({
@@ -276,7 +337,8 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
             width: initialData.primary_gem_width || initialData.stone_width || '',
             depth: initialData.primary_gem_depth || initialData.stone_depth || '',
             authentic: initialData.primary_gem_authentic || initialData.stone_authentic || false,
-            valuationType: initialData.primary_gem_valuation_type || 'each'
+            valuationType: initialData.primary_gem_valuation_type || 'each',
+            estimatedValue: initialData.primary_gem_value || initialData.stone_value || 0
           });
           
           // Set estimated value if available

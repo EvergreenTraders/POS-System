@@ -119,8 +119,19 @@ const useMetalForm = ({
   const handleChange = useCallback((event) => {
     const { name, value } = event.target;
     
-    // Standard form field - always update
-    if (name === 'weight' || name === 'spotPrice' || name === 'jewelryColor' || name === 'metalCategory') {
+    // Handle weight field specifically
+    if (name === 'weight') {
+      // If weight is cleared, set to '0' instead of empty string
+      const newValue = value === '' ? '0' : value;
+      setForm(prev => ({
+        ...prev,
+        [name]: newValue
+      }));
+      return;
+    }
+    
+    // Handle other standard form fields
+    if (name === 'spotPrice' || name === 'jewelryColor' || name === 'metalCategory') {
       setForm(prev => ({
         ...prev,
         [name]: value
