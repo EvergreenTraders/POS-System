@@ -919,10 +919,40 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
     };
 
     // Call parent component's onAddGem function with the new diamond
-    onAddGem(newItem);
-
-    // Update diamond summary directly
-    setDiamondSummary(prev => [...prev, newItem]);
+    // Let JewelEstimator handle adding to the summary
+    const success = onAddGem(newItem);
+    
+    if (success) {
+      
+      // Reset the form after successful addition
+      if (isPrimary) {
+        setPrimaryDiamondForm(prev => ({
+          ...prev,
+          shape: 'Round',
+          clarity: 'Flawless',
+          color: 'Colorless',
+          exactColor: 'D',
+          cut: '',
+          size: '',
+          weight: 0,
+          quantity: 1,
+          labGrown: false
+        }));
+      } else {
+        setSecondaryDiamondForm(prev => ({
+          ...prev,
+          shape: 'Round',
+          clarity: 'Flawless',
+          color: 'Colorless',
+          exactColor: 'D',
+          cut: '',
+          size: '',
+          weight: 0,
+          quantity: 1,
+          labGrown: false
+        }));
+      }
+    }
     
     // Update added gem types
     setAddedGemTypes(prev => ({
@@ -1010,10 +1040,34 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
     };
 
     // Call parent component's onAddGem function with the new stone
-    onAddGem(newStone);
-
-    // Update stone summary directly
-    setStoneSummary(prev => [...prev, newStone]);
+    // Let JewelEstimator handle adding to the summary
+    const success = onAddGem(newStone);
+    
+    if (success) {
+      
+      // Reset the form after successful addition
+      if (isPrimary) {
+        setPrimaryStoneForm(prev => ({
+          ...prev,
+          name: '',
+          shape: '',
+          color: '',
+          weight: 0,
+          quantity: 1,
+          authentic: false
+        }));
+      } else {
+        setSecondaryStoneForm(prev => ({
+          ...prev,
+          name: '',
+          shape: '',
+          color: '',
+          weight: 0,
+          quantity: 1,
+          authentic: false
+        }));
+      }
+    }
     
     // Update added gem types
     setAddedGemTypes(prev => ({

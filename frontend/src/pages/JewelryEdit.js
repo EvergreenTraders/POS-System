@@ -139,8 +139,8 @@ function JewelryEdit() {
   const [metalDialogOpen, setMetalDialogOpen] = useState(false);
   const [gemDialogOpen, setGemDialogOpen] = useState(false);
   const [combinedDialogOpen, setCombinedDialogOpen] = useState(false);
-  const [gemTab, setGemTab] = useState('diamond'); // Controls which gem tab is active
-  const [secondaryGemTab, setSecondaryGemTab] = useState('diamond'); // Controls which secondary gem tab is active
+  const [gemTab, setGemTab] = useState('diamond');  // Initialize with all secondary gems visible by default
+  const [secondaryGemTab, setSecondaryGemTab] = useState('all'); // Controls which secondary gem tab is active
   const [isSecondaryGem, setIsSecondaryGem] = useState(false); // Tracks whether we're editing primary or secondary gem
   // States to track inline editing
   const [editingField, setEditingField] = useState(null);
@@ -789,12 +789,20 @@ function JewelryEdit() {
     const fetchData = async () => {
       if (location.state?.itemId) {
         await fetchJewelryItem(location.state.itemId, location.state?.secondaryGems);
+        
+        // After fetching, check for secondary gems and set the appropriate tab
+        if (location.state?.secondaryGems?.length > 0) {
+          const hasStoneGem = location.state.secondaryGems.some(gem => 
+            gem?.secondary_gem_category?.toLowerCase() === 'stone'
+          );
+          setSecondaryGemTab(hasStoneGem ? 'stone' : 'diamond');
+        }
       } else {
         setLoading(false);
         setSnackbar({
           open: true,
-          message: 'No jewelry item selected',
-          severity: 'warning'
+          message: 'No item ID provided',
+          severity: 'error'
         });
       }
     };
@@ -1465,19 +1473,19 @@ function JewelryEdit() {
                     Description *
                   </Typography>
                   {renderEditableField(
-                    'short_desc',
-                    item.short_desc || 'No description available',
+                    'long_desc',
+                    item.long_desc || 'No description available',
                     <TextField
                       fullWidth
                       size="small"
-                      name="short_desc"
-                      value={editedItem.short_desc || ''}
+                      name="long_desc"
+                      value={editedItem.long_desc || ''}
                       onChange={handleInputChange}
                       inputRef={(el) => {
-                        if (editingField === 'short_desc') inlineInputRef.current = el;
+                        if (editingField === 'long_desc') inlineInputRef.current = el;
                       }}
-                      onKeyDown={(e) => handleInlineEditComplete(e, 'short_desc')}
-                      onBlur={(e) => handleInlineEditComplete(e, 'short_desc')}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'long_desc')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'long_desc')}
                       autoFocus
                       margin="dense"
                     />
@@ -2531,27 +2539,28 @@ function JewelryEdit() {
                       value={secondaryGemTab} 
                       onChange={(e, newValue) => setSecondaryGemTab(newValue)}
                       aria-label="secondary gem type tabs"
+                      variant="scrollable"
+                      scrollButtons="auto"
                     >
+                      <Tab label="All Gems" value="all" />
                       <Tab 
-                        label="Diamond" 
+                        label="Diamonds" 
                         value="diamond" 
-                        disabled={item.secondaryGems?.some(gem => 
-                          gem?.secondary_gem_category?.toLowerCase() === 'stone'
-                        )}
                       />
-                      <Tab label="Stone" value="stone" />
+                      <Tab label="Stones" value="stone" />
                     </Tabs>
                   </Box>
                   
-                  {/* Render secondary gems based on their category */}
-                  {item.secondaryGems && item.secondaryGems.length > 0 && item.secondaryGems.map((gem, index) => {
+                  {/* Always show all secondary gems, but filter by tab if needed */}
+                  {item.secondaryGems && item.secondaryGems.length > 0 && item.secondaryGems
+                    .filter(gem => {
+                      if (secondaryGemTab === 'all') return true;
+                      const isDiamond = gem?.secondary_gem_category?.toLowerCase() === 'diamond';
+                      return (isDiamond && secondaryGemTab === 'diamond') || 
+                             (!isDiamond && secondaryGemTab === 'stone');
+                    })
+                    .map((gem, index) => {
                     const isDiamond = gem?.secondary_gem_category?.toLowerCase() === 'diamond';
-                    
-                    // Skip rendering if the gem's category doesn't match the current tab
-                    if ((isDiamond && secondaryGemTab !== 'diamond') || 
-                        (!isDiamond && secondaryGemTab !== 'stone')) {
-                      return null;
-                    }
                     
                     return (
                       <React.Fragment key={`secondary-gem-${index}`}>

@@ -124,8 +124,36 @@ function JewelEstimator() {
   };
 
   const handleAddGem = (gemData) => {
-    // Add gem to the item summary
-    setGemSummary(prev => [...prev, gemData]);
+    console.log('Gem data received in JewelEstimator:', gemData);
+    
+    // Ensure gemData has all required fields with defaults
+    const gemWithDefaults = {
+      ...gemData,
+      isPrimary: gemData.isPrimary || false,
+      type: gemData.type || (gemData.shape ? 'diamond' : 'stone'),
+      estimatedValue: gemData.value || 0,
+      weight: gemData.weight || 0,
+      quantity: gemData.quantity || 1
+    };
+    
+    console.log('Processed gem data:', gemWithDefaults);
+    
+    // Update the appropriate summary based on gem type
+    if (gemWithDefaults.type === 'diamond') {
+      setDiamondSummary(prev => [...prev, gemWithDefaults]);
+    } else if (gemWithDefaults.type === 'stone') {
+      setStoneSummary(prev => [...prev, gemWithDefaults]);
+    }
+    
+    // Update addedGemTypes if this is a primary gem
+    if (gemWithDefaults.isPrimary) {
+      setAddedGemTypes(prev => ({
+        ...prev,
+        primary: gemWithDefaults.type === 'diamond' ? 'diamond' : 'stone'
+      }));
+    }
+    
+    return true; // Indicate success
   };
 
   const handleAddMetal = (newItem) => {
@@ -211,7 +239,16 @@ function JewelEstimator() {
     // Find primary diamond and stone
     const primaryDiamond = diamondSummary.find(d => d.isPrimary);
     const primaryStone = stoneSummary.find(s => s.isPrimary);
-
+    
+    // Log for debugging
+    console.log("Gem data in handleFinishEstimation:", {
+      diamondSummary,
+      stoneSummary,
+      primaryDiamond,
+      primaryStone,
+      addedGemTypes,
+      latestMetalData
+    });
     // Create new item with all required jewelry fields
     const jewelryItem = {
       // Basic item details
@@ -296,7 +333,7 @@ function JewelEstimator() {
       // Additional jewelry details - update short_desc to handle multiple secondary gems
       long_desc: latestMetalData.metal_weight ? `${latestMetalData.metal_weight}g ${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
 
-      short_desc: latestMetalData.metal_purity ? `${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}` : ''
+      short_desc: latestMetalData.metal_weight ? `${latestMetalData.metal_weight}g ${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}` : ''
     };
     console.log("jewelryItem", jewelryItem);
 
