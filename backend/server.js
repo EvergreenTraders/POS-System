@@ -1373,7 +1373,7 @@ app.post('/api/jewelry', async (req, res) => {
         parseFloat(item.est_metal_value) || 0,                       // 15
         item.primary_gem_type || null,                             // 16
         item.primary_gem_category || null,                      // 17
-        parseFloat(item.primary_gem_size) || null,                             // 18
+        item.primary_gem_size || null,                             // 18
         parseInt(item.primary_gem_quantity) || 0,                // 19
         item.primary_gem_shape || null,                            // 20
         parseFloat(item.primary_gem_weight) || 0,                // 21
@@ -2498,7 +2498,7 @@ app.put('/api/jewelry_secondary_gems/:item_id', async (req, res) => {
       result = await client.query(updateQuery, [
         req.body.secondary_gem_type || null,
         req.body.secondary_gem_category || null,
-        parseFloat(req.body.secondary_gem_size) || null,
+        req.body.secondary_gem_size || null,
         parseInt(req.body.secondary_gem_quantity) || 0,
         req.body.secondary_gem_shape || null,
         parseFloat(req.body.secondary_gem_weight) || null,

@@ -1,10 +1,9 @@
-DO $$ 
+-- Alter table to change column types
+ALTER TABLE jewelry 
+ALTER COLUMN primary_gem_size TYPE VARCHAR(20);
 
-BEGIN
-    -- Add melt_value column
-    ALTER TABLE jewelry ADD COLUMN melt_value DECIMAL(10,2);
-
-END $$;
+ALTER TABLE jewelry_secondary_gems 
+ALTER COLUMN secondary_gem_size TYPE VARCHAR(20);
 
 -- Create jewelry table for inventory
 CREATE TABLE IF NOT EXISTS jewelry (
@@ -44,21 +43,6 @@ CREATE TABLE IF NOT EXISTS jewelry (
     primary_gem_lab_grown BOOLEAN DEFAULT false,
     primary_gem_authentic BOOLEAN DEFAULT false,
     primary_gem_value DECIMAL(10,2),
-    
-    -- Secondary gem
-    secondary_gem_type VARCHAR(50),
-    secondary_gem_category VARCHAR(20) CHECK (secondary_gem_category IS NULL OR secondary_gem_category IN ('diamond', 'stone')),
-    secondary_gem_size DECIMAL(10,2),
-    secondary_gem_quantity INTEGER,
-    secondary_gem_shape VARCHAR(50),
-    secondary_gem_weight DECIMAL(10,3),
-    secondary_gem_color VARCHAR(50),
-    secondary_gem_exact_color CHAR(1),
-    secondary_gem_clarity VARCHAR(50),
-    secondary_gem_cut VARCHAR(50),
-    secondary_gem_lab_grown BOOLEAN DEFAULT false,
-    secondary_gem_authentic BOOLEAN DEFAULT false,
-    secondary_gem_value DECIMAL(10,2),
     
     -- Pricing
     buy_price DECIMAL(10,2),

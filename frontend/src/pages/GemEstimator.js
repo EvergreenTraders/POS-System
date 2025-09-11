@@ -390,11 +390,22 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
           // Set the exactColor state for the color slider
           setExactColor(savedExactColor);
           
+          // Get the clarity value from initialData
+          const initialClarity = initialData.primary_gem_clarity || initialData.diamond_clarity || 'Flawless';
+          
+          // Find the index of the clarity in diamondClarity array
+          if (diamondClarity.length > 0) {
+            const clarityIndex = diamondClarity.findIndex(c => c.name === initialClarity);
+            if (clarityIndex !== -1) {
+              setSelectedClarityIndex(clarityIndex);
+            }
+          }
+          
           // Initialize diamond form
           setPrimaryDiamondForm({
-            shape: initialData.primary_gem_shape || initialData.diamond_shape || '',
-            clarity: initialData.primary_gem_clarity || initialData.diamond_clarity || '',
-            color: initialData.primary_gem_color || initialData.diamond_color || '',
+            shape: initialData.primary_gem_shape || initialData.diamond_shape || 'Round',
+            clarity: initialClarity,
+            color: initialData.primary_gem_color || initialData.diamond_color || 'Colorless',
             quantity: initialData.primary_gem_quantity || initialData.diamond_quantity || 1,
             weight: initialData.primary_gem_weight || initialData.diamond_weight || 0,
             cut: initialData.primary_gem_cut || initialData.diamond_cut || '',
@@ -540,17 +551,27 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
     }
   }, [location.state, diamondShapes]);
   
-  // Effect to update selectedClarityIndex when diamondClarity is loaded and we're in edit mode
+  // Effect to update selectedClarityIndex when diamondClarity is loaded
   useEffect(() => {
-    if (diamondClarity.length > 0 && location.state?.editMode && location.state?.itemToEdit?.primary_gem_clarity) {
-      const clarityToMatch = location.state.itemToEdit.primary_gem_clarity;
+    if (diamondClarity.length > 0) {
+      // Get the clarity value from the current form or initial data
+      const clarityToMatch = primaryDiamondForm.clarity || 
+                           (location.state?.itemToEdit?.primary_gem_clarity || 'Flawless');
+      
       const clarityIndex = diamondClarity.findIndex(c => c.name === clarityToMatch);
       
       if (clarityIndex !== -1) {
         setSelectedClarityIndex(clarityIndex);
+      } else if (diamondClarity.length > 0) {
+        // If no match found, default to the first clarity
+        setSelectedClarityIndex(0);
+        setPrimaryDiamondForm(prev => ({
+          ...prev,
+          clarity: diamondClarity[0].name
+        }));
       }
     }
-  }, [diamondClarity, location.state]);
+  }, [diamondClarity, primaryDiamondForm.clarity]);
   
   // Effect to fetch diamond sizes when diamondShapes are loaded in edit mode
   useEffect(() => {

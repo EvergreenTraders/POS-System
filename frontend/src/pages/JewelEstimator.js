@@ -238,15 +238,6 @@ function JewelEstimator() {
     const primaryDiamond = diamondSummary.find(d => d.isPrimary);
     const primaryStone = stoneSummary.find(s => s.isPrimary);
     
-    // Log for debugging
-    console.log("Gem data in handleFinishEstimation:", {
-      diamondSummary,
-      stoneSummary,
-      primaryDiamond,
-      primaryStone,
-      addedGemTypes,
-      latestMetalData
-    });
     // Create new item with all required jewelry fields
     const jewelryItem = {
       // Basic item details
