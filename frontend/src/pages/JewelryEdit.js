@@ -2004,7 +2004,7 @@ function JewelryEdit() {
                         </Typography>
                         {renderEditableField(
                           'primary_gem_size',
-                          item.primary_gem_size ? `${item.primary_gem_size} mm` : 'N/A',
+                          item.primary_gem_size ? parseFloat(item.primary_gem_size).toString().replace(/\.?0+$/, '') + ' mm' : 'N/A',
                           <FormControl fullWidth size="small" margin="dense">
                             <Select
                               name="primary_gem_size"
@@ -2612,7 +2612,7 @@ function JewelryEdit() {
                         </Typography>
                         {renderEditableField(
                                 `secondary_gem_size_${index}`,
-                                gem?.secondary_gem_size ? `${gem.secondary_gem_size} mm` : 'N/A',
+                                gem?.secondary_gem_size ? parseFloat(gem.secondary_gem_size).toString().replace(/\.?0+$/, '') + ' mm' : 'N/A',
                           <FormControl fullWidth size="small" margin="dense">
                             <Select
                                     name={`secondary_gem_size_${index}`}

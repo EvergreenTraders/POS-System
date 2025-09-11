@@ -124,7 +124,6 @@ function JewelEstimator() {
   };
 
   const handleAddGem = (gemData) => {
-    console.log('Gem data received in JewelEstimator:', gemData);
     
     // Ensure gemData has all required fields with defaults
     const gemWithDefaults = {
@@ -136,7 +135,6 @@ function JewelEstimator() {
       quantity: gemData.quantity || 1
     };
     
-    console.log('Processed gem data:', gemWithDefaults);
     
     // Update the appropriate summary based on gem type
     if (gemWithDefaults.type === 'diamond') {
