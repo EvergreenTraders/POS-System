@@ -269,7 +269,8 @@ function JewelryEdit() {
   const [metalFormState, setMetalFormState] = useState(null);
   const [gemFormState, setGemFormState] = useState({
     diamonds: [],
-    stones: []
+    stones: [],
+    secondaryGems: []
   });
 
   // Handler for saving changes from combined dialog
@@ -924,9 +925,6 @@ function JewelryEdit() {
             ...prev,
             ...secondaryDiamondValues
           }));
-          
-          // Log to help debug
-          console.log('Secondary Diamond Gem initialized:', secondaryDiamondValues);
           
         } else {
           const secondaryStoneValues = {
