@@ -124,13 +124,47 @@ function JewelEstimator() {
   };
 
   const handleAddGem = (gemData) => {
-    // Add gem to the item summary
-    setGemSummary(prev => [...prev, gemData]);
+    
+    // Ensure gemData has all required fields with defaults
+    const gemWithDefaults = {
+      ...gemData,
+      isPrimary: gemData.isPrimary || false,
+      type: gemData.type || (gemData.shape ? 'diamond' : 'stone'),
+      estimatedValue: gemData.value || 0,
+      weight: gemData.weight || 0,
+      quantity: gemData.quantity || 1
+    };
+    
+    
+    // Update the appropriate summary based on gem type
+    if (gemWithDefaults.type === 'diamond') {
+      setDiamondSummary(prev => [...prev, gemWithDefaults]);
+    } else if (gemWithDefaults.type === 'stone') {
+      setStoneSummary(prev => [...prev, gemWithDefaults]);
+    }
+    
+    // Update addedGemTypes if this is a primary gem
+    if (gemWithDefaults.isPrimary) {
+      setAddedGemTypes(prev => ({
+        ...prev,
+        primary: gemWithDefaults.type === 'diamond' ? 'diamond' : 'stone'
+      }));
+    }
+    
+    return true; // Indicate success
   };
 
   const handleAddMetal = (newItem) => {
-    // Calculate price estimates when metal is added
-    const estimates = calculatePriceEstimates(newItem.estimatedValue, newItem.preciousMetalTypeId);
+    // Find the metal type from the state
+    const metalType = metalTypes.find(mt => 
+      mt.type === newItem.precious_metal_type
+    );
+
+    // Calculate price estimates with the found metal type ID
+    const estimates = calculatePriceEstimates(newItem.estimated_value, metalType.id);
+    
+    // Set the price estimates
+    setPriceEstimates(estimates);
     
     // Add the metal with its price estimates
     const metalWithEstimates = {
@@ -193,7 +227,6 @@ function JewelEstimator() {
     // Store the summary data before clearing it
     // Get the most recent metal data - use the latest from addMetal array
     const latestMetalData = addMetal.length > 0 ? {...addMetal[addMetal.length - 1]} : {};
-    
     const gemWeightInGrams = isCaratConversionEnabled ? calculateTotalGemWeight() : 0;
     const totalWeight = parseFloat(latestMetalData.weight || 0) + gemWeightInGrams;
 
@@ -204,19 +237,19 @@ function JewelEstimator() {
     // Find primary diamond and stone
     const primaryDiamond = diamondSummary.find(d => d.isPrimary);
     const primaryStone = stoneSummary.find(s => s.isPrimary);
-
+    
     // Create new item with all required jewelry fields
     const jewelryItem = {
       // Basic item details
-      metal_weight: latestMetalData.weight,
-      precious_metal_type: latestMetalData.preciousMetalType,
-      non_precious_metal_type: latestMetalData.nonPreciousMetalType || null,
-      metal_purity: latestMetalData.purity?.purity || latestMetalData.purity?.value,
-      category: latestMetalData.metalCategory,
-      jewelry_color: latestMetalData.jewelryColor,
-      metal_spot_price: latestMetalData.spotPrice,
-      est_metal_value: latestMetalData.estimatedValue?.toFixed(2),
-      purity_value: latestMetalData.purity?.value,
+      metal_weight: latestMetalData.metal_weight,
+      precious_metal_type: latestMetalData.precious_metal_type,
+      non_precious_metal_type: latestMetalData.non_precious_metal_type || null,
+      metal_purity: latestMetalData.metal_purity,
+      metal_category: latestMetalData.metal_category,
+      jewelry_color: latestMetalData.color,
+      metal_spot_price: latestMetalData.metal_spot_price,
+      est_metal_value: latestMetalData.estimated_value?.toFixed(2),
+      purity_value: latestMetalData.purity_value,
 
       // Primary gem details
       primary_gem_category: addedGemTypes.primary || null,
@@ -274,7 +307,7 @@ function JewelEstimator() {
       transaction_type: transactionType || 'buy',
       buy_price: priceEstimates.buy,
       pawn_price: priceEstimates.pawn,
-      melt_price: priceEstimates.melt,
+      melt_value: priceEstimates.melt,
       retail_price: priceEstimates.retail,
       
       // Images
@@ -287,9 +320,9 @@ function JewelEstimator() {
       notes: freeText || '',
       
       // Additional jewelry details - update short_desc to handle multiple secondary gems
-      short_desc: latestMetalData.weight ? `${latestMetalData.weight}g ${latestMetalData.purity?.purity || latestMetalData.purity?.value} ${latestMetalData.preciousMetalType} ${latestMetalData.metalCategory}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
+      long_desc: latestMetalData.metal_weight ? `${latestMetalData.metal_weight}g ${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
 
-      long_desc: latestMetalData.purity ? `${latestMetalData.purity?.purity || latestMetalData.purity?.value} ${latestMetalData.preciousMetalType} ${latestMetalData.metalCategory}` : ''
+      short_desc: latestMetalData.metal_weight ? `${latestMetalData.metal_weight}g ${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}` : ''
     };
     console.log("jewelryItem", jewelryItem);
 
@@ -475,6 +508,21 @@ function JewelEstimator() {
   const [diamondValuationType, setDiamondValuationType] = useState('each');
 
   const [exactColor, setExactColor] = useState('D');
+  const [metalTypes, setMetalTypes] = useState([]);
+
+  // Fetch metal types when component mounts
+  useEffect(() => {
+    const fetchMetalTypes = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/precious_metal_type`);
+        setMetalTypes(response.data);
+      } catch (error) {
+        console.error('Error fetching metal types:', error);
+      }
+    };
+    
+    fetchMetalTypes();
+  }, []);
 
   const colorScale = Array.from({length: 23}, (_, i) => 
     String.fromCharCode(68 + i) // Starting from 'D'
@@ -2441,6 +2489,7 @@ function JewelEstimator() {
             <Grid container spacing={2} >
             {addMetal
               // Filter out the item being edited (if any)
+            
               .filter(metal => {
                 // Check for items being edited via navigation
                 if (location.state?.itemToEdit) {
@@ -2477,13 +2526,13 @@ function JewelEstimator() {
                     <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative' }}>
                       <div>
                         <Typography variant="subtitle2">Metal</Typography>
-                        <Typography variant="body2">Precious Metal Type: {metal.preciousMetalType}</Typography>
-                        <Typography variant="body2">Non Precious Metal Type: {metal.nonPreciousMetalType}</Typography>
-                        <Typography variant="body2">Purity: {metal.purity.purity || metal.purity.value}</Typography>
-                        <Typography variant="body2">Category: {metal.metalCategory}</Typography>
-                        <Typography variant="body2">Color: {metal.jewelryColor}</Typography>
-                        <Typography variant="body2">Weight: {metal.weight}g</Typography>
-                        <Typography variant="body2">Estimated Value: ${metal.estimatedValue.toFixed(2)}</Typography>
+                        <Typography variant="body2">Precious Metal Type: {metal.precious_metal_type}</Typography>
+                        <Typography variant="body2">Non Precious Metal Type: {metal.non_precious_metal_type}</Typography>
+                        <Typography variant="body2">Purity: {metal.metal_purity || metal.purity_value}</Typography>
+                        <Typography variant="body2">Category: {metal.metal_category}</Typography>
+                        <Typography variant="body2">Color: {metal.color}</Typography>
+                        <Typography variant="body2">Weight: {metal.metal_weight}g</Typography>
+                        <Typography variant="body2">Estimated Value: ${metal.estimated_value.toFixed(2)}</Typography>
                         </div>
                         <IconButton variant="outlined" onClick={() => handleDeleteMetal(index)}
                                 sx={{
@@ -2749,7 +2798,7 @@ function JewelEstimator() {
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Box>
                             <Typography sx={{ fontWeight: 500, mb: 0.2 }}>
-                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.category}
+                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.metal_category}
                             </Typography>
                             <TextField
                               variant="standard"

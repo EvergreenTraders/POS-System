@@ -139,8 +139,8 @@ function JewelryEdit() {
   const [metalDialogOpen, setMetalDialogOpen] = useState(false);
   const [gemDialogOpen, setGemDialogOpen] = useState(false);
   const [combinedDialogOpen, setCombinedDialogOpen] = useState(false);
-  const [gemTab, setGemTab] = useState('diamond'); // Controls which gem tab is active
-  const [secondaryGemTab, setSecondaryGemTab] = useState('diamond'); // Controls which secondary gem tab is active
+  const [gemTab, setGemTab] = useState('diamond');  // Initialize with all secondary gems visible by default
+  const [secondaryGemTab, setSecondaryGemTab] = useState('all'); // Controls which secondary gem tab is active
   const [isSecondaryGem, setIsSecondaryGem] = useState(false); // Tracks whether we're editing primary or secondary gem
   // States to track inline editing
   const [editingField, setEditingField] = useState(null);
@@ -265,11 +265,76 @@ function JewelryEdit() {
     // Required by MetalEstimator
   };
   
+  // State to hold metal form data
+  const [metalFormState, setMetalFormState] = useState(null);
+  const [gemFormState, setGemFormState] = useState({
+    diamonds: [],
+    stones: [],
+    secondaryGems: []
+  });
+
   // Handler for saving changes from combined dialog
   const handleCombinedSave = () => {
-    // Here you would update both metal and gem data
+    setItem(prevItem => {
+      // Start with current item state
+      const updatedItem = { ...prevItem };
+      
+      // Update metal data if available
+      if (metalFormState) {
+        updatedItem.precious_metal_type = metalFormState.preciousMetalType || '';
+        updatedItem.metal_weight = parseFloat(metalFormState.weight) || 0;
+        updatedItem.non_precious_metal_type = metalFormState.nonPreciousMetalType || '';
+        updatedItem.metal_purity = metalFormState.purity?.purity || '';
+        updatedItem.purity_value = parseFloat(metalFormState.purity?.value) || 0;
+        updatedItem.metal_spot_price = parseFloat(metalFormState.spotPrice) || 0;
+        updatedItem.est_metal_value = parseFloat(metalFormState.value) || 0;
+        updatedItem.jewelry_color = metalFormState.jewelryColor || '';
+        updatedItem.category = metalFormState.metalCategory || '';
+      }
+
+      // Update gem data if available
+      if (gemFormState) {
+        // Handle primary gem data from diamonds or stones arrays
+        if (gemFormState.diamonds?.length > 0) {
+          const primaryDiamond = gemFormState.diamonds[0];
+          updatedItem.primary_gem_category = 'diamond';
+          updatedItem.primary_gem_shape = primaryDiamond.shape || '';
+          updatedItem.primary_gem_weight = parseFloat(primaryDiamond.weight) || 0;
+          updatedItem.primary_gem_color = primaryDiamond.color || '';
+          updatedItem.primary_gem_clarity = primaryDiamond.clarity || '';
+          updatedItem.primary_gem_cut = primaryDiamond.cut || '';
+          updatedItem.primary_gem_lab_grown = primaryDiamond.labGrown || false;
+          updatedItem.primary_gem_quantity = parseInt(primaryDiamond.quantity) || 1;
+          updatedItem.primary_gem_size = primaryDiamond.size || '';
+          updatedItem.primary_gem_exact_color = primaryDiamond.exactColor || 'D';
+          updatedItem.primary_gem_value = parseFloat(primaryDiamond.estimatedValue) || 0;
+          updatedItem.gemstone = 'Diamond';
+        } 
+        else if (gemFormState.stones?.length > 0) {
+          const primaryStone = gemFormState.stones[0];
+          updatedItem.primary_gem_category = 'stone';
+          updatedItem.primary_gem_type = primaryStone.type || '';
+          updatedItem.primary_gem_name = primaryStone.name || primaryStone.type || '';
+          updatedItem.primary_gem_weight = parseFloat(primaryStone.weight) || 0;
+          updatedItem.primary_gem_shape = primaryStone.shape || '';
+          updatedItem.primary_gem_color = primaryStone.color || '';
+          updatedItem.primary_gem_quantity = parseInt(primaryStone.quantity) || 1;
+          updatedItem.primary_gem_size = primaryStone.size || '';
+          updatedItem.primary_gem_authentic = primaryStone.authentic || false;
+          updatedItem.primary_gem_value = parseFloat(primaryStone.estimatedValue) || 0;
+          updatedItem.gemstone = primaryStone.type || '';
+        }
+      }
+
+      return updatedItem;
+    });
+
     setCombinedDialogOpen(false);
-    // Show success message or notification
+    setSnackbar({
+      open: true,
+      message: 'Changes saved successfully',
+      severity: 'success'
+    });
   };
   
   // Handler for canceling combined dialog
@@ -508,7 +573,7 @@ function JewelryEdit() {
         newItem.primary_gem_quantity = primaryStone.quantity || '1';
         newItem.primary_gem_size = primaryStone.size || '';
         newItem.primary_gem_authentic = primaryStone.authentic || false;
-        newItem.primary_gem_value = primaryStone.estimatedValue || '0';
+        newItem.primary_gem_value = primaryStone.estimatedValue || '';
         
         // No need to clear diamond_* fields - we use primary_gem_* fields instead
         
@@ -725,12 +790,20 @@ function JewelryEdit() {
     const fetchData = async () => {
       if (location.state?.itemId) {
         await fetchJewelryItem(location.state.itemId, location.state?.secondaryGems);
+        
+        // After fetching, check for secondary gems and set the appropriate tab
+        if (location.state?.secondaryGems?.length > 0) {
+          const hasStoneGem = location.state.secondaryGems.some(gem => 
+            gem?.secondary_gem_category?.toLowerCase() === 'stone'
+          );
+          setSecondaryGemTab(hasStoneGem ? 'stone' : 'diamond');
+        }
       } else {
         setLoading(false);
         setSnackbar({
           open: true,
-          message: 'No jewelry item selected',
-          severity: 'warning'
+          message: 'No item ID provided',
+          severity: 'error'
         });
       }
     };
@@ -852,9 +925,6 @@ function JewelryEdit() {
             ...prev,
             ...secondaryDiamondValues
           }));
-          
-          // Log to help debug
-          console.log('Secondary Diamond Gem initialized:', secondaryDiamondValues);
           
         } else {
           const secondaryStoneValues = {
@@ -1284,41 +1354,43 @@ function JewelryEdit() {
         <DialogTitle>Edit Jewelry Item</DialogTitle>
         <DialogContent dividers>
           <Grid container spacing={2}>
-            <Grid item xs={12} sm={5} md={4}> {/* 40% width for MetalEstimator */}
-                {combinedDialogOpen && (
-                  <MetalEstimator 
-                    initialData={{
-                      precious_metal_type: item?.precious_metal_type || '',
-                      metal_weight: item?.metal_weight || 0,
-                      non_precious_metal_type: item?.non_precious_metal_type || '',
-                      metal_purity: item?.metal_purity || '', 
-                      purity_value: item?.purity_value || 0,
-                      metal_spot_price: parseFloat(item?.metal_spot_price) || 0,
-                      estimated_value: parseFloat(item?.est_metal_value) || 0,
-                      color: item?.jewelry_color || '',
-                      metal_category: item?.category || ''
-                    }}
-                    hideButtons={true} /* Hide internal buttons */
-                  />
-                )}
+            <Grid item xs={12} sm={5} md={4}>
+              {combinedDialogOpen && (
+                <MetalEstimator 
+                  initialData={{
+                    precious_metal_type: item?.precious_metal_type || '',
+                    metal_weight: item?.metal_weight || 0,
+                    non_precious_metal_type: item?.non_precious_metal_type || '',
+                    metal_purity: item?.metal_purity || '',
+                    purity_value: item?.purity_value || 0,
+                    metal_spot_price: parseFloat(item?.metal_spot_price) || 0,
+                    estimated_value: parseFloat(item?.est_metal_value) || 0,
+                    color: item?.jewelry_color || '',
+                    metal_category: item?.category || ''
+                  }}
+                  hideButtons={true}
+                  setMetalFormState={setMetalFormState}
+                />
+              )}
             </Grid>
-            <Grid item xs={12} sm={7} md={8}> {/* 60% width for GemEstimator */}
-                {combinedDialogOpen && (
-                  <GemEstimator 
-                    initialData={{
-                      ...item,
-                      // Pass secondary gems if they exist
-                      secondaryGems: item.secondaryGems || []
-                    }}
-                    hideButtons={true} /* Hide internal buttons */
-                    onSecondaryGemsChange={(secondaryGems) => {
-                      setItem(prev => ({
-                        ...prev,
-                        secondaryGems
-                      }));
-                    }}
-                  />
-                )}
+            <Grid item xs={12} sm={7} md={8}>
+              {combinedDialogOpen && (
+                <GemEstimator 
+                  initialData={{
+                    ...item,
+                    // Pass secondary gems if they exist
+                    secondaryGems: item.secondaryGems || []
+                  }}
+                  hideButtons={true}
+                  setGemFormState={setGemFormState}
+                  onSecondaryGemsChange={(secondaryGems) => {
+                    setItem(prev => ({
+                      ...prev,
+                      secondaryGems
+                    }));
+                  }}
+                />
+              )}
             </Grid>
           </Grid>
         </DialogContent>
@@ -1399,19 +1471,19 @@ function JewelryEdit() {
                     Description *
                   </Typography>
                   {renderEditableField(
-                    'short_desc',
-                    item.short_desc || 'No description available',
+                    'long_desc',
+                    item.long_desc || 'No description available',
                     <TextField
                       fullWidth
                       size="small"
-                      name="short_desc"
-                      value={editedItem.short_desc || ''}
+                      name="long_desc"
+                      value={editedItem.long_desc || ''}
                       onChange={handleInputChange}
                       inputRef={(el) => {
-                        if (editingField === 'short_desc') inlineInputRef.current = el;
+                        if (editingField === 'long_desc') inlineInputRef.current = el;
                       }}
-                      onKeyDown={(e) => handleInlineEditComplete(e, 'short_desc')}
-                      onBlur={(e) => handleInlineEditComplete(e, 'short_desc')}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'long_desc')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'long_desc')}
                       autoFocus
                       margin="dense"
                     />
@@ -1575,7 +1647,6 @@ function JewelryEdit() {
                           onChange={(e) => {
                             // Find the selected purity by ID and extract all its properties
                             const selectedPurity = metalPurities.find(p => p.id === e.target.value);
-                            
                             if (selectedPurity) {
                               // Update both purity and purity value together
                               setEditedItem(prev => ({
@@ -1606,7 +1677,7 @@ function JewelryEdit() {
                         >
                           {metalPurities.map((purity) => (
                             <MenuItem key={purity.id} value={purity.id}>
-                              {purity.purity}
+                              {purity.purity || purity.value}
                             </MenuItem>
                           ))}
                         </Select>
@@ -1746,7 +1817,7 @@ function JewelryEdit() {
                   </Typography>
                   {renderEditableField(
                     'jewelry_color',
-                    item.jewelry_color || 'N/A',
+                    item.precious_metal_type?.toLowerCase().includes('gold') ? (item.jewelry_color || 'N/A') : 'N/A',
                     <FormControl fullWidth>
                       <Select
                         name="jewelry_color"
@@ -1777,7 +1848,11 @@ function JewelryEdit() {
                         onBlur={(e) => handleInlineEditComplete(e, 'jewelry_color')}
                         autoFocus
                       >
-                        <MenuItem value="" style={{ color: '#000000' }}>Select a jewelry color</MenuItem>
+                        {item.precious_metal_type?.toLowerCase().includes('gold') ? (
+                          <MenuItem value="" style={{ color: '#000000' }}>Select a jewelry color</MenuItem>
+                        ) : (
+                          <MenuItem value="" style={{ color: '#000000' }} disabled>N/A (Only available for gold)</MenuItem>
+                        )}
                         {metalColors && metalColors.length > 0 ? metalColors.map((color) => (
                           <MenuItem key={color.id} value={color.id.toString()} style={{ color: '#000000' }}>
                             {color.color}
@@ -1929,7 +2004,7 @@ function JewelryEdit() {
                         </Typography>
                         {renderEditableField(
                           'primary_gem_size',
-                          item.primary_gem_size ? `${item.primary_gem_size} mm` : 'N/A',
+                          item.primary_gem_size ? item.primary_gem_size : 'N/A',
                           <FormControl fullWidth size="small" margin="dense">
                             <Select
                               name="primary_gem_size"
@@ -2462,27 +2537,28 @@ function JewelryEdit() {
                       value={secondaryGemTab} 
                       onChange={(e, newValue) => setSecondaryGemTab(newValue)}
                       aria-label="secondary gem type tabs"
+                      variant="scrollable"
+                      scrollButtons="auto"
                     >
+                      <Tab label="All Gems" value="all" />
                       <Tab 
-                        label="Diamond" 
+                        label="Diamonds" 
                         value="diamond" 
-                        disabled={item.secondaryGems?.some(gem => 
-                          gem?.secondary_gem_category?.toLowerCase() === 'stone'
-                        )}
                       />
-                      <Tab label="Stone" value="stone" />
+                      <Tab label="Stones" value="stone" />
                     </Tabs>
                   </Box>
                   
-                  {/* Render secondary gems based on their category */}
-                  {item.secondaryGems && item.secondaryGems.length > 0 && item.secondaryGems.map((gem, index) => {
+                  {/* Always show all secondary gems, but filter by tab if needed */}
+                  {item.secondaryGems && item.secondaryGems.length > 0 && item.secondaryGems
+                    .filter(gem => {
+                      if (secondaryGemTab === 'all') return true;
+                      const isDiamond = gem?.secondary_gem_category?.toLowerCase() === 'diamond';
+                      return (isDiamond && secondaryGemTab === 'diamond') || 
+                             (!isDiamond && secondaryGemTab === 'stone');
+                    })
+                    .map((gem, index) => {
                     const isDiamond = gem?.secondary_gem_category?.toLowerCase() === 'diamond';
-                    
-                    // Skip rendering if the gem's category doesn't match the current tab
-                    if ((isDiamond && secondaryGemTab !== 'diamond') || 
-                        (!isDiamond && secondaryGemTab !== 'stone')) {
-                      return null;
-                    }
                     
                     return (
                       <React.Fragment key={`secondary-gem-${index}`}>
@@ -2536,7 +2612,7 @@ function JewelryEdit() {
                         </Typography>
                         {renderEditableField(
                                 `secondary_gem_size_${index}`,
-                                gem?.secondary_gem_size ? `${gem.secondary_gem_size} mm` : 'N/A',
+                                gem?.secondary_gem_size ? gem.secondary_gem_size : 'N/A',
                           <FormControl fullWidth size="small" margin="dense">
                             <Select
                                     name={`secondary_gem_size_${index}`}
@@ -3142,7 +3218,7 @@ function JewelryEdit() {
                       />
                     ) : (
                       <Typography variant="body2" align="center">
-                        ${Number(item.metal_cost || 0).toFixed(2)}
+                        ${Number(item.est_metal_value || 0).toFixed(2)}
                       </Typography>
                     )}
                   </Grid>
@@ -3162,7 +3238,10 @@ function JewelryEdit() {
                       />
                     ) : (
                       <Typography variant="body2" align="center">
-                        ${Number(item.gem_cost || 0).toFixed(2)}
+                        ${(Number(item.primary_gem_value || 0) + 
+                          (item.secondaryGems || []).reduce((sum, gem) => 
+                            sum + Number(gem.secondary_gem_value || 0), 0)
+                         ).toFixed(2)}
                       </Typography>
                     )}
                   </Grid>

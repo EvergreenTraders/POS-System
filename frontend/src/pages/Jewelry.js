@@ -243,7 +243,7 @@ function Jewelry() {
                       onClick={() => handleRowClick(item)}
                     >
                       <TableCell>{item.item_id}</TableCell>
-                      <TableCell>{item.short_desc}</TableCell>
+                      <TableCell>{item.short_desc || item.long_desc}</TableCell>
                       <TableCell>{item.category}</TableCell>
                       <TableCell>${item.buy_price}</TableCell>
                       <TableCell>{item.metal_weight}g</TableCell>
