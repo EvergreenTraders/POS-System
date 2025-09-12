@@ -2644,6 +2644,109 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something broke!', details: err.message });
 });
 
+// POST endpoint to log changes to item history
+app.post('/api/jewelry/history', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { item_id, changed_by, action, changed_fields, notes } = req.body;
+    
+    if (!item_id || !changed_by || !action || !changed_fields) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    const query = `
+      INSERT INTO jewelry_item_history (
+        item_id, 
+        changed_by, 
+        action_type, 
+        changed_fields, 
+        change_notes
+      ) VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `;
+    
+    const result = await client.query(query, [
+      item_id,
+      changed_by,
+      action,
+      JSON.stringify(changed_fields),
+      notes || 'Item details updated'
+    ]);
+    
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error logging history:', error);
+    res.status(500).json({ error: 'Failed to log history' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET endpoint to retrieve item history by item_id
+app.get('/api/jewelry/:item_id/history', async (req, res) => {
+  try {
+    const { item_id } = req.params;
+    const { limit = 10, offset = 0 } = req.query;
+    
+    // Get total count for pagination
+    const countQuery = 'SELECT COUNT(*) FROM jewelry_item_history WHERE item_id = $1';
+    const countResult = await pool.query(countQuery, [item_id]);
+    
+    // Get paginated history
+    const historyQuery = `
+      SELECT h.*, e.first_name, e.last_name
+      FROM jewelry_item_history h
+      LEFT JOIN employees e ON h.changed_by = e.employee_id
+      WHERE h.item_id = $1
+      ORDER BY h.changed_at DESC
+      LIMIT $2 OFFSET $3
+    `;
+    
+    const historyResult = await pool.query(historyQuery, [item_id, limit, offset]);
+    
+    res.json({
+      total: parseInt(countResult.rows[0].count, 10),
+      history: historyResult.rows
+    });
+  } catch (error) {
+    console.error('Error fetching item history:', error);
+    res.status(500).json({ error: 'Failed to fetch item history' });
+  }
+});
+
+// PUT endpoint to update change notes for a specific history entry
+app.put('/api/jewelry/history/:history_id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { history_id } = req.params;
+    const { change_notes } = req.body;
+    
+    if (!change_notes) {
+      return res.status(400).json({ error: 'Change notes are required' });
+    }
+    
+    const query = `
+      UPDATE jewelry_item_history 
+      SET change_notes = $1 
+      WHERE history_id = $2
+      RETURNING *
+    `;
+    
+    const result = await client.query(query, [change_notes, history_id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'History entry not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating history entry:', error);
+    res.status(500).json({ error: 'Failed to update history entry' });
+  } finally {
+    client.release();
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);

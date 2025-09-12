@@ -36,7 +36,7 @@ const INITIAL_FORM_STATE = {
   weight: '',
   spotPrice: 0,
   purity: { purity: '', value: 0 },
-  value: ''
+  metalValue: 0
 };
 
 const INITIAL_SPOT_PRICE = {
@@ -211,11 +211,15 @@ const useMetalForm = ({
   }, [metalSpotPrice, preciousMetalTypes, metalPurities, fetchPurities]);
 
   const calculateValue = useCallback(() => {
-  //  console.log('Form purity calculate:', form.purity);
     if (!isManualOverride && form.weight && form.spotPrice && form.purity) {
       const newValue = form.spotPrice * form.purity.value * form.weight;
       setTotalValue(newValue);
       onMetalValueChange(newValue);
+      // Update the form state with the new calculated value
+      setForm(prev => ({
+        ...prev,
+        metalValue: newValue
+      }));
     }
   }, [form.weight, form.spotPrice, form.purity, onMetalValueChange, isManualOverride]);
 
@@ -226,7 +230,8 @@ const useMetalForm = ({
   const resetForm = useCallback(() => {
     setForm({
       ...initialState,
-      spotPrice: metalSpotPrice.CADXAU
+      spotPrice: metalSpotPrice.CADXAU,
+      metalValue: 0
     });
     setTotalValue(0);
     setIsManualOverride(false);
@@ -238,6 +243,11 @@ const useMetalForm = ({
       setIsManualOverride(true);
       setTotalValue(newValue);
       onMetalValueChange(newValue);
+      // Update the form state with the manually entered value
+      setForm(prev => ({
+        ...prev,
+       metalValue: newValue
+      }));
     }
   }, [onMetalValueChange]);
 
