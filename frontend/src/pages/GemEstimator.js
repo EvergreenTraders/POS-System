@@ -246,7 +246,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
           formState.secondaryGems.push(currentSecondaryGem);
         }
       }
-      
       setGemFormState(formState);
     }
   }, [
@@ -411,7 +410,8 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
             cut: initialData.primary_gem_cut || initialData.diamond_cut || '',
             labGrown: initialData.primary_gem_lab_grown || initialData.diamond_lab_grown || false,
             exactColor: savedExactColor,
-            size: parseFloat(initialData.primary_gem_size).toString().replace(/\.?0+$/, '') + ' mm' || initialData.diamond_size || ''
+            size: initialData.primary_gem_size || initialData.diamond_size || '',
+            estimatedValue: initialData.primary_gem_value || initialData.diamond_value || 0
           });
           
           // Set estimated value if available
@@ -424,7 +424,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
         } else if (primaryGemType === 'stone') {
           // Initialize stone form with available data
           setPrimaryStoneForm({
-            name: initialData.primary_gem_name || initialData.stone_name || '',
             type: initialData.primary_gem_type || initialData.stone_type || '',
             shape: initialData.primary_gem_shape || initialData.stone_shape || '',
             color: initialData.primary_gem_color || initialData.stone_color || '',

@@ -2649,24 +2649,32 @@ app.post('/api/jewelry/history', async (req, res) => {
   const client = await pool.connect();
   try {
     const { item_id, changed_by, action, changed_fields, notes } = req.body;
-    
     if (!item_id || !changed_by || !action || !changed_fields) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
     
+    // Get the next version number
+    const versionResult = await client.query(
+      'SELECT COALESCE(MAX(version_number), 0) + 1 as next_version FROM jewelry_item_history WHERE item_id = $1',
+      [item_id]
+    );
+    const version_number = versionResult.rows[0].next_version;
+    
     const query = `
       INSERT INTO jewelry_item_history (
         item_id, 
+        version_number,
         changed_by, 
         action_type, 
         changed_fields, 
         change_notes
-      ) VALUES ($1, $2, $3, $4, $5)
+      ) VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *
     `;
     
     const result = await client.query(query, [
       item_id,
+      version_number,
       changed_by,
       action,
       JSON.stringify(changed_fields),

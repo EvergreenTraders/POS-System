@@ -36,16 +36,23 @@ function Jewelry() {
 
   const handleEditClick = async (item) => {
     try {
-      // Fetch all secondary gem details for this item in one request
-      const response = await axios.get(`${API_BASE_URL}/jewelry_secondary_gems/${item.item_id}`);
-      const secondaryGems = response.data || [];
+      // Fetch all secondary gem details and latest history in parallel
+      const [gemsResponse, historyResponse] = await Promise.all([
+        axios.get(`${API_BASE_URL}/jewelry_secondary_gems/${item.item_id}`),
+        axios.get(`${API_BASE_URL}/jewelry/${item.item_id}/history?limit=1`)
+      ]);
       
-      // Navigate with both item ID and all secondary gem data
+      const secondaryGems = gemsResponse.data || [];
+      const latestHistory = historyResponse.data?.history?.[0];
+      
+      // Navigate with item ID, secondary gem data, and latest history
       navigate('/jewelry-edit', { 
         state: { 
           itemId: item.item_id,
-          secondaryGems: secondaryGems
-        } 
+          secondaryGems: secondaryGems,
+          latestHistory: latestHistory
+        },
+        replace: true
       });
     } catch (error) {
       console.error('Error fetching secondary gem details:', error);

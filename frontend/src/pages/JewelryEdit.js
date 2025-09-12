@@ -58,21 +58,6 @@ const getImageUrl = (item) => {
   return item.image_url || '/placeholder-jewelry.png';
 };
 
-const calculatePercentage = (value, base) => {
-  if (!base || base === 0 || !value) return 'N/A';
-  const percentage = (value / base) * 100;
-  return `${percentage.toFixed(0)}%`;
-};
-
-const calculateProfitMargin = (retailPrice, costBasis) => {
-  if (!retailPrice || !costBasis || retailPrice <= 0 || costBasis <= 0) {
-    return 'N/A';
-  }
-  const profit = retailPrice - costBasis;
-  const margin = (profit / retailPrice) * 100;
-  return `${margin.toFixed(0)}%`;
-};
-
 // Metal API utility functions
 const API_BASE_URL = config.apiUrl;
 const API_ENDPOINTS = {
@@ -345,12 +330,10 @@ function JewelryEdit() {
           const primaryStone = gemFormState.stones[0];
           updatedItem.primary_gem_category = trackChange('primary_gem_category', 'stone');
           updatedItem.primary_gem_type = trackChange('primary_gem_type', primaryStone.type || '');
-          updatedItem.primary_gem_name = trackChange('primary_gem_name', primaryStone.name || primaryStone.type || '');
           updatedItem.primary_gem_weight = trackChange('primary_gem_weight', primaryStone.weight || 0);
           updatedItem.primary_gem_shape = trackChange('primary_gem_shape', primaryStone.shape || '');
           updatedItem.primary_gem_color = trackChange('primary_gem_color', primaryStone.color || '');
           updatedItem.primary_gem_quantity = trackChange('primary_gem_quantity', parseInt(primaryStone.quantity) || 1);
-          updatedItem.primary_gem_size = trackChange('primary_gem_size', primaryStone.size || '');
           updatedItem.primary_gem_authentic = trackChange('primary_gem_authentic', primaryStone.authentic || false);
           updatedItem.primary_gem_value = trackChange('primary_gem_value', primaryStone.estimatedValue || 0);
           updatedItem.gemstone = primaryStone.type;
@@ -359,14 +342,13 @@ function JewelryEdit() {
 
       // Only proceed with update if there are changes
       if (Object.keys(changes).length > 0) {
-        console.log('Changes:', changes);
         // Update the item in the database
         const response = await axios.put(`${API_BASE_URL}/jewelry/${item.id}`, updatedItem);
         
         // Log the changes to history
         try {
           await axios.post(`${API_BASE_URL}/jewelry/history`, {
-            item_id: item.id,
+            item_id: item.item_id,
             changed_by: currentUser?.employee_id || 1,
             action: 'UPDATE',
             changed_fields: changes,
@@ -1044,10 +1026,42 @@ function JewelryEdit() {
       }
       
       // Find the specific item by item_id
-      const foundItem = response.data.find(item => item.item_id === itemId);
+      let foundItem = response.data.find(item => item.item_id === itemId);
       
       if (!foundItem) {
         throw new Error(`Item with ID ${itemId} not found`);
+      }
+
+      // Check if we have latest history data from location state
+      if (location.state?.latestHistory?.changed_fields) {
+        try {
+          // Parse the changed_fields if it's a string (should be JSON)
+          const changedFields = typeof location.state.latestHistory.changed_fields === 'string' 
+            ? JSON.parse(location.state.latestHistory.changed_fields)
+            : location.state.latestHistory.changed_fields;
+          
+          // Process and merge the changed fields with the found item
+          const processedFields = {};
+          
+          // Handle each changed field
+          Object.entries(changedFields).forEach(([key, value]) => {
+            // If the value is an object with 'to' property (from history changes), use the 'to' value
+            if (value && typeof value === 'object' && 'to' in value) {
+              processedFields[key] = value.to;
+            } else {
+              processedFields[key] = value;
+            }
+          });
+          
+          // Merge the processed fields with the found item
+          foundItem = {
+            ...foundItem,
+            ...processedFields
+          };
+          
+        } catch (error) {
+          console.error('Error parsing history data:', error);
+        }
       }
 
       // Create a copy of the item with secondary gems
