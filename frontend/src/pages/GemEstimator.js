@@ -144,7 +144,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
     setAddedGemTypes(prev => ({ ...prev, secondary: gemType }));
     
     if (gemType === 'diamond') {
-      console.log("Initializing diamond gem:", gem);
       setSecondaryDiamondForm({
         shape: gem.secondary_gem_shape || 'Round',
         clarity: gem.secondary_gem_clarity || 'Flawless',
@@ -160,12 +159,21 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
       if (setActive) {
         setActiveTab('secondary_gem_diamond');
       }
+      if(gem.secondary_gem_value !== undefined) {
+        setEstimatedValues(prev => ({
+          ...prev,
+          secondaryDiamond: parseFloat(gem.secondary_gem_value) || 0
+        }));
+      }
     } else {
-      console.log("Initializing stone gem:", gem);
+      // Find the matching color to get the color_id
+      const colorMatch = stoneColors.find(color => color.color === (gem.secondary_gem_color || 'Red'));
       setSecondaryStoneForm({
-        type: gem.secondary_gem_type || '',
+        type:  gem.secondary_gem_type || '',
+        name:  gem.secondary_gem_type || '',
         shape: gem.secondary_gem_shape || 'Round',
-        color: gem.secondary_gem_color || '',
+        color: gem.secondary_gem_color || 'Red',
+        color_id: colorMatch ? colorMatch.id : 5, // Default to Red (id: 5) if not found
         quantity: gem.secondary_gem_quantity || 1,
         weight: gem.secondary_gem_weight || 0,
         width: gem.secondary_gem_width || '',
@@ -176,25 +184,34 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
       if (setActive) {
         setActiveTab('secondary_gem_stone');
       }
+      if(gem.secondary_gem_value !== undefined) {
+        setEstimatedValues(prev => ({
+          ...prev,
+          secondaryGemstone: parseFloat(gem.secondary_gem_value) || 0
+        }));
+      }
     }
   };
 
   // Handle tab changes and initialize form data
   useEffect(() => {
-   if (activeTab.startsWith('secondary_gem_') && secondaryGems.length > 0) {
+    if (activeTab.startsWith('secondary_gem_') && secondaryGems.length > 0) {
       const gemType = activeTab.replace('secondary_gem_', '');
-      const matchingGem = secondaryGems.find(gem => {
-        if (gemType === 'diamond') {
-          return gem.secondary_gem_category === 'diamond' || (gem.shape && gem.clarity);
-        } else {
-          return gem.secondary_gem_category === 'stone' || gem.name;
-        }
-      });
+      const matchingGem = secondaryGems[selectedSecondaryIndex];
+      
       if (matchingGem) {
-        initializeSecondaryGem(matchingGem);
+        initializeSecondaryGem(matchingGem, false);
+        
+        // Set the correct tab based on the gem category
+        const gemCategory = matchingGem.secondary_gem_category;
+        if (gemCategory === 'diamond' && !activeTab.includes('diamond')) {
+          setActiveTab('secondary_gem_diamond');
+        } else if (gemCategory === 'stone' && !activeTab.includes('stone')) {
+          setActiveTab('secondary_gem_stone');
+        }
       }
     }
-  }, [activeTab, secondaryGems, primaryDiamondForm, primaryStoneForm]);
+  }, [activeTab, secondaryGems, selectedSecondaryIndex, primaryDiamondForm, primaryStoneForm]);
 
   // Initialize component with initialData
   useEffect(() => {
@@ -278,18 +295,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
     }));
   };
   
-  const getInitials = (str) => {
-    return str.split(' ').map(word => word.charAt(0).toUpperCase()).join('');
-  };
-
-  // Update button text based on edit mode
-  const getFinishButtonText = () => {
-    if (editMode && returnToTicket) {
-      return 'Update Item';
-    }
-    return 'Finish Estimation';
-  };
-
 
   // Handle tab change from the RadioGroup controls
   const handleTabChange = (event) => {
@@ -424,7 +429,7 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
         } else if (primaryGemType === 'stone') {
           // Initialize stone form with available data
           setPrimaryStoneForm({
-            name: initialData.primary_gem_name || initialData.stone_name || '',
+            name: initialData.primary_gem_type || initialData.stone_name || '',
             type: initialData.primary_gem_type || initialData.stone_type || '',
             shape: initialData.primary_gem_shape || initialData.stone_shape || '',
             color: initialData.primary_gem_color || initialData.stone_color || '',
@@ -1632,6 +1637,17 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
     return totalCarats * parseFloat(caratConversion.grams);
   };
 
+  // Handle secondary gem selection from dropdown
+  const handleSecondaryGemSelect = (event) => {
+    const index = event.target.value;
+    setSelectedSecondaryIndex(index);
+    const selectedGem = secondaryGems[index];
+    if (selectedGem) {
+      // The tab will be updated by the effect that watches selectedSecondaryIndex
+      initializeSecondaryGem(selectedGem, false);
+    }
+  };
+
   // Diamond and stone handler functions have been moved inline to their respective add functions
 
   const renderContent = () => {
@@ -1646,14 +1662,7 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
               <FormControl size="small" sx={{ minWidth: 150 }}>
                 <Select
                   value={selectedSecondaryIndex}
-                  onChange={(e) => {
-                    const index = e.target.value;
-                    setSelectedSecondaryIndex(index);
-                    const selectedGem = secondaryGems[index];
-                    if (selectedGem) {
-                      initializeSecondaryGem(selectedGem, false);
-                    }
-                  }}
+                  onChange={handleSecondaryGemSelect}
                   displayEmpty
                   inputProps={{ 'aria-label': 'Select secondary gem' }}
                 >
