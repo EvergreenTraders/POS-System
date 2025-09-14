@@ -44,7 +44,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../context/AuthContext';
 
-function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData = null, hideButtons = false }) {
+function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, initialData = null, hideButtons = false }) {
   const API_BASE_URL = config.apiUrl;
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -144,7 +144,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
     setAddedGemTypes(prev => ({ ...prev, secondary: gemType }));
     
     if (gemType === 'diamond') {
-      console.log("Initializing diamond gem:", gem);
       setSecondaryDiamondForm({
         shape: gem.secondary_gem_shape || 'Round',
         clarity: gem.secondary_gem_clarity || 'Flawless',
@@ -571,6 +570,28 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
       }
     }
   }, [diamondClarity, primaryDiamondForm.clarity]);
+
+  // Effect to update parent component when primary gem value changes
+  useEffect(() => {
+    const isDiamond = activeTab.startsWith('primary_gem_diamond');
+    const primaryGemValue = isDiamond 
+      ? estimatedValues.primaryDiamond 
+      : estimatedValues.primaryGemstone;
+    
+    if (isDiamond) {
+      setPrimaryDiamondForm(prev => ({
+        ...prev,
+        estimatedValue: primaryGemValue
+      }));
+    } else {
+      setPrimaryStoneForm(prev => ({
+        ...prev,
+        estimatedValue: primaryGemValue
+      }));
+    }
+    
+    onGemValueChange(primaryGemValue || 0);
+  }, [estimatedValues.primaryDiamond, estimatedValues.primaryGemstone, activeTab, onGemValueChange]);
   
   // Effect to fetch diamond sizes when diamondShapes are loaded in edit mode
   useEffect(() => {
