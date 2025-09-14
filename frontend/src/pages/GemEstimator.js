@@ -160,6 +160,12 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
       if (setActive) {
         setActiveTab('secondary_gem_diamond');
       }
+      if(gem.secondary_gem_value !== undefined) {
+        setEstimatedValues(prev => ({
+          ...prev,
+          secondaryDiamond: parseFloat(gem.secondary_gem_value) || 0
+        }));
+      }
     } else {
       console.log("Initializing stone gem:", gem);
       setSecondaryStoneForm({
@@ -175,6 +181,12 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
       });
       if (setActive) {
         setActiveTab('secondary_gem_stone');
+      }
+      if(gem.secondary_gem_value !== undefined) {
+        setEstimatedValues(prev => ({
+          ...prev,
+          secondaryGemstone: parseFloat(gem.secondary_gem_value) || 0
+        }));
       }
     }
   };
@@ -281,18 +293,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
     }));
   };
   
-  const getInitials = (str) => {
-    return str.split(' ').map(word => word.charAt(0).toUpperCase()).join('');
-  };
-
-  // Update button text based on edit mode
-  const getFinishButtonText = () => {
-    if (editMode && returnToTicket) {
-      return 'Update Item';
-    }
-    return 'Finish Estimation';
-  };
-
 
   // Handle tab change from the RadioGroup controls
   const handleTabChange = (event) => {
