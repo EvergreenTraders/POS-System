@@ -144,7 +144,6 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
     setAddedGemTypes(prev => ({ ...prev, secondary: gemType }));
     
     if (gemType === 'diamond') {
-      console.log("Initializing diamond gem:", gem);
       setSecondaryDiamondForm({
         shape: gem.secondary_gem_shape || 'Round',
         clarity: gem.secondary_gem_clarity || 'Flawless',
@@ -167,11 +166,14 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
         }));
       }
     } else {
-      console.log("Initializing stone gem:", gem);
+      // Find the matching color to get the color_id
+      const colorMatch = stoneColors.find(color => color.color === (gem.secondary_gem_color || 'Red'));
       setSecondaryStoneForm({
-        type: gem.secondary_gem_type || '',
+        type:  gem.secondary_gem_type || '',
+        name:  gem.secondary_gem_type || '',
         shape: gem.secondary_gem_shape || 'Round',
-        color: gem.secondary_gem_color || '',
+        color: gem.secondary_gem_color || 'Red',
+        color_id: colorMatch ? colorMatch.id : 5, // Default to Red (id: 5) if not found
         quantity: gem.secondary_gem_quantity || 1,
         weight: gem.secondary_gem_weight || 0,
         width: gem.secondary_gem_width || '',
@@ -427,7 +429,7 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
         } else if (primaryGemType === 'stone') {
           // Initialize stone form with available data
           setPrimaryStoneForm({
-            name: initialData.primary_gem_name || initialData.stone_name || '',
+            name: initialData.primary_gem_type || initialData.stone_name || '',
             type: initialData.primary_gem_type || initialData.stone_type || '',
             shape: initialData.primary_gem_shape || initialData.stone_shape || '',
             color: initialData.primary_gem_color || initialData.stone_color || '',
