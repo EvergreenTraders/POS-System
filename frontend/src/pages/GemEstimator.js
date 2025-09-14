@@ -181,20 +181,23 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
 
   // Handle tab changes and initialize form data
   useEffect(() => {
-   if (activeTab.startsWith('secondary_gem_') && secondaryGems.length > 0) {
+    if (activeTab.startsWith('secondary_gem_') && secondaryGems.length > 0) {
       const gemType = activeTab.replace('secondary_gem_', '');
-      const matchingGem = secondaryGems.find(gem => {
-        if (gemType === 'diamond') {
-          return gem.secondary_gem_category === 'diamond' || (gem.shape && gem.clarity);
-        } else {
-          return gem.secondary_gem_category === 'stone' || gem.name;
-        }
-      });
+      const matchingGem = secondaryGems[selectedSecondaryIndex];
+      
       if (matchingGem) {
-        initializeSecondaryGem(matchingGem);
+        initializeSecondaryGem(matchingGem, false);
+        
+        // Set the correct tab based on the gem category
+        const gemCategory = matchingGem.secondary_gem_category;
+        if (gemCategory === 'diamond' && !activeTab.includes('diamond')) {
+          setActiveTab('secondary_gem_diamond');
+        } else if (gemCategory === 'stone' && !activeTab.includes('stone')) {
+          setActiveTab('secondary_gem_stone');
+        }
       }
     }
-  }, [activeTab, secondaryGems, primaryDiamondForm, primaryStoneForm]);
+  }, [activeTab, secondaryGems, selectedSecondaryIndex, primaryDiamondForm, primaryStoneForm]);
 
   // Initialize component with initialData
   useEffect(() => {
@@ -1632,6 +1635,17 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
     return totalCarats * parseFloat(caratConversion.grams);
   };
 
+  // Handle secondary gem selection from dropdown
+  const handleSecondaryGemSelect = (event) => {
+    const index = event.target.value;
+    setSelectedSecondaryIndex(index);
+    const selectedGem = secondaryGems[index];
+    if (selectedGem) {
+      // The tab will be updated by the effect that watches selectedSecondaryIndex
+      initializeSecondaryGem(selectedGem, false);
+    }
+  };
+
   // Diamond and stone handler functions have been moved inline to their respective add functions
 
   const renderContent = () => {
@@ -1646,14 +1660,7 @@ function GemEstimator({ onAddGem, onGemValueChange, setGemFormState, initialData
               <FormControl size="small" sx={{ minWidth: 150 }}>
                 <Select
                   value={selectedSecondaryIndex}
-                  onChange={(e) => {
-                    const index = e.target.value;
-                    setSelectedSecondaryIndex(index);
-                    const selectedGem = secondaryGems[index];
-                    if (selectedGem) {
-                      initializeSecondaryGem(selectedGem, false);
-                    }
-                  }}
+                  onChange={handleSecondaryGemSelect}
                   displayEmpty
                   inputProps={{ 'aria-label': 'Select secondary gem' }}
                 >
