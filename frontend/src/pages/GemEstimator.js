@@ -88,7 +88,7 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
   
   const [addedGemTypes, setAddedGemTypes] = useState({
     primary: null,  // can be 'diamond' or 'stone'
-    secondary: null // can be 'diamond' or 'stone'
+    secondary: []   // array of objects with type: 'diamond' or 'stone' and index
   });
 
 
@@ -225,6 +225,13 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
       // Initialize secondary gems if they exist in initialData
       if (initialData.secondaryGems && initialData.secondaryGems.length > 0) {
         setSecondaryGems(initialData.secondaryGems);
+        const secondaryGems = initialData.secondaryGems.map(gem => 
+          gem.secondary_gem_category === 'diamond' ? 'diamond' : 'stone'
+        );
+        setAddedGemTypes(prev => ({
+          ...prev,
+          secondary: secondaryGems
+        }));
       }
       
       
