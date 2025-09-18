@@ -20,13 +20,171 @@ import {
   Tooltip,
   CircularProgress
 } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import HistoryIcon from '@mui/icons-material/History';
+import { useSnackbar } from 'notistack';
 import SearchIcon from '@mui/icons-material/Search';
 import config from '../config';
 import axios from 'axios';
 
 function Jewelry() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { enqueueSnackbar } = useSnackbar();
+
+  const handleViewHistory = async (itemId) => {
+    console.log('View History clicked for item:', itemId);
+    if (!itemId) {
+      console.error('No item ID provided');
+      enqueueSnackbar('Error: No item selected', { variant: 'error' });
+      return;
+    }
+    
+    try {
+      const response = await axios.get(`${API_BASE_URL}/jewelry/${itemId}/history`);
+      if (response.data) {
+        generateHistoryPDF(response.data.history, itemId);
+      } else {
+        console.log('No history data found');
+        enqueueSnackbar('No history found for this item', { variant: 'info' });
+      }
+    } catch (error) {
+      console.error('Error fetching item history:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      enqueueSnackbar(`Error loading history: ${error.message}`, { variant: 'error' });
+    }
+  };
+
+  const generateHistoryPDF = (historyData, itemId) => {
+    const doc = new jsPDF();
+    const title = `Item History - #${itemId}`;
+    const headers = [['Date', 'Changed By', 'Field', 'From', 'To', 'Notes']];
+    // Sort history by date (newest first)
+    const sortedHistory = [...historyData].sort((a, b) => 
+      new Date(b.changed_at) - new Date(a.changed_at)
+    );
+
+    // Process history data into table rows
+    const tableData = [];
+    
+    sortedHistory.forEach(entry => {
+      const changedAt = new Date(entry.changed_at).toLocaleString();
+      const changedBy = entry.first_name && entry.last_name 
+        ? `${entry.first_name} ${entry.last_name}` 
+        : `User ID: ${entry.changed_by || 'System'}`;
+      
+      // Process each changed field
+      const changes = entry.changed_fields;
+      
+      // Handle nested changes (like in secondary_gem_*)
+      const processChanges = (changes, prefix = '') => {
+        return Object.entries(changes).flatMap(([field, value]) => {
+          const fullFieldName = prefix ? `${prefix}.${field}` : field;
+          
+          // If the value has 'from' and 'to' properties, it's a direct change
+          if (value && typeof value === 'object' && 'from' in value && 'to' in value) {
+            return [{
+              field: fullFieldName,
+              from: value.from !== undefined ? String(value.from) : 'N/A',
+              to: value.to !== undefined ? String(value.to) : 'N/A'
+            }];
+          }
+          // If it's a nested object (like secondary_gem_1), process it recursively
+          else if (value && typeof value === 'object') {
+            return processChanges(value, fullFieldName);
+          }
+          // Simple value
+          return [{
+            field: fullFieldName,
+            from: 'N/A',
+            to: value !== undefined ? String(value) : 'N/A'
+          }];
+        });
+      };
+      
+      const fieldChanges = processChanges(changes);
+      
+      // Add a row for each changed field
+      fieldChanges.forEach((change, index) => {
+        tableData.push([
+          index === 0 ? changedAt : '',
+          index === 0 ? changedBy : '',
+          change.field,
+          change.from,
+          change.to,
+          index === 0 ? (entry.change_notes || '') : ''
+        ]);
+      });
+      
+      // Add a separator row between different history entries
+      if (fieldChanges.length > 0) {
+        tableData.push(Array(6).fill(''));
+      }
+    });
+    
+    // Remove the last separator row if it exists
+    if (tableData.length > 0 && tableData[tableData.length - 1].every(cell => cell === '')) {
+      tableData.pop();
+    }
+
+    // Add title
+    doc.setFontSize(18);
+    doc.text(title, 14, 22);
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+
+    // Register autoTable plugin
+    autoTable(doc, {
+      head: headers,
+      body: tableData,
+      startY: 40,
+      headStyles: {
+        fillColor: [41, 128, 185],
+        textColor: 255,
+        fontStyle: 'bold',
+        fontSize: 8
+      },
+      bodyStyles: {
+        fontSize: 8,
+        cellPadding: 2
+      },
+      columnStyles: {
+        0: { cellWidth: 25, fontStyle: 'bold' }, // Date
+        1: { cellWidth: 25 }, // Changed By
+        2: { cellWidth: 35 }, // Field
+        3: { cellWidth: 30 }, // From
+        4: { cellWidth: 30 }, // To
+        5: { cellWidth: 45 }  // Notes
+      },
+      alternateRowStyles: {
+        fillColor: [245, 245, 245]
+      },
+      margin: { top: 40 },
+      didParseCell: function(data) {
+        // Make the first column (Date) and second column (Changed By) bold for the first row of each change set
+        if (data.column.index <= 1 && data.row.index > 0 && tableData[data.row.index - 1][0] === '') {
+          data.cell.styles.fontStyle = 'bold';
+        }
+        
+        // Add a border between different change sets
+        if (data.row.index > 0 && data.column.index === 0 && tableData[data.row.index][0] === '') {
+          data.cell.styles.lineWidth = 0.5;
+          data.cell.styles.lineColor = [200, 200, 200];
+        }
+      }
+    });
+
+    // Save the PDF with a timestamp
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    doc.save(`item_history_${itemId}.pdf`);
+  };
   const API_BASE_URL = config.apiUrl;
   const [selectedItem, setSelectedItem] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -335,10 +493,29 @@ function Jewelry() {
               </Box>
 
               {/* Specifications */}
-              <Paper elevation={0} sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 2 }}>
-                <Typography variant="subtitle2" sx={{ color: 'primary.main', mb: 1 }}>
-                  Specifications
-                </Typography>
+              <Paper elevation={0} sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 2, mb: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="subtitle2" sx={{ color: 'primary.main' }}>
+                    Specifications
+                  </Typography>
+                  <Button 
+                    variant="contained" 
+                    size="small"
+                    color="primary"
+                    onClick={() => handleViewHistory(selectedItem.item_id)}
+                    startIcon={<HistoryIcon fontSize="small" />}
+                    sx={{
+                      textTransform: 'none',
+                      fontSize: '0.75rem',
+                      py: 0.5,
+                      px: 1.5,
+                      borderRadius: 1,
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                    }}
+                  >
+                    View History
+                  </Button>
+                </Box>
                 <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
                   <Box>
                     <Typography variant="caption" color="textSecondary">Weight</Typography>
