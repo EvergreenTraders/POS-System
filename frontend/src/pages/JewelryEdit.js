@@ -262,6 +262,7 @@ function JewelryEdit() {
   const handleCombinedSave = async () => {
     try {
       setIsSaving(true);
+      console.log("gemformstate",gemFormState);
       
       // Create a copy of the current item with updated fields
       const updatedItem = { ...item };
@@ -304,13 +305,15 @@ function JewelryEdit() {
         updatedItem.purity_value = trackChange('purity_value', metalFormState.purity?.value || 0);
         updatedItem.metal_spot_price = trackChange('metal_spot_price', metalFormState.spotPrice || 0);
         updatedItem.est_metal_value = trackChange('est_metal_value', metalFormState.metalValue || 0);
-        updatedItem.jewelry_color = trackChange('jewelry_color', metalFormState.jewelryColor || '');
+        // Only track jewelry_color changes if the metal type is Gold
+        if (metalFormState.preciousMetalType === 'Gold') {
+          updatedItem.jewelry_color = trackChange('jewelry_color', metalFormState.jewelryColor || '');
+        }
         updatedItem.category = trackChange('category', metalFormState.metalCategory || '');
       }
 
-      // Update gem data if available
+      // Track gem changes
       if (gemFormState) {
-        // Handle primary gem data from diamonds or stones arrays
         if (gemFormState.diamonds?.length > 0) {
           const primaryDiamond = gemFormState.diamonds[0];
           updatedItem.primary_gem_category = trackChange('primary_gem_category', 'diamond');
@@ -324,7 +327,7 @@ function JewelryEdit() {
           updatedItem.primary_gem_size = trackChange('primary_gem_size', primaryDiamond.size || '');
           updatedItem.primary_gem_exact_color = trackChange('primary_gem_exact_color', primaryDiamond.exactColor || 'D');
           updatedItem.primary_gem_value = trackChange('primary_gem_value', primaryDiamond.estimatedValue || 0);
-          updatedItem.gemstone =  'Diamond';
+          updatedItem.gemstone = 'Diamond';
         } 
         else if (gemFormState.stones?.length > 0) {
           const primaryStone = gemFormState.stones[0];
@@ -336,52 +339,142 @@ function JewelryEdit() {
           updatedItem.primary_gem_quantity = trackChange('primary_gem_quantity', parseInt(primaryStone.quantity) || 1);
           updatedItem.primary_gem_authentic = trackChange('primary_gem_authentic', primaryStone.authentic || false);
           updatedItem.primary_gem_value = trackChange('primary_gem_value', primaryStone.estimatedValue || 0);
-          updatedItem.gemstone = primaryStone.type;
+          updatedItem.gemstone = 'Stone';
         }
-      }
 
-      // Only proceed with update if there are changes
-      if (Object.keys(changes).length > 0) {
-        // Update the item in the database
-        const response = await axios.put(`${API_BASE_URL}/jewelry/${item.id}`, updatedItem);
-        
-        // Log the changes to history
-        try {
-          await axios.post(`${API_BASE_URL}/jewelry/history`, {
-            item_id: item.item_id,
-            changed_by: currentUser?.employee_id || 1,
-            action: 'UPDATE',
-            changed_fields: changes,
-            notes: 'Item details updated via combined editor'
+        // Track secondary gems changes
+        if (gemFormState.secondaryGems?.length > 0) {
+          const oldSecondaryGems = item.secondaryGems || [];
+          // First, get the current values from the form state
+          const currentFormGems = gemFormState.secondaryGems || [];
+          const oldGems = item.secondaryGems || [];
+          
+          const newSecondaryGems = currentFormGems.map((gem, index) => {
+            const oldGem = oldGems[index] || {};
+            const updatedGem = { ...gem };
+            
+            // Create a function to safely track changes with proper type conversion
+            const trackGemChange = (field, newValue, oldValue = oldGem[field]) => {
+              // Convert numeric fields to numbers if they're strings
+              const numericFields = ['secondary_gem_weight', 'secondary_gem_quantity', 'secondary_gem_value'];
+              if (numericFields.includes(field) && typeof newValue === 'string') {
+                newValue = parseFloat(newValue) || 0;
+              }
+              return trackChange(field, newValue, oldValue);
+            };
+            
+            // Track changes for each field based on gem category
+            if (gem.secondary_gem_category === 'stone') {
+              // Stone-specific fields
+              updatedGem.secondary_gem_type = trackGemChange('secondary_gem_type', gem.secondary_gem_type);
+              updatedGem.secondary_gem_authentic = trackGemChange('secondary_gem_authentic', gem.secondary_gem_authentic);
+            } else if (gem.secondary_gem_category === 'diamond') {
+              // Diamond-specific fields
+              updatedGem.secondary_gem_clarity = trackGemChange('secondary_gem_clarity', gem.secondary_gem_clarity);
+              updatedGem.secondary_gem_cut = trackGemChange('secondary_gem_cut', gem.secondary_gem_cut);
+              updatedGem.secondary_gem_size = trackGemChange('secondary_gem_size', gem.secondary_gem_size);
+              updatedGem.secondary_gem_exact_color = trackGemChange('secondary_gem_exact_color', gem.secondary_gem_exact_color);
+              updatedGem.secondary_gem_lab_grown = trackGemChange('secondary_gem_lab_grown', gem.secondary_gem_lab_grown);
+            }
+            
+            // Common fields for both stone and diamond
+            updatedGem.secondary_gem_category = trackGemChange('secondary_gem_category', gem.secondary_gem_category);
+            updatedGem.secondary_gem_weight = trackGemChange('secondary_gem_weight', gem.secondary_gem_weight);
+            updatedGem.secondary_gem_shape = trackGemChange('secondary_gem_shape', gem.secondary_gem_shape);
+            updatedGem.secondary_gem_color = trackGemChange('secondary_gem_color', gem.secondary_gem_color);
+            updatedGem.secondary_gem_quantity = trackGemChange('secondary_gem_quantity', gem.secondary_gem_quantity);
+            updatedGem.secondary_gem_value = trackGemChange('secondary_gem_value', gem.secondary_gem_value);
+            
+            return updatedGem;
           });
-        } catch (historyError) {
-          console.error('Error logging history:', historyError);
-          // Don't fail the main operation if history logging fails
-        }
+          
+          // Add secondary gems to updatedItem for API submission
+          updatedItem.secondaryGems = newSecondaryGems;
+          
+          // Track changes for each secondary gem field in the specified format
+          newSecondaryGems.forEach((gem, index) => {
+            const oldGem = oldSecondaryGems[index] || {};
 
-        // Update local state with the response
-        setItem(updatedItem);
-        setEditedItem(updatedItem);
-        
-        setSnackbar({
-          open: true,
-          message: 'Changes saved successfully',
-          severity: 'success'
-        });
-      } else {
-        setSnackbar({
-          open: true,
-          message: 'No changes to save',
-          severity: 'info'
-        });
+            const gemChanges = {};
+            
+            // Define field mappings to their database field names
+            const fieldMappings = {
+              secondary_gem_type: 'secondary_gem_type',
+              secondary_gem_weight: 'secondary_gem_weight',
+              secondary_gem_shape: 'secondary_gem_shape',
+              secondary_gem_color: 'secondary_gem_color',
+              secondary_gem_quantity: 'secondary_gem_quantity',
+              secondary_gem_authentic: 'secondary_gem_authentic',
+              secondary_gem_value: 'secondary_gem_value',
+              secondary_gem_lab_grown: 'secondary_gem_lab_grown',
+              secondary_gem_category: 'secondary_gem_category',
+              secondary_gem_clarity: 'secondary_gem_clarity',
+              secondary_gem_cut: 'secondary_gem_cut',
+              secondary_gem_size: 'secondary_gem_size',
+              secondary_gem_exact_color: 'secondary_gem_exact_color'
+            };
+            
+            // Check each field for changes
+            Object.entries(fieldMappings).forEach(([field, dbField]) => {
+              if (JSON.stringify(gem[field]) !== JSON.stringify(oldGem[field])) {
+                gemChanges[dbField] = {
+                  from: oldGem[field],
+                  to: gem[field]
+                };
+              }
+            });
+            // If there are changes for this gem, add them to the changes object
+            if (Object.keys(gemChanges).length > 0) {
+              changes[`secondary_gem_${index + 1}`] = gemChanges;
+            }
+          });
+        }
       }
+
+      // Only proceed if there are changes
+      // if (Object.keys(changes).length > 0) {
+      //   // Log changes to history
+      //   try {
+      //       await axios.post(`${API_BASE_URL}/jewelry/history`, {
+      //       item_id: item.item_id,
+      //       changed_by: currentUser?.employee_id || 1,
+      //       action: 'UPDATE',
+      //       changed_fields: changes,
+      //       notes: 'Item details updated via combined editor'
+      //     });
+      //   } catch (historyError) {
+      //     console.error('Error logging history:', historyError);
+      //     // Continue with the update even if history logging fails
+      //   }
+
+      //   // Update local state with the response
+      //   const updatedItemWithGems = { 
+      //     ...updatedItem,
+      //     secondaryGems: gemFormState?.secondaryGems ? [...gemFormState.secondaryGems] : []
+      //   };
+        
+      //   setItem(updatedItemWithGems);
+      //   setEditedItem(updatedItemWithGems);
+        
+      //   setSnackbar({
+      //     open: true,
+      //     message: 'Changes saved successfully',
+      //     severity: 'success'
+      //   });
+      // } else {
+      //   setSnackbar({
+      //     open: true,
+      //     message: 'No changes to save',
+      //     severity: 'info'
+      //   });
+      // }
       
       setCombinedDialogOpen(false);
     } catch (error) {
       console.error('Error saving changes:', error);
       setSnackbar({
         open: true,
-        message: `Failed to save changes: ${error.message}`,
+        message: `Failed to save changes: ${error.response?.data?.message || error.message}`,
         severity: 'error'
       });
     } finally {
@@ -943,7 +1036,6 @@ function JewelryEdit() {
           }));
         }
       }
-      console.log("item:",item);
       // Initialize secondary gem data if available
       if (item.secondary_gem_category) {
         // Determine if secondary gem is diamond or stone
@@ -1001,8 +1093,6 @@ function JewelryEdit() {
             ...secondaryStoneValues
           }));
           
-          // Log to help debug
-          console.log('Secondary Stone Gem initialized:', secondaryStoneValues);
         }
       }
     }
@@ -1432,17 +1522,25 @@ function JewelryEdit() {
             <Grid item xs={12} sm={7} md={8}>
               {combinedDialogOpen && (
                 <GemEstimator 
+                  key={`gem-estimator-${combinedDialogOpen}`}
                   initialData={{
                     ...item,
-                    // Pass secondary gems if they exist
-                    secondaryGems: item.secondaryGems || []
+                    // Use the latest gemFormState if available, otherwise fall back to item data
+                    diamonds: gemFormState?.diamonds || item.diamonds || [],
+                    stones: gemFormState?.stones || item.stones || [],
+                    secondaryGems: gemFormState?.secondaryGems || item.secondaryGems || []
                   }}
                   hideButtons={true}
                   setGemFormState={setGemFormState}
                   onSecondaryGemsChange={(secondaryGems) => {
+                    // Update both the form state and the item state
+                    setGemFormState(prev => ({
+                      ...prev,
+                      secondaryGems: [...secondaryGems]
+                    }));
                     setItem(prev => ({
                       ...prev,
-                      secondaryGems
+                      secondaryGems: [...secondaryGems]
                     }));
                   }}
                 />
