@@ -90,7 +90,6 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     secondary: []   // array of objects with type: 'diamond' or 'stone' and index
   });
 
-
   // Primary gem form
   const [primaryDiamondForm, setPrimaryDiamondForm] = useState({
     shape: 'Round',
@@ -1126,11 +1125,54 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     return activeTab.startsWith('primary') ? primaryStoneForm : secondaryStoneForm;
   };
 
-  const setCurrentStoneForm = (newForm) => {
+  const setCurrentStoneForm = (updater) => {
     if (activeTab.startsWith('primary')) {
-      setPrimaryStoneForm(newForm);
+      setPrimaryStoneForm(updater);
     } else {
-      setSecondaryStoneForm(newForm);
+      // Get the updated form value
+      const updatedForm = typeof updater === 'function' 
+        ? updater(secondaryStoneForm) 
+        : updater;
+      
+      // Update the form state
+      setSecondaryStoneForm(updatedForm);
+      
+      // If we have a selected secondary gem index, update it in the secondaryGems array
+      if (selectedSecondaryIndex !== null && selectedSecondaryIndex >= 0) {
+        setGemFormState(prevState => {
+          const updatedGems = latestGemUpdates.current ? [...latestGemUpdates.current] : [...secondaryGems];
+          // Ensure we have an object at this index
+          if (!updatedGems[selectedSecondaryIndex]) {
+            updatedGems[selectedSecondaryIndex] = {};
+          }
+          
+          // Update the specific gem with the form data
+          updatedGems[selectedSecondaryIndex] = {
+            secondary_gem_category: 'stone',
+            secondary_gem_index: selectedSecondaryIndex,
+            secondary_gem_type: updatedForm.type || '',
+            secondary_gem_name: updatedForm.name || '',
+            secondary_gem_shape: updatedForm.shape || '',
+            secondary_gem_color: updatedForm.color || '',
+            secondary_gem_exact_color: updatedForm.exactColor || '',
+            secondary_gem_weight: updatedForm.weight || 0,
+            secondary_gem_size: updatedForm.size || '',
+            secondary_gem_quantity: updatedForm.quantity || 1,
+            secondary_gem_value: updatedForm.estimatedValue || 0,
+            secondary_gem_authentic: updatedForm.authentic || false,
+            secondary_gem_color_id: updatedForm.color_id || null,
+            secondary_gem_clarity: updatedForm.clarity || ''
+          };
+          
+          // Store the latest updates in the ref
+          latestGemUpdates.current = updatedGems;
+          // Return the updated state
+          return {
+            ...prevState,
+            secondaryGems: updatedGems
+          };
+        });
+      }
     }
   };
 

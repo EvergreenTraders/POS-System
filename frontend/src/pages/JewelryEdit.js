@@ -453,7 +453,6 @@ function JewelryEdit() {
           });
         }
       }
-
       // Update local state immediately for instant UI update
       const updatedItemWithGems = { 
         ...updatedItem,
