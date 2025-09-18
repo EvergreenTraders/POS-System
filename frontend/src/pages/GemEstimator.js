@@ -85,7 +85,6 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
   const [diamondSummary, setDiamondSummary] = useState([]);
   const [stoneSummary, setStoneSummary] = useState([]);
   const [secondaryGems, setSecondaryGems] = useState(initialData?.secondaryGems || []);
-  
   const [addedGemTypes, setAddedGemTypes] = useState({
     primary: null,  // can be 'diamond' or 'stone'
     secondary: []   // array of objects with type: 'diamond' or 'stone' and index
@@ -775,6 +774,56 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     
     onGemValueChange(primaryGemValue || 0);
   }, [estimatedValues.primaryDiamond, estimatedValues.primaryGemstone, activeTab, onGemValueChange]);
+
+  // Update secondary gem forms when estimatedValues, selectedSecondaryIndex, or activeTab changes
+  useEffect(() => {
+    // Only proceed if we're on a secondary gem tab
+    if (activeTab === 'secondary_gem_diamond' || activeTab === 'secondary_gem_stone') {
+      const isDiamond = activeTab === 'secondary_gem_diamond';
+      const secondaryGemValue = isDiamond 
+        ? estimatedValues.secondaryDiamond 
+        : estimatedValues.secondaryGemstone;
+      
+      if (isDiamond) {
+        setSecondaryDiamondForm(prev => ({
+          ...prev,
+          estimatedValue: secondaryGemValue
+        }));
+      } else {
+        setSecondaryStoneForm(prev => ({
+          ...prev,
+          estimatedValue: secondaryGemValue
+        }));
+      }
+      
+      // Update the gem form state with the new value
+      if (selectedSecondaryIndex !== null && selectedSecondaryIndex >= 0) {
+        setGemFormState(prevState => {
+          const updatedGems = latestGemUpdates.current ? [...latestGemUpdates.current] : [...(prevState.secondaryGems || [])];
+          // Ensure we have an object at this index
+          if (!updatedGems[selectedSecondaryIndex]) {
+            updatedGems[selectedSecondaryIndex] = {};
+          }
+          
+          // Update the specific gem with the form data
+          updatedGems[selectedSecondaryIndex] = {
+            ...updatedGems[selectedSecondaryIndex],
+            secondary_gem_category: isDiamond ? 'diamond' : 'stone',
+            secondary_gem_index: selectedSecondaryIndex,
+            secondary_gem_value: secondaryGemValue
+          };
+          
+          // Store the latest updates in the ref
+          latestGemUpdates.current = updatedGems;
+          
+          return {
+            ...prevState,
+            secondaryGems: updatedGems
+          };
+        });
+      }
+    }
+  }, [estimatedValues.secondaryDiamond, estimatedValues.secondaryGemstone, selectedSecondaryIndex, activeTab]);
   
   // Effect to fetch diamond sizes when diamondShapes are loaded in edit mode
   useEffect(() => {
@@ -1039,7 +1088,6 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
       // If we have a selected secondary gem index, update it in the secondaryGems array
       if (selectedSecondaryIndex !== null && selectedSecondaryIndex >= 0) {
         setGemFormState(prevState => {
-         // const updatedGems = [...(prevState.secondaryGems || [])];
           const updatedGems = latestGemUpdates.current ? [...latestGemUpdates.current] : [...secondaryGems];
           // Ensure we have an object at this index
           if (!updatedGems[selectedSecondaryIndex]) {
@@ -1058,9 +1106,9 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
               secondary_gem_cut: updatedForm.cut,
               secondary_gem_size: updatedForm.size,
               secondary_gem_lab_grown: updatedForm.labGrown,
-              secondary_gem_value: updatedForm.estimatedValue
+              secondary_gem_value: updatedForm.estimatedValue,
+              secondary_gem_quantity: updatedForm.quantity
           };
-          
           // Store the latest updates in the ref
           latestGemUpdates.current = updatedGems;
           
@@ -1324,7 +1372,8 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
       cut: '',
       labGrown: false,
       exactColor: 'D',
-      size: ''
+      size: '',
+      estimatedValue: 0
     };
     setCurrentForm(resetForm);
     setCurrentShapeIndex(0);
@@ -1890,6 +1939,9 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
   // Diamond and stone handler functions have been moved inline to their respective add functions
 
   const renderContent = () => {
+    // Debug form values
+    const currentForm = getCurrentForm();
+    
     return (
       <Paper sx={{ p: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
@@ -1898,8 +1950,6 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
               {activeTab.startsWith('primary') ? 'EST. PRIMARY GEM' : 'EST. SECONDARY GEM'}
             </Typography>
             {activeTab.startsWith('secondary') && secondaryGems.length > 0 && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                {secondaryGems.length > 1 && (
                   <FormControl size="small" sx={{ minWidth: 150 }}>
                     <Select
                       value={selectedSecondaryIndex}
@@ -1914,8 +1964,6 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
                       ))}
                     </Select>
                   </FormControl>
-                )}
-              </Box>
             )}
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>

@@ -262,7 +262,6 @@ function JewelryEdit() {
   const handleCombinedSave = async () => {
     try {
       setIsSaving(true);
-      console.log("gemformstate",gemFormState);
       
       // Create a copy of the current item with updated fields
       const updatedItem = { ...item };
@@ -341,16 +340,13 @@ function JewelryEdit() {
           updatedItem.primary_gem_value = trackChange('primary_gem_value', primaryStone.estimatedValue || 0);
           updatedItem.gemstone = 'Stone';
         }
-
         // Track secondary gems changes
         if (gemFormState.secondaryGems?.length > 0) {
-          const oldSecondaryGems = item.secondaryGems || [];
           // First, get the current values from the form state
           const currentFormGems = gemFormState.secondaryGems || [];
-          const oldGems = item.secondaryGems || [];
-          
+          const oldSecondaryGems = item.secondaryGems || [];
           const newSecondaryGems = currentFormGems.map((gem, index) => {
-            const oldGem = oldGems[index] || {};
+            const oldGem = oldSecondaryGems[index] || {};
             const updatedGem = { ...gem };
             
             // Create a function to safely track changes with proper type conversion
@@ -360,7 +356,7 @@ function JewelryEdit() {
               if (numericFields.includes(field) && typeof newValue === 'string') {
                 newValue = parseFloat(newValue) || 0;
               }
-              return trackChange(field, newValue, oldValue);
+              return newValue;
             };
             
             // Track changes for each field based on gem category
@@ -397,26 +393,53 @@ function JewelryEdit() {
 
             const gemChanges = {};
             
-            // Define field mappings to their database field names
-            const fieldMappings = {
-              secondary_gem_type: 'secondary_gem_type',
+            const isDiamond = gem.secondary_gem_category === 'diamond';
+
+            // Common fields for both diamond and stone
+            const commonMappings = {
               secondary_gem_weight: 'secondary_gem_weight',
               secondary_gem_shape: 'secondary_gem_shape',
               secondary_gem_color: 'secondary_gem_color',
               secondary_gem_quantity: 'secondary_gem_quantity',
-              secondary_gem_authentic: 'secondary_gem_authentic',
-              secondary_gem_value: 'secondary_gem_value',
-              secondary_gem_lab_grown: 'secondary_gem_lab_grown',
-              secondary_gem_category: 'secondary_gem_category',
+              secondary_gem_value: 'secondary_gem_value'
+            };
+
+            // Diamond specific fields
+            const diamondMappings = {
               secondary_gem_clarity: 'secondary_gem_clarity',
               secondary_gem_cut: 'secondary_gem_cut',
               secondary_gem_size: 'secondary_gem_size',
+              secondary_gem_lab_grown: 'secondary_gem_lab_grown',
               secondary_gem_exact_color: 'secondary_gem_exact_color'
             };
+
+            // Stone specific fields
+            const stoneMappings = {
+              secondary_gem_type: 'secondary_gem_type',
+              secondary_gem_authentic: 'secondary_gem_authentic'
+            };
+
+            // Combine common fields with type-specific fields
+            const fieldMappings = {
+              ...commonMappings,
+              ...(isDiamond ? diamondMappings : stoneMappings)
+            };
             
+            // Helper function to normalize values for comparison
+            const normalizeValue = (value) => {
+              if (value === null || value === undefined) return value;
+              // If it's a string that can be converted to a number, return as number
+              if (typeof value === 'string' && !isNaN(parseFloat(value)) && isFinite(value)) {
+                // Preserve decimal places for display but compare as number
+                return parseFloat(value);
+              }
+              return value;
+            };
             // Check each field for changes
             Object.entries(fieldMappings).forEach(([field, dbField]) => {
-              if (JSON.stringify(gem[field]) !== JSON.stringify(oldGem[field])) {
+              const newValue = normalizeValue(gem[field]);
+              const oldValue = normalizeValue(oldGem[field]);
+              if (newValue !== oldValue) {
                 gemChanges[dbField] = {
                   from: oldGem[field],
                   to: gem[field]
@@ -431,43 +454,48 @@ function JewelryEdit() {
         }
       }
 
-      // Only proceed if there are changes
-      // if (Object.keys(changes).length > 0) {
-      //   // Log changes to history
-      //   try {
-      //       await axios.post(`${API_BASE_URL}/jewelry/history`, {
-      //       item_id: item.item_id,
-      //       changed_by: currentUser?.employee_id || 1,
-      //       action: 'UPDATE',
-      //       changed_fields: changes,
-      //       notes: 'Item details updated via combined editor'
-      //     });
-      //   } catch (historyError) {
-      //     console.error('Error logging history:', historyError);
-      //     // Continue with the update even if history logging fails
-      //   }
-
-      //   // Update local state with the response
-      //   const updatedItemWithGems = { 
-      //     ...updatedItem,
-      //     secondaryGems: gemFormState?.secondaryGems ? [...gemFormState.secondaryGems] : []
-      //   };
-        
-      //   setItem(updatedItemWithGems);
-      //   setEditedItem(updatedItemWithGems);
-        
-      //   setSnackbar({
-      //     open: true,
-      //     message: 'Changes saved successfully',
-      //     severity: 'success'
-      //   });
-      // } else {
-      //   setSnackbar({
-      //     open: true,
-      //     message: 'No changes to save',
-      //     severity: 'info'
-      //   });
-      // }
+      // Update local state immediately for instant UI update
+      const updatedItemWithGems = { 
+        ...updatedItem,
+        secondaryGems: gemFormState?.secondaryGems ? [...gemFormState.secondaryGems] : []
+      };
+      
+      setItem(updatedItemWithGems);
+      setEditedItem(updatedItemWithGems);
+      
+      // If there are changes, save them to item_history
+      if (Object.keys(changes).length > 0) {
+        try {
+          // Prepare the history data
+          await axios.post(`${API_BASE_URL}/jewelry/history`, {
+            item_id: item.item_id,
+            changed_fields: changes,
+            changed_by: currentUser?.employee_id || 1,
+            action: 'update',
+            notes: 'Item details updated via combined editor'
+          });
+          
+          setSnackbar({
+            open: true,
+            message: 'Changes saved successfully',
+            severity: 'success'
+          });
+        } catch (error) {
+          console.error('Error saving to item history:', error);
+          // Still show success for the main save, but log the history error
+          setSnackbar({
+            open: true,
+            message: 'Changes saved, but there was an issue updating the history',
+            severity: 'warning'
+          });
+        }
+      } else {
+        setSnackbar({
+          open: true,
+          message: 'No changes to save',
+          severity: 'info'
+        });
+      }
       
       setCombinedDialogOpen(false);
     } catch (error) {
@@ -1503,7 +1531,8 @@ function JewelryEdit() {
             <Grid item xs={12} sm={5} md={4}>
               {combinedDialogOpen && (
                 <MetalEstimator 
-                  initialData={{
+                  key={`metal-${combinedDialogOpen}`}
+                  initialData={metalFormState && Object.keys(metalFormState).length > 0 ? metalFormState : {
                     precious_metal_type: item?.precious_metal_type || '',
                     metal_weight: item?.metal_weight || 0,
                     non_precious_metal_type: item?.non_precious_metal_type || '',
@@ -1522,25 +1551,24 @@ function JewelryEdit() {
             <Grid item xs={12} sm={7} md={8}>
               {combinedDialogOpen && (
                 <GemEstimator 
-                  key={`gem-estimator-${combinedDialogOpen}`}
+                  key={`gem-${combinedDialogOpen}`}
                   initialData={{
                     ...item,
-                    // Use the latest gemFormState if available, otherwise fall back to item data
-                    diamonds: gemFormState?.diamonds || item.diamonds || [],
-                    stones: gemFormState?.stones || item.stones || [],
-                    secondaryGems: gemFormState?.secondaryGems || item.secondaryGems || []
+                    secondaryGems: (item.secondaryGems || []).map(gem => ({
+                      ...gem,
+                      secondary_gem_value: gem.secondary_gem_value !== null ? gem.secondary_gem_value : 0
+                    }))
                   }}
                   hideButtons={true}
                   setGemFormState={setGemFormState}
                   onSecondaryGemsChange={(secondaryGems) => {
-                    // Update both the form state and the item state
                     setGemFormState(prev => ({
                       ...prev,
-                      secondaryGems: [...secondaryGems]
-                    }));
+                      secondaryGems
+                    })); 
                     setItem(prev => ({
                       ...prev,
-                      secondaryGems: [...secondaryGems]
+                      secondaryGems
                     }));
                   }}
                 />
