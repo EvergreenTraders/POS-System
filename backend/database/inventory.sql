@@ -1,9 +1,26 @@
--- Alter table to change column types
+-- Drop the change_notes column if it exists
 ALTER TABLE jewelry 
-ALTER COLUMN primary_gem_size TYPE VARCHAR(20);
+DROP COLUMN IF EXISTS change_notes;
 
-ALTER TABLE jewelry_secondary_gems 
-ALTER COLUMN secondary_gem_size TYPE VARCHAR(20);
+-- Create inventory_status table
+CREATE TABLE IF NOT EXISTS inventory_status (
+    status_id SERIAL PRIMARY KEY,
+    status_code VARCHAR(20) NOT NULL UNIQUE,
+    status_name VARCHAR(50) NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP,
+    CONSTRAINT valid_status_code CHECK (status_code ~ '^[A-Z0-9_]+$')
+);
+
+-- Insert default status values
+INSERT INTO inventory_status (status_code, status_name, description) VALUES
+    ('HOLD', 'On Hold', 'Item is on hold and not available for sale'),
+    ('IN_PROCESS', 'In Process', 'Item is being processed or worked on'),
+    ('SCRAP', 'Scrap', 'Item is marked for scrap or recycling'),
+    ('RESERVED', 'Reserved', 'Item is reserved for a customer'),
+    ('SOLD', 'Sold', 'Item has been sold')
+ON CONFLICT (status_code) DO NOTHING;
 
 -- Create jewelry table for inventory
 CREATE TABLE IF NOT EXISTS jewelry (

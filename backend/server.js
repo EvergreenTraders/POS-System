@@ -1429,6 +1429,183 @@ app.post('/api/jewelry', async (req, res) => {
     }
 });
 
+// Inventory Status API Endpoints
+app.get('/api/inventory-status', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM inventory_status ORDER BY status_name';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching inventory statuses:', error);
+    res.status(500).json({ error: 'Failed to fetch inventory statuses' });
+  }
+});
+
+app.get('/api/inventory-status/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = 'SELECT * FROM inventory_status WHERE status_id = $1';
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Inventory status not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching inventory status:', error);
+    res.status(500).json({ error: 'Failed to fetch inventory status' });
+  }
+});
+
+app.post('/api/inventory-status', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { status_code, status_name, description } = req.body;
+    
+    // Validate required fields
+    if (!status_code || !status_name) {
+      return res.status(400).json({ error: 'status_code and status_name are required' });
+    }
+    
+    await client.query('BEGIN');
+    
+    // Check if status_code already exists
+    const checkQuery = 'SELECT status_id FROM inventory_status WHERE status_code = $1';
+    const checkResult = await client.query(checkQuery, [status_code]);
+    
+    if (checkResult.rows.length > 0) {
+      return res.status(400).json({ error: 'Status code already exists' });
+    }
+    
+    // Insert new status
+    const insertQuery = `
+      INSERT INTO inventory_status (status_code, status_name, description)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `;
+    
+    const result = await client.query(insertQuery, [status_code, status_name, description || null]);
+    await client.query('COMMIT');
+    
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating inventory status:', error);
+    res.status(500).json({ error: 'Failed to create inventory status' });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/api/inventory-status/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { status_code, status_name, description } = req.body;
+    
+    // Validate required fields
+    if (!status_code || !status_name) {
+      return res.status(400).json({ error: 'status_code and status_name are required' });
+    }
+    
+    await client.query('BEGIN');
+    
+    // Check if status exists
+    const checkQuery = 'SELECT status_id FROM inventory_status WHERE status_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Inventory status not found' });
+    }
+    
+    // Check if status_code is being changed to one that already exists
+    const codeCheckQuery = 'SELECT status_id FROM inventory_status WHERE status_code = $1 AND status_id != $2';
+    const codeCheckResult = await client.query(codeCheckQuery, [status_code, id]);
+    
+    if (codeCheckResult.rows.length > 0) {
+      return res.status(400).json({ error: 'Status code already in use by another status' });
+    }
+    
+    // Update status
+    const updateQuery = `
+      UPDATE inventory_status 
+      SET status_code = $1, 
+          status_name = $2, 
+          description = $3,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE status_id = $4
+      RETURNING *
+    `;
+    
+    const result = await client.query(updateQuery, [
+      status_code, 
+      status_name, 
+      description || null, 
+      id
+    ]);
+    
+    await client.query('COMMIT');
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Inventory status not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating inventory status:', error);
+    res.status(500).json({ error: 'Failed to update inventory status' });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/api/inventory-status/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    
+    await client.query('BEGIN');
+    
+    // Check if status exists
+    const checkQuery = 'SELECT status_id FROM inventory_status WHERE status_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Inventory status not found' });
+    }
+    
+    // Check if status is in use
+    const inUseQuery = 'SELECT item_id FROM jewelry WHERE status = (SELECT status_code FROM inventory_status WHERE status_id = $1) LIMIT 1';
+    const inUseResult = await client.query(inUseQuery, [id]);
+    
+    if (inUseResult.rows.length > 0) {
+      return res.status(400).json({ 
+        error: 'Cannot delete status that is in use by jewelry items' 
+      });
+    }
+    
+    // Delete status
+    const deleteQuery = 'DELETE FROM inventory_status WHERE status_id = $1 RETURNING *';
+    const result = await client.query(deleteQuery, [id]);
+    
+    await client.query('COMMIT');
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Inventory status not found' });
+    }
+    
+    res.json({ message: 'Inventory status deleted successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting inventory status:', error);
+    res.status(500).json({ error: 'Failed to delete inventory status' });
+  } finally {
+    client.release();
+  }
+});
+
 // Quote Expiration Configuration API Endpoints
 app.get('/api/quote-expiration/config', async (req, res) => {
   try {

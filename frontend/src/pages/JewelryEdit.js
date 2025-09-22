@@ -1495,13 +1495,68 @@ function JewelryEdit() {
     setTotalAmount(discountedPrice + taxAmount);
   };
 
+  // Helper function to get status color
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'SOLD':
+        return 'success.main';
+      case 'IN_PROCESS':
+        return 'info.main';
+      case 'HOLD':
+        return 'warning.main';
+      case 'RESERVED':
+        return 'primary.main';
+      case 'SCRAP':
+        return 'error.main';
+      default:
+        return 'text.secondary';
+    }
+  };
+
+  const [inventoryStatuses, setInventoryStatuses] = useState([]);
+  const [loadingStatuses, setLoadingStatuses] = useState(true);
+  const [statusError, setStatusError] = useState(null);
+
+  useEffect(() => {
+    const fetchInventoryStatuses = async () => {
+      try {
+        setLoadingStatuses(true);
+        const response = await axios.get(`${API_BASE_URL}/inventory-status`);
+        if (response.data && response.data.length > 0) {
+          setInventoryStatuses(response.data);
+        } else {
+          setStatusError('No inventory statuses found');
+          console.error('No inventory statuses returned from API');
+        }
+      } catch (error) {
+        console.error('Error fetching inventory statuses:', error);
+        setStatusError('Failed to load statuses. Please try again later.');
+      } finally {
+        setLoadingStatuses(false);
+      }
+    };
+
+    fetchInventoryStatuses();
+  }, []);
+
   // Render loading state
-  if (loading) {
+  if (loading || loadingStatuses) {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
           <CircularProgress />
         </Box>
+      </Container>
+    );
+  }
+
+  // Show error if statuses failed to load
+  if (statusError) {
+    return (
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {statusError}
+        </Alert>
       </Container>
     );
   }
@@ -1678,25 +1733,60 @@ function JewelryEdit() {
                     ID: {item.item_id}
                   </Typography>
                   
-                  {/* Inventory Status Chip */}
-                  <Box sx={{ display: 'flex', gap: 1 }}>
+                  {/* Inventory Status Dropdown */}
+                  <FormControl size="small" sx={{ minWidth: 150, mt: 0.5 }}>
+                    <Select
+                      value={editingField === 'inventory_status' ? (editedItem.inventory_status || 'HOLD') : (item.inventory_status || 'HOLD')}
+                      onChange={async (e) => {
+                        const newStatus = e.target.value;
+                        // Update local state immediately for better UX
+                        setEditedItem(prev => ({
+                          ...prev,
+                          inventory_status: newStatus
+                        }));
+                        // Update the server
+                      //  await updateInventoryStatus(newStatus);
+                      }}
+                      onFocus={() => setEditingField('inventory_status')}
+                      onBlur={() => setEditingField(null)}
+                      displayEmpty
+                      inputProps={{ 'aria-label': 'Inventory Status' }}
+                      sx={{
+                        height: 32,
+                        '& .MuiSelect-select': {
+                          py: 0.5,
+                          fontSize: '0.8125rem',
+                          display: 'flex',
+                          alignItems: 'center'
+                        }
+                      }}
+                    >
+                      {inventoryStatuses.map((status) => (
+                        <MenuItem key={status.status_code} value={status.status_code}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Box 
+                              sx={{
+                                width: 10,
+                                height: 10,
+                                borderRadius: '50%',
+                                bgcolor: getStatusColor(status.status_code)
+                              }}
+                            />
+                            {status.status_name}
+                          </Box>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  {item.certification && (
                     <Chip 
-                      label={item.inventory_status || 'HOLD'} 
-                      color={item.inventory_status === 'IN-STOCK' ? 'success' : 
-                             item.inventory_status === 'IN-PROCESS' ? 'info' : 'warning'} 
-                      size="small" 
-                      sx={{ height: 24 }}
+                      label={`Certified: ${item.certification}`}
+                      color="info"
+                      size="small"
                     />
-                    {item.certification && (
-                      <Chip 
-                        label={`Certified: ${item.certification}`}
-                        color="info"
-                        size="small"
-                      />
-                    )}
+                  )}
                   </Box>
                 </Box>
-              </Box>
               
               {/* Editable Fields in Grid Layout */}
               <Grid container spacing={2}>
