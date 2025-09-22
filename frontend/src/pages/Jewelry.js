@@ -26,6 +26,7 @@ import {
   DialogTitle
 } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import HistoryIcon from '@mui/icons-material/History';
@@ -37,6 +38,7 @@ import axios from 'axios';
 function Jewelry() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { currentUser } = useAuth();
   const { enqueueSnackbar } = useSnackbar();
 
   const handleViewHistory = async (itemId) => {
@@ -203,24 +205,24 @@ function Jewelry() {
     if (!itemToScrap) return;
     
     try {
-      await axios.patch(`${API_BASE_URL}/jewelry/${itemToScrap.item_id}`, {
-        status: 'SCRAP',
-        inventory_status: 'SCRAP'
-      });
+      // Call the move-to-scrap endpoint
+      const response = await axios.post(
+        `${API_BASE_URL}/jewelry/${itemToScrap.item_id}/move-to-scrap`,
+        { moved_by: currentUser?.employee_id || 1 }
+      );
       
-      // Update the item in the local state
+      // Remove the item from the local state
       setJewelryItems(prevItems => 
-        prevItems.map(item => 
-          item.item_id === itemToScrap.item_id 
-            ? { ...item, status: 'SCRAP', inventory_status: 'SCRAP' }
-            : item
-        )
+        prevItems.filter(item => item.item_id !== itemToScrap.item_id)
       );
       
       enqueueSnackbar('Item moved to scrap successfully', { variant: 'success' });
     } catch (error) {
       console.error('Error moving item to scrap:', error);
-      enqueueSnackbar('Failed to move item to scrap', { variant: 'error' });
+      enqueueSnackbar(
+        error.response?.data?.error || 'Failed to move item to scrap', 
+        { variant: 'error' }
+      );
     } finally {
       setScrapDialogOpen(false);
       setItemToScrap(null);

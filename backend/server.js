@@ -361,21 +361,6 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
-// Orders routes
-app.post('/api/orders', async (req, res) => {
-  try {
-    const { items, total } = req.body;
-    const result = await pool.query(
-      'INSERT INTO orders (items, total, created_at) VALUES ($1, $2, NOW()) RETURNING *',
-      [items, total]
-    );
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error creating order:', err.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 // Precious Metal tables routes
 app.get('/api/precious_metal_type', async (req, res) => {
   try {
@@ -1229,6 +1214,75 @@ app.put('/api/jewelry/:quoteId', async (req, res) => {
     } finally {
         client.release();
     }
+});
+
+// Move item to scrap
+app.post('/api/jewelry/:id/move-to-scrap', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { moved_by } = req.body; // ID of the employee performing the action
+    
+    if (!moved_by) {
+      return res.status(400).json({ error: 'Employee ID (moved_by) is required' });
+    }
+    
+    // First, get the current item data for history
+    const { rows: [currentItem] } = await pool.query('SELECT * FROM jewelry WHERE item_id = $1', [id]);
+    
+    if (!currentItem) {
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+    
+    // Move the item to scrap using the database function
+    await client.query('SELECT move_to_scrap($1, $2)', [id, moved_by]);
+    
+    // Return success response
+    res.json({ 
+      success: true, 
+      message: 'Item moved to scrap successfully',
+      item: {
+        item_id: id,
+        original_item_id: id,
+        moved_by: parseInt(moved_by),
+        moved_at: new Date().toISOString()
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error moving item to scrap:', err);
+    res.status(500).json({ 
+      error: 'Failed to move item to scrap',
+      details: err.message 
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Get a single jewelry item by ID
+app.get('/api/jewelry/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = `
+      SELECT 
+        j.*,
+        TO_CHAR(j.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
+        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at
+      FROM jewelry j
+      WHERE j.item_id = $1`;
+    
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching jewelry item:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Get all jewelry items

@@ -126,12 +126,12 @@ function Sidebar() {
           </StyledListItem>
         </StyledLink>
 
-        <StyledLink to="/orders">
-          <StyledListItem active={isActive('/orders')}>
+        <StyledLink to="/transactions">
+          <StyledListItem active={isActive('/transactions')}>
             <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
               <Receipt />
             </ListItemIcon>
-            {isOpen && <ListItemText primary="Orders" />}
+            {isOpen && <ListItemText primary="Transactions" />}
           </StyledListItem>
         </StyledLink>
 
