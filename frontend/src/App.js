@@ -10,7 +10,7 @@ import Sidebar from './components/Sidebar';
 import Login from './components/Login';
 import Dashboard from './pages/Dashboard';
 import Home from './pages/Home';
-import Products from './pages/Products';
+import Scrap from './pages/Scrap';
 import Orders from './pages/Orders';
 import Jewelry from './pages/Jewelry';
 import CoinsBullions from './pages/CoinsBullions';
@@ -164,11 +164,11 @@ function App() {
                 }
               />
               <Route
-                path="/products"
+                path="/scrap"
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <Products />
+                      <Scrap />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

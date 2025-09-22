@@ -1744,7 +1744,7 @@ function JewelryEdit() {
                           ...prev,
                           inventory_status: newStatus
                         }));
-                        // Update the server
+                        // Update the server  
                       //  await updateInventoryStatus(newStatus);
                       }}
                       onFocus={() => setEditingField('inventory_status')}
