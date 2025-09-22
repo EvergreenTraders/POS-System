@@ -31,57 +31,31 @@ const Scrap = () => {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filter, setFilter] = useState('all');
 
   // Sample data - replace with actual data from your backend
   const scrapItems = [
     {
       id: 'SCRP-001',
       name: 'Gold Scrap 14K',
-      weight: '25g',
-      purity: '14K',
       category: 'Gold',
       price: 875.50,
-      dateAdded: '2025-09-15',
-      status: 'IN_STOCK'
+      dateAdded: '2025-09-15'
     },
     {
       id: 'SCRP-002',
       name: 'Silver Scrap',
-      weight: '100g',
-      purity: '925',
       category: 'Silver',
       price: 89.99,
-      dateAdded: '2025-09-10',
-      status: 'SOLD'
+      dateAdded: '2025-09-10'
     },
     {
       id: 'SCRP-003',
       name: 'Broken Gold Chain',
-      weight: '15g',
-      purity: '18K',
       category: 'Gold',
       price: 525.75,
-      dateAdded: '2025-09-05',
-      status: 'IN_STOCK'
+      dateAdded: '2025-09-05'
     }
   ];
-
-  const getStatusChip = (status) => {
-    const statusConfig = {
-      IN_STOCK: { label: 'In Stock', color: 'success' },
-      SOLD: { label: 'Sold', color: 'default' },
-      PROCESSING: { label: 'Processing', color: 'warning' }
-    };
-
-    return (
-      <Chip 
-        label={statusConfig[status]?.label || status} 
-        color={statusConfig[status]?.color || 'default'} 
-        size="small"
-      />
-    );
-  };
 
   const handleNewScrap = () => {
     // Implement new scrap item functionality
@@ -93,16 +67,11 @@ const Scrap = () => {
     setCurrentPage(1);
   };
 
-  const handleFilterChange = (event) => {
-    setFilter(event.target.value);
-    setCurrentPage(1);
-  };
 
   const filteredItems = scrapItems.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          item.id.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filter === 'all' || item.status === filter;
-    return matchesSearch && matchesFilter;
+    return matchesSearch;
   });
 
   // Pagination logic
@@ -134,7 +103,7 @@ const Scrap = () => {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box>
           <Typography variant="h4" component="h1" gutterBottom>
-            Scrap Items
+            Scrap Bucket
           </Typography>
           <Typography variant="subtitle1" color="text.secondary">
             Manage your scrap inventory and transactions
@@ -167,22 +136,6 @@ const Scrap = () => {
           }}
           sx={{ flex: 1, maxWidth: 400 }}
         />
-        <Select
-          value={filter}
-          onChange={handleFilterChange}
-          size="small"
-          sx={{ minWidth: 150 }}
-          startAdornment={
-            <InputAdornment position="start">
-              <FilterAltIcon />
-            </InputAdornment>
-          }
-        >
-          <MenuItem value="all">All Status</MenuItem>
-          <MenuItem value="IN_STOCK">In Stock</MenuItem>
-          <MenuItem value="SOLD">Sold</MenuItem>
-          <MenuItem value="PROCESSING">Processing</MenuItem>
-        </Select>
       </Box>
 
       {/* Scrap Items Table */}
@@ -193,11 +146,8 @@ const Scrap = () => {
               <TableCell>ID</TableCell>
               <TableCell>Item Name</TableCell>
               <TableCell>Category</TableCell>
-              <TableCell>Purity</TableCell>
-              <TableCell>Weight</TableCell>
               <TableCell>Price</TableCell>
               <TableCell>Date Added</TableCell>
-              <TableCell>Status</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -208,11 +158,8 @@ const Scrap = () => {
                   <TableCell>{item.id}</TableCell>
                   <TableCell>{item.name}</TableCell>
                   <TableCell>{item.category}</TableCell>
-                  <TableCell>{item.purity}</TableCell>
-                  <TableCell>{item.weight}</TableCell>
                   <TableCell>{formatCurrency(item.price)}</TableCell>
                   <TableCell>{formatDate(item.dateAdded)}</TableCell>
-                  <TableCell>{getStatusChip(item.status)}</TableCell>
                   <TableCell>
                     <IconButton size="small" color="primary" title="Edit">
                       <EditIcon fontSize="small" />
@@ -227,7 +174,7 @@ const Scrap = () => {
               <TableRow>
                 <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                   <Typography color="textSecondary">
-                    {searchTerm || filter !== 'all' 
+                    {searchTerm  !== 'all' 
                       ? 'No scrap items match your search criteria.' 
                       : 'No scrap items found. Click "Add Scrap Item" to get started.'}
                   </Typography>

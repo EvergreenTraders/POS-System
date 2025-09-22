@@ -18,7 +18,12 @@ import {
   InputAdornment,
   Grid,
   Tooltip,
-  CircularProgress
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle
 } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { jsPDF } from 'jspdf';
@@ -191,6 +196,36 @@ function Jewelry() {
   const [serialQuery, setSerialQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [jewelryItems, setJewelryItems] = useState([]);
+  const [scrapDialogOpen, setScrapDialogOpen] = useState(false);
+  const [itemToScrap, setItemToScrap] = useState(null);
+
+  const handleMoveToScrap = async () => {
+    if (!itemToScrap) return;
+    
+    try {
+      await axios.patch(`${API_BASE_URL}/jewelry/${itemToScrap.item_id}`, {
+        status: 'SCRAP',
+        inventory_status: 'SCRAP'
+      });
+      
+      // Update the item in the local state
+      setJewelryItems(prevItems => 
+        prevItems.map(item => 
+          item.item_id === itemToScrap.item_id 
+            ? { ...item, status: 'SCRAP', inventory_status: 'SCRAP' }
+            : item
+        )
+      );
+      
+      enqueueSnackbar('Item moved to scrap successfully', { variant: 'success' });
+    } catch (error) {
+      console.error('Error moving item to scrap:', error);
+      enqueueSnackbar('Failed to move item to scrap', { variant: 'error' });
+    } finally {
+      setScrapDialogOpen(false);
+      setItemToScrap(null);
+    }
+  };
 
   const handleEditClick = async (item) => {
     try {
@@ -415,17 +450,54 @@ function Jewelry() {
                       <TableCell>{item.status}</TableCell>
                       <TableCell>{new Date(item.created_at).toLocaleDateString()}</TableCell>
                       <TableCell>
-                        <Button 
-                          variant="contained" 
-                          color="primary"
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation(); // Prevent row selection
-                            handleEditClick(item);
-                          }}
-                        >
-                          Edit
-                        </Button>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Button 
+                            variant="contained" 
+                            color="primary"
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditClick(item);
+                            }}
+                            sx={{
+                              minWidth: '60px',
+                              height: '28px',
+                              fontSize: '0.75rem',
+                              padding: '4px 8px',
+                              '& .MuiButton-label': {
+                                lineHeight: 1.2
+                              }
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          {item.status !== 'SCRAP' && (
+                            <Button 
+                              variant="outlined" 
+                              color="error"
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setItemToScrap(item);
+                                setScrapDialogOpen(true);
+                              }}
+                              sx={{
+                                minWidth: '85px',
+                                height: '28px',
+                                fontSize: '0.7rem',
+                                padding: '4px 6px',
+                                '& .MuiButton-label': {
+                                  lineHeight: 1.1,
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis'
+                                }
+                              }}
+                            >
+                              To Scrap
+                            </Button>
+                          )}
+                        </Box>
                       </TableCell>
                     </TableRow>
                   ))
@@ -541,6 +613,37 @@ function Jewelry() {
           )}
         </Grid>
       </Grid>
+
+      {/* Move to Scrap Confirmation Dialog */}
+      <Dialog
+        open={scrapDialogOpen}
+        onClose={() => setScrapDialogOpen(false)}
+        aria-labelledby="scrap-dialog-title"
+        aria-describedby="scrap-dialog-description"
+      >
+        <DialogTitle id="scrap-dialog-title">
+          Move to Scrap
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText id="scrap-dialog-description">
+            Are you sure you want to move item <strong>{itemToScrap?.item_id}</strong> to scrap?
+            This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setScrapDialogOpen(false)} color="primary">
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleMoveToScrap} 
+            color="error"
+            variant="contained"
+            autoFocus
+          >
+            Move to Scrap
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

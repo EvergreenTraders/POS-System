@@ -122,7 +122,7 @@ function Sidebar() {
             <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
               <ScrapIcon />
             </ListItemIcon>
-            {isOpen && <ListItemText primary="Scrap Items" />}
+            {isOpen && <ListItemText primary="Scrap Bucket" />}
           </StyledListItem>
         </StyledLink>
 
