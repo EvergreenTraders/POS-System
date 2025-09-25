@@ -10,8 +10,8 @@ import Sidebar from './components/Sidebar';
 import Login from './components/Login';
 import Dashboard from './pages/Dashboard';
 import Home from './pages/Home';
-import Products from './pages/Products';
-import Orders from './pages/Orders';
+import Scrap from './pages/Scrap';
+import Transactions from './pages/Transactions';
 import Jewelry from './pages/Jewelry';
 import CoinsBullions from './pages/CoinsBullions';
 import SystemConfig from './pages/SystemConfig';
@@ -164,21 +164,21 @@ function App() {
                 }
               />
               <Route
-                path="/products"
+                path="/scrap"
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <Products />
+                      <Scrap />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
               />
               <Route
-                path="/orders"
+                path="/transactions"
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <Orders />
+                      <Transactions />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
@@ -268,7 +268,7 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <Orders />
+                      <Transactions />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

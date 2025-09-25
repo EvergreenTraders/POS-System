@@ -121,13 +121,11 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-
--- =============================================
 -- 4. Create the trigger
 -- =============================================
 DROP TRIGGER IF EXISTS trg_jewelry_changes ON jewelry;
 CREATE TRIGGER trg_jewelry_changes
-AFTER INSERT OR UPDATE ON jewelry
+AFTER UPDATE ON jewelry
 FOR EACH ROW
 EXECUTE FUNCTION track_jewelry_changes();
 
