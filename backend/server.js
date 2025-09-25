@@ -2451,25 +2451,183 @@ app.get('/api/reports/customers/export', async (req, res) => {
   }
 });
 
+// Get transaction items for a specific transaction
+app.get('/api/transactions/:transaction_id/items', async (req, res) => {
+  try {
+    const { transaction_id } = req.params;
+    console.log('Transaction ID:', transaction_id);
+    
+    // First, get all transaction items
+    const query = `
+      WITH item_list AS (
+        SELECT 
+          ti.id,
+          ti.transaction_id,
+          ti.item_id as transaction_item_id,
+          ti.item_price,
+          ti.created_at,
+          ti.updated_at,
+          tt.type as transaction_type,
+          j.item_id as jewelry_item_id,
+          j.long_desc,
+          j.short_desc,
+          j.category,
+          j.metal_weight,
+          j.precious_metal_type,
+          j.non_precious_metal_type,
+          j.metal_purity,
+          j.purity_value,
+          j.jewelry_color,
+          j.metal_spot_price,
+          j.est_metal_value,
+          j.images,
+          j.status as item_status,
+          j.primary_gem_type,
+          j.primary_gem_category,
+          j.primary_gem_size,
+          j.primary_gem_weight,
+          j.primary_gem_quantity,
+          j.primary_gem_shape,
+          j.primary_gem_color,
+          j.primary_gem_exact_color,
+          j.primary_gem_clarity,
+          j.primary_gem_cut,
+          j.primary_gem_lab_grown,
+          j.primary_gem_authentic,
+          j.primary_gem_value,
+          EXISTS (
+            SELECT * FROM jewelry_secondary_gems jsg 
+            WHERE jsg.item_id = ti.item_id
+          ) as has_secondary_gems
+        FROM transaction_items ti
+        JOIN transaction_type tt ON ti.transaction_type_id = tt.id
+        LEFT JOIN jewelry j ON ti.item_id = j.item_id
+        WHERE ti.transaction_id = $1
+      )
+      SELECT 
+        il.*,
+        (
+          SELECT COALESCE(
+            json_agg(jsg.*) FILTER (WHERE jsg.item_id IS NOT NULL),
+            '[]'::json
+          )
+          FROM jewelry_secondary_gems jsg 
+          WHERE jsg.item_id = il.transaction_item_id
+        ) as secondary_gems
+      FROM item_list il
+      ORDER BY il.created_at ASC
+    `;
+    
+    const result = await pool.query(query, [transaction_id]);
+    
+    // Transform the result to a more usable format
+    const items = result.rows.map(row => {
+      const primaryGem = (() => {
+        if (!row.primary_gem_category) return null;
+        
+        const baseProps = {
+          shape: row.primary_gem_shape,
+          color: row.primary_gem_color,
+          weight: row.primary_gem_weight,
+          quantity: row.primary_gem_quantity,
+          value: row.primary_gem_value
+        };
+
+        if (row.primary_gem_category === 'diamond') {
+          return {
+            ...baseProps,
+            size: row.primary_gem_size,
+            exact_color: row.primary_gem_exact_color,
+            clarity: row.primary_gem_clarity,
+            cut: row.primary_gem_cut,
+            lab_grown: row.primary_gem_lab_grown,
+          };
+        }
+        
+        if (row.primary_gem_category === 'stone') {
+          return {
+            ...baseProps,
+            type: row.primary_gem_type,
+            authentic: row.primary_gem_authentic
+          };
+        }
+        
+        return baseProps;
+      })();
+
+      // Process secondary gems if they exist
+      const secondaryGems = row.secondary_gems ? row.secondary_gems.map(gem => ({
+        shape: gem.secondary_gem_shape,
+        color: gem.secondary_gem_color,
+        weight: gem.secondary_gem_weight,
+        quantity: gem.secondary_gem_quantity,
+        value: gem.secondary_gem_value,
+        ...(gem.secondary_gem_category === 'diamond' ? {
+          size: gem.secondary_gem_size,
+          exact_color: gem.secondary_gem_exact_color,
+          clarity: gem.secondary_gem_clarity,
+          cut: gem.secondary_gem_cut,
+          lab_grown: gem.secondary_gem_lab_grown
+        } : {
+          type: gem.secondary_gem_type,
+          authentic: gem.secondary_gem_authentic
+        })
+      })) : [];
+
+      return {
+        id: row.id,
+        transaction_id: row.transaction_id,
+        item_id: row.transaction_item_id,
+        item_price: row.item_price,
+        notes: row.notes || '',
+        transaction_type: row.transaction_type,
+        item_details: {
+          item_id: row.jewelry_item_id,
+          description: row.long_desc || row.short_desc || '',
+          category: row.category,
+        metal: {
+          precious_metal_type: row.precious_metal_type,
+          non_precious_metal_type: row.non_precious_metal_type,
+          purity: row.metal_purity,
+          purity_value: row.purity_value,
+          weight: row.metal_weight,
+          color: row.jewelry_color,
+          spot_price: row.metal_spot_price,
+          value: row.est_metal_value
+        },
+        primary_gem: primaryGem,
+        secondary_gems: secondaryGems,
+        status: row.item_status,
+        images: row.images || []
+      },
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    }});
+    
+    res.json(items);
+  } catch (err) {
+    console.error('Error fetching transaction items:', err);
+    res.status(500).json({ error: 'Failed to fetch transaction items' });
+  }
+});
+
 // Transaction routes
 app.get('/api/transactions', async (req, res) => {
   try {
     const query = `
       SELECT 
         t.*,
-        tt.type as transaction_type_name,
-        c.first_name as customer_first_name,
-        c.last_name as customer_last_name,
-        e.first_name as employee_first_name,
-        e.last_name as employee_last_name,
-        p.payment_id as payment_reference,
-        TO_CHAR(t.created_at, 'YYYY-MM-DD') as created_date
+        tt.type as transaction_type,
+        c.first_name || ' ' || c.last_name as customer_name,
+        e.first_name || ' ' || e.last_name as employee_name,
+        TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
+        (SELECT COUNT(*) FROM transaction_items ti WHERE ti.transaction_id = t.transaction_id) as item_count
       FROM transactions t
-      LEFT JOIN transaction_type tt ON t.transaction_type_id = tt.id
+      LEFT JOIN transaction_items ti ON t.transaction_id = ti.transaction_id
+      LEFT JOIN transaction_type tt ON ti.transaction_type_id = tt.id
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN employees e ON t.employee_id = e.employee_id
-      LEFT JOIN payments p ON t.payment_id = p.id
-      GROUP BY t.id, tt.type, c.first_name, c.last_name, e.first_name, e.last_name, p.payment_id
+      GROUP BY t.id, tt.type, c.first_name, c.last_name, e.first_name, e.last_name
       ORDER BY t.created_at DESC
     `;
     
