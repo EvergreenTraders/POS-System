@@ -2455,7 +2455,6 @@ app.get('/api/reports/customers/export', async (req, res) => {
 app.get('/api/transactions/:transaction_id/items', async (req, res) => {
   try {
     const { transaction_id } = req.params;
-    console.log('Transaction ID:', transaction_id);
     
     // First, get all transaction items
     const query = `
@@ -2614,22 +2613,35 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
 // Transaction routes
 app.get('/api/transactions', async (req, res) => {
   try {
+    // First, get the grouped transaction data with item counts
     const query = `
+      WITH transaction_items_count AS (
+        SELECT 
+          ti.transaction_id,
+          COUNT(*) as item_count
+        FROM transaction_items ti
+        GROUP BY ti.transaction_id
+      )
       SELECT 
-        t.*,
-        tt.type as transaction_type,
+        t.transaction_id as id,
+        t.transaction_id,
         c.first_name || ' ' || c.last_name as customer_name,
         e.first_name || ' ' || e.last_name as employee_name,
-        TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
-        (SELECT COUNT(*) FROM transaction_items ti WHERE ti.transaction_id = t.transaction_id) as item_count
+        t.total_amount,
+        t.transaction_status,
+        t.created_at,
+        t.updated_at,
+        TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as formatted_created_at,
+        COALESCE(tic.item_count, 0) as item_count
       FROM transactions t
-      LEFT JOIN transaction_items ti ON t.transaction_id = ti.transaction_id
-      LEFT JOIN transaction_type tt ON ti.transaction_type_id = tt.id
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN employees e ON t.employee_id = e.employee_id
-      GROUP BY t.id, tt.type, c.first_name, c.last_name, e.first_name, e.last_name
-      ORDER BY t.created_at DESC
-    `;
+      LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
+      GROUP BY 
+        t.transaction_id, c.first_name, c.last_name, e.first_name, e.last_name, 
+        t.total_amount, t.transaction_status, t.created_at, 
+        t.updated_at, tic.item_count
+      ORDER BY t.created_at DESC`;
     
     const result = await pool.query(query);
     res.json(result.rows);

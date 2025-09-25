@@ -256,7 +256,6 @@ function Transactions() {
               <TableCell>Time</TableCell>
               <TableCell>Customer</TableCell>
               <TableCell>Employee</TableCell>
-              <TableCell>Type</TableCell>
               <TableCell>Amount</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Void</TableCell>
@@ -300,7 +299,6 @@ function Transactions() {
                   <TableCell>{formatTransactionTime(txn.created_at)}</TableCell>
                   <TableCell>{txn.customer_name || 'N/A'}</TableCell>
                   <TableCell>{txn.employee_name || 'N/A'}</TableCell>
-                  <TableCell>{txn.transaction_type || 'N/A'}</TableCell>
                   <TableCell>${parseFloat(txn.total_amount || 0).toFixed(2)}</TableCell>
                   <TableCell>
                     <span style={{
@@ -353,10 +351,6 @@ function Transactions() {
                       <TableCell>{selectedTransaction.employee_name || 'N/A'}</TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell variant="head">Type</TableCell>
-                      <TableCell>{selectedTransaction.transaction_type || 'N/A'}</TableCell>
-                    </TableRow>
-                    <TableRow>
                       <TableCell variant="head">Amount</TableCell>
                       <TableCell>${parseFloat(selectedTransaction.total_amount || 0).toFixed(2)}</TableCell>
                     </TableRow>
@@ -385,20 +379,19 @@ function Transactions() {
                     ) : transactionItems.length > 0 ? (
                       <>
                         <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
-                          <TableCell>Item</TableCell>
-                          <TableCell align="right">Price</TableCell>
+                          <TableCell><strong>Description</strong></TableCell>
+                          <TableCell><strong>Transaction Type</strong></TableCell>
+                          <TableCell align="right"><strong>Price</strong></TableCell>
                         </TableRow>
                         {transactionItems.map((item, index) => (
                           <TableRow key={index}>
                             <TableCell>
                               <Box>
-                                <div><strong>{item.item_details.description || `Item ${index + 1}`}</strong></div>
+                                <div>{item.item_details.description || `Item ${index + 1}`}</div>
                                 {item.description && <div style={{ fontSize: '0.8em', color: '#666' }}>{item.description}</div>}
-                                {item.quantity > 1 && (
-                                  <div style={{ fontSize: '0.8em' }}>Qty: {item.quantity}</div>
-                                )}
                               </Box>
                             </TableCell>
+                            <TableCell>{item.transaction_type}</TableCell>
                             <TableCell align="right">
                               ${parseFloat(item.item_price || 0).toFixed(2)}
                               {item.quantity > 1 && (
@@ -409,10 +402,12 @@ function Transactions() {
                             </TableCell>
                           </TableRow>
                         ))}
-                        <TableRow>
-                          <TableCell align="right"><strong>Subtotal:</strong></TableCell>
+                        <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f9f9f9' }}>
+                          <TableCell colSpan={2} align="right"><strong>Subtotal:</strong></TableCell>
                           <TableCell align="right">
-                            ${transactionItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0) * (item.quantity || 1)), 0).toFixed(2)}
+                            <strong>
+                              ${transactionItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0) * (item.quantity || 1)), 0).toFixed(2)}
+                            </strong>
                           </TableCell>
                         </TableRow>
                       </>
