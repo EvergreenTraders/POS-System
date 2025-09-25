@@ -2584,6 +2584,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
           item_id: row.jewelry_item_id,
           description: row.long_desc || row.short_desc || '',
           category: row.category,
+          images: row.images || [],
         metal: {
           precious_metal_type: row.precious_metal_type,
           non_precious_metal_type: row.non_precious_metal_type,

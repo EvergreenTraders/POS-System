@@ -23,10 +23,11 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { Visibility as ViewIcon } from '@mui/icons-material';
+import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { Avatar } from '@mui/material';
 import config from '../config';
 
 function Transactions() {
@@ -379,6 +380,7 @@ function Transactions() {
                     ) : transactionItems.length > 0 ? (
                       <>
                         <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+                          <TableCell><strong>Image</strong></TableCell>
                           <TableCell><strong>Description</strong></TableCell>
                           <TableCell><strong>Transaction Type</strong></TableCell>
                           <TableCell align="right"><strong>Price</strong></TableCell>
@@ -386,24 +388,44 @@ function Transactions() {
                         {transactionItems.map((item, index) => (
                           <TableRow key={index}>
                             <TableCell>
-                              <Box>
-                                <div>{item.item_details.description || `Item ${index + 1}`}</div>
-                                {item.description && <div style={{ fontSize: '0.8em', color: '#666' }}>{item.description}</div>}
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                {item.item_details?.images?.[0] ? (
+                                  <Avatar 
+                                    src={item.item_details.images[0].url} 
+                                    alt="Item" 
+                                    variant="rounded"
+                                    sx={{ width: 50, height: 50, objectFit: 'cover' }}
+                                  />
+                                ) : (
+                                  <Avatar 
+                                    variant="rounded"
+                                    sx={{ width: 50, height: 50, bgcolor: 'grey.300' }}
+                                  >
+                                    <AttachMoneyIcon />
+                                  </Avatar>
+                                )}
+                               
                               </Box>
+                            </TableCell>
+                            <TableCell>
+                                <Box>
+                                  <div>{item.item_details?.description || `Item ${index + 1}`}</div>
+                                  {item.description && <div style={{ fontSize: '0.8em', color: '#666' }}>{item.description}</div>}
+                                </Box>
                             </TableCell>
                             <TableCell>{item.transaction_type}</TableCell>
                             <TableCell align="right">
-                              ${parseFloat(item.item_price || 0).toFixed(2)}
-                              {item.quantity > 1 && (
-                                <div style={{ fontSize: '0.8em', color: '#666' }}>
-                                  (${parseFloat(item.item_price || 0).toFixed(2)} each)
-                                </div>
-                              )}
+                                  ${parseFloat(item.item_price || 0).toFixed(2)}
+                                  {item.quantity > 1 && (
+                                    <div style={{ fontSize: '0.8em', color: '#666' }}>
+                                      {item.quantity} @ ${(parseFloat(item.item_price || 0) / item.quantity).toFixed(2)} each
+                                    </div>
+                                  )}
                             </TableCell>
                           </TableRow>
                         ))}
                         <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f9f9f9' }}>
-                          <TableCell colSpan={2} align="right"><strong>Subtotal:</strong></TableCell>
+                          <TableCell colSpan={3} align="right"><strong>Subtotal:</strong></TableCell>
                           <TableCell align="right">
                             <strong>
                               ${transactionItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0) * (item.quantity || 1)), 0).toFixed(2)}
