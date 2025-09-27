@@ -1,6 +1,4 @@
--- Drop the change_notes column if it exists
-ALTER TABLE jewelry 
-DROP COLUMN IF EXISTS change_notes;
+drop table if exists inventory_status;
 
 -- Create inventory_status table
 CREATE TABLE IF NOT EXISTS inventory_status (
@@ -17,7 +15,6 @@ CREATE TABLE IF NOT EXISTS inventory_status (
 INSERT INTO inventory_status (status_code, status_name, description) VALUES
     ('HOLD', 'On Hold', 'Item is on hold and not available for sale'),
     ('IN_PROCESS', 'In Process', 'Item is being processed or worked on'),
-    ('SCRAP', 'Scrap', 'Item is marked for scrap or recycling'),
     ('RESERVED', 'Reserved', 'Item is reserved for a customer'),
     ('SOLD', 'Sold', 'Item has been sold')
 ON CONFLICT (status_code) DO NOTHING;

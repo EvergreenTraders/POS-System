@@ -1085,7 +1085,7 @@ function Checkout() {
                           <TableCell>
                             {item.images?.[0] ? (
                               <Avatar 
-                                src={item.images[0]} 
+                                src={item.images[0].url} 
                                 alt="Item" 
                                 variant="rounded"
                                 sx={{ width: 50, height: 50, objectFit: 'cover' }}
