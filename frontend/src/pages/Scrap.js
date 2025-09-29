@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Button,
@@ -24,7 +24,8 @@ import {
   Alert,
   TextField,
   InputAdornment,
-  Chip
+  Chip,
+  CircularProgress
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search';
@@ -33,8 +34,12 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import axios from 'axios';
+import config from '../config';
+import { useAuth } from '../context/AuthContext';
 
 const Scrap = () => {
+  const API_BASE_URL = config.apiUrl;
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
@@ -43,31 +48,31 @@ const Scrap = () => {
   const [bucketType, setBucketType] = useState('general');
   const [description, setDescription] = useState('');
   const [errors, setErrors] = useState({});
+  const { currentUser } = useAuth();
 
-  // Sample data - replace with actual data from your backend
-  const scrapItems = [
-    {
-      id: 'SCRP-001',
-      name: 'Gold Scrap 14K',
-      category: 'Gold',
-      price: 875.50,
-      dateAdded: '2025-09-15'
-    },
-    {
-      id: 'SCRP-002',
-      name: 'Silver Scrap',
-      category: 'Silver',
-      price: 89.99,
-      dateAdded: '2025-09-10'
-    },
-    {
-      id: 'SCRP-003',
-      name: 'Broken Gold Chain',
-      category: 'Gold',
-      price: 525.75,
-      dateAdded: '2025-09-05'
+  const [scrapBuckets, setScrapBuckets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Fetch scrap buckets from API
+  const fetchScrapBuckets = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/scrap/buckets`);
+      setScrapBuckets(response.data);
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching scrap buckets:', err);
+      setError('Failed to load scrap buckets. Please try again later.');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
+
+  // Fetch buckets on component mount
+  useEffect(() => {
+    fetchScrapBuckets();
+  }, []);
 
   const handleNewScrap = () => {
     setOpenCreateDialog(true);
@@ -91,18 +96,44 @@ const Scrap = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleCreateBucket = () => {
+  const handleCreateBucket = async () => {
     if (!validateForm()) return;
     
-    // Here you would typically make an API call to create the scrap bucket
-    console.log('Creating scrap bucket:', {
-      name: bucketName,
-      type: bucketType,
-      description: description
-    });
-    
-    // Reset form and close dialog
-    handleCloseDialog();
+    try {
+      const response = await axios.post(`${API_BASE_URL}/scrap/buckets`, {
+        bucket_name: bucketName,
+        notes: description,
+        created_by: currentUser?.employee_id || 1,
+        status: 'ACTIVE'
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      // Reset form and close dialog
+      handleCloseDialog();
+      
+    } catch (error) {
+      console.error('Error creating scrap bucket:', error);
+      
+      // Handle different types of errors
+      let errorMessage = 'Failed to create scrap bucket. Please try again.';
+      
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        errorMessage = error.response.data?.error || errorMessage;
+      } else if (error.request) {
+        // The request was made but no response was received
+        errorMessage = 'No response from server. Please check your connection.';
+      }
+      
+      setErrors(prev => ({
+        ...prev,
+        form: errorMessage
+      }));
+    }
   };
 
   const handleSearch = (event) => {
@@ -111,15 +142,18 @@ const Scrap = () => {
   };
 
 
-  const filteredItems = scrapItems.filter(item => {
-    const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         item.id.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSearch;
+  const filteredBuckets = scrapBuckets.filter(bucket => {
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      bucket.bucket_name.toLowerCase().includes(searchLower) ||
+      (bucket.notes && bucket.notes.toLowerCase().includes(searchLower)) ||
+      `SCRP-${bucket.bucket_id}`.toLowerCase().includes(searchLower)
+    );
   });
 
   // Pagination logic
-  const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
-  const paginatedItems = filteredItems.slice(
+  const totalPages = Math.ceil(filteredBuckets.length / itemsPerPage);
+  const paginatedBuckets = filteredBuckets.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
@@ -140,14 +174,140 @@ const Scrap = () => {
     });
   };
 
+  // Handle refresh after creating a bucket
+  const handleBucketCreated = () => {
+    fetchScrapBuckets();
+  };
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+      
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4" component="h1" gutterBottom>
+          Scrap Buckets
+        </Typography>
+        <Button
+          variant="contained"
+          color="primary"
+          startIcon={<AddIcon />}
+          onClick={handleNewScrap}
+        >
+          New Bucket
+        </Button>
+      </Box>
+
+      {/* Search */}
+      <Box sx={{ mb: 3 }}>
+        <TextField
+          fullWidth
+          variant="outlined"
+          placeholder="Search buckets..."
+          value={searchTerm}
+          onChange={handleSearch}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon />
+              </InputAdornment>
+            ),
+          }}
+        />
+      </Box>
+      
+      {loading ? (
+        <Box display="flex" justifyContent="center" my={4}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <>
+          {/* Scrap Buckets List */}
+          <TableContainer component={Paper} sx={{ mt: 3 }}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Bucket ID</TableCell>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Items</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Created</TableCell>
+                  <TableCell>Notes</TableCell>
+                  <TableCell>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {paginatedBuckets.length > 0 ? (
+                  paginatedBuckets.map((bucket) => (
+                    <TableRow key={bucket.bucket_id}>
+                      <TableCell>SCRP-{bucket.bucket_id}</TableCell>
+                      <TableCell>{bucket.bucket_name}</TableCell>
+                      <TableCell>{bucket.item_count || 0}</TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={bucket.status || 'ACTIVE'} 
+                          color={bucket.status === 'ACTIVE' ? 'success' : 'default'}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>{new Date(bucket.created_at).toLocaleDateString()}</TableCell>
+                      <TableCell sx={{ maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {bucket.notes || 'N/A'}
+                      </TableCell>
+                      <TableCell>
+                        <IconButton size="small" onClick={() => { /* Handle edit */ }}>
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" onClick={() => { /* Handle delete */ }}>
+                          <DeleteIcon fontSize="small" color="error" />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                      {searchTerm ? 'No matching buckets found' : 'No scrap buckets available'}
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <Box display="flex" justifyContent="flex-end" mt={2}>
+              <IconButton 
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeftIcon />
+              </IconButton>
+              <Box display="flex" alignItems="center" mx={1}>
+                Page {currentPage} of {totalPages}
+              </Box>
+              <IconButton
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+              >
+                <ChevronRightIcon />
+              </IconButton>
+            </Box>
+          )}
+        </>
+      )}
+      
       {/* Create Scrap Bucket Dialog */}
-      <Dialog open={openCreateDialog} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
+      <Dialog open={openCreateDialog} onClose={handleCloseDialog}>
         <DialogTitle>Create New Scrap Bucket</DialogTitle>
         <DialogContent>
-          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <TextField
+          <Box component="form" onSubmit={handleCreateBucket} sx={{ mt: 2 }}>
+          <TextField
               autoFocus
               margin="dense"
               label="Bucket Name"
@@ -159,7 +319,7 @@ const Scrap = () => {
               error={!!errors.bucketName}
               helperText={errors.bucketName || 'A unique name for your scrap bucket'}
             />
-            
+
             <FormControl fullWidth error={!!errors.bucketType}>
               <InputLabel id="bucket-type-label">Bucket Type</InputLabel>
               <Select
@@ -175,7 +335,7 @@ const Scrap = () => {
               </Select>
               <FormHelperText>{errors.bucketType || 'Select the type of scrap for this bucket'}</FormHelperText>
             </FormControl>
-            
+
             <TextField
               margin="dense"
               label="Description"
@@ -191,124 +351,13 @@ const Scrap = () => {
             />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ p: 2, pt: 0 }}>
+        <DialogActions>
           <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button 
-            onClick={handleCreateBucket} 
-            variant="contained"
-            color="primary"
-          >
-            Create Bucket
+          <Button onClick={handleCreateBucket} variant="contained" color="primary">
+            Create
           </Button>
         </DialogActions>
       </Dialog>
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Box>
-          <Typography variant="h4" component="h1" gutterBottom>
-            Scrap Bucket
-          </Typography>
-          <Typography variant="subtitle1" color="text.secondary">
-            Manage your scrap inventory and transactions
-          </Typography>
-        </Box>
-        <TextField
-          placeholder="Search scrap..."
-          variant="outlined"
-          size="small"
-          value={searchTerm}
-          onChange={handleSearch}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            ),
-          }}
-          sx={{ width: 300 }}
-        />
-      </Box>
-
-      {/* Actions */}
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3 }}>
-        <Button
-          variant="contained"
-          color="primary"
-          startIcon={<AddIcon />}
-          onClick={handleNewScrap}
-        >
-          Create Scrap Bucket
-        </Button>
-      </Box>
-
-      {/* Scrap Items Table */}
-      <TableContainer component={Paper} elevation={2}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>ID</TableCell>
-              <TableCell>Item Name</TableCell>
-              <TableCell>Category</TableCell>
-              <TableCell>Price</TableCell>
-              <TableCell>Date Added</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {paginatedItems.length > 0 ? (
-              paginatedItems.map((item) => (
-                <TableRow key={item.id} hover>
-                  <TableCell>{item.id}</TableCell>
-                  <TableCell>{item.name}</TableCell>
-                  <TableCell>{item.category}</TableCell>
-                  <TableCell>{formatCurrency(item.price)}</TableCell>
-                  <TableCell>{formatDate(item.dateAdded)}</TableCell>
-                  <TableCell>
-                    <IconButton size="small" color="primary" title="Edit">
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton size="small" color="error" title="Delete">
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
-                  <Typography color="textSecondary">
-                    {searchTerm  !== 'all' 
-                      ? 'No scrap items match your search criteria.' 
-                      : 'No scrap items found. Click "Add Scrap Item" to get started.'}
-                  </Typography>
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
-
-      {/* Pagination */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-        <Typography variant="body2" color="text.secondary">
-          Showing {paginatedItems.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} to{' '}
-          {Math.min(currentPage * itemsPerPage, filteredItems.length)} of {filteredItems.length} entries
-        </Typography>
-        <Box>
-          <IconButton 
-            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-          >
-            <ChevronLeftIcon />
-          </IconButton>
-          <IconButton 
-            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages || totalPages === 0}
-          >
-            <ChevronRightIcon />
-          </IconButton>
-        </Box>
-      </Box>
     </Container>
   );
 };

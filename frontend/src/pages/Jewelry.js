@@ -23,7 +23,8 @@ import {
   DialogActions,
   DialogContent,
   DialogContentText,
-  DialogTitle
+  DialogTitle,
+  MenuItem
 } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -200,15 +201,46 @@ function Jewelry() {
   const [jewelryItems, setJewelryItems] = useState([]);
   const [scrapDialogOpen, setScrapDialogOpen] = useState(false);
   const [itemToScrap, setItemToScrap] = useState(null);
+  const [scrapBuckets, setScrapBuckets] = useState([]);
+  const [selectedBucket, setSelectedBucket] = useState('');
+  const [loadingBuckets, setLoadingBuckets] = useState(false);
+
+  const fetchScrapBuckets = async () => {
+    try {
+      setLoadingBuckets(true);
+      const response = await axios.get(`${API_BASE_URL}/scrap/buckets`);
+      setScrapBuckets(response.data);
+      if (response.data.length > 0) {
+        setSelectedBucket(response.data[0].bucket_id);
+      }
+    } catch (error) {
+      console.error('Error fetching scrap buckets:', error);
+      enqueueSnackbar('Failed to load scrap buckets', { variant: 'error' });
+    } finally {
+      setLoadingBuckets(false);
+    }
+  };
 
   const handleMoveToScrap = async () => {
-    if (!itemToScrap) return;
+    if (!itemToScrap || !selectedBucket) {
+      enqueueSnackbar('Please select a scrap bucket', { variant: 'warning' });
+      return;
+    }
     
     try {
-      // Call the move-to-scrap endpoint
+      // Find the selected bucket by ID to get its name
+      const selectedBucketObj = scrapBuckets.find(bucket => bucket.bucket_id === selectedBucket);
+      if (!selectedBucketObj) {
+        throw new Error('Selected bucket not found');
+      }
+      
+      // Call the move-to-scrap endpoint with the selected bucket name
       const response = await axios.post(
         `${API_BASE_URL}/jewelry/${itemToScrap.item_id}/move-to-scrap`,
-        { moved_by: currentUser?.employee_id || 1 }
+        { 
+          moved_by: currentUser?.employee_id || 1,
+          bucket_id: selectedBucket
+        }
       );
       
       // Remove the item from the local state
@@ -264,9 +296,11 @@ function Jewelry() {
     try {
       setLoading(true);
       const response = await axios.get(`${API_BASE_URL}/jewelry`);
-      setJewelryItems(response.data);
-      if (response.data.length > 0) {
-        setSelectedItem(response.data[0]);
+      // Filter out items with status 'SCRAP'
+      const nonScrapItems = response.data.filter(item => item.status !== 'SCRAP');
+      setJewelryItems(nonScrapItems);
+      if (nonScrapItems.length > 0) {
+        setSelectedItem(nonScrapItems[0]);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -482,12 +516,14 @@ function Jewelry() {
                                 e.stopPropagation();
                                 setItemToScrap(item);
                                 setScrapDialogOpen(true);
+                                fetchScrapBuckets().catch((error) => {
+                                  console.error('Error fetching scrap buckets:', error);
+                                });
                               }}
                               sx={{
                                 minWidth: '85px',
                                 height: '28px',
                                 fontSize: '0.7rem',
-                                padding: '4px 6px',
                                 '& .MuiButton-label': {
                                   lineHeight: 1.1,
                                   whiteSpace: 'nowrap',
@@ -627,10 +663,33 @@ function Jewelry() {
           Move to Scrap
         </DialogTitle>
         <DialogContent>
-          <DialogContentText id="scrap-dialog-description">
+          <DialogContentText id="scrap-dialog-description" sx={{ mb: 2 }}>
             Are you sure you want to move item <strong>{itemToScrap?.item_id}</strong> to scrap?
             This action cannot be undone.
           </DialogContentText>
+          
+          {loadingBuckets ? (
+            <Box display="flex" justifyContent="center" my={2}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : (
+            <TextField
+              select
+              fullWidth
+              label="Select Scrap Bucket"
+              value={selectedBucket}
+              onChange={(e) => setSelectedBucket(e.target.value)}
+              variant="outlined"
+              margin="normal"
+              required
+            >
+              {scrapBuckets.map((bucket) => (
+                <MenuItem key={bucket.bucket_id} value={bucket.bucket_id}>
+                  {bucket.bucket_name} ({bucket.bucket_type})
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setScrapDialogOpen(false)} color="primary">

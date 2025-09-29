@@ -1222,28 +1222,78 @@ app.post('/api/jewelry/:id/move-to-scrap', async (req, res) => {
   try {
     const { id } = req.params;
     const { moved_by } = req.body; // ID of the employee performing the action
-    
     if (!moved_by) {
       return res.status(400).json({ error: 'Employee ID (moved_by) is required' });
     }
     
     // First, get the current item data for history
     const { rows: [currentItem] } = await pool.query('SELECT * FROM jewelry WHERE item_id = $1', [id]);
-    
     if (!currentItem) {
       return res.status(404).json({ error: 'Jewelry item not found' });
     }
     
-    // Move the item to scrap using the database function
-    await client.query('SELECT move_to_scrap($1, $2)', [id, moved_by]);
+    const { bucket_id } = req.body;
     
+    if (!bucket_id) {
+      return res.status(400).json({ error: 'Bucket ID is required' });
+    }
+       // 3. Add to item history
+    const currentStatusQuery = await client.query(
+      'SELECT status FROM jewelry WHERE item_id = $1',
+      [id]
+    );
+    const oldStatus = currentStatusQuery.rows[0]?.status || 'UNKNOWN';
+    
+    // Create the changed_fields JSON object
+    const changedFields = {
+      status: {
+        old: oldStatus,
+        new: 'SCRAP'
+      }
+    };
+    // Get the next version number
+    const versionResult = await client.query(
+      'SELECT COALESCE(MAX(version_number), 0) + 1 as next_version FROM jewelry_item_history WHERE item_id = $1',
+      [id]
+    );
+    const version_number = versionResult.rows[0].next_version;
+
+    // Insert the history record
+    await client.query(
+      `INSERT INTO jewelry_item_history (
+        item_id, 
+        version_number,
+        changed_by, 
+        action_type, 
+        changed_fields, 
+        change_notes
+      ) VALUES ($1, $2, $3, 'STATUS_CHANGE', $4, 'Moved to SCRAP')`,
+      [id, version_number, moved_by, changedFields]
+    );
+    // 1. Update the jewelry item status to SCRAP
+    const updateJewelryQuery = await client.query(
+      `UPDATE jewelry SET status = 'SCRAP', updated_at = CURRENT_TIMESTAMP WHERE item_id = $1 RETURNING *`,
+      [id]
+    );
+    // 2. Add item_id to the selected bucket's item_id array
+    await client.query(
+      `UPDATE scrap 
+       SET item_id = item_id || $1::jsonb,
+           updated_at = CURRENT_TIMESTAMP,
+           updated_by = $2::integer
+       WHERE bucket_id = $3::integer
+       AND NOT item_id @> $1::jsonb`, 
+      [JSON.stringify([id]), moved_by, bucket_id]
+    );
+    
+ 
     // Return success response
     res.json({ 
       success: true, 
       message: 'Item moved to scrap successfully',
       item: {
         item_id: id,
-        original_item_id: id,
+        bucket_id: bucket_id,
         moved_by: parseInt(moved_by),
         moved_at: new Date().toISOString()
       }
@@ -3035,6 +3085,173 @@ app.post('/api/jewelry_secondary_gems', authenticateToken, async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error saving jewelry secondary gem:', error);
     res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Scrap Bucket API Endpoints
+
+// GET all scrap buckets
+app.get('/api/scrap/buckets', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        bucket_id,
+        bucket_name,
+        jsonb_array_length(item_id) as item_count,
+        created_at,
+        updated_at,
+        notes,
+        status
+      FROM scrap
+      ORDER BY created_at DESC
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching scrap buckets:', err);
+    res.status(500).json({ error: 'Failed to fetch scrap buckets' });
+  }
+});
+
+// GET a single scrap bucket by ID
+app.get('/api/scrap/buckets/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = `
+      SELECT 
+        s.*,
+        jsonb_agg(
+          jsonb_build_object(
+            'item_id', j.item_id,
+            'description', j.description,
+            'metal_type', j.metal_type,
+            'purity', j.purity,
+            'weight', j.weight
+          )
+        ) as items
+      FROM scrap s
+      LEFT JOIN LATERAL (
+        SELECT * 
+        FROM jewelry j 
+        WHERE j.item_id = ANY(ARRAY(SELECT jsonb_array_elements_text(s.item_id)))
+      ) j ON true
+      WHERE s.bucket_id = $1
+      GROUP BY s.bucket_id
+    `;
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Scrap bucket not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching scrap bucket:', err);
+    res.status(500).json({ error: 'Failed to fetch scrap bucket' });
+  }
+});
+
+// CREATE a new scrap bucket
+app.post('/api/scrap/buckets', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { bucket_name, notes, created_by } = req.body;
+    console.log("details",req.body);
+    
+    if (!bucket_name) {
+      return res.status(400).json({ error: 'Bucket name is required' });
+    }
+    
+    await client.query('BEGIN');
+    
+    const query = `
+      INSERT INTO scrap (
+        bucket_name,
+        item_id,
+        created_by,
+        notes,
+        status
+      ) VALUES ($1, '[]'::jsonb, $2, $3, 'ACTIVE')
+      RETURNING *
+    `;
+    
+    const result = await client.query(query, [
+      bucket_name,
+      created_by || null,
+      notes || null
+    ]);
+    
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+    
+  } catch (err) {
+    await client.query('ROLLBACK');
+    
+    if (err.code === '23505') { // Unique violation
+      return res.status(409).json({ error: 'A bucket with this name already exists' });
+    }
+    
+    console.error('Error creating scrap bucket:', err);
+    res.status(500).json({ error: 'Failed to create scrap bucket' });
+  } finally {
+    client.release();
+  }
+});
+
+// UPDATE a scrap bucket
+app.put('/api/scrap/buckets/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { bucket_name, notes, status } = req.body;
+    
+    if (!bucket_name) {
+      return res.status(400).json({ error: 'Bucket name is required' });
+    }
+    
+    await client.query('BEGIN');
+    
+    // First check if the bucket exists
+    const checkQuery = 'SELECT 1 FROM scrap WHERE bucket_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Scrap bucket not found' });
+    }
+    
+    // Update the bucket
+    const updateQuery = `
+      UPDATE scrap
+      SET 
+        bucket_name = $1,
+        notes = $2,
+        status = $3,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE bucket_id = $4
+      RETURNING *
+    `;
+    
+    const result = await client.query(updateQuery, [
+      bucket_name,
+      notes || null,
+      status || 'ACTIVE',
+      id
+    ]);
+    
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+    
+  } catch (err) {
+    await client.query('ROLLBACK');
+    
+    if (err.code === '23505') { // Unique violation
+      return res.status(409).json({ error: 'A bucket with this name already exists' });
+    }
+    
+    console.error('Error updating scrap bucket:', err);
+    res.status(500).json({ error: 'Failed to update scrap bucket' });
   } finally {
     client.release();
   }
