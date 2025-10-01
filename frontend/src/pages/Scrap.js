@@ -25,7 +25,10 @@ import {
   TextField,
   InputAdornment,
   Chip,
-  CircularProgress
+  CircularProgress,
+  List,
+  ListItem,
+  ListItemText
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search';
@@ -45,7 +48,11 @@ const Scrap = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [openCreateDialog, setOpenCreateDialog] = useState(false);
   const [bucketName, setBucketName] = useState('');
-  const [bucketType, setBucketType] = useState('general');
+  const [selectedBucket, setSelectedBucket] = useState(null);
+  const [bucketItems, setBucketItems] = useState([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+
+  const [bucketType, setBucketType] = useState('gold');
   const [description, setDescription] = useState('');
   const [errors, setErrors] = useState({});
   const { currentUser } = useAuth();
@@ -61,18 +68,92 @@ const Scrap = () => {
       const response = await axios.get(`${API_BASE_URL}/scrap/buckets`);
       setScrapBuckets(response.data);
       setError(null);
+      return response.data; // Return the fetched data for chaining
     } catch (err) {
       console.error('Error fetching scrap buckets:', err);
       setError('Failed to load scrap buckets. Please try again later.');
+      return [];
     } finally {
       setLoading(false);
     }
   };
 
+  // Fetch items for a specific bucket
+  const fetchBucketItems = async (bucket) => {
+    try {
+      setItemsLoading(true);      
+      // If bucket has item_ids array, fetch the actual items
+      if (bucket.item_id && bucket.item_id.length > 0) {
+        // Fetch each item individually
+        const itemPromises = bucket.item_id.map(id => 
+          axios.get(`${API_BASE_URL}/jewelry/${id}`)
+            .then(res => res.data)
+            .catch(err => {
+              console.error(`Error fetching item ${id}:`, err);
+              return null; // Return null for failed requests
+            })
+        );
+        
+        // Wait for all requests to complete
+        const items = await Promise.all(itemPromises);
+        // Filter out any null values from failed requests
+        setBucketItems(items.filter(item => item !== null));
+      } else {
+        // If no items, set empty array
+        setBucketItems([]);
+      }
+    } catch (err) {
+      console.error('Error fetching bucket items:', err);
+      setError('Failed to load bucket items. Please try again.');
+      setBucketItems([]);
+    } finally {
+      setItemsLoading(false);
+    }
+  };
+
+  // Handle bucket selection
+  const handleBucketSelect = (bucket) => {
+    setSelectedBucket(bucket);
+    fetchBucketItems(bucket);
+  };
+
   // Fetch buckets on component mount
   useEffect(() => {
-    fetchScrapBuckets();
+    const initialize = async () => {
+      const buckets = await fetchScrapBuckets();
+      
+      // Find and select 'Gold scrap' bucket by default
+      if (buckets && buckets.length > 0) {
+        const goldBucket = buckets.find(bucket => 
+          bucket.bucket_name && bucket.bucket_name.toLowerCase().includes('gold')
+        );
+        
+        if (goldBucket) {
+          handleBucketSelect(goldBucket);
+        } else if (buckets.length > 0) {
+          // If no gold bucket, select the first one
+          handleBucketSelect(buckets[0]);
+        }
+      }
+    };
+    
+    initialize();
   }, []);
+  
+  // Update selected bucket when scrapBuckets changes
+  useEffect(() => {
+    if (scrapBuckets.length > 0 && !selectedBucket) {
+      const goldBucket = scrapBuckets.find(bucket => 
+        bucket.bucket_name && bucket.bucket_name.toLowerCase().includes('gold')
+      );
+      
+      if (goldBucket) {
+        handleBucketSelect(goldBucket);
+      } else {
+        handleBucketSelect(scrapBuckets[0]);
+      }
+    }
+  }, [scrapBuckets]);
 
   const handleNewScrap = () => {
     setOpenCreateDialog(true);
@@ -113,6 +194,13 @@ const Scrap = () => {
       
       // Reset form and close dialog
       handleCloseDialog();
+      
+      // Refresh buckets and select the new one
+      const updatedBuckets = await fetchScrapBuckets();
+      const newBucket = updatedBuckets.find(b => b.bucket_id === response.data.bucket_id);
+      if (newBucket) {
+        handleBucketSelect(newBucket);
+      }
       
     } catch (error) {
       console.error('Error creating scrap bucket:', error);
@@ -226,58 +314,126 @@ const Scrap = () => {
         </Box>
       ) : (
         <>
-          {/* Scrap Buckets List */}
-          <TableContainer component={Paper} sx={{ mt: 3 }}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Bucket ID</TableCell>
-                  <TableCell>Name</TableCell>
-                  <TableCell>Items</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell>Created</TableCell>
-                  <TableCell>Notes</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {paginatedBuckets.length > 0 ? (
-                  paginatedBuckets.map((bucket) => (
-                    <TableRow key={bucket.bucket_id}>
-                      <TableCell>SCRP-{bucket.bucket_id}</TableCell>
-                      <TableCell>{bucket.bucket_name}</TableCell>
-                      <TableCell>{bucket.item_count || 0}</TableCell>
-                      <TableCell>
-                        <Chip 
-                          label={bucket.status || 'ACTIVE'} 
-                          color={bucket.status === 'ACTIVE' ? 'success' : 'default'}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>{new Date(bucket.created_at).toLocaleDateString()}</TableCell>
-                      <TableCell sx={{ maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {bucket.notes || 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        <IconButton size="small" onClick={() => { /* Handle edit */ }}>
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton size="small" onClick={() => { /* Handle delete */ }}>
-                          <DeleteIcon fontSize="small" color="error" />
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
-                      {searchTerm ? 'No matching buckets found' : 'No scrap buckets available'}
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
+          <Box sx={{ display: 'flex', gap: 3, mt: 3 }}>
+        {/* Bucket List */}
+        <Paper sx={{ width: '30%', p: 2, maxHeight: '70vh', overflow: 'auto' }}>
+          <Typography variant="h6" gutterBottom>Buckets</Typography>
+          <List>
+            {paginatedBuckets.length > 0 ? (
+              paginatedBuckets.map((bucket) => (
+                <ListItem 
+                  key={bucket.bucket_id}
+                  button 
+                  selected={selectedBucket?.bucket_id === bucket.bucket_id}
+                  onClick={() => handleBucketSelect(bucket)}
+                  sx={{
+                    mb: 1,
+                    borderRadius: 1,
+                    '&.Mui-selected': {
+                      backgroundColor: 'primary.light',
+                      '&:hover': {
+                        backgroundColor: 'primary.light',
+                      },
+                    },
+                  }}
+                >
+                  <ListItemText
+                    primary={bucket.bucket_name}
+                    secondary={`${bucket.item_count || 0} items`}
+                    primaryTypographyProps={{
+                      fontWeight: selectedBucket?.bucket_id === bucket.bucket_id ? 'bold' : 'normal',
+                    }}
+                  />
+                  <Chip 
+                    label={bucket.status || 'ACTIVE'} 
+                    color={bucket.status === 'ACTIVE' ? 'success' : 'default'}
+                    size="small"
+                    sx={{ ml: 1 }}
+                  />
+                </ListItem>
+              ))
+            ) : (
+              <Typography variant="body2" color="textSecondary" sx={{ p: 2, textAlign: 'center' }}>
+                {searchTerm ? 'No matching buckets found' : 'No scrap buckets available'}
+              </Typography>
+            )}
+          </List>
+        </Paper>
+
+        {/* Bucket Items */}
+        <Paper sx={{ flex: 1, p: 2, maxHeight: '70vh', overflow: 'auto' }}>
+          {selectedBucket ? (
+            <>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">
+                  {selectedBucket.bucket_name} ({bucketItems.length} items)
+                </Typography>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={() => { /* Handle add item */ }}
+                >
+                  Add Item
+                </Button>
+              </Box>
+              
+              {itemsLoading ? (
+                <Box display="flex" justifyContent="center" my={4}>
+                  <CircularProgress />
+                </Box>
+              ) : bucketItems.length > 0 ? (
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Item ID</TableCell>
+                        <TableCell>Description</TableCell>
+                        <TableCell>Category</TableCell>
+                        <TableCell>Value</TableCell>
+                        <TableCell>Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {bucketItems.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>{item.item_id || 'N/A'}</TableCell>
+                          <TableCell>{item.long_desc || 'Unnamed Item'}</TableCell>
+                          <TableCell>{item.category || 'N/A'}</TableCell>
+                          <TableCell>${item.item_price?.toFixed(2) || '0.00'}</TableCell>
+                          <TableCell>
+                            <IconButton size="small" onClick={() => { /* Handle delete */ }}>
+                              <DeleteIcon fontSize="small" color="error" />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
+                  <Typography>No items in this bucket yet.</Typography>
+                  <Button 
+                    variant="outlined" 
+                    color="primary" 
+                    startIcon={<AddIcon />} 
+                    sx={{ mt: 2 }}
+                    onClick={() => { /* Handle add item */ }}
+                  >
+                    Add First Item
+                  </Button>
+                </Box>
+              )}
+            </>
+          ) : (
+            <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
+              <Typography>Select a bucket to view items</Typography>
+            </Box>
+          )}
+        </Paper>
+      </Box>
 
           {/* Pagination */}
           {totalPages > 1 && (

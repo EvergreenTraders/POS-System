@@ -3099,6 +3099,7 @@ app.get('/api/scrap/buckets', async (req, res) => {
       SELECT 
         bucket_id,
         bucket_name,
+        item_id,
         jsonb_array_length(item_id) as item_count,
         created_at,
         updated_at,
