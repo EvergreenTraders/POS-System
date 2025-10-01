@@ -2819,6 +2819,35 @@ app.post('/api/transactions', async (req, res) => {
     }
 });
 
+// Delete a transaction and all its related data
+app.delete('/api/transactions/:transaction_id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { transaction_id } = req.params;
+    
+    await client.query('BEGIN');
+    
+    // 1. Delete from payments first (due to foreign key constraints)
+    await client.query('DELETE FROM payments WHERE transaction_id = $1', [transaction_id]);
+    
+    // 2. Delete from transaction_items
+    await client.query('DELETE FROM transaction_items WHERE transaction_id = $1', [transaction_id]);
+    
+    // 3. Finally, delete the transaction
+    await client.query('DELETE FROM transactions WHERE transaction_id = $1', [transaction_id]);
+    
+    await client.query('COMMIT');
+    
+    res.json({ success: true, message: 'Transaction and all related data deleted successfully' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting transaction:', err);
+    res.status(500).json({ error: 'Failed to delete transaction' });
+  } finally {
+    client.release();
+  }
+});
+
 app.put('/api/transactions/:transaction_id', async (req, res) => {
   const client = await pool.connect();
   try {

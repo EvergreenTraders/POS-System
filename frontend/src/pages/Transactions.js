@@ -23,7 +23,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon } from '@mui/icons-material';
+import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon, Warning as WarningIcon } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -31,6 +31,8 @@ import { Avatar } from '@mui/material';
 import config from '../config';
 
 function Transactions() {
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState(null);
   const [store, setStore] = useState('');
   const [transactionType, setTransactionType] = useState('');
   const [employee, setEmployee] = useState('');
@@ -145,19 +147,46 @@ function Transactions() {
     fetchData();
   }, []);
 
-  const handleVoidTransaction = async (transactionId) => {
-    if (!window.confirm('Are you sure you want to void this transaction?')) {
+  const handleOpenDeleteDialog = (transactionId) => {
+    const transaction = transactions.find(tx => tx.id === transactionId);
+    
+    if (!transaction) {
+      console.error('Transaction not found');
       return;
     }
     
+    const transactionDate = new Date(transaction.created_at).toDateString();
+    const today = new Date().toDateString();
+    
+    if (transactionDate !== today) {
+      alert('You can only delete transactions made today.');
+      return;
+    }
+    
+    setTransactionToDelete(transactionId);
+    setDeleteDialogOpen(true);
+  };
+  
+  const handleCloseDeleteDialog = () => {
+    setDeleteDialogOpen(false);
+    setTransactionToDelete(null);
+  };
+  
+  const handleConfirmDelete = async () => {
+    if (!transactionToDelete) return;
+    
     try {
-      await axios.put(`${API_BASE_URL}/transactions/${transactionId}/void`);
-      // Refresh transactions after successful void
-      const updatedTransactions = transactions.filter(tx => tx.id !== transactionId);
+      // Delete the transaction and all related data
+      await axios.delete(`${API_BASE_URL}/transactions/${transactionToDelete}`);
+      
+      // Update the UI by removing the deleted transaction
+      const updatedTransactions = transactions.filter(tx => tx.id !== transactionToDelete);
       setTransactions(updatedTransactions);
     } catch (err) {
-      console.error('Error voiding transaction:', err);
-      alert('Failed to void transaction. Please try again.');
+      console.error('Error deleting transaction:', err);
+      alert('Failed to delete transaction. Please try again.');
+    } finally {
+      handleCloseDeleteDialog();
     }
   };
   
@@ -366,7 +395,7 @@ function Transactions() {
                     <Box display="flex" alignItems="center">
                       {txn.status !== 'voided' && (
                         <Checkbox
-                          onChange={() => handleVoidTransaction(txn.id)}
+                          onChange={() => handleOpenDeleteDialog(txn.id)}
                           color="error"
                           size="small"
                         />
@@ -502,6 +531,43 @@ function Transactions() {
         <DialogActions>
           <Button onClick={handleCloseDialog} color="primary">
             Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={handleCloseDeleteDialog}
+        aria-labelledby="alert-dialog-title"
+        aria-describedby="alert-dialog-description"
+      >
+        <DialogTitle id="alert-dialog-title">
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarningIcon color="warning" />
+            Confirm Deletion
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box display="flex" alignItems="center" gap={2} p={1}>
+            <WarningIcon color="warning" style={{ fontSize: 40 }} />
+            <Typography variant="body1">
+              Are you sure you want to delete this transaction? This action cannot be undone.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDeleteDialog} color="primary">
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleConfirmDelete} 
+            color="error" 
+            variant="contained"
+            startIcon={<WarningIcon />}
+            autoFocus
+          >
+            Delete Permanently
           </Button>
         </DialogActions>
       </Dialog>
