@@ -2678,6 +2678,7 @@ app.get('/api/transactions', async (req, res) => {
         t.transaction_id,
         c.first_name || ' ' || c.last_name as customer_name,
         e.first_name || ' ' || e.last_name as employee_name,
+        e.employee_id,
         t.total_amount,
         t.transaction_status,
         t.created_at,
@@ -2690,7 +2691,7 @@ app.get('/api/transactions', async (req, res) => {
       LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
       GROUP BY 
         t.transaction_id, c.first_name, c.last_name, e.first_name, e.last_name, 
-        t.total_amount, t.transaction_status, t.created_at, 
+        e.employee_id, t.total_amount, t.transaction_status, t.created_at, 
         t.updated_at, tic.item_count
       ORDER BY t.created_at DESC`;
     

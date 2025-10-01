@@ -176,7 +176,13 @@ function Transactions() {
   // Filter transactions based on search criteria
   const filteredTransactions = transactions.filter(tx => {
     const matchesStore = !store || tx.store_id === store;
-    const matchesEmployee = !employee || tx.employee_id?.toString() === employee.toString();
+    
+    // Check employee match if employee is selected
+    let matchesEmployee = true;
+    if (employee) {
+      matchesEmployee = tx.employee_id?.toString() === employee.toString();
+    }
+    
     const matchesTransactionNumber = !transactionNumber || 
       tx.transaction_id?.toLowerCase().includes(transactionNumber.toLowerCase());
     
