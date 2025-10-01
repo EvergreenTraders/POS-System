@@ -2661,6 +2661,47 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
   }
 });
 
+// Get payments for a specific transaction
+app.get('/api/transactions/:transaction_id/payments', async (req, res) => {
+  try {
+    const { transaction_id } = req.params;
+    
+    // First, verify the transaction exists
+    const transactionCheck = await pool.query(
+      'SELECT transaction_id FROM transactions WHERE transaction_id = $1',
+      [transaction_id]
+    );
+    
+    if (transactionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    // Get all payments for the transaction
+    const result = await pool.query(
+      `SELECT 
+        id,
+        amount,
+        payment_method,
+        created_at,
+        updated_at
+      FROM payments 
+      WHERE transaction_id = $1
+      ORDER BY created_at`,
+      [transaction_id]
+    );
+    
+    res.json({
+      transaction_id,
+      payments: result.rows,
+      total_paid: result.rows.reduce((sum, payment) => sum + parseFloat(payment.amount), 0)
+    });
+    
+  } catch (err) {
+    console.error('Error fetching transaction payments:', err);
+    res.status(500).json({ error: 'Failed to fetch transaction payments' });
+  }
+});
+
 // Transaction routes
 app.get('/api/transactions', async (req, res) => {
   try {

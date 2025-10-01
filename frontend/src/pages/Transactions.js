@@ -8,6 +8,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   IconButton,
   InputLabel,
@@ -42,6 +43,8 @@ function Transactions() {
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [transactionItems, setTransactionItems] = useState([]);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [paymentDetails, setPaymentDetails] = useState({ payments: [], total_paid: 0 });
+  const [loadingPayments, setLoadingPayments] = useState(false);
   const API_BASE_URL = config.apiUrl;
   
   const [transactions, setTransactions] = useState([]);
@@ -71,22 +74,38 @@ function Transactions() {
     fetchTransactionTypes();
   }, []);
   
-  const handleViewTransaction = (transaction) => {
+  const handleViewTransaction = async (transaction) => {
     setSelectedTransaction(transaction);
     setLoadingItems(true);
+    setLoadingPayments(true);
     setViewDialogOpen(true);
     
-    // Get all transaction items from the pre-fetched map
-    const items = transactionItemsMap[transaction.transaction_id] || [];
-    
-    // Show all items in the popup, regardless of transaction type
-    setTransactionItems(items);
-    setLoadingItems(false);
+    try {
+      // Get all transaction items from the pre-fetched map
+      const items = transactionItemsMap[transaction.transaction_id] || [];
+      setTransactionItems(items);
+      
+      // Fetch payment details
+      const response = await axios.get(`${API_BASE_URL}/transactions/${transaction.transaction_id}/payments`);
+      setPaymentDetails({
+        payments: response.data.payments || [],
+        total_paid: response.data.total_paid || 0
+      });
+    } catch (error) {
+      console.error('Error fetching transaction details:', error);
+      // Initialize with empty data if there's an error
+      setPaymentDetails({ payments: [], total_paid: 0 });
+    } finally {
+      setLoadingItems(false);
+      setLoadingPayments(false);
+    }
   };
   
   const handleCloseDialog = () => {
     setViewDialogOpen(false);
     setSelectedTransaction(null);
+    // Reset payment details when closing dialog
+    setPaymentDetails({ payments: [], total_paid: 0 });
     // Don't clear transaction items to keep them in memory
   };
   
@@ -512,6 +531,34 @@ function Transactions() {
                             <strong>
                               ${transactionItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0) * (item.quantity || 1)), 0).toFixed(2)}
                             </strong>
+                          </TableCell>
+                        </TableRow>
+                        
+                        {/* Payment Methods Section */}
+                        <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f5f9ff' }}>
+                          <TableCell colSpan={4} sx={{ pt: 1, pb: 1 }}>
+                            <Box sx={{ textAlign: 'right' }}>
+                              <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Payment Methods:</Typography>
+                            {loadingPayments ? (
+                              <Typography>Loading payment details...</Typography>
+                            ) : paymentDetails.payments.length > 0 ? (
+                              <Box sx={{ textAlign: 'right' }}>
+                                {paymentDetails.payments.map((payment, index) => (
+                                  <Box key={index} display="flex" justifyContent="flex-end" gap={2} mb={1}>
+                                    <span>{payment.payment_method.replace(/_/g, ' ').toUpperCase()}:</span>
+                                    <span>${parseFloat(payment.amount).toFixed(2)}</span>
+                                  </Box>
+                                ))}
+                                <Divider sx={{ my: 1 }} />
+                                <Box display="flex" justifyContent="flex-end" gap={2} fontWeight="bold">
+                                  <span>Total Paid:</span>
+                                  <span>${parseFloat(paymentDetails.total_paid).toFixed(2)}</span>
+                                </Box>
+                              </Box>
+                            ) : (
+                              <Typography>No payment information available</Typography>
+                            )}
+                            </Box>
                           </TableCell>
                         </TableRow>
                       </>
