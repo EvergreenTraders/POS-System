@@ -18,9 +18,16 @@ import {
   InputAdornment,
   Grid,
   Tooltip,
-  CircularProgress
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  MenuItem
 } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import HistoryIcon from '@mui/icons-material/History';
@@ -32,6 +39,7 @@ import axios from 'axios';
 function Jewelry() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { currentUser } = useAuth();
   const { enqueueSnackbar } = useSnackbar();
 
   const handleViewHistory = async (itemId) => {
@@ -191,6 +199,67 @@ function Jewelry() {
   const [serialQuery, setSerialQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [jewelryItems, setJewelryItems] = useState([]);
+  const [scrapDialogOpen, setScrapDialogOpen] = useState(false);
+  const [itemToScrap, setItemToScrap] = useState(null);
+  const [scrapBuckets, setScrapBuckets] = useState([]);
+  const [selectedBucket, setSelectedBucket] = useState('');
+  const [loadingBuckets, setLoadingBuckets] = useState(false);
+
+  const fetchScrapBuckets = async () => {
+    try {
+      setLoadingBuckets(true);
+      const response = await axios.get(`${API_BASE_URL}/scrap/buckets`);
+      setScrapBuckets(response.data);
+      if (response.data.length > 0) {
+        setSelectedBucket(response.data[0].bucket_id);
+      }
+    } catch (error) {
+      console.error('Error fetching scrap buckets:', error);
+      enqueueSnackbar('Failed to load scrap buckets', { variant: 'error' });
+    } finally {
+      setLoadingBuckets(false);
+    }
+  };
+
+  const handleMoveToScrap = async () => {
+    if (!itemToScrap || !selectedBucket) {
+      enqueueSnackbar('Please select a scrap bucket', { variant: 'warning' });
+      return;
+    }
+    
+    try {
+      // Find the selected bucket by ID to get its name
+      const selectedBucketObj = scrapBuckets.find(bucket => bucket.bucket_id === selectedBucket);
+      if (!selectedBucketObj) {
+        throw new Error('Selected bucket not found');
+      }
+      
+      // Call the move-to-scrap endpoint with the selected bucket name
+      const response = await axios.post(
+        `${API_BASE_URL}/jewelry/${itemToScrap.item_id}/move-to-scrap`,
+        { 
+          moved_by: currentUser?.employee_id || 1,
+          bucket_id: selectedBucket
+        }
+      );
+      
+      // Remove the item from the local state
+      setJewelryItems(prevItems => 
+        prevItems.filter(item => item.item_id !== itemToScrap.item_id)
+      );
+      
+      enqueueSnackbar('Item moved to scrap successfully', { variant: 'success' });
+    } catch (error) {
+      console.error('Error moving item to scrap:', error);
+      enqueueSnackbar(
+        error.response?.data?.error || 'Failed to move item to scrap', 
+        { variant: 'error' }
+      );
+    } finally {
+      setScrapDialogOpen(false);
+      setItemToScrap(null);
+    }
+  };
 
   const handleEditClick = async (item) => {
     try {
@@ -227,9 +296,11 @@ function Jewelry() {
     try {
       setLoading(true);
       const response = await axios.get(`${API_BASE_URL}/jewelry`);
-      setJewelryItems(response.data);
-      if (response.data.length > 0) {
-        setSelectedItem(response.data[0]);
+      // Filter out items with status 'SCRAP'
+      const nonScrapItems = response.data.filter(item => item.status !== 'SCRAP');
+      setJewelryItems(nonScrapItems);
+      if (nonScrapItems.length > 0) {
+        setSelectedItem(nonScrapItems[0]);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -415,17 +486,56 @@ function Jewelry() {
                       <TableCell>{item.status}</TableCell>
                       <TableCell>{new Date(item.created_at).toLocaleDateString()}</TableCell>
                       <TableCell>
-                        <Button 
-                          variant="contained" 
-                          color="primary"
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation(); // Prevent row selection
-                            handleEditClick(item);
-                          }}
-                        >
-                          Edit
-                        </Button>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Button 
+                            variant="contained" 
+                            color="primary"
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditClick(item);
+                            }}
+                            sx={{
+                              minWidth: '60px',
+                              height: '28px',
+                              fontSize: '0.75rem',
+                              padding: '4px 8px',
+                              '& .MuiButton-label': {
+                                lineHeight: 1.2
+                              }
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          {item.status !== 'SCRAP' && (
+                            <Button 
+                              variant="outlined" 
+                              color="error"
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setItemToScrap(item);
+                                setScrapDialogOpen(true);
+                                fetchScrapBuckets().catch((error) => {
+                                  console.error('Error fetching scrap buckets:', error);
+                                });
+                              }}
+                              sx={{
+                                minWidth: '85px',
+                                height: '28px',
+                                fontSize: '0.7rem',
+                                '& .MuiButton-label': {
+                                  lineHeight: 1.1,
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis'
+                                }
+                              }}
+                            >
+                              To Scrap
+                            </Button>
+                          )}
+                        </Box>
                       </TableCell>
                     </TableRow>
                   ))
@@ -541,6 +651,60 @@ function Jewelry() {
           )}
         </Grid>
       </Grid>
+
+      {/* Move to Scrap Confirmation Dialog */}
+      <Dialog
+        open={scrapDialogOpen}
+        onClose={() => setScrapDialogOpen(false)}
+        aria-labelledby="scrap-dialog-title"
+        aria-describedby="scrap-dialog-description"
+      >
+        <DialogTitle id="scrap-dialog-title">
+          Move to Scrap
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText id="scrap-dialog-description" sx={{ mb: 2 }}>
+            Are you sure you want to move item <strong>{itemToScrap?.item_id}</strong> to scrap?
+            This action cannot be undone.
+          </DialogContentText>
+          
+          {loadingBuckets ? (
+            <Box display="flex" justifyContent="center" my={2}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : (
+            <TextField
+              select
+              fullWidth
+              label="Select Scrap Bucket"
+              value={selectedBucket}
+              onChange={(e) => setSelectedBucket(e.target.value)}
+              variant="outlined"
+              margin="normal"
+              required
+            >
+              {scrapBuckets.map((bucket) => (
+                <MenuItem key={bucket.bucket_id} value={bucket.bucket_id}>
+                  {bucket.bucket_name} ({bucket.bucket_type})
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setScrapDialogOpen(false)} color="primary">
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleMoveToScrap} 
+            color="error"
+            variant="contained"
+            autoFocus
+          >
+            Move to Scrap
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

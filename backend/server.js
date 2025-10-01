@@ -361,21 +361,6 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
-// Orders routes
-app.post('/api/orders', async (req, res) => {
-  try {
-    const { items, total } = req.body;
-    const result = await pool.query(
-      'INSERT INTO orders (items, total, created_at) VALUES ($1, $2, NOW()) RETURNING *',
-      [items, total]
-    );
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('Error creating order:', err.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 // Precious Metal tables routes
 app.get('/api/precious_metal_type', async (req, res) => {
   try {
@@ -1231,6 +1216,125 @@ app.put('/api/jewelry/:quoteId', async (req, res) => {
     }
 });
 
+// Move item to scrap
+app.post('/api/jewelry/:id/move-to-scrap', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { moved_by } = req.body; // ID of the employee performing the action
+    if (!moved_by) {
+      return res.status(400).json({ error: 'Employee ID (moved_by) is required' });
+    }
+    
+    // First, get the current item data for history
+    const { rows: [currentItem] } = await pool.query('SELECT * FROM jewelry WHERE item_id = $1', [id]);
+    if (!currentItem) {
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+    
+    const { bucket_id } = req.body;
+    
+    if (!bucket_id) {
+      return res.status(400).json({ error: 'Bucket ID is required' });
+    }
+       // 3. Add to item history
+    const currentStatusQuery = await client.query(
+      'SELECT status FROM jewelry WHERE item_id = $1',
+      [id]
+    );
+    const oldStatus = currentStatusQuery.rows[0]?.status || 'UNKNOWN';
+    
+    // Create the changed_fields JSON object
+    const changedFields = {
+      status: {
+        old: oldStatus,
+        new: 'SCRAP'
+      }
+    };
+    // Get the next version number
+    const versionResult = await client.query(
+      'SELECT COALESCE(MAX(version_number), 0) + 1 as next_version FROM jewelry_item_history WHERE item_id = $1',
+      [id]
+    );
+    const version_number = versionResult.rows[0].next_version;
+
+    // Insert the history record
+    await client.query(
+      `INSERT INTO jewelry_item_history (
+        item_id, 
+        version_number,
+        changed_by, 
+        action_type, 
+        changed_fields, 
+        change_notes
+      ) VALUES ($1, $2, $3, 'STATUS_CHANGE', $4, 'Moved to SCRAP')`,
+      [id, version_number, moved_by, changedFields]
+    );
+    // 1. Update the jewelry item status to SCRAP
+    const updateJewelryQuery = await client.query(
+      `UPDATE jewelry SET status = 'SCRAP', updated_at = CURRENT_TIMESTAMP WHERE item_id = $1 RETURNING *`,
+      [id]
+    );
+    // 2. Add item_id to the selected bucket's item_id array
+    await client.query(
+      `UPDATE scrap 
+       SET item_id = item_id || $1::jsonb,
+           updated_at = CURRENT_TIMESTAMP,
+           updated_by = $2::integer
+       WHERE bucket_id = $3::integer
+       AND NOT item_id @> $1::jsonb`, 
+      [JSON.stringify([id]), moved_by, bucket_id]
+    );
+    
+ 
+    // Return success response
+    res.json({ 
+      success: true, 
+      message: 'Item moved to scrap successfully',
+      item: {
+        item_id: id,
+        bucket_id: bucket_id,
+        moved_by: parseInt(moved_by),
+        moved_at: new Date().toISOString()
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error moving item to scrap:', err);
+    res.status(500).json({ 
+      error: 'Failed to move item to scrap',
+      details: err.message 
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Get a single jewelry item by ID
+app.get('/api/jewelry/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = `
+      SELECT 
+        j.*,
+        TO_CHAR(j.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
+        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at
+      FROM jewelry j
+      WHERE j.item_id = $1`;
+    
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching jewelry item:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get all jewelry items
 app.get('/api/jewelry', async (req, res) => {
   try {
@@ -1427,6 +1531,183 @@ app.post('/api/jewelry', async (req, res) => {
     } finally {
         client.release();
     }
+});
+
+// Inventory Status API Endpoints
+app.get('/api/inventory-status', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM inventory_status ORDER BY status_name';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching inventory statuses:', error);
+    res.status(500).json({ error: 'Failed to fetch inventory statuses' });
+  }
+});
+
+app.get('/api/inventory-status/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = 'SELECT * FROM inventory_status WHERE status_id = $1';
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Inventory status not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching inventory status:', error);
+    res.status(500).json({ error: 'Failed to fetch inventory status' });
+  }
+});
+
+app.post('/api/inventory-status', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { status_code, status_name, description } = req.body;
+    
+    // Validate required fields
+    if (!status_code || !status_name) {
+      return res.status(400).json({ error: 'status_code and status_name are required' });
+    }
+    
+    await client.query('BEGIN');
+    
+    // Check if status_code already exists
+    const checkQuery = 'SELECT status_id FROM inventory_status WHERE status_code = $1';
+    const checkResult = await client.query(checkQuery, [status_code]);
+    
+    if (checkResult.rows.length > 0) {
+      return res.status(400).json({ error: 'Status code already exists' });
+    }
+    
+    // Insert new status
+    const insertQuery = `
+      INSERT INTO inventory_status (status_code, status_name, description)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `;
+    
+    const result = await client.query(insertQuery, [status_code, status_name, description || null]);
+    await client.query('COMMIT');
+    
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating inventory status:', error);
+    res.status(500).json({ error: 'Failed to create inventory status' });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/api/inventory-status/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { status_code, status_name, description } = req.body;
+    
+    // Validate required fields
+    if (!status_code || !status_name) {
+      return res.status(400).json({ error: 'status_code and status_name are required' });
+    }
+    
+    await client.query('BEGIN');
+    
+    // Check if status exists
+    const checkQuery = 'SELECT status_id FROM inventory_status WHERE status_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Inventory status not found' });
+    }
+    
+    // Check if status_code is being changed to one that already exists
+    const codeCheckQuery = 'SELECT status_id FROM inventory_status WHERE status_code = $1 AND status_id != $2';
+    const codeCheckResult = await client.query(codeCheckQuery, [status_code, id]);
+    
+    if (codeCheckResult.rows.length > 0) {
+      return res.status(400).json({ error: 'Status code already in use by another status' });
+    }
+    
+    // Update status
+    const updateQuery = `
+      UPDATE inventory_status 
+      SET status_code = $1, 
+          status_name = $2, 
+          description = $3,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE status_id = $4
+      RETURNING *
+    `;
+    
+    const result = await client.query(updateQuery, [
+      status_code, 
+      status_name, 
+      description || null, 
+      id
+    ]);
+    
+    await client.query('COMMIT');
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Inventory status not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating inventory status:', error);
+    res.status(500).json({ error: 'Failed to update inventory status' });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/api/inventory-status/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    
+    await client.query('BEGIN');
+    
+    // Check if status exists
+    const checkQuery = 'SELECT status_id FROM inventory_status WHERE status_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Inventory status not found' });
+    }
+    
+    // Check if status is in use
+    const inUseQuery = 'SELECT item_id FROM jewelry WHERE status = (SELECT status_code FROM inventory_status WHERE status_id = $1) LIMIT 1';
+    const inUseResult = await client.query(inUseQuery, [id]);
+    
+    if (inUseResult.rows.length > 0) {
+      return res.status(400).json({ 
+        error: 'Cannot delete status that is in use by jewelry items' 
+      });
+    }
+    
+    // Delete status
+    const deleteQuery = 'DELETE FROM inventory_status WHERE status_id = $1 RETURNING *';
+    const result = await client.query(deleteQuery, [id]);
+    
+    await client.query('COMMIT');
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Inventory status not found' });
+    }
+    
+    res.json({ message: 'Inventory status deleted successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting inventory status:', error);
+    res.status(500).json({ error: 'Failed to delete inventory status' });
+  } finally {
+    client.release();
+  }
 });
 
 // Quote Expiration Configuration API Endpoints
@@ -2220,27 +2501,198 @@ app.get('/api/reports/customers/export', async (req, res) => {
   }
 });
 
+// Get transaction items for a specific transaction
+app.get('/api/transactions/:transaction_id/items', async (req, res) => {
+  try {
+    const { transaction_id } = req.params;
+    
+    // First, get all transaction items
+    const query = `
+      WITH item_list AS (
+        SELECT 
+          ti.id,
+          ti.transaction_id,
+          ti.item_id as transaction_item_id,
+          ti.item_price,
+          ti.created_at,
+          ti.updated_at,
+          tt.type as transaction_type,
+          j.item_id as jewelry_item_id,
+          j.long_desc,
+          j.short_desc,
+          j.category,
+          j.metal_weight,
+          j.precious_metal_type,
+          j.non_precious_metal_type,
+          j.metal_purity,
+          j.purity_value,
+          j.jewelry_color,
+          j.metal_spot_price,
+          j.est_metal_value,
+          j.images,
+          j.status as item_status,
+          j.primary_gem_type,
+          j.primary_gem_category,
+          j.primary_gem_size,
+          j.primary_gem_weight,
+          j.primary_gem_quantity,
+          j.primary_gem_shape,
+          j.primary_gem_color,
+          j.primary_gem_exact_color,
+          j.primary_gem_clarity,
+          j.primary_gem_cut,
+          j.primary_gem_lab_grown,
+          j.primary_gem_authentic,
+          j.primary_gem_value,
+          EXISTS (
+            SELECT * FROM jewelry_secondary_gems jsg 
+            WHERE jsg.item_id = ti.item_id
+          ) as has_secondary_gems
+        FROM transaction_items ti
+        JOIN transaction_type tt ON ti.transaction_type_id = tt.id
+        LEFT JOIN jewelry j ON ti.item_id = j.item_id
+        WHERE ti.transaction_id = $1
+      )
+      SELECT 
+        il.*,
+        (
+          SELECT COALESCE(
+            json_agg(jsg.*) FILTER (WHERE jsg.item_id IS NOT NULL),
+            '[]'::json
+          )
+          FROM jewelry_secondary_gems jsg 
+          WHERE jsg.item_id = il.transaction_item_id
+        ) as secondary_gems
+      FROM item_list il
+      ORDER BY il.created_at ASC
+    `;
+    
+    const result = await pool.query(query, [transaction_id]);
+    
+    // Transform the result to a more usable format
+    const items = result.rows.map(row => {
+      const primaryGem = (() => {
+        if (!row.primary_gem_category) return null;
+        
+        const baseProps = {
+          shape: row.primary_gem_shape,
+          color: row.primary_gem_color,
+          weight: row.primary_gem_weight,
+          quantity: row.primary_gem_quantity,
+          value: row.primary_gem_value
+        };
+
+        if (row.primary_gem_category === 'diamond') {
+          return {
+            ...baseProps,
+            size: row.primary_gem_size,
+            exact_color: row.primary_gem_exact_color,
+            clarity: row.primary_gem_clarity,
+            cut: row.primary_gem_cut,
+            lab_grown: row.primary_gem_lab_grown,
+          };
+        }
+        
+        if (row.primary_gem_category === 'stone') {
+          return {
+            ...baseProps,
+            type: row.primary_gem_type,
+            authentic: row.primary_gem_authentic
+          };
+        }
+        
+        return baseProps;
+      })();
+
+      // Process secondary gems if they exist
+      const secondaryGems = row.secondary_gems ? row.secondary_gems.map(gem => ({
+        shape: gem.secondary_gem_shape,
+        color: gem.secondary_gem_color,
+        weight: gem.secondary_gem_weight,
+        quantity: gem.secondary_gem_quantity,
+        value: gem.secondary_gem_value,
+        ...(gem.secondary_gem_category === 'diamond' ? {
+          size: gem.secondary_gem_size,
+          exact_color: gem.secondary_gem_exact_color,
+          clarity: gem.secondary_gem_clarity,
+          cut: gem.secondary_gem_cut,
+          lab_grown: gem.secondary_gem_lab_grown
+        } : {
+          type: gem.secondary_gem_type,
+          authentic: gem.secondary_gem_authentic
+        })
+      })) : [];
+
+      return {
+        id: row.id,
+        transaction_id: row.transaction_id,
+        item_id: row.transaction_item_id,
+        item_price: row.item_price,
+        notes: row.notes || '',
+        transaction_type: row.transaction_type,
+        item_details: {
+          item_id: row.jewelry_item_id,
+          description: row.long_desc || row.short_desc || '',
+          category: row.category,
+          images: row.images || [],
+        metal: {
+          precious_metal_type: row.precious_metal_type,
+          non_precious_metal_type: row.non_precious_metal_type,
+          purity: row.metal_purity,
+          purity_value: row.purity_value,
+          weight: row.metal_weight,
+          color: row.jewelry_color,
+          spot_price: row.metal_spot_price,
+          value: row.est_metal_value
+        },
+        primary_gem: primaryGem,
+        secondary_gems: secondaryGems,
+        status: row.item_status,
+        images: row.images || []
+      },
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    }});
+    
+    res.json(items);
+  } catch (err) {
+    console.error('Error fetching transaction items:', err);
+    res.status(500).json({ error: 'Failed to fetch transaction items' });
+  }
+});
+
 // Transaction routes
 app.get('/api/transactions', async (req, res) => {
   try {
+    // First, get the grouped transaction data with item counts
     const query = `
+      WITH transaction_items_count AS (
+        SELECT 
+          ti.transaction_id,
+          COUNT(*) as item_count
+        FROM transaction_items ti
+        GROUP BY ti.transaction_id
+      )
       SELECT 
-        t.*,
-        tt.type as transaction_type_name,
-        c.first_name as customer_first_name,
-        c.last_name as customer_last_name,
-        e.first_name as employee_first_name,
-        e.last_name as employee_last_name,
-        p.payment_id as payment_reference,
-        TO_CHAR(t.created_at, 'YYYY-MM-DD') as created_date
+        t.transaction_id as id,
+        t.transaction_id,
+        c.first_name || ' ' || c.last_name as customer_name,
+        e.first_name || ' ' || e.last_name as employee_name,
+        t.total_amount,
+        t.transaction_status,
+        t.created_at,
+        t.updated_at,
+        TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as formatted_created_at,
+        COALESCE(tic.item_count, 0) as item_count
       FROM transactions t
-      LEFT JOIN transaction_type tt ON t.transaction_type_id = tt.id
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN employees e ON t.employee_id = e.employee_id
-      LEFT JOIN payments p ON t.payment_id = p.id
-      GROUP BY t.id, tt.type, c.first_name, c.last_name, e.first_name, e.last_name, p.payment_id
-      ORDER BY t.created_at DESC
-    `;
+      LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
+      GROUP BY 
+        t.transaction_id, c.first_name, c.last_name, e.first_name, e.last_name, 
+        t.total_amount, t.transaction_status, t.created_at, 
+        t.updated_at, tic.item_count
+      ORDER BY t.created_at DESC`;
     
     const result = await pool.query(query);
     res.json(result.rows);
@@ -2633,6 +3085,174 @@ app.post('/api/jewelry_secondary_gems', authenticateToken, async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error saving jewelry secondary gem:', error);
     res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Scrap Bucket API Endpoints
+
+// GET all scrap buckets
+app.get('/api/scrap/buckets', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        bucket_id,
+        bucket_name,
+        item_id,
+        jsonb_array_length(item_id) as item_count,
+        created_at,
+        updated_at,
+        notes,
+        status
+      FROM scrap
+      ORDER BY created_at DESC
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching scrap buckets:', err);
+    res.status(500).json({ error: 'Failed to fetch scrap buckets' });
+  }
+});
+
+// GET a single scrap bucket by ID
+app.get('/api/scrap/buckets/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = `
+      SELECT 
+        s.*,
+        jsonb_agg(
+          jsonb_build_object(
+            'item_id', j.item_id,
+            'description', j.description,
+            'metal_type', j.metal_type,
+            'purity', j.purity,
+            'weight', j.weight
+          )
+        ) as items
+      FROM scrap s
+      LEFT JOIN LATERAL (
+        SELECT * 
+        FROM jewelry j 
+        WHERE j.item_id = ANY(ARRAY(SELECT jsonb_array_elements_text(s.item_id)))
+      ) j ON true
+      WHERE s.bucket_id = $1
+      GROUP BY s.bucket_id
+    `;
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Scrap bucket not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching scrap bucket:', err);
+    res.status(500).json({ error: 'Failed to fetch scrap bucket' });
+  }
+});
+
+// CREATE a new scrap bucket
+app.post('/api/scrap/buckets', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { bucket_name, notes, created_by } = req.body;
+    console.log("details",req.body);
+    
+    if (!bucket_name) {
+      return res.status(400).json({ error: 'Bucket name is required' });
+    }
+    
+    await client.query('BEGIN');
+    
+    const query = `
+      INSERT INTO scrap (
+        bucket_name,
+        item_id,
+        created_by,
+        notes,
+        status
+      ) VALUES ($1, '[]'::jsonb, $2, $3, 'ACTIVE')
+      RETURNING *
+    `;
+    
+    const result = await client.query(query, [
+      bucket_name,
+      created_by || null,
+      notes || null
+    ]);
+    
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+    
+  } catch (err) {
+    await client.query('ROLLBACK');
+    
+    if (err.code === '23505') { // Unique violation
+      return res.status(409).json({ error: 'A bucket with this name already exists' });
+    }
+    
+    console.error('Error creating scrap bucket:', err);
+    res.status(500).json({ error: 'Failed to create scrap bucket' });
+  } finally {
+    client.release();
+  }
+});
+
+// UPDATE a scrap bucket
+app.put('/api/scrap/buckets/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { bucket_name, notes, status } = req.body;
+    
+    if (!bucket_name) {
+      return res.status(400).json({ error: 'Bucket name is required' });
+    }
+    
+    await client.query('BEGIN');
+    
+    // First check if the bucket exists
+    const checkQuery = 'SELECT 1 FROM scrap WHERE bucket_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Scrap bucket not found' });
+    }
+    
+    // Update the bucket
+    const updateQuery = `
+      UPDATE scrap
+      SET 
+        bucket_name = $1,
+        notes = $2,
+        status = $3,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE bucket_id = $4
+      RETURNING *
+    `;
+    
+    const result = await client.query(updateQuery, [
+      bucket_name,
+      notes || null,
+      status || 'ACTIVE',
+      id
+    ]);
+    
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+    
+  } catch (err) {
+    await client.query('ROLLBACK');
+    
+    if (err.code === '23505') { // Unique violation
+      return res.status(409).json({ error: 'A bucket with this name already exists' });
+    }
+    
+    console.error('Error updating scrap bucket:', err);
+    res.status(500).json({ error: 'Failed to update scrap bucket' });
   } finally {
     client.release();
   }

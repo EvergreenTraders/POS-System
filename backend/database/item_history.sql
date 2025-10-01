@@ -94,7 +94,7 @@ BEGIN
         END LOOP;
         
         -- Only create version if there are changes
-        IF jsonb_typeof(diff) = 'object' AND jsonb_array_length(diff) > 0 THEN
+        IF jsonb_typeof(diff) = 'object' AND jsonb_typeof(diff) IS NOT NULL AND jsonb_object_keys(diff) IS NOT NULL THEN
             INSERT INTO jewelry_item_history (
                 item_id,
                 version_number,
@@ -126,10 +126,10 @@ $$ LANGUAGE plpgsql;
 -- 4. Create the trigger
 -- =============================================
 DROP TRIGGER IF EXISTS trg_jewelry_changes ON jewelry;
-CREATE TRIGGER trg_jewelry_changes
-AFTER INSERT OR UPDATE ON jewelry
-FOR EACH ROW
-EXECUTE FUNCTION track_jewelry_changes();
+-- CREATE TRIGGER trg_jewelry_changes
+-- AFTER INSERT OR UPDATE ON jewelry
+-- FOR EACH ROW
+-- EXECUTE FUNCTION track_jewelry_changes();
 
 -- =============================================
 -- 5. Add change_notes column to jewelry table if it doesn't exist

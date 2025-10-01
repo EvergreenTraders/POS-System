@@ -1019,7 +1019,8 @@ function Checkout() {
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell width="55%">Item Description</TableCell>
+                      <TableCell width="10%">Image</TableCell>
+                      <TableCell width="45%">Item Description</TableCell>
                       <TableCell width="25%">Transaction Type</TableCell>
                       <TableCell width="20%" align="right">Price</TableCell>
                     </TableRow>
@@ -1082,7 +1083,29 @@ function Checkout() {
                       return (
                         <TableRow key={index}>
                           <TableCell>
-                            {displayDescription}
+                            {item.images?.[0] ? (
+                              <Avatar 
+                                src={item.images[0].url} 
+                                alt="Item" 
+                                variant="rounded"
+                                sx={{ width: 50, height: 50, objectFit: 'cover' }}
+                              />
+                            ) : (
+                              <Avatar 
+                                variant="rounded"
+                                sx={{ width: 50, height: 50, bgcolor: 'grey.300' }}
+                              >
+                                <AttachMoneyIcon />
+                              </Avatar>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                              <span>{displayDescription}</span>
+                              {item.description && (
+                                <span style={{ fontSize: '0.8em', color: '#666' }}>{item.description}</span>
+                              )}
+                            </Box>
                           </TableCell>
                           <TableCell>{transactionType}</TableCell>
                           <TableCell align="right">

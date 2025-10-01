@@ -14,7 +14,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 
 import {
   Dashboard as DashboardIcon,
-  ShoppingCart,
+  Recycling as ScrapIcon,
   Receipt,
   Inventory as InventoryIcon,
   KeyboardArrowDown,
@@ -117,21 +117,21 @@ function Sidebar() {
           </StyledListItem>
         </StyledLink>
 
-        <StyledLink to="/products">
-          <StyledListItem active={isActive('/products')}>
+        <StyledLink to="/scrap">
+          <StyledListItem active={isActive('/scrap')}>
             <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
-              <ShoppingCart />
+              <ScrapIcon />
             </ListItemIcon>
-            {isOpen && <ListItemText primary="Products" />}
+            {isOpen && <ListItemText primary="Scrap Bucket" />}
           </StyledListItem>
         </StyledLink>
 
-        <StyledLink to="/orders">
-          <StyledListItem active={isActive('/orders')}>
+        <StyledLink to="/transactions">
+          <StyledListItem active={isActive('/transactions')}>
             <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
               <Receipt />
             </ListItemIcon>
-            {isOpen && <ListItemText primary="Orders" />}
+            {isOpen && <ListItemText primary="Transactions" />}
           </StyledListItem>
         </StyledLink>
 
