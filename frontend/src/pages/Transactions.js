@@ -8,6 +8,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   IconButton,
   InputLabel,
@@ -23,7 +24,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon } from '@mui/icons-material';
+import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon, Warning as WarningIcon } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -31,8 +32,10 @@ import { Avatar } from '@mui/material';
 import config from '../config';
 
 function Transactions() {
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState(null);
   const [store, setStore] = useState('');
-  const [workstation, setWorkstation] = useState('');
+  const [transactionType, setTransactionType] = useState('');
   const [employee, setEmployee] = useState('');
   const [businessDate, setBusinessDate] = useState(null);
   const [transactionNumber, setTransactionNumber] = useState('');
@@ -40,40 +43,74 @@ function Transactions() {
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [transactionItems, setTransactionItems] = useState([]);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [paymentDetails, setPaymentDetails] = useState({ payments: [], total_paid: 0 });
+  const [loadingPayments, setLoadingPayments] = useState(false);
   const API_BASE_URL = config.apiUrl;
   
   const [transactions, setTransactions] = useState([]);
+  const [transactionItemsMap, setTransactionItemsMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stores, setStores] = useState([]);
-  const [workstations, setWorkstations] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [transactionTypes, setTransactionTypes] = useState([]);
+  
+  // Fetch transaction types from API
+  useEffect(() => {
+    const fetchTransactionTypes = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/transaction-types`);
+        // Transform the data to match the expected format
+        const types = response.data.map(type => ({
+          value: type.type.toLowerCase(),
+          label: type.type.charAt(0).toUpperCase() + type.type.slice(1)
+        }));
+        setTransactionTypes(types);
+      } catch (error) {
+        console.error('Error fetching transaction types:', error);
+      }
+    };
+
+    fetchTransactionTypes();
+  }, []);
   
   const handleViewTransaction = async (transaction) => {
     setSelectedTransaction(transaction);
     setLoadingItems(true);
+    setLoadingPayments(true);
     setViewDialogOpen(true);
     
     try {
-      // Fetch transaction items for the selected transaction
-      const response = await axios.get(`${API_BASE_URL}/transactions/${transaction.transaction_id}/items`);
-      setTransactionItems(response.data);
-    } catch (err) {
-      console.error('Error fetching transaction items:', err);
-      // Optionally show an error message to the user
+      // Get all transaction items from the pre-fetched map
+      const items = transactionItemsMap[transaction.transaction_id] || [];
+      setTransactionItems(items);
+      
+      // Fetch payment details
+      const response = await axios.get(`${API_BASE_URL}/transactions/${transaction.transaction_id}/payments`);
+      setPaymentDetails({
+        payments: response.data.payments || [],
+        total_paid: response.data.total_paid || 0
+      });
+    } catch (error) {
+      console.error('Error fetching transaction details:', error);
+      // Initialize with empty data if there's an error
+      setPaymentDetails({ payments: [], total_paid: 0 });
     } finally {
       setLoadingItems(false);
+      setLoadingPayments(false);
     }
   };
   
   const handleCloseDialog = () => {
     setViewDialogOpen(false);
     setSelectedTransaction(null);
-    setTransactionItems([]);
+    // Reset payment details when closing dialog
+    setPaymentDetails({ payments: [], total_paid: 0 });
+    // Don't clear transaction items to keep them in memory
   };
   
 
-  // Fetch transactions and filter options
+  // Fetch transactions, their items, and filter options
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -85,7 +122,29 @@ function Transactions() {
           axios.get(`${API_BASE_URL}/employees`)
         ]);
         
-        setTransactions(transactionsRes.data);
+        const transactionsData = transactionsRes.data;
+        setTransactions(transactionsData);
+        
+        // Fetch all transaction items in parallel
+        const itemsPromises = transactionsData.map(tx => 
+          axios.get(`${API_BASE_URL}/transactions/${tx.transaction_id}/items`)
+            .then(res => ({
+              transactionId: tx.transaction_id,
+              items: res.data
+            }))
+            .catch(() => ({
+              transactionId: tx.transaction_id,
+              items: []
+            }))
+        );
+        
+        // Process all items responses
+        const itemsResponses = await Promise.all(itemsPromises);
+        const itemsMap = {};
+        itemsResponses.forEach(({ transactionId, items }) => {
+          itemsMap[transactionId] = items;
+        });
+        setTransactionItemsMap(itemsMap);
         
         // Transform employees data for the dropdown
         const employeeOptions = employeesRes.data.map(emp => ({
@@ -107,19 +166,46 @@ function Transactions() {
     fetchData();
   }, []);
 
-  const handleVoidTransaction = async (transactionId) => {
-    if (!window.confirm('Are you sure you want to void this transaction?')) {
+  const handleOpenDeleteDialog = (transactionId) => {
+    const transaction = transactions.find(tx => tx.id === transactionId);
+    
+    if (!transaction) {
+      console.error('Transaction not found');
       return;
     }
     
+    const transactionDate = new Date(transaction.created_at).toDateString();
+    const today = new Date().toDateString();
+    
+    if (transactionDate !== today) {
+      alert('You can only delete transactions made today.');
+      return;
+    }
+    
+    setTransactionToDelete(transactionId);
+    setDeleteDialogOpen(true);
+  };
+  
+  const handleCloseDeleteDialog = () => {
+    setDeleteDialogOpen(false);
+    setTransactionToDelete(null);
+  };
+  
+  const handleConfirmDelete = async () => {
+    if (!transactionToDelete) return;
+    
     try {
-      await axios.put(`${API_BASE_URL}/transactions/${transactionId}/void`);
-      // Refresh transactions after successful void
-      const updatedTransactions = transactions.filter(tx => tx.id !== transactionId);
+      // Delete the transaction and all related data
+      await axios.delete(`${API_BASE_URL}/transactions/${transactionToDelete}`);
+      
+      // Update the UI by removing the deleted transaction
+      const updatedTransactions = transactions.filter(tx => tx.id !== transactionToDelete);
       setTransactions(updatedTransactions);
     } catch (err) {
-      console.error('Error voiding transaction:', err);
-      alert('Failed to void transaction. Please try again.');
+      console.error('Error deleting transaction:', err);
+      alert('Failed to delete transaction. Please try again.');
+    } finally {
+      handleCloseDeleteDialog();
     }
   };
   
@@ -138,21 +224,36 @@ function Transactions() {
   // Filter transactions based on search criteria
   const filteredTransactions = transactions.filter(tx => {
     const matchesStore = !store || tx.store_id === store;
-    const matchesWorkstation = !workstation || tx.workstation_id === workstation;
-    const matchesEmployee = !employee || tx.employee_id?.toString() === employee.toString();
+    
+    // Check employee match if employee is selected
+    let matchesEmployee = true;
+    if (employee) {
+      matchesEmployee = tx.employee_id?.toString() === employee.toString();
+    }
+    
     const matchesTransactionNumber = !transactionNumber || 
-      tx.transaction_id.toLowerCase().includes(transactionNumber.toLowerCase());
+      tx.transaction_id?.toLowerCase().includes(transactionNumber.toLowerCase());
+    
+    // Check transaction type match
+    let matchesTransactionType = !transactionType;
+    if (transactionType) {
+      const items = transactionItemsMap[tx.transaction_id] || [];
+      // Match if transaction type matches any item's type or the transaction's main type
+      matchesTransactionType = items.some(item => 
+        item.transaction_type?.toLowerCase() === transactionType.toLowerCase()
+      ) || tx.transaction_type_name?.toLowerCase() === transactionType.toLowerCase();
+    }
       
     // Check date match if businessDate is set
     let matchesDate = true;
     if (businessDate) {
-      const txDate = new Date(tx.created_at).toDateString();
+      const txDate = tx.created_at ? new Date(tx.created_at).toDateString() : '';
       const selectedDate = new Date(businessDate).toDateString();
       matchesDate = txDate === selectedDate;
     }
     
-    return matchesStore && matchesWorkstation && matchesEmployee && 
-           matchesTransactionNumber && matchesDate;
+    return matchesStore && matchesEmployee && matchesTransactionNumber && 
+           matchesDate && matchesTransactionType;
   });
 
   return (
@@ -183,20 +284,20 @@ function Transactions() {
             </Select>
           </FormControl>
 
-          <FormControl variant="outlined" size="small" sx={{ minWidth: 150, flex: 1 }}>
-            <InputLabel id="workstation-label">Workstation</InputLabel>
+          <FormControl variant="outlined" size="small" sx={{ minWidth: 180, flex: 1 }}>
+            <InputLabel id="transaction-type-label">Transaction Type</InputLabel>
             <Select
-              labelId="workstation-label"
-              value={workstation}
-              onChange={(e) => setWorkstation(e.target.value)}
-              label="Workstation"
+              labelId="transaction-type-label"
+              value={transactionType}
+              onChange={(e) => setTransactionType(e.target.value)}
+              label="Transaction Type"
             >
               <MenuItem value="">
-                <em>All Workstations</em>
+                <em>All Types</em>
               </MenuItem>
-              {workstations.map((ws) => (
-                <MenuItem key={ws} value={ws}>
-                  {ws}
+              {transactionTypes.map((type) => (
+                <MenuItem key={type.value} value={type.value}>
+                  {type.label}
                 </MenuItem>
               ))}
             </Select>
@@ -313,7 +414,7 @@ function Transactions() {
                     <Box display="flex" alignItems="center">
                       {txn.status !== 'voided' && (
                         <Checkbox
-                          onChange={() => handleVoidTransaction(txn.id)}
+                          onChange={() => handleOpenDeleteDialog(txn.id)}
                           color="error"
                           size="small"
                         />
@@ -432,6 +533,34 @@ function Transactions() {
                             </strong>
                           </TableCell>
                         </TableRow>
+                        
+                        {/* Payment Methods Section */}
+                        <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f5f9ff' }}>
+                          <TableCell colSpan={4} sx={{ pt: 1, pb: 1 }}>
+                            <Box sx={{ textAlign: 'right' }}>
+                              <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Payment Methods:</Typography>
+                            {loadingPayments ? (
+                              <Typography>Loading payment details...</Typography>
+                            ) : paymentDetails.payments.length > 0 ? (
+                              <Box sx={{ textAlign: 'right' }}>
+                                {paymentDetails.payments.map((payment, index) => (
+                                  <Box key={index} display="flex" justifyContent="flex-end" gap={2} mb={1}>
+                                    <span>{payment.payment_method.replace(/_/g, ' ').toUpperCase()}:</span>
+                                    <span>${parseFloat(payment.amount).toFixed(2)}</span>
+                                  </Box>
+                                ))}
+                                <Divider sx={{ my: 1 }} />
+                                <Box display="flex" justifyContent="flex-end" gap={2} fontWeight="bold">
+                                  <span>Total Paid:</span>
+                                  <span>${parseFloat(paymentDetails.total_paid).toFixed(2)}</span>
+                                </Box>
+                              </Box>
+                            ) : (
+                              <Typography>No payment information available</Typography>
+                            )}
+                            </Box>
+                          </TableCell>
+                        </TableRow>
                       </>
                     ) : (
                       <TableRow>
@@ -449,6 +578,43 @@ function Transactions() {
         <DialogActions>
           <Button onClick={handleCloseDialog} color="primary">
             Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={handleCloseDeleteDialog}
+        aria-labelledby="alert-dialog-title"
+        aria-describedby="alert-dialog-description"
+      >
+        <DialogTitle id="alert-dialog-title">
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarningIcon color="warning" />
+            Confirm Deletion
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box display="flex" alignItems="center" gap={2} p={1}>
+            <WarningIcon color="warning" style={{ fontSize: 40 }} />
+            <Typography variant="body1">
+              Are you sure you want to delete this transaction? This action cannot be undone.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDeleteDialog} color="primary">
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleConfirmDelete} 
+            color="error" 
+            variant="contained"
+            startIcon={<WarningIcon />}
+            autoFocus
+          >
+            Delete Permanently
           </Button>
         </DialogActions>
       </Dialog>

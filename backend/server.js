@@ -2661,6 +2661,47 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
   }
 });
 
+// Get payments for a specific transaction
+app.get('/api/transactions/:transaction_id/payments', async (req, res) => {
+  try {
+    const { transaction_id } = req.params;
+    
+    // First, verify the transaction exists
+    const transactionCheck = await pool.query(
+      'SELECT transaction_id FROM transactions WHERE transaction_id = $1',
+      [transaction_id]
+    );
+    
+    if (transactionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    
+    // Get all payments for the transaction
+    const result = await pool.query(
+      `SELECT 
+        id,
+        amount,
+        payment_method,
+        created_at,
+        updated_at
+      FROM payments 
+      WHERE transaction_id = $1
+      ORDER BY created_at`,
+      [transaction_id]
+    );
+    
+    res.json({
+      transaction_id,
+      payments: result.rows,
+      total_paid: result.rows.reduce((sum, payment) => sum + parseFloat(payment.amount), 0)
+    });
+    
+  } catch (err) {
+    console.error('Error fetching transaction payments:', err);
+    res.status(500).json({ error: 'Failed to fetch transaction payments' });
+  }
+});
+
 // Transaction routes
 app.get('/api/transactions', async (req, res) => {
   try {
@@ -2678,6 +2719,7 @@ app.get('/api/transactions', async (req, res) => {
         t.transaction_id,
         c.first_name || ' ' || c.last_name as customer_name,
         e.first_name || ' ' || e.last_name as employee_name,
+        e.employee_id,
         t.total_amount,
         t.transaction_status,
         t.created_at,
@@ -2690,7 +2732,7 @@ app.get('/api/transactions', async (req, res) => {
       LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
       GROUP BY 
         t.transaction_id, c.first_name, c.last_name, e.first_name, e.last_name, 
-        t.total_amount, t.transaction_status, t.created_at, 
+        e.employee_id, t.total_amount, t.transaction_status, t.created_at, 
         t.updated_at, tic.item_count
       ORDER BY t.created_at DESC`;
     
@@ -2816,6 +2858,35 @@ app.post('/api/transactions', async (req, res) => {
     } finally {
         client.release();
     }
+});
+
+// Delete a transaction and all its related data
+app.delete('/api/transactions/:transaction_id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { transaction_id } = req.params;
+    
+    await client.query('BEGIN');
+    
+    // 1. Delete from payments first (due to foreign key constraints)
+    await client.query('DELETE FROM payments WHERE transaction_id = $1', [transaction_id]);
+    
+    // 2. Delete from transaction_items
+    await client.query('DELETE FROM transaction_items WHERE transaction_id = $1', [transaction_id]);
+    
+    // 3. Finally, delete the transaction
+    await client.query('DELETE FROM transactions WHERE transaction_id = $1', [transaction_id]);
+    
+    await client.query('COMMIT');
+    
+    res.json({ success: true, message: 'Transaction and all related data deleted successfully' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting transaction:', err);
+    res.status(500).json({ error: 'Failed to delete transaction' });
+  } finally {
+    client.release();
+  }
 });
 
 app.put('/api/transactions/:transaction_id', async (req, res) => {
