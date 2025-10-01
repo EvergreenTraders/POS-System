@@ -32,7 +32,7 @@ import config from '../config';
 
 function Transactions() {
   const [store, setStore] = useState('');
-  const [workstation, setWorkstation] = useState('');
+  const [transactionType, setTransactionType] = useState('');
   const [employee, setEmployee] = useState('');
   const [businessDate, setBusinessDate] = useState(null);
   const [transactionNumber, setTransactionNumber] = useState('');
@@ -43,37 +43,53 @@ function Transactions() {
   const API_BASE_URL = config.apiUrl;
   
   const [transactions, setTransactions] = useState([]);
+  const [transactionItemsMap, setTransactionItemsMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stores, setStores] = useState([]);
-  const [workstations, setWorkstations] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [transactionTypes, setTransactionTypes] = useState([]);
   
-  const handleViewTransaction = async (transaction) => {
+  // Fetch transaction types from API
+  useEffect(() => {
+    const fetchTransactionTypes = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/transaction-types`);
+        // Transform the data to match the expected format
+        const types = response.data.map(type => ({
+          value: type.type.toLowerCase(),
+          label: type.type.charAt(0).toUpperCase() + type.type.slice(1)
+        }));
+        setTransactionTypes(types);
+      } catch (error) {
+        console.error('Error fetching transaction types:', error);
+      }
+    };
+
+    fetchTransactionTypes();
+  }, []);
+  
+  const handleViewTransaction = (transaction) => {
     setSelectedTransaction(transaction);
     setLoadingItems(true);
     setViewDialogOpen(true);
     
-    try {
-      // Fetch transaction items for the selected transaction
-      const response = await axios.get(`${API_BASE_URL}/transactions/${transaction.transaction_id}/items`);
-      setTransactionItems(response.data);
-    } catch (err) {
-      console.error('Error fetching transaction items:', err);
-      // Optionally show an error message to the user
-    } finally {
-      setLoadingItems(false);
-    }
+    // Get all transaction items from the pre-fetched map
+    const items = transactionItemsMap[transaction.transaction_id] || [];
+    
+    // Show all items in the popup, regardless of transaction type
+    setTransactionItems(items);
+    setLoadingItems(false);
   };
   
   const handleCloseDialog = () => {
     setViewDialogOpen(false);
     setSelectedTransaction(null);
-    setTransactionItems([]);
+    // Don't clear transaction items to keep them in memory
   };
   
 
-  // Fetch transactions and filter options
+  // Fetch transactions, their items, and filter options
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -85,7 +101,29 @@ function Transactions() {
           axios.get(`${API_BASE_URL}/employees`)
         ]);
         
-        setTransactions(transactionsRes.data);
+        const transactionsData = transactionsRes.data;
+        setTransactions(transactionsData);
+        
+        // Fetch all transaction items in parallel
+        const itemsPromises = transactionsData.map(tx => 
+          axios.get(`${API_BASE_URL}/transactions/${tx.transaction_id}/items`)
+            .then(res => ({
+              transactionId: tx.transaction_id,
+              items: res.data
+            }))
+            .catch(() => ({
+              transactionId: tx.transaction_id,
+              items: []
+            }))
+        );
+        
+        // Process all items responses
+        const itemsResponses = await Promise.all(itemsPromises);
+        const itemsMap = {};
+        itemsResponses.forEach(({ transactionId, items }) => {
+          itemsMap[transactionId] = items;
+        });
+        setTransactionItemsMap(itemsMap);
         
         // Transform employees data for the dropdown
         const employeeOptions = employeesRes.data.map(emp => ({
@@ -138,21 +176,30 @@ function Transactions() {
   // Filter transactions based on search criteria
   const filteredTransactions = transactions.filter(tx => {
     const matchesStore = !store || tx.store_id === store;
-    const matchesWorkstation = !workstation || tx.workstation_id === workstation;
     const matchesEmployee = !employee || tx.employee_id?.toString() === employee.toString();
     const matchesTransactionNumber = !transactionNumber || 
-      tx.transaction_id.toLowerCase().includes(transactionNumber.toLowerCase());
+      tx.transaction_id?.toLowerCase().includes(transactionNumber.toLowerCase());
+    
+    // Check transaction type match
+    let matchesTransactionType = !transactionType;
+    if (transactionType) {
+      const items = transactionItemsMap[tx.transaction_id] || [];
+      // Match if transaction type matches any item's type or the transaction's main type
+      matchesTransactionType = items.some(item => 
+        item.transaction_type?.toLowerCase() === transactionType.toLowerCase()
+      ) || tx.transaction_type_name?.toLowerCase() === transactionType.toLowerCase();
+    }
       
     // Check date match if businessDate is set
     let matchesDate = true;
     if (businessDate) {
-      const txDate = new Date(tx.created_at).toDateString();
+      const txDate = tx.created_at ? new Date(tx.created_at).toDateString() : '';
       const selectedDate = new Date(businessDate).toDateString();
       matchesDate = txDate === selectedDate;
     }
     
-    return matchesStore && matchesWorkstation && matchesEmployee && 
-           matchesTransactionNumber && matchesDate;
+    return matchesStore && matchesEmployee && matchesTransactionNumber && 
+           matchesDate && matchesTransactionType;
   });
 
   return (
@@ -183,20 +230,20 @@ function Transactions() {
             </Select>
           </FormControl>
 
-          <FormControl variant="outlined" size="small" sx={{ minWidth: 150, flex: 1 }}>
-            <InputLabel id="workstation-label">Workstation</InputLabel>
+          <FormControl variant="outlined" size="small" sx={{ minWidth: 180, flex: 1 }}>
+            <InputLabel id="transaction-type-label">Transaction Type</InputLabel>
             <Select
-              labelId="workstation-label"
-              value={workstation}
-              onChange={(e) => setWorkstation(e.target.value)}
-              label="Workstation"
+              labelId="transaction-type-label"
+              value={transactionType}
+              onChange={(e) => setTransactionType(e.target.value)}
+              label="Transaction Type"
             >
               <MenuItem value="">
-                <em>All Workstations</em>
+                <em>All Types</em>
               </MenuItem>
-              {workstations.map((ws) => (
-                <MenuItem key={ws} value={ws}>
-                  {ws}
+              {transactionTypes.map((type) => (
+                <MenuItem key={type.value} value={type.value}>
+                  {type.label}
                 </MenuItem>
               ))}
             </Select>
