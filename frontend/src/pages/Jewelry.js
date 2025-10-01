@@ -178,20 +178,25 @@ function Jewelry() {
       didParseCell: function(data) {
         // Make the first column (Date) and second column (Changed By) bold for the first row of each change set
         if (data.column.index <= 1 && data.row.index > 0 && tableData[data.row.index - 1][0] === '') {
-          data.cell.styles.fontStyle = 'bold';
         }
         
         // Add a border between different change sets
         if (data.row.index > 0 && data.column.index === 0 && tableData[data.row.index][0] === '') {
           data.cell.styles.lineWidth = 0.5;
-          data.cell.styles.lineColor = [200, 200, 200];
         }
       }
     });
-
-    // Save the PDF with a timestamp
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    doc.save(`item_history_${itemId}.pdf`);
+    
+    // Generate PDF blob and open in new tab
+    const pdfOutput = doc.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfOutput);
+    const newWindow = window.open();
+    if (newWindow) {
+      newWindow.location.href = pdfUrl;
+    } else {
+      // Fallback to download if popup is blocked
+      doc.save(`item_${itemId}_history.pdf`);
+    }
   };
   const API_BASE_URL = config.apiUrl;
   const [selectedItem, setSelectedItem] = useState(null);
