@@ -1,5 +1,3 @@
-drop table if exists inventory_status;
-
 -- Create inventory_status table
 CREATE TABLE IF NOT EXISTS inventory_status (
     status_id SERIAL PRIMARY KEY,
@@ -10,15 +8,19 @@ CREATE TABLE IF NOT EXISTS inventory_status (
     updated_at TIMESTAMP,
     CONSTRAINT valid_status_code CHECK (status_code ~ '^[A-Z0-9_]+$')
 );
+-- First, drop the existing column if it exists
+ALTER TABLE jewelry DROP COLUMN IF EXISTS images;
 
+-- Add the new column with BYTEA[] type
+ALTER TABLE jewelry ADD COLUMN images BYTEA[];
 -- Insert default status values
-INSERT INTO inventory_status (status_code, status_name, description) VALUES
-    ('HOLD', 'On Hold', 'Item is on hold and not available for sale'),
-    ('IN_PROCESS', 'In Process', 'Item is being processed or worked on'),
-    ('SCRAP', 'Scrap', 'Item is scrap and not available for sale'),
-    ('RESERVED', 'Reserved', 'Item is reserved for a customer'),
-    ('SOLD', 'Sold', 'Item has been sold')
-ON CONFLICT (status_code) DO NOTHING;
+-- INSERT INTO inventory_status (status_code, status_name, description) VALUES
+--     ('HOLD', 'On Hold', 'Item is on hold and not available for sale'),
+--     ('IN_PROCESS', 'In Process', 'Item is being processed or worked on'),
+--     ('SCRAP', 'Scrap', 'Item is scrap and not available for sale'),
+--     ('RESERVED', 'Reserved', 'Item is reserved for a customer'),
+--     ('SOLD', 'Sold', 'Item has been sold')
+-- ON CONFLICT (status_code) DO NOTHING;
 
 -- Create jewelry table for inventory
 CREATE TABLE IF NOT EXISTS jewelry (
@@ -29,7 +31,7 @@ CREATE TABLE IF NOT EXISTS jewelry (
     category VARCHAR(50) NOT NULL,
     brand VARCHAR(100),
     vintage BOOLEAN DEFAULT false,
-    stamps TEXT,
+    stamps TEXT, 
     images JSONB DEFAULT '[]',
     notes TEXT,
     
