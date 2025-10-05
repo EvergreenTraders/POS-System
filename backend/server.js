@@ -1455,8 +1455,10 @@ app.post('/api/jewelry', async (req, res) => {
           condition,
           metal_spot_price,
           notes,
-          melt_value
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
+          item_price,
+          melt_value,
+          total_weight
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)
         RETURNING *`;
 
       const jewelryValues = [
@@ -1496,7 +1498,13 @@ app.post('/api/jewelry', async (req, res) => {
         'GOOD',          // 34
         item.metal_spot_price,
         item.notes,
-        item.melt_value
+        item.price,
+        item.melt_value,
+        // Calculate total weight: metal_weight + primary_gem_weight + sum(secondary_gem_weights)
+        (parseFloat(item.metal_weight) || 0) + 
+        (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
+        (item.secondary_gems || []).reduce((sum, gem) => 
+          sum + (parseFloat(gem.secondary_gem_weight) || 0) * (parseInt(gem.secondary_gem_quantity) || 1), 0)
       ];
 
       const result = await client.query(jewelryQuery, jewelryValues);

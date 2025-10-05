@@ -9,10 +9,11 @@ CREATE TABLE IF NOT EXISTS inventory_status (
     CONSTRAINT valid_status_code CHECK (status_code ~ '^[A-Z0-9_]+$')
 );
 -- First, drop the existing column if it exists
-ALTER TABLE jewelry DROP COLUMN IF EXISTS images;
+-- ALTER TABLE jewelry DROP COLUMN IF EXISTS images;
+ALTER TABLE jewelry ADD COLUMN total_weight DECIMAL(10,2);
 
--- Add the new column with BYTEA[] type
-ALTER TABLE jewelry ADD COLUMN images BYTEA[];
+-- -- Add the new column with BYTEA[] type
+-- ALTER TABLE jewelry ADD COLUMN images JSONB DEFAULT '[]';
 -- Insert default status values
 -- INSERT INTO inventory_status (status_code, status_name, description) VALUES
 --     ('HOLD', 'On Hold', 'Item is on hold and not available for sale'),
