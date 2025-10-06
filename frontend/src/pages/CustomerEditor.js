@@ -178,7 +178,7 @@ const CustomerEditor = () => {
           submitData.append('id_image_back', file);
         }
       }
-      
+      console.log("customer data",submitData);
       const url = formData.id 
         ? `${config.apiUrl}/customers/${formData.id}` 
         : `${config.apiUrl}/customers`;
@@ -610,6 +610,8 @@ const CustomerEditor = () => {
                     value={formData.id_type || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    required
+                    error={!formData.id_type}
                     margin="dense"
                   />
                 </Grid>
@@ -620,6 +622,8 @@ const CustomerEditor = () => {
                     value={formData.id_number || ''}
                     onChange={handleFormChange}
                     fullWidth
+                    required
+                    error={!formData.id_number}
                     margin="dense"
                   />
                 </Grid>
