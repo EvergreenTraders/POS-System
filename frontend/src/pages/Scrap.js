@@ -359,7 +359,6 @@ const Scrap = () => {
             )}
           </List>
         </Paper>
-
         {/* Bucket Items */}
         <Paper sx={{ flex: 1, p: 2, maxHeight: '70vh', overflow: 'auto' }}>
           {selectedBucket ? (
@@ -379,19 +378,44 @@ const Scrap = () => {
                 </Button>
               </Box>
               
-              {itemsLoading ? (
-                <Box display="flex" justifyContent="center" my={4}>
-                  <CircularProgress />
-                </Box>
-              ) : bucketItems.length > 0 ? (
-                <TableContainer>
+              {/* Metal Type Summary and Items Table */}
+              {bucketItems.length > 0 ? (
+                <>
+                  <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                    <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                      Total Weight by Metal Type:
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {Object.entries(
+                        bucketItems.reduce((acc, item) => {
+                          const metalType = item.precious_metal_type?.toLowerCase() || 'other';
+                          const weight = parseFloat(item.weight_grams) || 0;
+                          acc[metalType] = item.total_weight || 0;
+                          return acc;
+                        }, {})
+                      ).map(([metalType, totalWeight]) => (
+                        <Chip
+                          key={metalType}
+                          label={`${metalType.charAt(0).toUpperCase() + metalType.slice(1)}: ${totalWeight}g`}
+                          color="primary"
+                          variant="outlined"
+                          size="small"
+                          sx={{ 
+                            fontWeight: 'medium',
+                            '& .MuiChip-label': { px: 1 }
+                          }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                  <TableContainer>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
                         <TableCell>Item ID</TableCell>
                         <TableCell>Description</TableCell>
                         <TableCell>Category</TableCell>
-                        <TableCell>Value</TableCell>
+                        <TableCell>Price</TableCell>
                         <TableCell>Actions</TableCell>
                       </TableRow>
                     </TableHead>
@@ -401,7 +425,7 @@ const Scrap = () => {
                           <TableCell>{item.item_id || 'N/A'}</TableCell>
                           <TableCell>{item.long_desc || 'Unnamed Item'}</TableCell>
                           <TableCell>{item.category || 'N/A'}</TableCell>
-                          <TableCell>${item.item_price?.toFixed(2) || '0.00'}</TableCell>
+                          <TableCell>${item.item_price || '0.00'}</TableCell>
                           <TableCell>
                             <IconButton size="small" onClick={() => { /* Handle delete */ }}>
                               <DeleteIcon fontSize="small" color="error" />
@@ -411,7 +435,8 @@ const Scrap = () => {
                       ))}
                     </TableBody>
                   </Table>
-                </TableContainer>
+                  </TableContainer>
+                </>
               ) : (
                 <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
                   <Typography>No items in this bucket yet.</Typography>
