@@ -1028,6 +1028,7 @@ function JewelEstimator() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [popupImageIndex, setPopupImageIndex] = useState(0);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const sliderRef = React.useRef(null);
   const colorSliderRef = React.useRef(null);
   const cutRef = React.useRef(null);
@@ -1113,96 +1114,30 @@ function JewelEstimator() {
     setPopupImageIndex((prevIndex) => Math.max(prevIndex - 1, 0));
   };
 
-  // Popup Component
-  const ImagePopup = ({ images, index }) => {
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Handlers for popup
+  const handleDeleteImage = () => {
+    // Delete the image at popupImageIndex
+    setImages(prev => prev.filter((_, i) => i !== popupImageIndex));
 
-    const handleDelete = () => {
-      setImages(prev => prev.filter((_, i) => i !== index));
-      setShowDeleteConfirm(false);
+    // Adjust popup index if needed
+    if (popupImageIndex >= images.length - 1 && popupImageIndex > 0) {
+      setPopupImageIndex(popupImageIndex - 1);
+    }
+
+    // Close popup if no images left
+    if (images.length <= 1) {
       closePopup();
-    };
+    }
+  };
 
-    const handleMakePrimary = (event) => {
-      const newImages = [...images];
-      // Remove primary flag from all images
-      newImages.forEach(img => img.isPrimary = false);
-      // Set primary flag for current image
-      newImages[index].isPrimary = event.target.checked;
-      setImages(newImages);
-    };
-
-    if (!images || images.length === 0) return null;
-
-    return (
-      <>
-        <Dialog open={isPopupOpen} onClose={closePopup} maxWidth="md">
-          <DialogContent sx={{ overflow: 'hidden' }}>
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', gap: 2 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                <Button onClick={handlePrevPopupImage} disabled={index === 0}>◀</Button>
-                <img 
-                  src={images[index].url} 
-                  alt="Popup Image" 
-                  style={{ 
-                    width: '500px', 
-                    height: 'auto', 
-                    transition: 'opacity 0.5s ease-in-out', 
-                    opacity: isPopupOpen ? 1 : 0 
-                  }} 
-                />
-                <Button onClick={handleNextPopupImage} disabled={index === images.length - 1}>▶</Button>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={images[index].isPrimary || false}
-                      onChange={handleMakePrimary}
-                    />
-                  }
-                  label="Make Primary"
-                />
-                <Button 
-                  variant="contained" 
-                  color="error" 
-                  startIcon={<DeleteIcon />}
-                  onClick={() => setShowDeleteConfirm(true)}
-                >
-                  Delete
-                </Button>
-              </Box>
-            </Box>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={closePopup}>Close</Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Delete Confirmation Dialog */}
-        <Dialog
-          open={showDeleteConfirm}
-          onClose={() => setShowDeleteConfirm(false)}
-          aria-labelledby="delete-dialog-title"
-          aria-describedby="delete-dialog-description"
-        >
-          <DialogTitle id="delete-dialog-title">
-            {"Delete Image"}
-          </DialogTitle>
-          <DialogContent>
-            <Typography>
-              Are you sure you want to delete this image? This action cannot be undone.
-            </Typography>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
-            <Button onClick={handleDelete} color="error" variant="contained" autoFocus>
-              Delete
-            </Button>
-          </DialogActions>
-        </Dialog>
-      </>
-    );
+  const handleMakePrimaryImage = (event) => {
+    const newImages = [...images];
+    // Remove primary flag from all images
+    newImages.forEach(img => img.isPrimary = false);
+    // Set primary flag for current image
+    const currentIndex = Math.min(popupImageIndex, images.length - 1);
+    newImages[currentIndex].isPrimary = event.target.checked;
+    setImages(newImages);
   };
 
   const handleFileUpload = (event) => {
@@ -2359,7 +2294,91 @@ function JewelEstimator() {
             </Box>
             )}
 
-            <ImagePopup images={images} index={popupImageIndex}/>
+            {/* Image Popup Dialog */}
+            {isPopupOpen && images && images.length > 0 && (
+              <>
+                <Dialog open={isPopupOpen} onClose={closePopup} maxWidth="sm">
+                  <DialogContent sx={{ overflow: 'hidden' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', gap: 2 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                        <Button
+                          onClick={handlePrevPopupImage}
+                          disabled={popupImageIndex === 0}
+                        >
+                          ◀
+                        </Button>
+                        <img
+                          key={`popup-img-${popupImageIndex}`}
+                          src={images[Math.min(popupImageIndex, images.length - 1)]?.url}
+                          alt="Popup Image"
+                          style={{
+                            maxWidth: '400px',
+                            maxHeight: '50vh',
+                            width: 'auto',
+                            height: 'auto',
+                            objectFit: 'contain'
+                          }}
+                        />
+                        <Button
+                          onClick={handleNextPopupImage}
+                          disabled={popupImageIndex >= images.length - 1}
+                        >
+                          ▶
+                        </Button>
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <FormControlLabel
+                          control={
+                            <Checkbox
+                              checked={images[Math.min(popupImageIndex, images.length - 1)]?.isPrimary || false}
+                              onChange={handleMakePrimaryImage}
+                            />
+                          }
+                          label="Make Primary"
+                        />
+                        <Button
+                          variant="contained"
+                          color="error"
+                          startIcon={<DeleteIcon />}
+                          onClick={() => setShowDeleteConfirm(true)}
+                        >
+                          Delete
+                        </Button>
+                      </Box>
+                    </Box>
+                  </DialogContent>
+                  <DialogActions>
+                    <Button onClick={closePopup}>Close</Button>
+                  </DialogActions>
+                </Dialog>
+
+                {/* Delete Confirmation Dialog */}
+                <Dialog
+                  open={showDeleteConfirm}
+                  onClose={() => setShowDeleteConfirm(false)}
+                >
+                  <DialogTitle>Delete Image</DialogTitle>
+                  <DialogContent>
+                    <Typography>
+                      Are you sure you want to delete this image? This action cannot be undone.
+                    </Typography>
+                  </DialogContent>
+                  <DialogActions>
+                    <Button onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+                    <Button
+                      onClick={() => {
+                        handleDeleteImage();
+                        setShowDeleteConfirm(false);
+                      }}
+                      color="error"
+                      variant="contained"
+                    >
+                      Delete
+                    </Button>
+                  </DialogActions>
+                </Dialog>
+              </>
+            )}
 
             <Box sx={{ mb: 3 }}>
               <Typography variant="h6" sx={{ mb: 0 }}>Price Estimates</Typography>
