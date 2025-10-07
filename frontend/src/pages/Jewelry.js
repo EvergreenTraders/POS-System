@@ -333,7 +333,22 @@ function Jewelry() {
   const getImageUrl = (images) => {
     // Default placeholder image
     const placeholderImage = 'https://via.placeholder.com/150';
-    
+
+    // Helper to convert relative paths to absolute URLs
+    const makeAbsoluteUrl = (url) => {
+      if (!url) return placeholderImage;
+      // If already absolute URL (starts with http:// or https://), return as is
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        return url;
+      }
+      // If relative path (starts with /uploads), prepend server base URL
+      if (url.startsWith('/uploads')) {
+        const serverBase = config.apiUrl.replace('/api', '');
+        return `${serverBase}${url}`;
+      }
+      return url;
+    };
+
     try {
       // If images is a string (JSON string), try to parse it
       if (typeof images === 'string') {
@@ -344,31 +359,31 @@ function Jewelry() {
           return placeholderImage;
         }
       }
-      
+
       // If no images or empty array
       if (!images || !Array.isArray(images) || images.length === 0) {
         return placeholderImage;
       }
-      
+
       // Try to find the primary image first
       const primaryImage = images.find(img => img.isPrimary === true || img.is_primary === true);
-      
+
       // If primary image found
       if (primaryImage) {
         // Check for different possible URL structures
-        if (primaryImage.url) return primaryImage.url;
-        if (primaryImage.image_url) return primaryImage.image_url;
-        if (typeof primaryImage === 'string') return primaryImage;
+        if (primaryImage.url) return makeAbsoluteUrl(primaryImage.url);
+        if (primaryImage.image_url) return makeAbsoluteUrl(primaryImage.image_url);
+        if (typeof primaryImage === 'string') return makeAbsoluteUrl(primaryImage);
       }
-      
+
       // Otherwise use the first image
       const firstImage = images[0];
       if (firstImage) {
-        if (firstImage.url) return firstImage.url;
-        if (firstImage.image_url) return firstImage.image_url;
-        if (typeof firstImage === 'string') return firstImage;
+        if (firstImage.url) return makeAbsoluteUrl(firstImage.url);
+        if (firstImage.image_url) return makeAbsoluteUrl(firstImage.image_url);
+        if (typeof firstImage === 'string') return makeAbsoluteUrl(firstImage);
       }
-      
+
       // Default to placeholder if no valid images found
       return placeholderImage;
     } catch (error) {

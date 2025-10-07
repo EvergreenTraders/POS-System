@@ -408,43 +408,90 @@ function Checkout() {
             }
           } else {
             // If coming from estimator, create new jewelry items
-            
-            // Process the cart items to ensure images are in the correct format
-            const processedItems = cartItems.map(item => {
-              // Create a deep copy of the item without the images property
-              const { images, ...itemWithoutImages } = item;
-              
-              // Process images to ensure they're in a format the backend can handle
-              let processedImages = [];
-              if (images && Array.isArray(images)) {
-                // Extract only the URL from each image object
-                processedImages = images.map(img => {
-                  if (typeof img === 'object') {
-                    return { url: img.url || '' };
-                  }
-                  return img;
-                });
-              }
-              
-              // Return the processed item with appropriate fields
-              return {
-                ...itemWithoutImages,
-                images: processedImages
-              };
-            });
-            
-            // Check if we have any jewelry items from the gem estimator
-            const itemsToPost = jewelryItems.length > 0 ? jewelryItems : processedItems;
-  
-            const jewelryResponse = await axios.post(
-              `${config.apiUrl}/jewelry`,
-              { cartItems: itemsToPost },
-              {
-                headers: { Authorization: `Bearer ${token}` }
-              }
+
+            // Check if any items have actual file objects (not just blob URLs)
+            const hasImageFiles = cartItems.some(item =>
+              item.images && Array.isArray(item.images) &&
+              item.images.some(img => img.file instanceof File)
             );
+
+            let jewelryResponse;
+            let itemsToPost; // Declare outside if/else blocks
+
+            if (hasImageFiles) {
+
+              // Use FormData for file uploads
+              const formData = new FormData();
+
+              // Collect all image files from all items
+              let fileCount = 0;
+              cartItems.forEach(item => {
+                if (item.images && Array.isArray(item.images)) {
+                  item.images.forEach(img => {
+                    if (img.file instanceof File) {
+                      formData.append('images', img.file);
+                      fileCount++;
+                    }
+                  });
+                }
+              });
+
+              // Process cart items to remove file objects (can't be serialized to JSON)
+              const processedItems = cartItems.map(item => {
+                const { images, ...itemWithoutImages } = item;
+                return itemWithoutImages;
+              });
+
+              // Check if we have any jewelry items from the gem estimator
+              itemsToPost = jewelryItems.length > 0 ? jewelryItems : processedItems;
+
+              // Add cart items as JSON string in FormData
+              formData.append('cartItems', JSON.stringify(itemsToPost));
+
+              jewelryResponse = await axios.post(
+                `${config.apiUrl}/jewelry/with-images`,
+                formData,
+                {
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'multipart/form-data'
+                  }
+                }
+              );
+            } else {
+              // No files, use regular JSON approach (for backward compatibility)
+              const processedItems = cartItems.map(item => {
+                const { images, ...itemWithoutImages } = item;
+
+                let processedImages = [];
+                if (images && Array.isArray(images)) {
+                  processedImages = images.map(img => {
+                    if (typeof img === 'object') {
+                      return { url: img.url || '' };
+                    }
+                    return img;
+                  });
+                }
+
+                return {
+                  ...itemWithoutImages,
+                  images: processedImages
+                };
+              });
+
+              itemsToPost = jewelryItems.length > 0 ? jewelryItems : processedItems;
+
+              jewelryResponse = await axios.post(
+                `${config.apiUrl}/jewelry`,
+                { cartItems: itemsToPost },
+                {
+                  headers: { Authorization: `Bearer ${token}` }
+                }
+              );
+            }
+
             createdJewelryItems = jewelryResponse.data;
-            
+
             // Push data to jewelry_secondary_gems for each created item
             for (let i = 0; i < createdJewelryItems.length; i++) {
               const item = createdJewelryItems[i];
@@ -657,19 +704,65 @@ function Checkout() {
           severity: 'success'
         });
 
-        await axios.post(
-          `${config.apiUrl}/jewelry`,
-          { 
-            cartItems: cartItems.map(item => ({
-              ...item,
-              transaction_type_id: transactionTypes[item.transaction_type],
-            })),
-            quote_id: response.data.quote_id // Pass the quote_id
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` }
-          }
+        // Check if any items have actual file objects
+        const hasImageFiles = cartItems.some(item =>
+          item.images && Array.isArray(item.images) &&
+          item.images.some(img => img.file instanceof File)
         );
+
+        if (hasImageFiles) {
+          // Use FormData for file uploads
+          const formData = new FormData();
+
+          // Collect all image files from all items
+          cartItems.forEach(item => {
+            if (item.images && Array.isArray(item.images)) {
+              item.images.forEach(img => {
+                if (img.file instanceof File) {
+                  formData.append('images', img.file);
+                }
+              });
+            }
+          });
+
+          // Process cart items to remove file objects
+          const processedItems = cartItems.map(item => {
+            const { images, ...itemWithoutImages } = item;
+            return {
+              ...itemWithoutImages,
+              transaction_type_id: transactionTypes[item.transaction_type],
+            };
+          });
+
+          formData.append('cartItems', JSON.stringify(processedItems));
+          formData.append('quote_id', response.data.quote_id);
+
+          await axios.post(
+            `${config.apiUrl}/jewelry/with-images`,
+            formData,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'multipart/form-data'
+              }
+            }
+          );
+        } else {
+          // No files, use regular JSON approach
+          await axios.post(
+            `${config.apiUrl}/jewelry`,
+            {
+              cartItems: cartItems.map(item => ({
+                ...item,
+                transaction_type_id: transactionTypes[item.transaction_type],
+              })),
+              quote_id: response.data.quote_id
+            },
+            {
+              headers: { Authorization: `Bearer ${token}` }
+            }
+          );
+        }
 
         clearCart();
         setTimeout(() => {

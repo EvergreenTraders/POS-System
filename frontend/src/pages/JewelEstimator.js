@@ -310,10 +310,12 @@ function JewelEstimator() {
       melt_value: priceEstimates.melt,
       retail_price: priceEstimates.retail,
       
-      // Images
+      // Images - preserve File objects for upload
       images: images.map(img => ({
         url: img.url,
-        isPrimary: img.isPrimary || false
+        isPrimary: img.isPrimary || false,
+        file: img.file, // Preserve the File object for upload
+        type: img.type
       })),
       
       // Free text description if available
@@ -356,9 +358,19 @@ function JewelEstimator() {
         // Normal add for non-edit mode - append to existing items
         updatedItems = [...prev, itemWithPrices];
       }
-      
-      // Save to sessionStorage to persist through navigation
-      sessionStorage.setItem('jewelEstimatorItems', JSON.stringify(updatedItems));
+
+      // Check if any items have File objects (can't be stored in sessionStorage)
+      const hasFileObjects = updatedItems.some(item =>
+        item.images && Array.isArray(item.images) &&
+        item.images.some(img => img.file instanceof File)
+      );
+
+      // Only save to sessionStorage if there are no File objects
+      if (!hasFileObjects) {
+        sessionStorage.setItem('jewelEstimatorItems', JSON.stringify(updatedItems));
+      } else {
+        sessionStorage.removeItem('jewelEstimatorItems');
+      }
       
       // In edit mode, don't automatically navigate back to CustomerTicket
       // User will need to explicitly hit "Add to Ticket" to return
@@ -2134,20 +2146,32 @@ function JewelEstimator() {
   };
 
   const handleCheckout = () => {
-    // Save the current state in session storage before navigating
+    // Prepare items with current pricing
     const updatedItems = estimatedItems.map((item) => ({
       ...item,
       price: item.price_estimates[item.transaction_type],
       notes: item.notes
     }));
 
-    sessionStorage.setItem('estimationState', JSON.stringify({
-      items: updatedItems
-    }));
-    
-    // Add items to cart before navigation
+    // Check if any items have File objects (can't be stored in sessionStorage)
+    const hasFileObjects = updatedItems.some(item =>
+      item.images && Array.isArray(item.images) &&
+      item.images.some(img => img.file instanceof File)
+    );
+
+    // Only use sessionStorage if there are no File objects
+    if (!hasFileObjects) {
+      sessionStorage.setItem('estimationState', JSON.stringify({
+        items: updatedItems
+      }));
+    } else {
+      // Clear sessionStorage if there are File objects
+      sessionStorage.removeItem('estimationState');
+    }
+
+    // Add items to cart before navigation (cart is in-memory)
     updatedItems.forEach(item => addToCart(item));
-    
+
     const customerData = location.state?.customer;
 
     if (customerData) {
@@ -2156,7 +2180,7 @@ function JewelEstimator() {
       navigate('/checkout', {
         state: {
           customer: customerData,
-          items: updatedItems,
+          items: updatedItems, // Pass items with File objects through navigation state
           from: 'jewelry'
         }
       });
@@ -2164,7 +2188,7 @@ function JewelEstimator() {
       // Otherwise, navigate to customer manager to select or create a customer
       navigate('/customer', {
         state: {
-          items: updatedItems,
+          items: updatedItems, // Pass items with File objects through navigation state
           from: 'jewelry'
         }
       });
