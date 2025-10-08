@@ -9,6 +9,8 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
+// Serve uploaded files statically
+app.use('/uploads', express.static('uploads'));
 
 // Database configuration
 const pool = new Pool({
@@ -18,6 +20,41 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 5432,
 });
+
+// Multer setup for file uploads
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Multer setup for customer image uploads
+const uploadCustomerImage = multer({ storage: multer.memoryStorage() });
+
+// Configure multer for multiple image uploads (customer photo, ID front and back)
+const uploadCustomerImages = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10 MB limit per file
+}).fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'id_image_front', maxCount: 1 },
+  { name: 'id_image_back', maxCount: 1 }
+]);
+
+// Configure multer for jewelry image uploads (multiple images)
+const uploadJewelryImages = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10 MB limit per file
+}).array('images', 10); // Allow up to 10 images
+
+// Ensure upload directories exist
+const uploadDir = 'uploads/customers/';
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const jewelryUploadDir = 'uploads/jewelry/';
+if (!fs.existsSync(jewelryUploadDir)) {
+  fs.mkdirSync(jewelryUploadDir, { recursive: true });
+}
 
 // Function to update quote days remaining
 const updateQuoteDaysRemaining = async () => {
@@ -1355,6 +1392,219 @@ app.get('/api/jewelry', async (req, res) => {
 });
 
 // Add jewelry item endpoint
+// New endpoint for jewelry with image uploads
+app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Parse cartItems from form data
+    const cartItems = JSON.parse(req.body.cartItems || '[]');
+    const quote_id = req.body.quote_id;
+    const imageMetadata = req.body.imageMetadata ? JSON.parse(req.body.imageMetadata) : [];
+    const results = [];
+
+    // Store uploaded files temporarily (will be saved with meaningful names after getting item_id)
+    const uploadedFiles = req.files || [];
+    // Process each item sequentially
+    let itemCounter = 1;
+    let globalImageIndex = 0; // Track global image index across all items
+
+    for (let itemIdx = 0; itemIdx < cartItems.length; itemIdx++) {
+      const item = cartItems[itemIdx];
+
+      // Use quote_id as item_id if provided, otherwise generate a new one
+      let item_id, status;
+      if (quote_id) {
+        const sequentialNumber = itemCounter.toString().padStart(2, '0');
+        item_id = `${quote_id}-${sequentialNumber}`;
+        itemCounter++;
+        status = 'QUOTED';
+      } else {
+        const usedIds = new Set();
+        item_id = await generateItemId(item.metal_category, client, usedIds);
+        status = 'HOLD';
+      }
+
+      // Now save images with meaningful filenames using item_id
+      const processedImages = [];
+
+      // Get the number of images for this item from imagesMeta or count files
+      const itemImageCount = item.imagesMeta ? item.imagesMeta.length : 0;
+
+      if (uploadedFiles.length > 0 && itemImageCount > 0) {
+
+        for (let i = 0; i < itemImageCount; i++) {
+          const fileIndex = globalImageIndex + i;
+          if (fileIndex >= uploadedFiles.length) break;
+
+          const file = uploadedFiles[fileIndex];
+
+          // Get file extension from original filename
+          const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+
+          // Create meaningful filename: ITEMID-1.jpg, ITEMID-2.jpg, etc.
+          const imageNumber = i + 1;
+          const filename = `${item_id}-${imageNumber}${ext}`;
+          const filepath = path.join(jewelryUploadDir, filename);
+
+          // Save file to disk with meaningful name
+          await fs.promises.writeFile(filepath, file.buffer);
+
+          // Get isPrimary from metadata if available, otherwise default to first image
+          const isPrimary = item.imagesMeta && item.imagesMeta[i]
+            ? item.imagesMeta[i].isPrimary
+            : i === 0;
+
+          // Store relative path for database
+          processedImages.push({
+            url: `/uploads/jewelry/${filename}`,
+            isPrimary: isPrimary
+          });
+        }
+
+        globalImageIndex += itemImageCount;
+      }
+
+      // Insert jewelry record
+      const jewelryQuery = `
+        INSERT INTO jewelry (
+          item_id,
+          long_desc,
+          short_desc,
+          category,
+          brand,
+          vintage,
+          stamps,
+          images,
+          metal_weight,
+          precious_metal_type,
+          non_precious_metal_type,
+          metal_purity,
+          jewelry_color,
+          purity_value,
+          est_metal_value,
+          primary_gem_type,
+          primary_gem_category,
+          primary_gem_size,
+          primary_gem_quantity,
+          primary_gem_shape,
+          primary_gem_weight,
+          primary_gem_color,
+          primary_gem_exact_color,
+          primary_gem_clarity,
+          primary_gem_cut,
+          primary_gem_lab_grown,
+          primary_gem_authentic,
+          primary_gem_value,
+          buy_price,
+          pawn_value,
+          retail_price,
+          status,
+          location,
+          condition,
+          metal_spot_price,
+          notes,
+          item_price,
+          melt_value,
+          total_weight,
+          inventory_type
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
+        RETURNING *`;
+
+      const jewelryValues = [
+        item_id,
+        item.long_desc || '',
+        item.short_desc || '',
+        item.metal_category || '',
+        item.brand || '',
+        item.vintage || false,
+        item.stamps || '',
+        JSON.stringify(processedImages),
+        parseFloat(item.metal_weight) || 0,
+        item.precious_metal_type || '',
+        item.non_precious_metal_type || '',
+        item.metal_purity || '',
+        item.jewelry_color || '',
+        parseFloat(item.purity_value) || 0,
+        parseFloat(item.est_metal_value) || 0,
+        item.primary_gem_type || null,
+        item.primary_gem_category || null,
+        item.primary_gem_size || null,
+        parseInt(item.primary_gem_quantity) || 0,
+        item.primary_gem_shape || null,
+        parseFloat(item.primary_gem_weight) || 0,
+        item.primary_gem_color || null,
+        item.primary_gem_exact_color || null,
+        item.primary_gem_clarity || null,
+        item.primary_gem_cut || null,
+        item.primary_gem_lab_grown || false,
+        item.primary_gem_authentic || false,
+        parseFloat(item.primary_gem_value) || 0,
+        item.buy_price,
+        item.pawn_price,
+        item.retail_price,
+        status,
+        'SOUTH STORE',
+        'GOOD',
+        item.metal_spot_price,
+        item.notes,
+        item.price,
+        item.melt_value,
+        (parseFloat(item.metal_weight) || 0) +
+        (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
+        (item.secondary_gems || []).reduce((sum, gem) =>
+          sum + (parseFloat(gem.weight) || 0) * (parseInt(gem.quantity) || 0), 0),
+        'jewelry'
+      ];
+
+      const jewelryResult = await client.query(jewelryQuery, jewelryValues);
+
+      // Insert secondary gems if any
+      if (item.secondary_gems && Array.isArray(item.secondary_gems)) {
+        for (const gem of item.secondary_gems) {
+          const secondaryGemQuery = `
+            INSERT INTO jewelry_secondary_gems (
+              item_id, gem_type, gem_category, gem_size, gem_quantity,
+              gem_shape, gem_weight, gem_color, gem_exact_color,
+              gem_clarity, gem_cut, gem_lab_grown, gem_authentic, gem_value
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`;
+
+          await client.query(secondaryGemQuery, [
+            item_id,
+            gem.gem_type || null,
+            gem.gem_category || null,
+            gem.gem_size || null,
+            parseInt(gem.gem_quantity) || 0,
+            gem.gem_shape || null,
+            parseFloat(gem.gem_weight) || 0,
+            gem.gem_color || null,
+            gem.gem_exact_color || null,
+            gem.gem_clarity || null,
+            gem.gem_cut || null,
+            gem.gem_lab_grown || false,
+            gem.gem_authentic || false,
+            parseFloat(gem.gem_value) || 0
+          ]);
+        }
+      }
+
+      results.push(jewelryResult.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json(results); // Return array directly to match /api/jewelry endpoint
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating jewelry with images:', error);
+    res.status(500).json({ error: error.message }); // Match /api/jewelry error format
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/jewelry', async (req, res) => {
   const client = await pool.connect();
   try {
@@ -2038,30 +2288,6 @@ app.get('/api/customers/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch customer' });
   }
 });
-
-const multer = require('multer');
-const path = require('path');
-
-// Multer setup for customer image uploads
-// Use memory storage for multer to store image as buffer
-const uploadCustomerImage = multer({ storage: multer.memoryStorage() });
-
-// Configure multer for multiple image uploads (customer photo, ID front and back)
-const uploadCustomerImages = multer({ 
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 } // 10 MB limit per file
-}).fields([
-  { name: 'image', maxCount: 1 },
-  { name: 'id_image_front', maxCount: 1 },
-  { name: 'id_image_back', maxCount: 1 }
-]);
-
-// Ensure upload directory exists
-const fs = require('fs');
-const uploadDir = 'uploads/customers/';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
 
 app.post('/api/customers', uploadCustomerImages, async (req, res) => {
   try {
@@ -3240,7 +3466,6 @@ app.post('/api/scrap/buckets', async (req, res) => {
   const client = await pool.connect();
   try {
     const { bucket_name, notes, created_by } = req.body;
-    console.log("details",req.body);
     
     if (!bucket_name) {
       return res.status(400).json({ error: 'Bucket name is required' });
