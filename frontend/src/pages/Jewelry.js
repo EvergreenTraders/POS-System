@@ -365,8 +365,15 @@ function Jewelry() {
         return placeholderImage;
       }
 
-      // Try to find the primary image first
-      const primaryImage = images.find(img => img.isPrimary === true || img.is_primary === true);
+      // Try to find the primary image first - check multiple possible field names
+      const primaryImage = images.find(img =>
+        img.isPrimary === true ||
+        img.is_primary === true ||
+        img.primary === true ||
+        img.isPrimary === 'true' ||
+        img.is_primary === 'true' ||
+        img.primary === 'true'
+      );
 
       // If primary image found
       if (primaryImage) {

@@ -311,12 +311,15 @@ function JewelEstimator() {
       retail_price: priceEstimates.retail,
       
       // Images - preserve File objects for upload
-      images: images.map(img => ({
-        url: img.url,
-        isPrimary: img.isPrimary || false,
-        file: img.file, // Preserve the File object for upload
-        type: img.type
-      })),
+      images: images.map((img, idx) => {
+        const imageData = {
+          url: img.url,
+          isPrimary: img.isPrimary || false,
+          file: img.file, // Preserve the File object for upload
+          type: img.type
+        };
+        return imageData;
+      }),
       
       // Free text description if available
       notes: freeText || '',
@@ -581,7 +584,6 @@ function JewelEstimator() {
       // Direct fill for primary gem fields if they exist on itemToEdit
       // Check if we have direct primary gem properties
       if (itemToEdit.primary_gem_category) {
-        console.log('Direct primary gem data found in itemToEdit:', itemToEdit);
         
         // Set the appropriate gem type - with type checking
         const primaryGemCategory = itemToEdit.primary_gem_category;
@@ -785,7 +787,6 @@ function JewelEstimator() {
           // If still no match, use the first color as default
           if (!matchingColor && stoneColors.length > 0) {
             matchingColor = stoneColors[0];
-            console.log('No matching color found, using default:', matchingColor.name);
           }
           
           if (matchingColor) {            
@@ -1131,23 +1132,49 @@ function JewelEstimator() {
   };
 
   const handleMakePrimaryImage = (event) => {
-    const newImages = [...images];
-    // Remove primary flag from all images
-    newImages.forEach(img => img.isPrimary = false);
-    // Set primary flag for current image
     const currentIndex = Math.min(popupImageIndex, images.length - 1);
-    newImages[currentIndex].isPrimary = event.target.checked;
-    setImages(newImages);
+    const isChecked = event.target.checked;
+
+    if (!isChecked) {
+      // If unchecking, set the next image as primary (or last image if current is last)
+      // If there's only one image, keep it as primary
+      if (images.length === 1) {
+        return;
+      }
+
+      const newPrimaryIndex = currentIndex === 0 ? 1 : 0;
+      const newImages = images.map((img, idx) => ({
+        ...img,
+        isPrimary: idx === newPrimaryIndex
+      }));
+      setImages(newImages);
+
+    } else {
+      // If checking, set this image as primary
+      const newImages = images.map((img, idx) => ({
+        ...img,
+        isPrimary: idx === currentIndex
+      }));
+      setImages(newImages);
+    }
   };
 
   const handleFileUpload = (event) => {
     const files = Array.from(event.target.files);
-    const newImages = files.map(file => ({
+    const newImages = files.map((file, index) => ({
       file,
       url: URL.createObjectURL(file),
-      type: 'upload'
+      type: 'upload',
+      isPrimary: false // Initialize isPrimary flag
     }));
-    setImages(prev => [...prev, ...newImages]);
+
+    setImages(prev => {
+      // If this is the first image being uploaded, make it primary
+      if (prev.length === 0 && newImages.length > 0) {
+        newImages[0].isPrimary = true;
+      }
+      return [...prev, ...newImages];
+    });
   };
 
   const startCamera = async () => {
@@ -1201,12 +1228,16 @@ function JewelEstimator() {
           return;
         }
         const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-        const newImage = {
-          file,
-          url: URL.createObjectURL(file),
-          type: 'capture'
-        };
-        setImages(prev => [...prev, newImage]);
+
+        setImages(prev => {
+          const newImage = {
+            file,
+            url: URL.createObjectURL(file),
+            type: 'capture',
+            isPrimary: prev.length === 0 // Set as primary if it's the first image
+          };
+          return [...prev, newImage];
+        });
         stopCamera();
       }, 'image/jpeg', 0.8);
     } catch (err) {

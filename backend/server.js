@@ -1395,21 +1395,25 @@ app.get('/api/jewelry', async (req, res) => {
 // New endpoint for jewelry with image uploads
 app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
   const client = await pool.connect();
+
   try {
     await client.query('BEGIN');
 
     // Parse cartItems from form data
     const cartItems = JSON.parse(req.body.cartItems || '[]');
     const quote_id = req.body.quote_id;
+    const imageMetadata = req.body.imageMetadata ? JSON.parse(req.body.imageMetadata) : [];
     const results = [];
 
     // Store uploaded files temporarily (will be saved with meaningful names after getting item_id)
     const uploadedFiles = req.files || [];
-
     // Process each item sequentially
     let itemCounter = 1;
+    let globalImageIndex = 0; // Track global image index across all items
 
-    for (const item of cartItems) {
+    for (let itemIdx = 0; itemIdx < cartItems.length; itemIdx++) {
+      const item = cartItems[itemIdx];
+
       // Use quote_id as item_id if provided, otherwise generate a new one
       let item_id, status;
       if (quote_id) {
@@ -1426,10 +1430,16 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
       // Now save images with meaningful filenames using item_id
       const processedImages = [];
 
-      if (uploadedFiles.length > 0) {
+      // Get the number of images for this item from imagesMeta or count files
+      const itemImageCount = item.imagesMeta ? item.imagesMeta.length : 0;
 
-        for (let i = 0; i < uploadedFiles.length; i++) {
-          const file = uploadedFiles[i];
+      if (uploadedFiles.length > 0 && itemImageCount > 0) {
+
+        for (let i = 0; i < itemImageCount; i++) {
+          const fileIndex = globalImageIndex + i;
+          if (fileIndex >= uploadedFiles.length) break;
+
+          const file = uploadedFiles[fileIndex];
 
           // Get file extension from original filename
           const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
@@ -1442,12 +1452,19 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           // Save file to disk with meaningful name
           await fs.promises.writeFile(filepath, file.buffer);
 
+          // Get isPrimary from metadata if available, otherwise default to first image
+          const isPrimary = item.imagesMeta && item.imagesMeta[i]
+            ? item.imagesMeta[i].isPrimary
+            : i === 0;
+
           // Store relative path for database
           processedImages.push({
             url: `/uploads/jewelry/${filename}`,
-            isPrimary: i === 0 // First image is primary
+            isPrimary: isPrimary
           });
         }
+
+        globalImageIndex += itemImageCount;
       }
 
       // Insert jewelry record
@@ -3449,7 +3466,6 @@ app.post('/api/scrap/buckets', async (req, res) => {
   const client = await pool.connect();
   try {
     const { bucket_name, notes, created_by } = req.body;
-    console.log("details",req.body);
     
     if (!bucket_name) {
       return res.status(400).json({ error: 'Bucket name is required' });

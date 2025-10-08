@@ -328,12 +328,16 @@ function Checkout() {
       setIsFullyPaid(isPaid);
       
       if (isPaid) {
-        // Only create jewelry items and transactions when payment is fully completed
-        try {
-          let createdJewelryItems;
-          let realTransactionId;
+        // Only create database records when payment is fully completed
+        // This ensures we don't save to jewelry database unless payments and transactions succeed
+        setLoading(true);
 
-          // Step 1: Create jewelry items
+        // Declare variables outside try block so they're accessible in catch block for rollback
+        let createdJewelryItems;
+        let realTransactionId;
+
+        try {
+          // Step 1: Create jewelry items FIRST
           if (isFromQuotes) {
             // If coming from quotes, update each quote item to a regular item
             const convertResponse = await axios.put(
@@ -353,9 +357,6 @@ function Checkout() {
               
                 try {
                   if (originalItem.secondary_gems && originalItem.secondary_gems.length > 0) {
-                    // Handle the new array format of secondary gems
-                    console.log(`Processing ${originalItem.secondary_gems.length} secondary gems for converted item ${item.item_id}`);
-                    
                     // Send each secondary gem individually
                     try {
                       for (const gemData of originalItem.secondary_gems) {
@@ -370,7 +371,6 @@ function Checkout() {
                           { headers: { Authorization: `Bearer ${token}` } }
                         );
                       }
-                      console.log(`Successfully added ${originalItem.secondary_gems.length} individual secondary gems for converted item ${item.item_id}`);
                     } catch (error) {
                       console.error(`Error adding secondary gems for item ${item.item_id}:`, error);
                     }
@@ -398,7 +398,6 @@ function Checkout() {
                       secondaryGemData,
                       { headers: { Authorization: `Bearer ${token}` } }
                     );
-                  console.log(`Successfully added secondary gems for converted item ${item.item_id}`);
                 }
                } catch (error) {
                   console.error(`Error adding secondary gems for converted item ${item.item_id}:`, error);
@@ -423,23 +422,38 @@ function Checkout() {
               // Use FormData for file uploads
               const formData = new FormData();
 
-              // Collect all image files from all items
-              let fileCount = 0;
-              cartItems.forEach(item => {
+              // Collect all image files from all items and track their metadata
+              const imageMetadata = [];
+              cartItems.forEach((item, itemIndex) => {
                 if (item.images && Array.isArray(item.images)) {
-                  item.images.forEach(img => {
+                  item.images.forEach((img, imgIndex) => {
                     if (img.file instanceof File) {
                       formData.append('images', img.file);
-                      fileCount++;
+                      // Track which image is primary
+                      imageMetadata.push({
+                        itemIndex,
+                        imageIndex: imgIndex,
+                        isPrimary: img.isPrimary || false
+                      });
                     }
                   });
                 }
               });
 
-              // Process cart items to remove file objects (can't be serialized to JSON)
+              // Process cart items to remove file objects but keep image metadata
               const processedItems = cartItems.map(item => {
                 const { images, ...itemWithoutImages } = item;
-                return itemWithoutImages;
+
+                // Keep image metadata (isPrimary flag) but remove file objects
+                const imagesMeta = images ? images.map(img => ({
+                  isPrimary: img.isPrimary || false,
+                  type: img.type
+                })) : [];
+
+                return {
+                  ...itemWithoutImages,
+                  imagesMeta // Send metadata separately
+                };
               });
 
               // Check if we have any jewelry items from the gem estimator
@@ -447,6 +461,9 @@ function Checkout() {
 
               // Add cart items as JSON string in FormData
               formData.append('cartItems', JSON.stringify(itemsToPost));
+
+              // Add image metadata for backend to know which image is primary
+              formData.append('imageMetadata', JSON.stringify(imageMetadata));
 
               jewelryResponse = await axios.post(
                 `${config.apiUrl}/jewelry/with-images`,
@@ -478,7 +495,6 @@ function Checkout() {
                   images: processedImages
                 };
               });
-
               itemsToPost = jewelryItems.length > 0 ? jewelryItems : processedItems;
 
               jewelryResponse = await axios.post(
@@ -545,7 +561,6 @@ function Checkout() {
                       secondaryGemData,
                       { headers: { Authorization: `Bearer ${token}` } }
                     );
-                    console.log(`Successfully added secondary gem for item ${item.item_id} using legacy format`);
                   }
                 } catch (error) {
                   console.error(`Error adding secondary gems for item ${item.item_id}:`, error);
@@ -554,14 +569,14 @@ function Checkout() {
               }
             }
           }
-          
-          // Step 2: Create transaction
+
+          // Step 2: Create transaction with PENDING status
           const transactionResponse = await axios.post(
             `${config.apiUrl}/transactions`,
             {
               customer_id: selectedCustomer.id,
               employee_id: employeeId,
-            total_amount: calculateTotal(),
+              total_amount: calculateTotal(),
               cartItems: createdJewelryItems.map((item, index) => {
                 const type = cartItems[index].transaction_type.toLowerCase();
                 return {
@@ -577,15 +592,15 @@ function Checkout() {
               headers: { Authorization: `Bearer ${token}` }
             }
           );
-  
+
           realTransactionId = transactionResponse.data.transaction.transaction_id;
-          
+
           // Step 3: Process all collected payments against the real transaction ID
           for (const payment of updatedPayments) {
-            await axios.post(
+            const paymentResponse = await axios.post(
               `${config.apiUrl}/payments`,
               {
-                transaction_id: realTransactionId, // Use real transaction ID instead of temporary one
+                transaction_id: realTransactionId,
                 amount: payment.amount,
                 payment_method: payment.payment_method
               },
@@ -595,37 +610,47 @@ function Checkout() {
             );
           }
 
-          // Step 4: Update transaction status to completed
+          // Step 4: Update transaction status to COMPLETED after all payments succeed
           await axios.put(
             `${config.apiUrl}/transactions/${realTransactionId}`,
             { transaction_status: 'COMPLETED' },
             { headers: { Authorization: `Bearer ${token}` } }
           );
-          
-          // Step 5: Display success message and clear cart
+
+          // Step 5: Display success message and navigate to home
+          setLoading(false);
           setSnackbar({
             open: true,
             message: 'Transaction completed successfully!',
             severity: 'success'
           });
-          
-          // Clear cart and reset state
-          clearCart();
-          setTransactionCreated(false);
-          setCurrentTransactionId(null);
-          setPayments([]);
-          
-          // Navigate to login page after successful payment
-          console.log('Navigating to login page');
-          setTimeout(() => navigate('/login'), 300);
+
+          // Navigate to jewel estimator, then clear cart
+          // This prevents the useEffect redirect from interfering
+          setTimeout(() => {
+            clearCart();
+            setTransactionCreated(false);
+            setCurrentTransactionId(null);
+            setPayments([]);
+            navigate('/jewel-estimator');
+          }, 1000);
 
         } catch (paymentError) {
-          console.error('Error processing payments:', paymentError);
+          console.error('Error processing payment:', paymentError);
+          setLoading(false);
+
           setSnackbar({
             open: true,
             message: 'Error processing payments. Please try again.',
             severity: 'error'
           });
+
+          // Reset payment state to allow retry
+          setIsFullyPaid(false);
+          setTransactionCreated(false);
+          setCurrentTransactionId(null);
+          setPayments([]);
+          setRemainingAmount(calculateTotal());
           return;
         }
       } else {
@@ -811,7 +836,6 @@ function Checkout() {
       } else {
         itemsToKeep = allCartItems;
       }
-      console.log("Items to keep:", itemsToKeep);
       // Ensure each item is a properly formatted object, not an array
       const formattedCartItems = itemsToKeep.map(item => {
         // If item is an array, convert it to a proper object
@@ -1176,15 +1200,15 @@ function Checkout() {
                       return (
                         <TableRow key={index}>
                           <TableCell>
-                            {item.images?.[0] ? (
-                              <Avatar 
-                                src={item.images[0].url} 
-                                alt="Item" 
+                            {item.images && item.images.length > 0 ? (
+                              <Avatar
+                                src={item.images.find(img => img.isPrimary)?.url || item.images[0]?.url}
+                                alt="Item"
                                 variant="rounded"
                                 sx={{ width: 50, height: 50, objectFit: 'cover' }}
                               />
                             ) : (
-                              <Avatar 
+                              <Avatar
                                 variant="rounded"
                                 sx={{ width: 50, height: 50, bgcolor: 'grey.300' }}
                               >
