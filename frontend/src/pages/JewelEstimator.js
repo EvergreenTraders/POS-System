@@ -1207,6 +1207,28 @@ function JewelEstimator() {
     setShowCamera(false);
   };
 
+  // Effect to assign stream to video element when stream changes
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+
+      // Set video ready when video can play
+      const handleCanPlay = () => {
+        setIsVideoReady(true);
+        console.log('Camera video is ready');
+      };
+
+      videoRef.current.addEventListener('canplay', handleCanPlay);
+
+      // Cleanup
+      return () => {
+        if (videoRef.current) {
+          videoRef.current.removeEventListener('canplay', handleCanPlay);
+        }
+      };
+    }
+  }, [stream]);
+
   const captureImage = () => {
     if (!videoRef.current || !isVideoReady) {
       console.log("Video ref:", videoRef.current, "Ready:", isVideoReady);
