@@ -93,58 +93,108 @@ function Checkout() {
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
-    if (!isInitialized && location.state) {
+    // Only run initialization logic if we haven't initialized yet
+    if (isInitialized) {
+      return;
+    }
+
+    // Check if data is in location.state or sessionStorage
+    let itemsToCheckout = null;
+    let customerData = null;
+    let fromSource = null;
+    let allCartItemsData = null;
+
+    if (location.state?.items) {
+      // Data from navigation state (preferred method)
+      itemsToCheckout = location.state.items;
+      customerData = location.state.customer;
+      fromSource = location.state.from;
+      allCartItemsData = location.state.allCartItems;
+    } else {
+      // Fallback to sessionStorage (for CustomerTicket navigation)
+      const sessionItems = sessionStorage.getItem('checkoutItems');
+      const sessionCustomer = sessionStorage.getItem('selectedCustomer');
+
+      if (sessionItems) {
+        itemsToCheckout = JSON.parse(sessionItems);
+        fromSource = 'cart'; // CustomerTicket uses cart-like structure
+        // Clear sessionStorage after reading
+        sessionStorage.removeItem('checkoutItems');
+      }
+
+      if (sessionCustomer) {
+        customerData = JSON.parse(sessionCustomer);
+      }
+    }
+
+    if (itemsToCheckout && itemsToCheckout.length > 0) {
+      // Reset payment-related state only when actually initializing
+      setTransactionCreated(false);
+      setCurrentTransactionId(null);
+      setPayments([]);
+      setIsFullyPaid(false);
+      setPaymentDetails({
+        cashAmount: '',
+        cardNumber: ''
+      });
+
       // Handle from generic estimator or specific estimators like coinsbullions
-      if ((location.state.from === 'jewelry' || location.state.from === 'coinsbullions') && location.state?.items) {
+      if (fromSource === 'jewelry' || fromSource === 'coinsbullions') {
         // Clear existing cart items before adding new ones from estimator
-        clearCart(); 
-        
+        clearCart();
+
         // Ensure each item is added individually to the cart
-        if (Array.isArray(location.state.items)) {
-          location.state.items.forEach(item => addToCart(item));
+        if (Array.isArray(itemsToCheckout)) {
+          itemsToCheckout.forEach(item => addToCart(item));
         }
         // Set checkoutItems for display
-        setCheckoutItems(location.state.items);
-        
+        setCheckoutItems(itemsToCheckout);
+
         // Set the customer if it exists
-        if (location.state.customer) {
-          setCustomer(location.state.customer);
+        if (customerData) {
+          setCustomer(customerData);
         }
-        setIsInitialized(true); // Mark as initialized to prevent re-running
-      } 
-      else if (location.state.from === 'cart' && location.state?.items) {        
+        setIsInitialized(true);
+      }
+      else if (fromSource === 'cart') {
         // Store the items to checkout and all cart items separately
-        const items = location.state.items;
-        
+        const items = itemsToCheckout;
+
         // Extract jewelry-specific items and store them in state for later use in handleSubmit
         const filteredJewelryItems = items.filter(item => item.sourceEstimator === 'jewelry');
         setJewelryItems(filteredJewelryItems);
-        
+
         if (filteredJewelryItems.length > 0) {
           console.log('Jewelry items from gem estimator found in checkout:', filteredJewelryItems);
         }
-        
+
+        // Clear cart and add items with normalized price field
+        clearCart();
+        items.forEach(item => {
+          // Normalize the price field for consistent calculations
+          const normalizedItem = { ...item };
+          if (normalizedItem.price === undefined) {
+            if (normalizedItem.value !== undefined) normalizedItem.price = normalizedItem.value;
+            else if (normalizedItem.fee !== undefined) normalizedItem.price = normalizedItem.fee;
+            else if (normalizedItem.amount !== undefined) normalizedItem.price = normalizedItem.amount;
+            else normalizedItem.price = 0;
+          }
+          addToCart(normalizedItem);
+        });
+
         // Set the checkout items, ensuring jewelry items retain all fields
         setCheckoutItems(items);
-        setAllCartItems(location.state.allCartItems);
-        
+        setAllCartItems(allCartItemsData || items);
+
         // Set the customer if provided
-        if (location.state.customer) {
-          setCustomer(location.state.customer);
+        if (customerData) {
+          setCustomer(customerData);
         }
-        
-        setIsInitialized(true); // Mark as initialized to prevent re-running
+
+        setIsInitialized(true);
       }
     }
   }, [location.state, addToCart, setCustomer, clearCart, isInitialized]);
-
-  // Initialize or update remaining amount when cart changes
-  useEffect(() => {
-    const total = calculateTotal();
-    if (!transactionCreated) {
-      setRemainingAmount(total);
-    }
-  }, [cartItems, transactionCreated]);
 
   // Fetch transaction types on component mount
   useEffect(() => {
@@ -165,7 +215,12 @@ function Checkout() {
 
   const calculateTotal = () => {
     return cartItems.reduce((total, item) => {
-      return total + parseFloat(item.price);
+      let itemValue = 0;
+      if (item.price !== undefined) itemValue = parseFloat(item.price);
+      else if (item.value !== undefined) itemValue = parseFloat(item.value);
+      else if (item.fee !== undefined) itemValue = parseFloat(item.fee);
+      else if (item.amount !== undefined) itemValue = parseFloat(item.amount);
+      return total + itemValue;
     }, 0);
   };
 
@@ -180,18 +235,8 @@ function Checkout() {
 
   const handleInputChange = (field) => (event) => {
     const value = event.target.value;
-    // Validate amount to not exceed remaining amount
-    if (field === 'cashAmount') {
-      const amount = parseFloat(value) || 0;
-      if (amount > remainingAmount) {
-        setSnackbar({
-          open: true,
-          message: `Amount cannot exceed remaining balance of $${remainingAmount.toFixed(2)}`,
-          severity: 'warning'
-        });
-        return;
-      }
-    }
+    // Always allow editing the input field
+    // Validation will happen on submit
     setPaymentDetails({
       ...paymentDetails,
       [field]: value,
@@ -255,12 +300,20 @@ function Checkout() {
     }
   };
 
-  // Initialize remaining amount when component mounts or cart changes
+  // Initialize remaining amount only when checkoutItems are set and transaction not yet created
   useEffect(() => {
-    if (!transactionCreated) {
-      setRemainingAmount(calculateTotal());
+    if (checkoutItems.length > 0 && !transactionCreated) {
+      const total = checkoutItems.reduce((sum, item) => {
+        let itemValue = 0;
+        if (item.price !== undefined) itemValue = parseFloat(item.price);
+        else if (item.value !== undefined) itemValue = parseFloat(item.value);
+        else if (item.fee !== undefined) itemValue = parseFloat(item.fee);
+        else if (item.amount !== undefined) itemValue = parseFloat(item.amount);
+        return sum + itemValue;
+      }, 0);
+      setRemainingAmount(total);
     }
-  }, [transactionCreated, calculateTotal]);
+  }, [checkoutItems, transactionCreated]);
 
   const handleSubmit = async () => {
     if (!selectedCustomer?.id) {
@@ -337,7 +390,16 @@ function Checkout() {
         let realTransactionId;
 
         try {
-          // Step 1: Create jewelry items FIRST
+          // Check if items are jewelry items (have jewelry-specific fields or sourceEstimator flag)
+          const hasJewelryItems = cartItems.some(item =>
+            item.sourceEstimator === 'jewelry' ||
+            item.metal_weight ||
+            item.metal_purity ||
+            item.precious_metal_type ||
+            item.originalData
+          );
+
+          // Step 1: Create jewelry items FIRST (only if we have jewelry items)
           if (isFromQuotes) {
             // If coming from quotes, update each quote item to a regular item
             const convertResponse = await axios.put(
@@ -405,8 +467,8 @@ function Checkout() {
                 }
     
             }
-          } else {
-            // If coming from estimator, create new jewelry items
+          } else if (hasJewelryItems) {
+            // If coming from estimator, create new jewelry items (only if we have jewelry items)
 
             // Check if any items have actual file objects (not just blob URLs)
             const hasImageFiles = cartItems.some(item =>
@@ -457,7 +519,20 @@ function Checkout() {
               });
 
               // Check if we have any jewelry items from the gem estimator
-              itemsToPost = jewelryItems.length > 0 ? jewelryItems : processedItems;
+              // If items have originalData, use that for full jewelry information
+              const jewelryItemsToPost = jewelryItems.map(item => {
+                if (item.originalData) {
+                  // Merge originalData with current item to ensure we have all jewelry fields
+                  return {
+                    ...item.originalData,
+                    price: item.price,
+                    transaction_type: item.transaction_type,
+                    images: item.images || item.originalData.images
+                  };
+                }
+                return item;
+              });
+              itemsToPost = jewelryItems.length > 0 ? jewelryItemsToPost : processedItems;
 
               // Add cart items as JSON string in FormData
               formData.append('cartItems', JSON.stringify(itemsToPost));
@@ -495,7 +570,22 @@ function Checkout() {
                   images: processedImages
                 };
               });
-              itemsToPost = jewelryItems.length > 0 ? jewelryItems : processedItems;
+
+              // Check if we have any jewelry items from the gem estimator
+              // If items have originalData, use that for full jewelry information
+              const jewelryItemsToPost = jewelryItems.map(item => {
+                if (item.originalData) {
+                  // Merge originalData with current item to ensure we have all jewelry fields
+                  return {
+                    ...item.originalData,
+                    price: item.price,
+                    transaction_type: item.transaction_type,
+                    images: item.images || item.originalData.images
+                  };
+                }
+                return item;
+              });
+              itemsToPost = jewelryItems.length > 0 ? jewelryItemsToPost : processedItems;
 
               jewelryResponse = await axios.post(
                 `${config.apiUrl}/jewelry`,
@@ -571,23 +661,41 @@ function Checkout() {
           }
 
           // Step 2: Create transaction with PENDING status
+          // For jewelry items: use createdJewelryItems
+          // For non-jewelry items: use cartItems directly (no item_id needed)
+          const transactionPayload = {
+            customer_id: selectedCustomer.id,
+            employee_id: employeeId,
+            total_amount: calculateTotal(),
+            transaction_status: 'PENDING',
+            transaction_date: new Date().toISOString().split('T')[0]
+          };
+
+          // Only add cartItems if we have jewelry items (which need item_id linking)
+          if (createdJewelryItems && createdJewelryItems.length > 0) {
+            transactionPayload.cartItems = createdJewelryItems.map((item, index) => {
+              const type = cartItems[index].transaction_type.toLowerCase();
+              return {
+                item_id: item.item_id,
+                transaction_type_id: transactionTypes[type],
+                price: cartItems[index].price
+              };
+            });
+          } else {
+            // For non-jewelry items from CustomerTicket, just send transaction type and price
+            transactionPayload.cartItems = cartItems.map(item => {
+              const type = item.transaction_type.toLowerCase();
+              return {
+                transaction_type_id: transactionTypes[type],
+                price: item.price,
+                description: item.description || 'Item'
+              };
+            });
+          }
+
           const transactionResponse = await axios.post(
             `${config.apiUrl}/transactions`,
-            {
-              customer_id: selectedCustomer.id,
-              employee_id: employeeId,
-              total_amount: calculateTotal(),
-              cartItems: createdJewelryItems.map((item, index) => {
-                const type = cartItems[index].transaction_type.toLowerCase();
-                return {
-                  item_id: item.item_id,
-                  transaction_type_id: transactionTypes[type],
-                  price: cartItems[index].price
-                };
-              }),
-              transaction_status: 'PENDING',
-              transaction_date: new Date().toISOString().split('T')[0]
-            },
+            transactionPayload,
             {
               headers: { Authorization: `Bearer ${token}` }
             }
