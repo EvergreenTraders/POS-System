@@ -592,7 +592,7 @@ function JewelEstimator() {
             ...prev,
             primary: 'diamond'
           }));
-          
+
           // Set primary diamond form directly from itemToEdit
           const diamondFormData = {
             shape: itemToEdit.primary_gem_shape || 'Round',
@@ -605,8 +605,17 @@ function JewelEstimator() {
             exactColor: itemToEdit.primary_gem_exact_color || 'D',
             size: itemToEdit.primary_gem_size || ''
           };
-          
-          setPrimaryDiamondForm(diamondFormData);          
+
+          setPrimaryDiamondForm(diamondFormData);
+
+          // Add primary diamond to diamondSummary
+          const primaryDiamond = {
+            ...diamondFormData,
+            estimatedValue: itemToEdit.primary_gem_value || 0,
+            isPrimary: true,
+            type: 'diamond'
+          };
+          setDiamondSummary([primaryDiamond]);          
           // Directly set the state variables that control the dropdown values
           setExactColor(diamondFormData.exactColor);
           
@@ -638,7 +647,7 @@ function JewelEstimator() {
             ...prev,
             primary: 'stone'
           }));
-          
+
           // Set primary stone form directly from itemToEdit
           const stoneFormData = {
             name: itemToEdit.primary_gem_type || '',
@@ -649,8 +658,17 @@ function JewelEstimator() {
             authentic: itemToEdit.primary_gem_authentic || false,
             valuationType: 'each'
           };
-          
+
           setPrimaryStoneForm(stoneFormData);
+
+          // Add primary stone to stoneSummary
+          const primaryStone = {
+            ...stoneFormData,
+            estimatedValue: itemToEdit.primary_gem_value || 0,
+            isPrimary: true,
+            type: 'stone'
+          };
+          setStoneSummary([primaryStone]);
           // Set the estimated value for primary stone if available
           if (itemToEdit.primary_gem_value !== undefined) {
             setEstimatedValues(prev => ({
@@ -660,7 +678,61 @@ function JewelEstimator() {
           }
         }
       }
-      
+
+      // Load secondary gems if they exist
+      if (itemToEdit.secondary_gems && itemToEdit.secondary_gems.length > 0) {
+        const secondaryDiamonds = [];
+        const secondaryStones = [];
+
+        itemToEdit.secondary_gems.forEach(gem => {
+          if (gem.secondary_gem_category === 'diamond') {
+            secondaryDiamonds.push({
+              shape: gem.secondary_gem_shape || '',
+              clarity: gem.secondary_gem_clarity || '',
+              color: gem.secondary_gem_color || '',
+              exactColor: gem.secondary_gem_exact_color || 'D',
+              cut: gem.secondary_gem_cut || '',
+              size: gem.secondary_gem_size || '',
+              weight: gem.secondary_gem_weight || 0,
+              quantity: gem.secondary_gem_quantity || 0,
+              labGrown: gem.secondary_gem_lab_grown || false,
+              estimatedValue: gem.secondary_gem_value || 0,
+              isPrimary: false,
+              type: 'diamond'
+            });
+          } else if (gem.secondary_gem_category === 'stone') {
+            secondaryStones.push({
+              name: gem.secondary_gem_type || '',
+              shape: gem.secondary_gem_shape || '',
+              color: gem.secondary_gem_color || '',
+              quantity: gem.secondary_gem_quantity || 0,
+              weight: gem.secondary_gem_weight || 0,
+              authentic: gem.secondary_gem_authentic || false,
+              estimatedValue: gem.secondary_gem_value || 0,
+              isPrimary: false,
+              type: 'stone'
+            });
+          }
+        });
+
+        // Set the diamond and stone summaries with secondary gems
+        if (secondaryDiamonds.length > 0) {
+          setDiamondSummary(prev => [...prev, ...secondaryDiamonds]);
+        }
+        if (secondaryStones.length > 0) {
+          setStoneSummary(prev => [...prev, ...secondaryStones]);
+        }
+
+        // Update addedGemTypes to track secondary gems
+        const secondaryGemTypes = itemToEdit.secondary_gems.map(gem =>
+          gem.secondary_gem_category === 'diamond' ? 'diamond' : 'stone'
+        );
+        setAddedGemTypes(prev => ({
+          ...prev,
+          secondary: secondaryGemTypes
+        }));
+      }
+
       // Set form values based on the item being edited
       if (itemToEdit.metal_weight) {
         // This is likely a metal item with jewelry properties

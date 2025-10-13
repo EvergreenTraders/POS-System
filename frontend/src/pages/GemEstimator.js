@@ -325,20 +325,66 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
         const primaryGemType = initialData.primary_gem_category === 'diamond' || initialData.diamond_shape ? 'diamond' : 'stone';
         setAddedGemTypes(prev => ({ ...prev, primary: primaryGemType }));
       }
-      
+
       // Initialize secondary gems if they exist in initialData
-      if (initialData.secondaryGems && initialData.secondaryGems.length > 0) {
-        setSecondaryGems(initialData.secondaryGems);
-        const secondaryGems = initialData.secondaryGems.map(gem => 
+      // Check both secondaryGems (camelCase) and secondary_gems (underscore) for compatibility
+      const secondaryGemsData = initialData.secondaryGems || initialData.secondary_gems;
+      if (secondaryGemsData && secondaryGemsData.length > 0) {
+        setSecondaryGems(secondaryGemsData);
+        const secondaryGemTypes = secondaryGemsData.map(gem =>
           gem.secondary_gem_category === 'diamond' ? 'diamond' : 'stone'
         );
         setAddedGemTypes(prev => ({
           ...prev,
-          secondary: secondaryGems
+          secondary: secondaryGemTypes
         }));
+
+        // Initialize the first secondary gem for display
+        const firstGem = secondaryGemsData[0];
+        if (firstGem) {
+          const gemType = firstGem.secondary_gem_category === 'diamond' ? 'diamond' : 'stone';
+
+          if (gemType === 'diamond') {
+            setSecondaryDiamondForm({
+              shape: firstGem.secondary_gem_shape || 'Round',
+              clarity: firstGem.secondary_gem_clarity || 'Flawless',
+              color: firstGem.secondary_gem_color || 'Colorless',
+              quantity: firstGem.secondary_gem_quantity || 1,
+              weight: firstGem.secondary_gem_weight || 0,
+              cut: firstGem.secondary_gem_cut || '',
+              labGrown: firstGem.secondary_gem_lab_grown || false,
+              exactColor: firstGem.secondary_gem_exact_color || 'D',
+              size: firstGem.secondary_gem_size || '',
+              estimatedValue: firstGem.secondary_gem_value || 0
+            });
+
+            setEstimatedValues(prev => ({
+              ...prev,
+              secondaryDiamond: parseFloat(firstGem.secondary_gem_value) || 0
+            }));
+          } else {
+            setSecondaryStoneForm({
+              type: firstGem.secondary_gem_type || '',
+              name: firstGem.secondary_gem_type || '',
+              shape: firstGem.secondary_gem_shape || 'Round',
+              color: firstGem.secondary_gem_color || 'Red',
+              quantity: firstGem.secondary_gem_quantity || 1,
+              weight: firstGem.secondary_gem_weight || 0,
+              authentic: firstGem.secondary_gem_authentic || false,
+              estimatedValue: firstGem.secondary_gem_value || 0
+            });
+
+            setEstimatedValues(prev => ({
+              ...prev,
+              secondaryGemstone: parseFloat(firstGem.secondary_gem_value) || 0
+            }));
+          }
+
+          setSelectedSecondaryIndex(0);
+        }
       }
-      
-      
+
+
       setIsInitialized(true);
     }
   }, [initialData, isInitialized]);
@@ -2009,6 +2055,23 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
             <Typography variant="h6">
               {activeTab.startsWith('primary') ? 'EST. PRIMARY GEM' : 'EST. SECONDARY GEM'}
             </Typography>
+            {/* Show dropdown only when in edit mode and have multiple secondary gems */}
+            {activeTab.startsWith('secondary') && secondaryGems.length > 1 && editMode && (
+                  <FormControl size="small" sx={{ minWidth: 150 }}>
+                    <Select
+                      value={selectedSecondaryIndex}
+                      onChange={handleSecondaryGemSelect}
+                      displayEmpty
+                      inputProps={{ 'aria-label': 'Select secondary gem' }}
+                    >
+                      {secondaryGems.map((gem, index) => (
+                        <MenuItem key={index} value={index}>
+                          Secondary Gem {index + 1}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+            )}
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <FormControl sx={{ mr: 2 }}>
