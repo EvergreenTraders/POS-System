@@ -158,13 +158,13 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
       if (gemIndex === -1) return; // Gem not found in array
       
       const gemType = gem.secondary_gem_category === 'diamond' ? 'diamond' : 'stone';
-      
+
       // Update the specific gem in the addedGemTypes.secondary array
       setAddedGemTypes(prev => ({
         ...prev,
-        secondary: prev.secondary.map((item, idx) => 
-          idx === gemIndex ? gemType : item
-        )
+        secondary: Array.isArray(prev.secondary)
+          ? prev.secondary.map((item, idx) => idx === gemIndex ? gemType : item)
+          : [gemType]
       }));
       
       if (gemType === 'diamond') {
@@ -225,7 +225,7 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     } else {
       // Legacy handling for non-array secondary gems
       const gemType = gem.secondary_gem_category === 'diamond' ? 'diamond' : 'stone';
-      setAddedGemTypes(prev => ({ ...prev, secondary: gemType }));
+      setAddedGemTypes(prev => ({ ...prev, secondary: [gemType] }));
       
       if (gemType === 'diamond') {
         setSecondaryDiamondForm({
@@ -325,20 +325,66 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
         const primaryGemType = initialData.primary_gem_category === 'diamond' || initialData.diamond_shape ? 'diamond' : 'stone';
         setAddedGemTypes(prev => ({ ...prev, primary: primaryGemType }));
       }
-      
+
       // Initialize secondary gems if they exist in initialData
-      if (initialData.secondaryGems && initialData.secondaryGems.length > 0) {
-        setSecondaryGems(initialData.secondaryGems);
-        const secondaryGems = initialData.secondaryGems.map(gem => 
+      // Check both secondaryGems (camelCase) and secondary_gems (underscore) for compatibility
+      const secondaryGemsData = initialData.secondaryGems || initialData.secondary_gems;
+      if (secondaryGemsData && secondaryGemsData.length > 0) {
+        setSecondaryGems(secondaryGemsData);
+        const secondaryGemTypes = secondaryGemsData.map(gem =>
           gem.secondary_gem_category === 'diamond' ? 'diamond' : 'stone'
         );
         setAddedGemTypes(prev => ({
           ...prev,
-          secondary: secondaryGems
+          secondary: secondaryGemTypes
         }));
+
+        // Initialize the first secondary gem for display
+        const firstGem = secondaryGemsData[0];
+        if (firstGem) {
+          const gemType = firstGem.secondary_gem_category === 'diamond' ? 'diamond' : 'stone';
+
+          if (gemType === 'diamond') {
+            setSecondaryDiamondForm({
+              shape: firstGem.secondary_gem_shape || 'Round',
+              clarity: firstGem.secondary_gem_clarity || 'Flawless',
+              color: firstGem.secondary_gem_color || 'Colorless',
+              quantity: firstGem.secondary_gem_quantity || 1,
+              weight: firstGem.secondary_gem_weight || 0,
+              cut: firstGem.secondary_gem_cut || '',
+              labGrown: firstGem.secondary_gem_lab_grown || false,
+              exactColor: firstGem.secondary_gem_exact_color || 'D',
+              size: firstGem.secondary_gem_size || '',
+              estimatedValue: firstGem.secondary_gem_value || 0
+            });
+
+            setEstimatedValues(prev => ({
+              ...prev,
+              secondaryDiamond: parseFloat(firstGem.secondary_gem_value) || 0
+            }));
+          } else {
+            setSecondaryStoneForm({
+              type: firstGem.secondary_gem_type || '',
+              name: firstGem.secondary_gem_type || '',
+              shape: firstGem.secondary_gem_shape || 'Round',
+              color: firstGem.secondary_gem_color || 'Red',
+              quantity: firstGem.secondary_gem_quantity || 1,
+              weight: firstGem.secondary_gem_weight || 0,
+              authentic: firstGem.secondary_gem_authentic || false,
+              estimatedValue: firstGem.secondary_gem_value || 0
+            });
+
+            setEstimatedValues(prev => ({
+              ...prev,
+              secondaryGemstone: parseFloat(firstGem.secondary_gem_value) || 0
+            }));
+          }
+
+          setSelectedSecondaryIndex(0);
+        }
       }
-      
-      
+
+
       setIsInitialized(true);
     }
   }, [initialData, isInitialized]);
@@ -385,18 +431,28 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
 
   const handleDeleteGem = (index, type, isPrimary) => {
     const gemPosition = isPrimary ? 'primary' : 'secondary';
-  
+
     if (type === 'diamond') {
       setDiamondSummary(prev => prev.filter((_, i) => i !== index));
     } else {
       setStoneSummary(prev => prev.filter((_, i) => i !== index));
     }
-        
+
     // Clear the gem type when deleted
-    setAddedGemTypes(prev => ({
-      ...prev,
-      [gemPosition]: null
-    }));
+    if (isPrimary) {
+      setAddedGemTypes(prev => ({
+        ...prev,
+        primary: null
+      }));
+    } else {
+      // For secondary gems, remove the specific type from the array
+      setAddedGemTypes(prev => ({
+        ...prev,
+        secondary: Array.isArray(prev.secondary)
+          ? prev.secondary.filter((_, i) => i !== index)
+          : []
+      }));
+    }
   };
   
 
@@ -440,13 +496,13 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
         // Update the gems array
         const updatedGems = [...secondaryGems];
         updatedGems[currentGemIndex] = updatedGem;
-        
+
         // Update the gem type in addedGemTypes
         setAddedGemTypes(prev => ({
           ...prev,
-          secondary: prev.secondary.map((item, idx) => 
-            idx === currentGemIndex ? gemType : item
-          )
+          secondary: Array.isArray(prev.secondary)
+            ? prev.secondary.map((item, idx) => idx === currentGemIndex ? gemType : item)
+            : [gemType]
         }));
         
         setSecondaryGems(updatedGems);
@@ -1325,22 +1381,25 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
   const addDiamond = () => {
     const currentForm = getCurrentForm();
     const isPrimary = activeTab.startsWith('primary');
-    
+
     // Call parent component's onAddGem function if provided
     if (onAddGem) {
-  
-    // Check if we can add this type of gem
-    const gemPosition = isPrimary ? 'primary' : 'secondary';
-    if (addedGemTypes[gemPosition] === 'stone') {
-      alert(`Please delete the existing ${gemPosition} stone before adding a diamond`);
-      return;
-    }
 
-    // For primary gems, check if there's already one in the array
-    if (isPrimary && (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary))) {
-      alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
-      return;
+    // Check if we can add this type of gem - only for primary gems
+    if (isPrimary) {
+      // Check if there's already a primary stone
+      if (addedGemTypes.primary === 'stone') {
+        alert('Please delete the existing primary stone before adding a diamond');
+        return;
+      }
+
+      // Check if there's already one primary gem in the array
+      if (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary)) {
+        alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
+        return;
+      }
     }
+    // For secondary gems, allow multiple types (both diamonds and stones)
 
     const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
 
@@ -1401,7 +1460,8 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     // Update added gem types
     setAddedGemTypes(prev => ({
       ...prev,
-      [isPrimary ? 'primary' : 'secondary']: 'diamond'
+      primary: isPrimary ? 'diamond' : prev.primary,
+      secondary: isPrimary ? prev.secondary : [...(Array.isArray(prev.secondary) ? prev.secondary : []), 'diamond']
     }));
     
     // Reset the current form after adding
@@ -1453,22 +1513,25 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
   const addStone = () => {
     const currentForm = getCurrentStoneForm();
     const isPrimary = activeTab.startsWith('primary');
-    
+
     // Call parent component's onAddGem function if provided
     if (onAddGem) {
 
-    // Check if we can add this type of gem
-    const gemPosition = isPrimary ? 'primary' : 'secondary';
-    if (addedGemTypes[gemPosition] === 'diamond') {
-      alert(`Please delete the existing ${gemPosition} diamond before adding a stone`);
-      return;
-    }
+    // Check if we can add this type of gem - only for primary gems
+    if (isPrimary) {
+      // Check if there's already a primary diamond
+      if (addedGemTypes.primary === 'diamond') {
+        alert('Please delete the existing primary diamond before adding a stone');
+        return;
+      }
 
-    // For primary gems, check if there's already one in the array
-    if (isPrimary && (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary))) {
-      alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
-      return;
+      // Check if there's already one primary gem in the array
+      if (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary)) {
+        alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
+        return;
+      }
     }
+    // For secondary gems, allow multiple types (both diamonds and stones)
 
     const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
     
@@ -1517,7 +1580,8 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     // Update added gem types
     setAddedGemTypes(prev => ({
       ...prev,
-      [isPrimary ? 'primary' : 'secondary']: 'stone'
+      primary: isPrimary ? 'stone' : prev.primary,
+      secondary: isPrimary ? prev.secondary : [...(Array.isArray(prev.secondary) ? prev.secondary : []), 'stone']
     }));
     
     // Reset the form after adding
@@ -1991,7 +2055,8 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
             <Typography variant="h6">
               {activeTab.startsWith('primary') ? 'EST. PRIMARY GEM' : 'EST. SECONDARY GEM'}
             </Typography>
-            {activeTab.startsWith('secondary') && secondaryGems.length > 0 && (
+            {/* Show dropdown only when in edit mode and have multiple secondary gems */}
+            {activeTab.startsWith('secondary') && secondaryGems.length > 1 && editMode && (
                   <FormControl size="small" sx={{ minWidth: 150 }}>
                     <Select
                       value={selectedSecondaryIndex}

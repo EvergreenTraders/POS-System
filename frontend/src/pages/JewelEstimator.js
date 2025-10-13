@@ -310,11 +310,16 @@ function JewelEstimator() {
       melt_value: priceEstimates.melt,
       retail_price: priceEstimates.retail,
       
-      // Images
-      images: images.map(img => ({
-        url: img.url,
-        isPrimary: img.isPrimary || false
-      })),
+      // Images - preserve File objects for upload
+      images: images.map((img, idx) => {
+        const imageData = {
+          url: img.url,
+          isPrimary: img.isPrimary || false,
+          file: img.file, // Preserve the File object for upload
+          type: img.type
+        };
+        return imageData;
+      }),
       
       // Free text description if available
       notes: freeText || '',
@@ -356,9 +361,19 @@ function JewelEstimator() {
         // Normal add for non-edit mode - append to existing items
         updatedItems = [...prev, itemWithPrices];
       }
-      
-      // Save to sessionStorage to persist through navigation
-      sessionStorage.setItem('jewelEstimatorItems', JSON.stringify(updatedItems));
+
+      // Check if any items have File objects (can't be stored in sessionStorage)
+      const hasFileObjects = updatedItems.some(item =>
+        item.images && Array.isArray(item.images) &&
+        item.images.some(img => img.file instanceof File)
+      );
+
+      // Only save to sessionStorage if there are no File objects
+      if (!hasFileObjects) {
+        sessionStorage.setItem('jewelEstimatorItems', JSON.stringify(updatedItems));
+      } else {
+        sessionStorage.removeItem('jewelEstimatorItems');
+      }
       
       // In edit mode, don't automatically navigate back to CustomerTicket
       // User will need to explicitly hit "Add to Ticket" to return
@@ -569,7 +584,6 @@ function JewelEstimator() {
       // Direct fill for primary gem fields if they exist on itemToEdit
       // Check if we have direct primary gem properties
       if (itemToEdit.primary_gem_category) {
-        console.log('Direct primary gem data found in itemToEdit:', itemToEdit);
         
         // Set the appropriate gem type - with type checking
         const primaryGemCategory = itemToEdit.primary_gem_category;
@@ -578,7 +592,7 @@ function JewelEstimator() {
             ...prev,
             primary: 'diamond'
           }));
-          
+
           // Set primary diamond form directly from itemToEdit
           const diamondFormData = {
             shape: itemToEdit.primary_gem_shape || 'Round',
@@ -591,8 +605,17 @@ function JewelEstimator() {
             exactColor: itemToEdit.primary_gem_exact_color || 'D',
             size: itemToEdit.primary_gem_size || ''
           };
-          
-          setPrimaryDiamondForm(diamondFormData);          
+
+          setPrimaryDiamondForm(diamondFormData);
+
+          // Add primary diamond to diamondSummary
+          const primaryDiamond = {
+            ...diamondFormData,
+            estimatedValue: itemToEdit.primary_gem_value || 0,
+            isPrimary: true,
+            type: 'diamond'
+          };
+          setDiamondSummary([primaryDiamond]);          
           // Directly set the state variables that control the dropdown values
           setExactColor(diamondFormData.exactColor);
           
@@ -624,7 +647,7 @@ function JewelEstimator() {
             ...prev,
             primary: 'stone'
           }));
-          
+
           // Set primary stone form directly from itemToEdit
           const stoneFormData = {
             name: itemToEdit.primary_gem_type || '',
@@ -635,8 +658,17 @@ function JewelEstimator() {
             authentic: itemToEdit.primary_gem_authentic || false,
             valuationType: 'each'
           };
-          
+
           setPrimaryStoneForm(stoneFormData);
+
+          // Add primary stone to stoneSummary
+          const primaryStone = {
+            ...stoneFormData,
+            estimatedValue: itemToEdit.primary_gem_value || 0,
+            isPrimary: true,
+            type: 'stone'
+          };
+          setStoneSummary([primaryStone]);
           // Set the estimated value for primary stone if available
           if (itemToEdit.primary_gem_value !== undefined) {
             setEstimatedValues(prev => ({
@@ -646,7 +678,61 @@ function JewelEstimator() {
           }
         }
       }
-      
+
+      // Load secondary gems if they exist
+      if (itemToEdit.secondary_gems && itemToEdit.secondary_gems.length > 0) {
+        const secondaryDiamonds = [];
+        const secondaryStones = [];
+
+        itemToEdit.secondary_gems.forEach(gem => {
+          if (gem.secondary_gem_category === 'diamond') {
+            secondaryDiamonds.push({
+              shape: gem.secondary_gem_shape || '',
+              clarity: gem.secondary_gem_clarity || '',
+              color: gem.secondary_gem_color || '',
+              exactColor: gem.secondary_gem_exact_color || 'D',
+              cut: gem.secondary_gem_cut || '',
+              size: gem.secondary_gem_size || '',
+              weight: gem.secondary_gem_weight || 0,
+              quantity: gem.secondary_gem_quantity || 0,
+              labGrown: gem.secondary_gem_lab_grown || false,
+              estimatedValue: gem.secondary_gem_value || 0,
+              isPrimary: false,
+              type: 'diamond'
+            });
+          } else if (gem.secondary_gem_category === 'stone') {
+            secondaryStones.push({
+              name: gem.secondary_gem_type || '',
+              shape: gem.secondary_gem_shape || '',
+              color: gem.secondary_gem_color || '',
+              quantity: gem.secondary_gem_quantity || 0,
+              weight: gem.secondary_gem_weight || 0,
+              authentic: gem.secondary_gem_authentic || false,
+              estimatedValue: gem.secondary_gem_value || 0,
+              isPrimary: false,
+              type: 'stone'
+            });
+          }
+        });
+
+        // Set the diamond and stone summaries with secondary gems
+        if (secondaryDiamonds.length > 0) {
+          setDiamondSummary(prev => [...prev, ...secondaryDiamonds]);
+        }
+        if (secondaryStones.length > 0) {
+          setStoneSummary(prev => [...prev, ...secondaryStones]);
+        }
+
+        // Update addedGemTypes to track secondary gems
+        const secondaryGemTypes = itemToEdit.secondary_gems.map(gem =>
+          gem.secondary_gem_category === 'diamond' ? 'diamond' : 'stone'
+        );
+        setAddedGemTypes(prev => ({
+          ...prev,
+          secondary: secondaryGemTypes
+        }));
+      }
+
       // Set form values based on the item being edited
       if (itemToEdit.metal_weight) {
         // This is likely a metal item with jewelry properties
@@ -773,7 +859,6 @@ function JewelEstimator() {
           // If still no match, use the first color as default
           if (!matchingColor && stoneColors.length > 0) {
             matchingColor = stoneColors[0];
-            console.log('No matching color found, using default:', matchingColor.name);
           }
           
           if (matchingColor) {            
@@ -1016,6 +1101,7 @@ function JewelEstimator() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [popupImageIndex, setPopupImageIndex] = useState(0);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const sliderRef = React.useRef(null);
   const colorSliderRef = React.useRef(null);
   const cutRef = React.useRef(null);
@@ -1101,106 +1187,66 @@ function JewelEstimator() {
     setPopupImageIndex((prevIndex) => Math.max(prevIndex - 1, 0));
   };
 
-  // Popup Component
-  const ImagePopup = ({ images, index }) => {
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Handlers for popup
+  const handleDeleteImage = () => {
+    // Delete the image at popupImageIndex
+    setImages(prev => prev.filter((_, i) => i !== popupImageIndex));
 
-    const handleDelete = () => {
-      setImages(prev => prev.filter((_, i) => i !== index));
-      setShowDeleteConfirm(false);
+    // Adjust popup index if needed
+    if (popupImageIndex >= images.length - 1 && popupImageIndex > 0) {
+      setPopupImageIndex(popupImageIndex - 1);
+    }
+
+    // Close popup if no images left
+    if (images.length <= 1) {
       closePopup();
-    };
+    }
+  };
 
-    const handleMakePrimary = (event) => {
-      const newImages = [...images];
-      // Remove primary flag from all images
-      newImages.forEach(img => img.isPrimary = false);
-      // Set primary flag for current image
-      newImages[index].isPrimary = event.target.checked;
+  const handleMakePrimaryImage = (event) => {
+    const currentIndex = Math.min(popupImageIndex, images.length - 1);
+    const isChecked = event.target.checked;
+
+    if (!isChecked) {
+      // If unchecking, set the next image as primary (or last image if current is last)
+      // If there's only one image, keep it as primary
+      if (images.length === 1) {
+        return;
+      }
+
+      const newPrimaryIndex = currentIndex === 0 ? 1 : 0;
+      const newImages = images.map((img, idx) => ({
+        ...img,
+        isPrimary: idx === newPrimaryIndex
+      }));
       setImages(newImages);
-    };
 
-    if (!images || images.length === 0) return null;
-
-    return (
-      <>
-        <Dialog open={isPopupOpen} onClose={closePopup} maxWidth="md">
-          <DialogContent sx={{ overflow: 'hidden' }}>
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', gap: 2 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                <Button onClick={handlePrevPopupImage} disabled={index === 0}>◀</Button>
-                <img 
-                  src={images[index].url} 
-                  alt="Popup Image" 
-                  style={{ 
-                    width: '500px', 
-                    height: 'auto', 
-                    transition: 'opacity 0.5s ease-in-out', 
-                    opacity: isPopupOpen ? 1 : 0 
-                  }} 
-                />
-                <Button onClick={handleNextPopupImage} disabled={index === images.length - 1}>▶</Button>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={images[index].isPrimary || false}
-                      onChange={handleMakePrimary}
-                    />
-                  }
-                  label="Make Primary"
-                />
-                <Button 
-                  variant="contained" 
-                  color="error" 
-                  startIcon={<DeleteIcon />}
-                  onClick={() => setShowDeleteConfirm(true)}
-                >
-                  Delete
-                </Button>
-              </Box>
-            </Box>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={closePopup}>Close</Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Delete Confirmation Dialog */}
-        <Dialog
-          open={showDeleteConfirm}
-          onClose={() => setShowDeleteConfirm(false)}
-          aria-labelledby="delete-dialog-title"
-          aria-describedby="delete-dialog-description"
-        >
-          <DialogTitle id="delete-dialog-title">
-            {"Delete Image"}
-          </DialogTitle>
-          <DialogContent>
-            <Typography>
-              Are you sure you want to delete this image? This action cannot be undone.
-            </Typography>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
-            <Button onClick={handleDelete} color="error" variant="contained" autoFocus>
-              Delete
-            </Button>
-          </DialogActions>
-        </Dialog>
-      </>
-    );
+    } else {
+      // If checking, set this image as primary
+      const newImages = images.map((img, idx) => ({
+        ...img,
+        isPrimary: idx === currentIndex
+      }));
+      setImages(newImages);
+    }
   };
 
   const handleFileUpload = (event) => {
     const files = Array.from(event.target.files);
-    const newImages = files.map(file => ({
+    const newImages = files.map((file, index) => ({
       file,
       url: URL.createObjectURL(file),
-      type: 'upload'
+      type: 'upload',
+      isPrimary: false // Initialize isPrimary flag
     }));
-    setImages(prev => [...prev, ...newImages]);
+
+    setImages(prev => {
+      // If this is the first image being uploaded, make it primary
+      if (prev.length === 0 && newImages.length > 0) {
+        newImages[0].isPrimary = true;
+      }
+      return [...prev, ...newImages];
+    });
   };
 
   const startCamera = async () => {
@@ -1233,6 +1279,28 @@ function JewelEstimator() {
     setShowCamera(false);
   };
 
+  // Effect to assign stream to video element when stream changes
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+
+      // Set video ready when video can play
+      const handleCanPlay = () => {
+        setIsVideoReady(true);
+        console.log('Camera video is ready');
+      };
+
+      videoRef.current.addEventListener('canplay', handleCanPlay);
+
+      // Cleanup
+      return () => {
+        if (videoRef.current) {
+          videoRef.current.removeEventListener('canplay', handleCanPlay);
+        }
+      };
+    }
+  }, [stream]);
+
   const captureImage = () => {
     if (!videoRef.current || !isVideoReady) {
       console.log("Video ref:", videoRef.current, "Ready:", isVideoReady);
@@ -1254,12 +1322,16 @@ function JewelEstimator() {
           return;
         }
         const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
-        const newImage = {
-          file,
-          url: URL.createObjectURL(file),
-          type: 'capture'
-        };
-        setImages(prev => [...prev, newImage]);
+
+        setImages(prev => {
+          const newImage = {
+            file,
+            url: URL.createObjectURL(file),
+            type: 'capture',
+            isPrimary: prev.length === 0 // Set as primary if it's the first image
+          };
+          return [...prev, newImage];
+        });
         stopCamera();
       }, 'image/jpeg', 0.8);
     } catch (err) {
@@ -2134,20 +2206,32 @@ function JewelEstimator() {
   };
 
   const handleCheckout = () => {
-    // Save the current state in session storage before navigating
+    // Prepare items with current pricing
     const updatedItems = estimatedItems.map((item) => ({
       ...item,
       price: item.price_estimates[item.transaction_type],
       notes: item.notes
     }));
 
-    sessionStorage.setItem('estimationState', JSON.stringify({
-      items: updatedItems
-    }));
-    
-    // Add items to cart before navigation
+    // Check if any items have File objects (can't be stored in sessionStorage)
+    const hasFileObjects = updatedItems.some(item =>
+      item.images && Array.isArray(item.images) &&
+      item.images.some(img => img.file instanceof File)
+    );
+
+    // Only use sessionStorage if there are no File objects
+    if (!hasFileObjects) {
+      sessionStorage.setItem('estimationState', JSON.stringify({
+        items: updatedItems
+      }));
+    } else {
+      // Clear sessionStorage if there are File objects
+      sessionStorage.removeItem('estimationState');
+    }
+
+    // Add items to cart before navigation (cart is in-memory)
     updatedItems.forEach(item => addToCart(item));
-    
+
     const customerData = location.state?.customer;
 
     if (customerData) {
@@ -2156,7 +2240,7 @@ function JewelEstimator() {
       navigate('/checkout', {
         state: {
           customer: customerData,
-          items: updatedItems,
+          items: updatedItems, // Pass items with File objects through navigation state
           from: 'jewelry'
         }
       });
@@ -2164,7 +2248,7 @@ function JewelEstimator() {
       // Otherwise, navigate to customer manager to select or create a customer
       navigate('/customer', {
         state: {
-          items: updatedItems,
+          items: updatedItems, // Pass items with File objects through navigation state
           from: 'jewelry'
         }
       });
@@ -2335,7 +2419,91 @@ function JewelEstimator() {
             </Box>
             )}
 
-            <ImagePopup images={images} index={popupImageIndex}/>
+            {/* Image Popup Dialog */}
+            {isPopupOpen && images && images.length > 0 && (
+              <>
+                <Dialog open={isPopupOpen} onClose={closePopup} maxWidth="sm">
+                  <DialogContent sx={{ overflow: 'hidden' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', gap: 2 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                        <Button
+                          onClick={handlePrevPopupImage}
+                          disabled={popupImageIndex === 0}
+                        >
+                          ◀
+                        </Button>
+                        <img
+                          key={`popup-img-${popupImageIndex}`}
+                          src={images[Math.min(popupImageIndex, images.length - 1)]?.url}
+                          alt="Popup Image"
+                          style={{
+                            maxWidth: '400px',
+                            maxHeight: '50vh',
+                            width: 'auto',
+                            height: 'auto',
+                            objectFit: 'contain'
+                          }}
+                        />
+                        <Button
+                          onClick={handleNextPopupImage}
+                          disabled={popupImageIndex >= images.length - 1}
+                        >
+                          ▶
+                        </Button>
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <FormControlLabel
+                          control={
+                            <Checkbox
+                              checked={images[Math.min(popupImageIndex, images.length - 1)]?.isPrimary || false}
+                              onChange={handleMakePrimaryImage}
+                            />
+                          }
+                          label="Make Primary"
+                        />
+                        <Button
+                          variant="contained"
+                          color="error"
+                          startIcon={<DeleteIcon />}
+                          onClick={() => setShowDeleteConfirm(true)}
+                        >
+                          Delete
+                        </Button>
+                      </Box>
+                    </Box>
+                  </DialogContent>
+                  <DialogActions>
+                    <Button onClick={closePopup}>Close</Button>
+                  </DialogActions>
+                </Dialog>
+
+                {/* Delete Confirmation Dialog */}
+                <Dialog
+                  open={showDeleteConfirm}
+                  onClose={() => setShowDeleteConfirm(false)}
+                >
+                  <DialogTitle>Delete Image</DialogTitle>
+                  <DialogContent>
+                    <Typography>
+                      Are you sure you want to delete this image? This action cannot be undone.
+                    </Typography>
+                  </DialogContent>
+                  <DialogActions>
+                    <Button onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+                    <Button
+                      onClick={() => {
+                        handleDeleteImage();
+                        setShowDeleteConfirm(false);
+                      }}
+                      color="error"
+                      variant="contained"
+                    >
+                      Delete
+                    </Button>
+                  </DialogActions>
+                </Dialog>
+              </>
+            )}
 
             <Box sx={{ mb: 3 }}>
               <Typography variant="h6" sx={{ mb: 0 }}>Price Estimates</Typography>
