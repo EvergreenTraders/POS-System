@@ -136,9 +136,27 @@ DROP TRIGGER IF EXISTS trg_jewelry_changes ON jewelry;
 -- =============================================
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                   WHERE table_name = 'jewelry' AND column_name = 'change_notes') THEN
         ALTER TABLE jewelry ADD COLUMN change_notes TEXT;
+    END IF;
+END $$;
+
+-- =============================================
+-- 5a. Add source and bought_from columns to jewelry_item_history table
+-- =============================================
+DO $$
+BEGIN
+    -- Add source column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_name = 'jewelry_item_history' AND column_name = 'source') THEN
+        ALTER TABLE jewelry_item_history ADD COLUMN source VARCHAR(255);
+    END IF;
+
+    -- Add bought_from column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_name = 'jewelry_item_history' AND column_name = 'bought_from') THEN
+        ALTER TABLE jewelry_item_history ADD COLUMN bought_from VARCHAR(255);
     END IF;
 END $$;
 

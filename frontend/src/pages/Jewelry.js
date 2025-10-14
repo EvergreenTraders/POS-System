@@ -49,11 +49,16 @@ function Jewelry() {
       enqueueSnackbar('Error: No item selected', { variant: 'error' });
       return;
     }
-    
+
     try {
-      const response = await axios.get(`${API_BASE_URL}/jewelry/${itemId}/history`);
-      if (response.data) {
-        generateHistoryPDF(response.data.history, itemId);
+      // Fetch both history and item details in parallel
+      const [historyResponse, itemResponse] = await Promise.all([
+        axios.get(`${API_BASE_URL}/jewelry/${itemId}/history`),
+        axios.get(`${API_BASE_URL}/jewelry/${itemId}`)
+      ]);
+
+      if (historyResponse.data) {
+        generateHistoryPDF(historyResponse.data.history, itemId, itemResponse.data);
       } else {
         console.log('No history data found');
         enqueueSnackbar('No history found for this item', { variant: 'info' });
@@ -69,24 +74,26 @@ function Jewelry() {
     }
   };
 
-  const generateHistoryPDF = (historyData, itemId) => {
+  const generateHistoryPDF = async (historyData, itemId, itemData) => {
     const doc = new jsPDF();
     const title = `Item History - #${itemId}`;
-    const headers = [['Date', 'Changed By', 'Field', 'From', 'To', 'Notes']];
+    const headers = [['Date', 'Changed By', 'Field', 'From', 'To', 'Source', 'Bought From', 'Notes']];
     // Sort history by date (newest first)
-    const sortedHistory = [...historyData].sort((a, b) => 
+    const sortedHistory = [...historyData].sort((a, b) =>
       new Date(b.changed_at) - new Date(a.changed_at)
     );
 
     // Process history data into table rows
     const tableData = [];
-    
+
     sortedHistory.forEach(entry => {
       const changedAt = new Date(entry.changed_at).toLocaleString();
-      const changedBy = entry.first_name && entry.last_name 
-        ? `${entry.first_name} ${entry.last_name}` 
+      const changedBy = entry.first_name && entry.last_name
+        ? `${entry.first_name} ${entry.last_name}`
         : `User ID: ${entry.changed_by || 'System'}`;
-      
+      const source = entry.source || '';
+      const boughtFrom = entry.bought_from || '';
+
       // Process each changed field
       const changes = entry.changed_fields;
       
@@ -126,19 +133,59 @@ function Jewelry() {
           change.field,
           change.from,
           change.to,
+          index === 0 ? source : '',
+          index === 0 ? boughtFrom : '',
           index === 0 ? (entry.change_notes || '') : ''
         ]);
       });
-      
+
       // Add a separator row between different history entries
       if (fieldChanges.length > 0) {
-        tableData.push(Array(6).fill(''));
+        tableData.push(Array(8).fill(''));
       }
     });
     
     // Remove the last separator row if it exists
     if (tableData.length > 0 && tableData[tableData.length - 1].every(cell => cell === '')) {
       tableData.pop();
+    }
+
+    // Add primary image to top right corner
+    try {
+      const imageUrl = getImageUrl(itemData.images);
+      if (imageUrl && !imageUrl.includes('placeholder')) {
+        // Load the image
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+
+        await new Promise((resolve, reject) => {
+          img.onload = () => {
+            try {
+              // Add image to PDF at top right corner
+              const imgWidth = 30;
+              const imgHeight = 30;
+              const xPos = doc.internal.pageSize.getWidth() - imgWidth - 14;
+              const yPos = 10;
+
+              doc.addImage(img, 'JPEG', xPos, yPos, imgWidth, imgHeight);
+              resolve();
+            } catch (error) {
+              console.error('Error adding image to PDF:', error);
+              resolve(); // Continue even if image fails
+            }
+          };
+
+          img.onerror = () => {
+            console.error('Failed to load image for PDF');
+            resolve(); // Continue even if image fails
+          };
+
+          img.src = imageUrl;
+        });
+      }
+    } catch (error) {
+      console.error('Error loading image for PDF:', error);
+      // Continue with PDF generation even if image fails
     }
 
     // Add title
@@ -157,19 +204,21 @@ function Jewelry() {
         fillColor: [41, 128, 185],
         textColor: 255,
         fontStyle: 'bold',
-        fontSize: 8
+        fontSize: 7
       },
       bodyStyles: {
-        fontSize: 8,
-        cellPadding: 2
+        fontSize: 7,
+        cellPadding: 1.5
       },
       columnStyles: {
-        0: { cellWidth: 25, fontStyle: 'bold' }, // Date
-        1: { cellWidth: 25 }, // Changed By
-        2: { cellWidth: 35 }, // Field
-        3: { cellWidth: 30 }, // From
-        4: { cellWidth: 30 }, // To
-        5: { cellWidth: 45 }  // Notes
+        0: { cellWidth: 22, fontStyle: 'bold' }, // Date
+        1: { cellWidth: 20 }, // Changed By
+        2: { cellWidth: 28 }, // Field
+        3: { cellWidth: 22 }, // From
+        4: { cellWidth: 22 }, // To
+        5: { cellWidth: 20 }, // Source
+        6: { cellWidth: 22 }, // Bought From
+        7: { cellWidth: 30 }  // Notes
       },
       alternateRowStyles: {
         fillColor: [245, 245, 245]
@@ -179,7 +228,7 @@ function Jewelry() {
         // Make the first column (Date) and second column (Changed By) bold for the first row of each change set
         if (data.column.index <= 1 && data.row.index > 0 && tableData[data.row.index - 1][0] === '') {
         }
-        
+
         // Add a border between different change sets
         if (data.row.index > 0 && data.column.index === 0 && tableData[data.row.index][0] === '') {
           data.cell.styles.lineWidth = 0.5;
