@@ -1601,12 +1601,13 @@ function JewelryEdit() {
         <DialogTitle>Edit Gemstone Details</DialogTitle>
         <DialogContent dividers>
           {gemDialogOpen && (
-            <GemEstimator 
+            <GemEstimator
               initialData={{
                 ...item,
                 // Pass secondary gems if they exist
                 secondaryGems: item.secondaryGems || []
               }}
+              editMode={true}
               onSave={(updatedData) => {
                 // Handle saving gem data
                 setGemDialogOpen(false);
@@ -1659,7 +1660,7 @@ function JewelryEdit() {
             </Grid>
             <Grid item xs={12} sm={7} md={8}>
               {combinedDialogOpen && (
-                <GemEstimator 
+                <GemEstimator
                   key={`gem-${combinedDialogOpen}`}
                   initialData={{
                     ...item,
@@ -1669,12 +1670,13 @@ function JewelryEdit() {
                     }))
                   }}
                   hideButtons={true}
+                  editMode={true}
                   setGemFormState={setGemFormState}
                   onSecondaryGemsChange={(secondaryGems) => {
                     setGemFormState(prev => ({
                       ...prev,
                       secondaryGems
-                    })); 
+                    }));
                     setItem(prev => ({
                       ...prev,
                       secondaryGems
@@ -4386,17 +4388,17 @@ function JewelryEdit() {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleGemDialogClose}>Cancel</Button>
-          <Button 
+          <Button
             onClick={() => {
-              const gemInfo = gemTab === 'diamond' 
-                ? { diamonds: [{ 
-                    ...gemData.diamond, 
+              const gemInfo = gemTab === 'diamond'
+                ? { diamonds: [{
+                    ...gemData.diamond,
                     primary: true,
                     quantity: gemData.diamond.quantity || 1,
                     exactColor: gemData.diamond.exactColor || 'D'
                   }] }
-                : { stones: [{ 
-                    ...gemData.stone, 
+                : { stones: [{
+                    ...gemData.stone,
                     primary: true,
                     quantity: gemData.stone.quantity || 1
                   }] };
