@@ -114,7 +114,7 @@ const useMetalAPI = () => {
 function JewelryEdit() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentUser } = useAuth();
+  const { user: currentUser } = useAuth();
   const API_BASE_URL = config.apiUrl;
 
   
@@ -488,7 +488,7 @@ function JewelryEdit() {
           await axios.post(`${API_BASE_URL}/jewelry/history`, {
             item_id: item.item_id,
             changed_fields: changes,
-            changed_by: currentUser?.employee_id || 1,
+            changed_by: currentUser?.id || 1,
             action: 'update',
             notes: 'Item details updated via combined editor'
           });
@@ -1201,7 +1201,7 @@ function JewelryEdit() {
             await axios.post(`${API_BASE_URL}/jewelry/history`, {
               item_id: item.item_id,
               changed_fields: changes,
-              changed_by: currentUser?.employee_id || 1,
+              changed_by: currentUser?.id || 1,
               action: 'update',
               notes: 'Item details updated via direct edit (auto-save)'
             });
