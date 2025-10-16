@@ -465,6 +465,8 @@ function JewelryEdit() {
             });
             // If there are changes for this gem, add them to the changes object
             if (Object.keys(gemChanges).length > 0) {
+              // Store without index suffix - just use secondary_gem_1, secondary_gem_2, etc.
+              // For first gem (index 0), use secondary_gem_1
               changes[`secondary_gem_${index + 1}`] = gemChanges;
             }
           });
@@ -1130,6 +1132,10 @@ function JewelryEdit() {
           allFields.forEach(field => {
             if (excludeFields.includes(field)) return;
 
+            // Skip flat secondary gem properties that end with _index (e.g., secondary_gem_quantity_0)
+            // These are tracked in the secondaryGems array instead
+            if (/^secondary_gem_\w+_\d+$/.test(field)) return;
+
             const baselineValue = baselineItem?.[field];
             const editedValue = editedItem?.[field];
 
@@ -1138,7 +1144,10 @@ function JewelryEdit() {
               return;
             }
 
-            changes[field] = {
+            // Map inventory_status to status for database compatibility
+            const dbFieldName = field === 'inventory_status' ? 'status' : field;
+
+            changes[dbFieldName] = {
               from: baselineValue,
               to: editedValue
             };
@@ -1199,8 +1208,20 @@ function JewelryEdit() {
 
             // Update baseline to reflect the new current state
             const updatedItem = { ...item, ...editedItem };
-            setItem(updatedItem);
-            setBaselineItem(JSON.parse(JSON.stringify(updatedItem)));
+
+            // Ensure flat properties are in sync with secondaryGems array
+            const flatSecondaryGemProps = {};
+            if (updatedItem.secondaryGems && Array.isArray(updatedItem.secondaryGems)) {
+              updatedItem.secondaryGems.forEach((gem, index) => {
+                Object.keys(gem).forEach(key => {
+                  flatSecondaryGemProps[`${key}_${index}`] = gem[key];
+                });
+              });
+            }
+
+            const finalUpdatedItem = { ...updatedItem, ...flatSecondaryGemProps };
+            setItem(finalUpdatedItem);
+            setBaselineItem(JSON.parse(JSON.stringify(finalUpdatedItem)));
             setHasUnsavedChanges(false);
 
             setSnackbar({
@@ -1563,40 +1584,72 @@ function JewelryEdit() {
       });
       
       
+      // Create flat properties for secondary gems so fields can read them
+      const flatSecondaryGemProps = {};
+      finalSecondaryGems.forEach((gem, index) => {
+        Object.keys(gem).forEach(key => {
+          // Create flat property like secondary_gem_cut_0, secondary_gem_clarity_1, etc.
+          flatSecondaryGemProps[`${key}_${index}`] = gem[key];
+        });
+      });
+
       // Create a copy of the item with secondary gems
+      // Map database field 'status' to 'inventory_status' for frontend use
+      // Apply same defaults as editedItem to avoid false change detection on initial load
       const itemWithGems = {
         ...foundItem,
-        secondaryGems: finalSecondaryGems
+        // Map status field and apply defaults
+        inventory_status: foundItem.status || foundItem.inventory_status || 'HOLD',
+        short_desc: foundItem.short_desc ?? '',
+        gemstone: foundItem.gemstone ?? '',
+        stone_weight: foundItem.stone_weight ?? '',
+        precious_metal_type_id: foundItem.precious_metal_type_id ?? '',
+        precious_metal_type: foundItem.precious_metal_type ?? '',
+        non_precious_metal_type_id: foundItem.non_precious_metal_type_id ?? '',
+        non_precious_metal_type: foundItem.non_precious_metal_type ?? '',
+        metal_category_id: foundItem.metal_category_id ?? '',
+        metal_category: foundItem.metal_category ?? '',
+        metal_purity_id: foundItem.metal_purity_id ?? '',
+        metal_purity: foundItem.metal_purity ?? '',
+        purity_value: foundItem.purity_value ?? 0,
+        metal_weight: foundItem.metal_weight ?? 0,
+        est_metal_value: foundItem.est_metal_value ?? 0,
+        spot_price: foundItem.spot_price ?? 0,
+        jewelry_color: foundItem.jewelry_color ?? '',
+        secondaryGems: finalSecondaryGems,
+        ...flatSecondaryGemProps
       };
-      
+
       // Set the jewelry item data to state
       setItem(itemWithGems);
       // Set baseline for comparison (this represents the current state with all history applied)
       setBaselineItem(JSON.parse(JSON.stringify(itemWithGems))); // Deep clone to avoid reference issues
 
-      // Set initial edited item state for form
+      // Set initial edited item state for form (with same defaults as itemWithGems)
       setEditedItem({
         ...foundItem,
-        inventory_status: foundItem.inventory_status || 'HOLD',
-        short_desc: foundItem.short_desc || '',
-        gemstone: foundItem.gemstone || '',
-        stone_weight: foundItem.stone_weight || '',
+        inventory_status: foundItem.status || foundItem.inventory_status || 'HOLD',
+        short_desc: foundItem.short_desc ?? '',
+        gemstone: foundItem.gemstone ?? '',
+        stone_weight: foundItem.stone_weight ?? '',
         // Ensure metal-related fields are properly initialized
-        precious_metal_type_id: foundItem.precious_metal_type_id || '',
-        precious_metal_type: foundItem.precious_metal_type || '',
-        non_precious_metal_type_id: foundItem.non_precious_metal_type_id || '',
-        non_precious_metal_type: foundItem.non_precious_metal_type || '',
-        metal_category_id: foundItem.metal_category_id || '',
-        metal_category: foundItem.metal_category || '',
-        metal_purity_id: foundItem.metal_purity_id || '',
-        metal_purity: foundItem.metal_purity || '',
-        purity_value: foundItem.purity_value || 0,
-        metal_weight: foundItem.metal_weight || 0,
-        est_metal_value: foundItem.est_metal_value || 0,
-        spot_price: foundItem.spot_price || 0,
-        jewelry_color: foundItem.jewelry_color || '',
+        precious_metal_type_id: foundItem.precious_metal_type_id ?? '',
+        precious_metal_type: foundItem.precious_metal_type ?? '',
+        non_precious_metal_type_id: foundItem.non_precious_metal_type_id ?? '',
+        non_precious_metal_type: foundItem.non_precious_metal_type ?? '',
+        metal_category_id: foundItem.metal_category_id ?? '',
+        metal_category: foundItem.metal_category ?? '',
+        metal_purity_id: foundItem.metal_purity_id ?? '',
+        metal_purity: foundItem.metal_purity ?? '',
+        purity_value: foundItem.purity_value ?? 0,
+        metal_weight: foundItem.metal_weight ?? 0,
+        est_metal_value: foundItem.est_metal_value ?? 0,
+        spot_price: foundItem.spot_price ?? 0,
+        jewelry_color: foundItem.jewelry_color ?? '',
         // Include secondary gems in the edited item
-        secondaryGems: finalSecondaryGems
+        secondaryGems: finalSecondaryGems,
+        // Also include flat properties for field access
+        ...flatSecondaryGemProps
       });
   
       // Set initial price based on retail price
@@ -1726,7 +1779,9 @@ function JewelryEdit() {
         }
         return {
           ...prev,
-          secondaryGems: updatedGems
+          secondaryGems: updatedGems,
+          // Also update the flat property so the field can read it
+          [name]: finalValue
         };
       });
 
@@ -1740,7 +1795,9 @@ function JewelryEdit() {
         }
         return {
           ...prev,
-          secondaryGems: updatedGems
+          secondaryGems: updatedGems,
+          // Also update the flat property so the field can read it
+          [name]: finalValue
         };
       });
     } else {
@@ -3469,13 +3526,13 @@ function JewelryEdit() {
                         </Typography>
                         {renderEditableField(
                           `secondary_gem_quantity_${index}`,
-                          gem?.secondary_gem_quantity || '1',
+                          editedItem?.secondaryGems?.[index]?.secondary_gem_quantity || gem?.secondary_gem_quantity || '1',
                           <TextField
                             fullWidth
                             size="small"
                             name={`secondary_gem_quantity_${index}`}
                             type="number"
-                            value={editedItem?.[`secondary_gem_quantity_${index}`] || gem?.secondary_gem_quantity || '1'}
+                            value={editedItem?.secondaryGems?.[index]?.secondary_gem_quantity || gem?.secondary_gem_quantity || '1'}
                             onChange={handleInputChange}
                             inputProps={{ min: 1, step: 1 }}
                             onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_quantity_${index}`, index)}
@@ -3754,14 +3811,12 @@ function JewelryEdit() {
                         </Typography>
                         {renderEditableField(
                                   `secondary_gem_quantity_${index}`,
-                                  gem?.secondary_gem_quantity || '1',
+                                  editedItem?.secondaryGems?.[index]?.secondary_gem_quantity || gem?.secondary_gem_quantity || '1',
                           <TextField
                             fullWidth
                             size="small"
                                     name={`secondary_gem_quantity_${index}`}
-                                    value={editedItem?.[`secondary_gem_quantity_${index}`] !== undefined ? 
-                                      editedItem?.secondaryGems?.[index]?.secondary_gem_quantity : 
-                                      (gem?.secondary_gem_quantity || '1')}
+                                    value={editedItem?.secondaryGems?.[index]?.secondary_gem_quantity || gem?.secondary_gem_quantity || '1'}
                             onChange={handleInputChange}
                             inputRef={(el) => {
                                       if (editingField === `secondary_gem_quantity_${index}`) inlineInputRef.current = el;
