@@ -317,21 +317,21 @@ function Jewelry() {
 
   const handleEditClick = async (item) => {
     try {
-      // Fetch all secondary gem details and latest history in parallel
+      // Fetch all secondary gem details and full history in parallel
       const [gemsResponse, historyResponse] = await Promise.all([
         axios.get(`${API_BASE_URL}/jewelry_secondary_gems/${item.item_id}`),
-        axios.get(`${API_BASE_URL}/jewelry/${item.item_id}/history?limit=1`)
+        axios.get(`${API_BASE_URL}/jewelry/${item.item_id}/history`)
       ]);
-      
+
       const secondaryGems = gemsResponse.data || [];
-      const latestHistory = historyResponse.data?.history?.[0];
-      
-      // Navigate with item ID, secondary gem data, and latest history
-      navigate('/jewelry-edit', { 
-        state: { 
+      const fullHistory = historyResponse.data?.history || [];
+
+      // Navigate with item ID, secondary gem data, and full history
+      navigate('/jewelry-edit', {
+        state: {
           itemId: item.item_id,
           secondaryGems: secondaryGems,
-          latestHistory: latestHistory
+          fullHistory: fullHistory
         },
         replace: true
       });

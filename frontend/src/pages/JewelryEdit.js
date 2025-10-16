@@ -1149,32 +1149,82 @@ function JewelryEdit() {
         throw new Error(`Item with ID ${itemId} not found`);
       }
 
-      // Check if we have latest history data from location state
-      if (location.state?.latestHistory?.changed_fields) {
+      // Check if we have full history data from location state
+      if (location.state?.fullHistory && Array.isArray(location.state.fullHistory)) {
         try {
-          // Parse the changed_fields if it's a string (should be JSON)
-          const changedFields = typeof location.state.latestHistory.changed_fields === 'string' 
-            ? JSON.parse(location.state.latestHistory.changed_fields)
-            : location.state.latestHistory.changed_fields;
-          
-          // Process and merge the changed fields with the found item
-          const processedFields = {};
-          
-          // Handle each changed field
-          Object.entries(changedFields).forEach(([key, value]) => {
-            // If the value is an object with 'to' property (from history changes), use the 'to' value
-            if (value && typeof value === 'object' && 'to' in value) {
-              processedFields[key] = value.to;
+          // Build the current state by processing all history entries
+          // We need to get the latest change for each field
+          const latestChanges = {};
+
+          // Sort history by date (newest first) to get latest changes
+          const sortedHistory = [...location.state.fullHistory].sort((a, b) =>
+            new Date(b.changed_at) - new Date(a.changed_at)
+          );
+
+          // Process each history entry
+          sortedHistory.forEach(entry => {
+            const changedFields = typeof entry.changed_fields === 'string'
+              ? JSON.parse(entry.changed_fields)
+              : entry.changed_fields;
+
+            if (!changedFields) return;
+
+            // Process each field in this history entry
+            const processField = (fields, prefix = '') => {
+              Object.entries(fields).forEach(([key, value]) => {
+                const fullKey = prefix ? `${prefix}.${key}` : key;
+
+                // Skip if we already have a newer value for this field
+                if (latestChanges.hasOwnProperty(fullKey)) {
+                  return;
+                }
+
+                // If value has 'to' property, it's a direct change
+                if (value && typeof value === 'object' && 'to' in value) {
+                  latestChanges[fullKey] = value.to;
+                }
+                // If it's a nested object (like secondary_gem_1), process recursively
+                else if (value && typeof value === 'object' && !Array.isArray(value)) {
+                  processField(value, fullKey);
+                }
+                // Simple value
+                else {
+                  latestChanges[fullKey] = value;
+                }
+              });
+            };
+
+            processField(changedFields);
+          });
+
+          // Now merge the latest changes with the found item
+          // Handle nested keys (like secondary_gem_1.cut)
+          Object.entries(latestChanges).forEach(([key, value]) => {
+            if (key.includes('.')) {
+              // Handle nested keys
+              const parts = key.split('.');
+              const mainKey = parts[0];
+              const subKey = parts.slice(1).join('.');
+
+              if (!foundItem[mainKey] || typeof foundItem[mainKey] !== 'object') {
+                foundItem[mainKey] = {};
+              }
+
+              // Set the nested value
+              let current = foundItem[mainKey];
+              const subParts = subKey.split('.');
+              for (let i = 0; i < subParts.length - 1; i++) {
+                if (!current[subParts[i]] || typeof current[subParts[i]] !== 'object') {
+                  current[subParts[i]] = {};
+                }
+                current = current[subParts[i]];
+              }
+              current[subParts[subParts.length - 1]] = value;
             } else {
-              processedFields[key] = value;
+              // Direct field
+              foundItem[key] = value;
             }
           });
-          
-          // Merge the processed fields with the found item
-          foundItem = {
-            ...foundItem,
-            ...processedFields
-          };
         } catch (error) {
           console.error('Error parsing history data:', error);
         }
