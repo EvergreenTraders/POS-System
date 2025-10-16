@@ -120,10 +120,14 @@ function JewelryEdit() {
   
   // State variables
   const [item, setItem] = useState(null);
+  const [baselineItem, setBaselineItem] = useState(null); // Stores the current state with all history applied (for comparison)
   const [loading, setLoading] = useState(true);
   const [metalDialogOpen, setMetalDialogOpen] = useState(false);
   const [gemDialogOpen, setGemDialogOpen] = useState(false);
   const [combinedDialogOpen, setCombinedDialogOpen] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false); // Track if there are unsaved changes
+  const autoSaveTimerRef = useRef(null); // Reference for auto-save timer
+  const isInitialLoadRef = useRef(true); // Track if this is the initial load
   const [gemTab, setGemTab] = useState('diamond');  // Initialize with all secondary gems visible by default
   const [secondaryGemTab, setSecondaryGemTab] = useState('all'); // Controls which secondary gem tab is active
   const [isSecondaryGem, setIsSecondaryGem] = useState(false); // Tracks whether we're editing primary or secondary gem
@@ -269,8 +273,20 @@ function JewelryEdit() {
       
       // Helper function to track changes with proper number comparison
       const trackChange = (field, newValue) => {
-        const oldValue = updatedItem[field];
-        
+        // Compare against baselineItem (current state with history) instead of the original item
+        const oldValue = baselineItem?.[field] !== undefined ? baselineItem[field] : updatedItem[field];
+
+        // Helper function to check if a value is "empty"
+        const isEmpty = (value) => {
+          return value === null || value === undefined || value === '' ||
+                 (typeof value === 'string' && value.trim() === '');
+        };
+
+        // Skip if both values are empty (no meaningful change)
+        if (isEmpty(oldValue) && isEmpty(newValue)) {
+          return newValue;
+        }
+
         // Function to normalize values for comparison (convert string numbers to numbers)
         const normalizeValue = (value) => {
           if (value === null || value === undefined) return value;
@@ -281,10 +297,10 @@ function JewelryEdit() {
           }
           return value;
         };
-        
+
         const normalizedOld = normalizeValue(oldValue);
         const normalizedNew = normalizeValue(newValue);
-        
+
         // Compare the normalized values
         if (JSON.stringify(normalizedOld) !== JSON.stringify(normalizedNew)) {
           changes[field] = {
@@ -344,7 +360,8 @@ function JewelryEdit() {
         if (gemFormState.secondaryGems?.length > 0) {
           // First, get the current values from the form state
           const currentFormGems = gemFormState.secondaryGems || [];
-          const oldSecondaryGems = item.secondaryGems || [];
+          // Use baselineItem for comparison instead of item
+          const oldSecondaryGems = baselineItem?.secondaryGems || item.secondaryGems || [];
           const newSecondaryGems = currentFormGems.map((gem, index) => {
             const oldGem = oldSecondaryGems[index] || {};
             const updatedGem = { ...gem };
@@ -473,7 +490,10 @@ function JewelryEdit() {
             action: 'update',
             notes: 'Item details updated via combined editor'
           });
-          
+
+          // Update baseline to reflect the new current state after successful save
+          setBaselineItem(JSON.parse(JSON.stringify(updatedItemWithGems)));
+
           setSnackbar({
             open: true,
             message: 'Changes saved successfully',
@@ -957,6 +977,176 @@ function JewelryEdit() {
   const [transactionType, setTransactionType] = useState('retail'); // 'sell' or 'retail'
   const [updatedMetalData, setUpdatedMetalData] = useState(null);
 
+  // Auto-save effect: monitors editedItem changes and triggers save after a delay
+  useEffect(() => {
+    // Skip if no baseline or edited item (initial load)
+    if (!baselineItem || !editedItem || !item) return;
+
+    // Skip the initial load - only start tracking changes after the first render
+    if (isInitialLoadRef.current) {
+      isInitialLoadRef.current = false;
+      return;
+    }
+
+    // Function to check if values are meaningfully different
+    const hasMeaningfulChanges = () => {
+      const fieldsToCheck = [
+        'long_desc', 'short_desc', 'inventory_status', 'dimensions',
+        'serial_number', 'age_year', 'precious_metal_type', 'precious_metal_type_id',
+        'non_precious_metal_type', 'metal_weight', 'metal_purity', 'purity_value',
+        'jewelry_color', 'category', 'metal_spot_price', 'est_metal_value',
+        'primary_gem_category', 'primary_gem_type', 'primary_gem_shape',
+        'primary_gem_weight', 'primary_gem_color', 'primary_gem_clarity',
+        'primary_gem_cut', 'primary_gem_lab_grown', 'primary_gem_quantity',
+        'primary_gem_size', 'primary_gem_exact_color', 'primary_gem_authentic',
+        'primary_gem_value', 'gemstone'
+      ];
+
+      const isEmpty = (value) => {
+        return value === null || value === undefined || value === '' ||
+               (typeof value === 'string' && value.trim() === '');
+      };
+
+      const normalizeValue = (value) => {
+        if (value === null || value === undefined) return value;
+        if (typeof value === 'string' && !isNaN(parseFloat(value)) && isFinite(value)) {
+          return parseFloat(value);
+        }
+        return value;
+      };
+
+      for (const field of fieldsToCheck) {
+        const baselineValue = baselineItem?.[field];
+        const editedValue = editedItem?.[field];
+
+        // Skip if both are empty
+        if (isEmpty(baselineValue) && isEmpty(editedValue)) {
+          continue;
+        }
+
+        // Compare normalized values
+        const normalizedBaseline = normalizeValue(baselineValue);
+        const normalizedEdited = normalizeValue(editedValue);
+
+        if (JSON.stringify(normalizedBaseline) !== JSON.stringify(normalizedEdited)) {
+          return true; // Found a meaningful change
+        }
+      }
+
+      return false; // No meaningful changes
+    };
+
+    // Check if there are actual meaningful changes
+    const hasChanges = hasMeaningfulChanges();
+    setHasUnsavedChanges(hasChanges);
+
+    if (hasChanges) {
+      // Clear existing timer
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+
+      // Set new timer to auto-save after 2 seconds of inactivity
+      autoSaveTimerRef.current = setTimeout(async () => {
+        try {
+          setIsSaving(true);
+
+          // Compare editedItem with baselineItem to track changes
+          const changes = {};
+
+          // Helper function to normalize values for comparison
+          const normalizeValue = (value) => {
+            if (value === null || value === undefined) return value;
+            if (typeof value === 'string' && !isNaN(parseFloat(value)) && isFinite(value)) {
+              return parseFloat(value);
+            }
+            return value;
+          };
+
+          // List of fields to track
+          const fieldsToTrack = [
+            'long_desc', 'short_desc', 'inventory_status', 'dimensions',
+            'serial_number', 'age_year', 'precious_metal_type', 'precious_metal_type_id',
+            'non_precious_metal_type', 'metal_weight', 'metal_purity', 'purity_value',
+            'jewelry_color', 'category', 'metal_spot_price', 'est_metal_value',
+            'primary_gem_category', 'primary_gem_type', 'primary_gem_shape',
+            'primary_gem_weight', 'primary_gem_color', 'primary_gem_clarity',
+            'primary_gem_cut', 'primary_gem_lab_grown', 'primary_gem_quantity',
+            'primary_gem_size', 'primary_gem_exact_color', 'primary_gem_authentic',
+            'primary_gem_value', 'gemstone'
+          ];
+
+          // Helper function to check if a value is "empty"
+          const isEmpty = (value) => {
+            return value === null || value === undefined || value === '' ||
+                   (typeof value === 'string' && value.trim() === '');
+          };
+
+          // Track changes for each field
+          fieldsToTrack.forEach(field => {
+            const baselineValue = baselineItem?.[field];
+            const editedValue = editedItem?.[field];
+
+            // Skip if both values are empty (no meaningful change)
+            if (isEmpty(baselineValue) && isEmpty(editedValue)) {
+              return;
+            }
+
+            const normalizedBaseline = normalizeValue(baselineValue);
+            const normalizedEdited = normalizeValue(editedValue);
+
+            // Only track if there's an actual change
+            if (JSON.stringify(normalizedBaseline) !== JSON.stringify(normalizedEdited)) {
+              changes[field] = {
+                from: baselineValue,
+                to: editedValue
+              };
+            }
+          });
+
+          // If there are changes, save them to history
+          if (Object.keys(changes).length > 0) {
+            await axios.post(`${API_BASE_URL}/jewelry/history`, {
+              item_id: item.item_id,
+              changed_fields: changes,
+              changed_by: currentUser?.employee_id || 1,
+              action: 'update',
+              notes: 'Item details updated via direct edit (auto-save)'
+            });
+
+            // Update baseline to reflect the new current state
+            const updatedItem = { ...item, ...editedItem };
+            setItem(updatedItem);
+            setBaselineItem(JSON.parse(JSON.stringify(updatedItem)));
+            setHasUnsavedChanges(false);
+
+            setSnackbar({
+              open: true,
+              message: 'Changes auto-saved successfully',
+              severity: 'success'
+            });
+          }
+        } catch (error) {
+          console.error('Error auto-saving changes:', error);
+          setSnackbar({
+            open: true,
+            message: `Failed to auto-save: ${error.response?.data?.message || error.message}`,
+            severity: 'error'
+          });
+        } finally {
+          setIsSaving(false);
+        }
+      }, 2000);
+    }
+
+    // Cleanup function
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [editedItem, baselineItem, item, currentUser, API_BASE_URL]); // Dependencies
+
   // Effects
   useEffect(() => {
     const fetchData = async () => {
@@ -1298,7 +1488,9 @@ function JewelryEdit() {
       
       // Set the jewelry item data to state
       setItem(itemWithGems);
-      
+      // Set baseline for comparison (this represents the current state with all history applied)
+      setBaselineItem(JSON.parse(JSON.stringify(itemWithGems))); // Deep clone to avoid reference issues
+
       // Set initial edited item state for form
       setEditedItem({
         ...foundItem,
@@ -1747,8 +1939,8 @@ function JewelryEdit() {
         {/* Header Section */}
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', mb: 3 }}>
           {/* Back to Inventory Button - Right Aligned */}
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             color="primary"
             onClick={handleBackToInventory}
             startIcon={<ArrowBackIcon />}
