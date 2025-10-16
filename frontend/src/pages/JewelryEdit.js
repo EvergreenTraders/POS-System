@@ -990,17 +990,14 @@ function JewelryEdit() {
 
     // Function to check if values are meaningfully different
     const hasMeaningfulChanges = () => {
-      const fieldsToCheck = [
-        'long_desc', 'short_desc', 'inventory_status', 'dimensions',
-        'serial_number', 'age_year', 'precious_metal_type', 'precious_metal_type_id',
-        'non_precious_metal_type', 'metal_weight', 'metal_purity', 'purity_value',
-        'jewelry_color', 'category', 'metal_spot_price', 'est_metal_value',
-        'primary_gem_category', 'primary_gem_type', 'primary_gem_shape',
-        'primary_gem_weight', 'primary_gem_color', 'primary_gem_clarity',
-        'primary_gem_cut', 'primary_gem_lab_grown', 'primary_gem_quantity',
-        'primary_gem_size', 'primary_gem_exact_color', 'primary_gem_authentic',
-        'primary_gem_value', 'gemstone'
-      ];
+      // Get all unique field names from both baseline and edited items
+      const allFields = new Set([
+        ...Object.keys(baselineItem || {}),
+        ...Object.keys(editedItem || {})
+      ]);
+
+      // Fields to exclude from comparison (internal state fields)
+      const excludeFields = ['secondaryGems']; // Will handle secondaryGems separately
 
       const isEmpty = (value) => {
         return value === null || value === undefined || value === '' ||
@@ -1015,21 +1012,58 @@ function JewelryEdit() {
         return value;
       };
 
-      for (const field of fieldsToCheck) {
+      // Helper function to check if values are effectively the same
+      const areSameValue = (val1, val2) => {
+        // Both empty
+        if (isEmpty(val1) && isEmpty(val2)) return true;
+
+        // Both are 0 or falsy numbers
+        if ((val1 === 0 || val1 === '0') && (val2 === 0 || val2 === '0')) return true;
+
+        // Same value after normalization
+        const norm1 = normalizeValue(val1);
+        const norm2 = normalizeValue(val2);
+        return JSON.stringify(norm1) === JSON.stringify(norm2);
+      };
+
+      // Check all fields dynamically
+      for (const field of allFields) {
+        if (excludeFields.includes(field)) continue;
+
         const baselineValue = baselineItem?.[field];
         const editedValue = editedItem?.[field];
 
-        // Skip if both are empty
-        if (isEmpty(baselineValue) && isEmpty(editedValue)) {
-          continue;
+        // Skip if values are the same
+        if (!areSameValue(baselineValue, editedValue)) {
+          return true; // Found a meaningful change
+        }
+      }
+
+      // Check secondaryGems if they exist
+      if (baselineItem?.secondaryGems || editedItem?.secondaryGems) {
+        const baselineGems = baselineItem?.secondaryGems || [];
+        const editedGems = editedItem?.secondaryGems || [];
+
+        // Check if lengths differ
+        if (baselineGems.length !== editedGems.length) {
+          return true;
         }
 
-        // Compare normalized values
-        const normalizedBaseline = normalizeValue(baselineValue);
-        const normalizedEdited = normalizeValue(editedValue);
+        // Check each gem for changes
+        for (let i = 0; i < baselineGems.length; i++) {
+          const baselineGem = baselineGems[i] || {};
+          const editedGem = editedGems[i] || {};
 
-        if (JSON.stringify(normalizedBaseline) !== JSON.stringify(normalizedEdited)) {
-          return true; // Found a meaningful change
+          const gemFields = new Set([
+            ...Object.keys(baselineGem),
+            ...Object.keys(editedGem)
+          ]);
+
+          for (const field of gemFields) {
+            if (!areSameValue(baselineGem[field], editedGem[field])) {
+              return true; // Found a change in secondary gem
+            }
+          }
         }
       }
 
@@ -1063,46 +1097,95 @@ function JewelryEdit() {
             return value;
           };
 
-          // List of fields to track
-          const fieldsToTrack = [
-            'long_desc', 'short_desc', 'inventory_status', 'dimensions',
-            'serial_number', 'age_year', 'precious_metal_type', 'precious_metal_type_id',
-            'non_precious_metal_type', 'metal_weight', 'metal_purity', 'purity_value',
-            'jewelry_color', 'category', 'metal_spot_price', 'est_metal_value',
-            'primary_gem_category', 'primary_gem_type', 'primary_gem_shape',
-            'primary_gem_weight', 'primary_gem_color', 'primary_gem_clarity',
-            'primary_gem_cut', 'primary_gem_lab_grown', 'primary_gem_quantity',
-            'primary_gem_size', 'primary_gem_exact_color', 'primary_gem_authentic',
-            'primary_gem_value', 'gemstone'
-          ];
+          // Get all unique field names dynamically
+          const allFields = new Set([
+            ...Object.keys(baselineItem || {}),
+            ...Object.keys(editedItem || {})
+          ]);
 
-          // Helper function to check if a value is "empty"
+          // Fields to exclude from tracking (internal state fields)
+          const excludeFields = ['secondaryGems'];
+
+          // Helper function to check if a value is "empty" or default
           const isEmpty = (value) => {
             return value === null || value === undefined || value === '' ||
                    (typeof value === 'string' && value.trim() === '');
           };
 
-          // Track changes for each field
-          fieldsToTrack.forEach(field => {
+          // Helper function to check if values are effectively the same
+          const areSameValue = (val1, val2) => {
+            // Both empty
+            if (isEmpty(val1) && isEmpty(val2)) return true;
+
+            // Both are 0 or falsy numbers
+            if ((val1 === 0 || val1 === '0') && (val2 === 0 || val2 === '0')) return true;
+
+            // Same value after normalization
+            const norm1 = normalizeValue(val1);
+            const norm2 = normalizeValue(val2);
+            return JSON.stringify(norm1) === JSON.stringify(norm2);
+          };
+
+          // Track changes for each field dynamically (excluding secondary gems)
+          allFields.forEach(field => {
+            if (excludeFields.includes(field)) return;
+
             const baselineValue = baselineItem?.[field];
             const editedValue = editedItem?.[field];
 
-            // Skip if both values are empty (no meaningful change)
-            if (isEmpty(baselineValue) && isEmpty(editedValue)) {
+            // Skip if values are the same
+            if (areSameValue(baselineValue, editedValue)) {
               return;
             }
 
-            const normalizedBaseline = normalizeValue(baselineValue);
-            const normalizedEdited = normalizeValue(editedValue);
-
-            // Only track if there's an actual change
-            if (JSON.stringify(normalizedBaseline) !== JSON.stringify(normalizedEdited)) {
-              changes[field] = {
-                from: baselineValue,
-                to: editedValue
-              };
-            }
+            changes[field] = {
+              from: baselineValue,
+              to: editedValue
+            };
           });
+
+          // Handle secondaryGems separately with proper structure
+          if (baselineItem?.secondaryGems || editedItem?.secondaryGems) {
+            const baselineGems = baselineItem?.secondaryGems || [];
+            const editedGems = editedItem?.secondaryGems || [];
+
+            // Track changes for each secondary gem
+            const maxLength = Math.max(baselineGems.length, editedGems.length);
+
+            for (let i = 0; i < maxLength; i++) {
+              const baselineGem = baselineGems[i] || {};
+              const editedGem = editedGems[i] || {};
+
+              // Get all unique fields from both gems
+              const gemFields = new Set([
+                ...Object.keys(baselineGem),
+                ...Object.keys(editedGem)
+              ]);
+
+              const gemChanges = {};
+
+              gemFields.forEach(field => {
+                const baselineGemValue = baselineGem[field];
+                const editedGemValue = editedGem[field];
+
+                // Skip if values are the same
+                if (areSameValue(baselineGemValue, editedGemValue)) {
+                  return;
+                }
+
+                // Track the change
+                gemChanges[field] = {
+                  from: baselineGemValue,
+                  to: editedGemValue
+                };
+              });
+
+              // If there are changes for this gem, add them to changes object
+              if (Object.keys(gemChanges).length > 0) {
+                changes[`secondary_gem_${i + 1}`] = gemChanges;
+              }
+            }
+          }
 
           // If there are changes, save them to history
           if (Object.keys(changes).length > 0) {
@@ -1584,17 +1667,17 @@ function JewelryEdit() {
     const { name, value } = event.target;
     const checkboxValue = event.target.type === 'checkbox' ? event.target.checked : value;
     const finalValue = event.target.type === 'checkbox' ? checkboxValue : value;
-    
+
     // Map old field names to primary_gem_* fields
     let mappedName = name;
     let primaryGemName = null;
     let secondaryGemName = null;
-    
+
     // Handle primary gem field mapping
     if (name.startsWith('diamond_')) {
       const gemField = name.replace('diamond_', '');
       primaryGemName = `primary_gem_${gemField}`;
-      
+
       // Update gemData for diamond fields
       setGemData(prev => ({
         ...prev,
@@ -1606,7 +1689,7 @@ function JewelryEdit() {
     } else if (name.startsWith('stone_')) {
       const gemField = name.replace('stone_', '');
       primaryGemName = `primary_gem_${gemField}`;
-      
+
       // Update gemData for stone fields
       setGemData(prev => ({
         ...prev,
@@ -1624,22 +1707,59 @@ function JewelryEdit() {
       const gemField = name.replace('secondary_stone_', '');
       secondaryGemName = `secondary_gem_${gemField}`;
     }
-    
-    // Update editedItem state with the new value
-    setEditedItem(prev => ({
-      ...prev,
-      [name]: finalValue,
-      ...(primaryGemName ? { [primaryGemName]: finalValue } : {}),
-      ...(secondaryGemName ? { [secondaryGemName]: finalValue } : {})
-    }));
 
-    // If we're auto-saving changes immediately, also update the item state
-    setItem(prev => ({
-      ...prev,
-      [name]: finalValue,
-      ...(primaryGemName ? { [primaryGemName]: finalValue } : {}),
-      ...(secondaryGemName ? { [secondaryGemName]: finalValue } : {})
-    }));
+    // Check if this is a secondary gem field with index (e.g., secondary_gem_weight_0)
+    const secondaryGemMatch = name.match(/^secondary_gem_(\w+)_(\d+)$/);
+
+    if (secondaryGemMatch) {
+      const [, fieldName, gemIndex] = secondaryGemMatch;
+      const index = parseInt(gemIndex, 10);
+
+      // Update the secondaryGems array properly
+      setEditedItem(prev => {
+        const updatedGems = [...(prev.secondaryGems || [])];
+        if (updatedGems[index]) {
+          updatedGems[index] = {
+            ...updatedGems[index],
+            [`secondary_gem_${fieldName}`]: finalValue
+          };
+        }
+        return {
+          ...prev,
+          secondaryGems: updatedGems
+        };
+      });
+
+      setItem(prev => {
+        const updatedGems = [...(prev.secondaryGems || [])];
+        if (updatedGems[index]) {
+          updatedGems[index] = {
+            ...updatedGems[index],
+            [`secondary_gem_${fieldName}`]: finalValue
+          };
+        }
+        return {
+          ...prev,
+          secondaryGems: updatedGems
+        };
+      });
+    } else {
+      // Update editedItem state with the new value (for non-secondary-gem fields)
+      setEditedItem(prev => ({
+        ...prev,
+        [name]: finalValue,
+        ...(primaryGemName ? { [primaryGemName]: finalValue } : {}),
+        ...(secondaryGemName ? { [secondaryGemName]: finalValue } : {})
+      }));
+
+      // If we're auto-saving changes immediately, also update the item state
+      setItem(prev => ({
+        ...prev,
+        [name]: finalValue,
+        ...(primaryGemName ? { [primaryGemName]: finalValue } : {}),
+        ...(secondaryGemName ? { [secondaryGemName]: finalValue } : {})
+      }));
+    }
   };
 
 
@@ -3186,7 +3306,7 @@ function JewelryEdit() {
                           <FormControl fullWidth size="small" margin="dense">
                             <Select
                                     name={`secondary_gem_size_${index}`}
-                                    value={editedItem?.[`secondary_gem_size_${index}`] || gem?.secondary_gem_size || ''}
+                                    value={editedItem?.secondaryGems?.[index]?.secondary_gem_size || gem?.secondary_gem_size || ''}
                               onChange={handleInputChange}
                                     onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_size_${index}`, index)}
                                     onClose={() => handleInlineEditComplete(null, `secondary_gem_size_${index}`, index)}
@@ -3224,7 +3344,7 @@ function JewelryEdit() {
                             <FormControl fullWidth size="small" margin="dense">
                               <Select
                                       name={`secondary_gem_weight_${index}`}
-                                      value={editedItem?.[`secondary_gem_weight_${index}`] || gem?.secondary_gem_weight || ''}
+                                      value={editedItem?.secondaryGems?.[index]?.secondary_gem_weight || gem?.secondary_gem_weight || ''}
                                 onChange={handleInputChange}
                                       onBlur={(e) => handleInlineEditComplete(e, `secondary_gem_weight_${index}`, index)}
                                       onClose={() => handleInlineEditComplete(null, `secondary_gem_weight_${index}`, index)}
@@ -3414,8 +3534,8 @@ function JewelryEdit() {
                           <FormControl fullWidth size="small">
                             <Select
                               name={`secondary_gem_lab_grown_${index}`}
-                              value={editedItem?.[`secondary_gem_lab_grown_${index}`] !== undefined ? 
-                                editedItem[`secondary_gem_lab_grown_${index}`] : 
+                              value={editedItem?.secondaryGems?.[index]?.secondary_gem_lab_grown !== undefined ?
+                                editedItem.secondaryGems[index].secondary_gem_lab_grown :
                                 (gem?.secondary_gem_lab_grown ? true : false)}
                               onChange={(e) => {
                                 setEditedItem(prev => ({
@@ -3459,7 +3579,7 @@ function JewelryEdit() {
                             name={`secondary_gem_value_${index}`}
                             type="number"
                             value={editedItem?.[`secondary_gem_value_${index}`] !== undefined ? 
-                              editedItem[`secondary_gem_value_${index}`] : 
+                              editedItem?.secondaryGems?.[index]?.secondary_gem_value : 
                               (gem?.secondary_gem_value || '')}
                             onChange={handleInputChange}
                             InputProps={{
@@ -3614,7 +3734,7 @@ function JewelryEdit() {
                             size="small"
                                     name={`secondary_gem_weight_${index}`}
                                     value={editedItem?.[`secondary_gem_weight_${index}`] !== undefined ? 
-                                      editedItem[`secondary_gem_weight_${index}`] : 
+                                      editedItem?.secondaryGems?.[index]?.secondary_gem_weight : 
                                       (gem?.secondary_gem_weight || '')}
                             onChange={handleInputChange}
                             inputRef={(el) => {
@@ -3640,7 +3760,7 @@ function JewelryEdit() {
                             size="small"
                                     name={`secondary_gem_quantity_${index}`}
                                     value={editedItem?.[`secondary_gem_quantity_${index}`] !== undefined ? 
-                                      editedItem[`secondary_gem_quantity_${index}`] : 
+                                      editedItem?.secondaryGems?.[index]?.secondary_gem_quantity : 
                                       (gem?.secondary_gem_quantity || '1')}
                             onChange={handleInputChange}
                             inputRef={(el) => {
@@ -3665,7 +3785,7 @@ function JewelryEdit() {
                             <Select
                                       name={`secondary_gem_authentic_${index}`}
                                       value={editedItem?.[`secondary_gem_authentic_${index}`] !== undefined ? 
-                                        editedItem[`secondary_gem_authentic_${index}`] : 
+                                        editedItem?.secondaryGems?.[index]?.secondary_gem_authentic : 
                                         (gem?.secondary_gem_authentic || false)}
                               onChange={(e) => {
                                 setEditedItem(prev => ({
@@ -3707,7 +3827,7 @@ function JewelryEdit() {
                             size="small"
                                     name={`secondary_gem_value_${index}`}
                                     value={editedItem?.[`secondary_gem_value_${index}`] !== undefined ? 
-                                      editedItem[`secondary_gem_value_${index}`] : 
+                                      editedItem?.secondaryGems?.[index]?.secondary_gem_value : 
                                       (gem?.secondary_gem_value || '')}
                             onChange={handleInputChange}
                             inputRef={(el) => {
