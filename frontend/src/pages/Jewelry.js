@@ -39,7 +39,7 @@ import axios from 'axios';
 function Jewelry() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentUser } = useAuth();
+  const { user: currentUser } = useAuth();
   const { enqueueSnackbar } = useSnackbar();
 
   const handleViewHistory = async (itemId) => {
@@ -291,8 +291,8 @@ function Jewelry() {
       // Call the move-to-scrap endpoint with the selected bucket name
       const response = await axios.post(
         `${API_BASE_URL}/jewelry/${itemToScrap.item_id}/move-to-scrap`,
-        { 
-          moved_by: currentUser?.employee_id || 1,
+        {
+          moved_by: currentUser?.id || 1,
           bucket_id: selectedBucket
         }
       );
@@ -352,9 +352,83 @@ function Jewelry() {
       const response = await axios.get(`${API_BASE_URL}/jewelry`);
       // Filter out items with status 'SCRAP'
       const nonScrapItems = response.data.filter(item => item.status !== 'SCRAP');
-      setJewelryItems(nonScrapItems);
-      if (nonScrapItems.length > 0) {
-        setSelectedItem(nonScrapItems[0]);
+
+      // Fetch history for all items and apply latest changes
+      const itemsWithHistory = await Promise.all(
+        nonScrapItems.map(async (item) => {
+          try {
+            // Fetch history for this item
+            const historyResponse = await axios.get(`${API_BASE_URL}/jewelry/${item.item_id}/history`);
+            const history = historyResponse.data?.history || [];
+
+            if (history.length === 0) {
+              return item; // No history, return item as-is
+            }
+
+            // Sort history by date (newest first) to get latest changes
+            const sortedHistory = [...history].sort((a, b) =>
+              new Date(b.changed_at) - new Date(a.changed_at)
+            );
+
+            // Build current state by applying all history changes
+            const latestChanges = {};
+
+            // Process each history entry
+            sortedHistory.forEach(entry => {
+              const changedFields = typeof entry.changed_fields === 'string'
+                ? JSON.parse(entry.changed_fields)
+                : entry.changed_fields;
+
+              if (!changedFields) return;
+
+              // Process each field in this history entry
+              const processField = (fields, prefix = '') => {
+                Object.entries(fields).forEach(([key, value]) => {
+                  const fullKey = prefix ? `${prefix}.${key}` : key;
+
+                  // Skip if we already have a newer value for this field
+                  if (latestChanges.hasOwnProperty(fullKey)) {
+                    return;
+                  }
+
+                  // If value has 'to' property, it's a direct change
+                  if (value && typeof value === 'object' && 'to' in value) {
+                    latestChanges[fullKey] = value.to;
+                  }
+                  // If it's a nested object (like secondary_gem_1), process recursively
+                  else if (value && typeof value === 'object' && !Array.isArray(value)) {
+                    processField(value, fullKey);
+                  }
+                  // Simple value
+                  else {
+                    latestChanges[fullKey] = value;
+                  }
+                });
+              };
+
+              processField(changedFields);
+            });
+
+            // Apply the latest changes to the item
+            const updatedItem = { ...item };
+            Object.entries(latestChanges).forEach(([key, value]) => {
+              if (!key.includes('.')) {
+                // Simple field - apply directly
+                updatedItem[key] = value;
+              }
+            });
+
+            return updatedItem;
+          } catch (error) {
+            console.error(`Error fetching history for item ${item.item_id}:`, error);
+            return item; // Return item without history if fetch fails
+          }
+        })
+      );
+
+      setJewelryItems(itemsWithHistory);
+      if (itemsWithHistory.length > 0) {
+        setSelectedItem(itemsWithHistory[0]);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -393,12 +467,14 @@ function Jewelry() {
       // If relative path (starts with /uploads), prepend server base URL
       if (url.startsWith('/uploads')) {
         const serverBase = config.apiUrl.replace('/api', '');
-        return `${serverBase}${url}`;
+        const finalUrl = `${serverBase}${url}`;
+        return finalUrl;
       }
       return url;
     };
 
     try {
+
       // If images is a string (JSON string), try to parse it
       if (typeof images === 'string') {
         try {
@@ -416,12 +492,7 @@ function Jewelry() {
 
       // Try to find the primary image first - check multiple possible field names
       const primaryImage = images.find(img =>
-        img.isPrimary === true ||
-        img.is_primary === true ||
-        img.primary === true ||
-        img.isPrimary === 'true' ||
-        img.is_primary === 'true' ||
-        img.primary === 'true'
+        img.isPrimary === true
       );
 
       // If primary image found
@@ -643,9 +714,16 @@ function Jewelry() {
               <Box sx={{ display: 'flex', gap: 2 }}>
                 {/* Image */}
                 <Box sx={{ width: '120px', height: '120px', flexShrink: 0 }}>
-                  <img 
+                  <img
                     src={getImageUrl(selectedItem.images)}
                     alt={selectedItem.name || 'Item'}
+                    onError={(e) => {
+                      console.error('Image failed to load:', e.target.src);
+                      e.target.src = 'https://via.placeholder.com/150';
+                    }}
+                    onLoad={(e) => {
+                      console.log('Image loaded successfully:', e.target.src);
+                    }}
                     style={{
                       width: '100%',
                       height: '100%',

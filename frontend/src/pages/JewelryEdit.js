@@ -47,19 +47,77 @@ import config from '../config';
 import MetalEstimator from './MetalEstimator';
 import GemEstimator from './GemEstimator';
 
+// Metal API utility functions
+const API_BASE_URL = config.apiUrl;
+
 // Utility functions for pricing analysis and image handling
 const formatPrice = (price) => {
   return Number(price).toFixed(2);
 };
 
-// Function to get image URL for jewelry items
-const getImageUrl = (item) => {
-  if (!item) return '/placeholder-jewelry.png';
-  return item.image_url || '/placeholder-jewelry.png';
+// Helper to convert relative paths to absolute URLs
+const makeAbsoluteUrl = (url) => {
+  const placeholderImage = 'https://via.placeholder.com/150';
+
+  if (!url) return placeholderImage;
+
+  // If already absolute URL (starts with http:// or https://), return as is
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+
+  // If relative path (starts with /uploads), prepend server base URL
+  if (url.startsWith('/uploads')) {
+    const serverBase = API_BASE_URL.replace('/api', '');
+    const finalUrl = `${serverBase}${url}`;
+    return finalUrl;
+  }
+
+  return url;
 };
 
-// Metal API utility functions
-const API_BASE_URL = config.apiUrl;
+// Function to get image URL for jewelry items
+const getImageUrl = (item) => {
+  const placeholderImage = 'https://via.placeholder.com/150';
+
+  if (!item) return placeholderImage;
+
+  // Check if item has images array
+  if (item.images) {
+    let images;
+
+    // Parse images if it's a string
+    if (typeof item.images === 'string') {
+      try {
+        images = JSON.parse(item.images);
+      } catch (e) {
+        console.error('JewelryEdit - Error parsing images:', e);
+        return placeholderImage;
+      }
+    } else if (Array.isArray(item.images)) {
+      images = item.images;
+    }
+
+    // Find primary image or use first image
+    if (images && images.length > 0) {
+      const primaryImage = images.find(img => img.isPrimary) || images[0];
+
+      if (primaryImage) {
+        // Check for different possible URL structures
+        if (primaryImage.url) return makeAbsoluteUrl(primaryImage.url);
+        if (primaryImage.image_url) return makeAbsoluteUrl(primaryImage.image_url);
+        if (typeof primaryImage === 'string') return makeAbsoluteUrl(primaryImage);
+      }
+    }
+  }
+
+  // Fallback to image_url if available
+  if (item.image_url) {
+    return makeAbsoluteUrl(item.image_url);
+  }
+
+  return placeholderImage;
+};
 const API_ENDPOINTS = {
   // Fix endpoints to match exact API paths that MetalEstimator.js uses
   PRECIOUS_METAL_TYPE: `${API_BASE_URL}/precious_metal_type`,
@@ -2138,7 +2196,7 @@ function JewelryEdit() {
               <Box sx={{ display: 'flex', mb: 3 }}>
                 {/* Item Image */}
                 <Box sx={{ width: 150, mr: 3 }}>
-                  <img 
+                  <img
                     src={getImageUrl(item)}
                     alt={item.short_desc || 'Jewelry item'}
                     style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
