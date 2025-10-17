@@ -4057,14 +4057,14 @@ function JewelryEdit() {
                       Melt Value:
                     </Typography>
                   </Grid>
-                  <Grid item xs={4}>
+                  <Grid item xs={8}>
                     {isEditing ? (
                       <TextField
                         fullWidth
                         size="small"
-                        name="metal_melt_value"
+                        name="melt_value"
                         type="number"
-                        value={editedItem.metal_melt_value || 0}
+                        value={editedItem.melt_value || 0}
                         onChange={handleInputChange}
                         margin="dense"
                         InputProps={{
@@ -4072,28 +4072,8 @@ function JewelryEdit() {
                         }}
                       />
                     ) : (
-                      <Typography variant="body2" align="center">
-                        ${Number(item.metal_melt_value || 0).toFixed(2)}
-                      </Typography>
-                    )}
-                  </Grid>
-                  <Grid item xs={4}>
-                    {isEditing ? (
-                      <TextField
-                        fullWidth
-                        size="small"
-                        name="gem_melt_value"
-                        type="number"
-                        value={editedItem.gem_melt_value || 0}
-                        onChange={handleInputChange}
-                        margin="dense"
-                        InputProps={{
-                          startAdornment: <InputAdornment position="start">$</InputAdornment>
-                        }}
-                      />
-                    ) : (
-                      <Typography variant="body2" align="center">
-                        ${Number(item.gem_melt_value || 0).toFixed(2)}
+                      <Typography variant="body2" align="center" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                        ${Number(item.melt_value || 0).toFixed(2)}
                       </Typography>
                     )}
                   </Grid>
