@@ -39,7 +39,7 @@ import axios from 'axios';
 function Jewelry() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentUser } = useAuth();
+  const { user: currentUser } = useAuth();
   const { enqueueSnackbar } = useSnackbar();
 
   const handleViewHistory = async (itemId) => {
@@ -49,11 +49,16 @@ function Jewelry() {
       enqueueSnackbar('Error: No item selected', { variant: 'error' });
       return;
     }
-    
+
     try {
-      const response = await axios.get(`${API_BASE_URL}/jewelry/${itemId}/history`);
-      if (response.data) {
-        generateHistoryPDF(response.data.history, itemId);
+      // Fetch both history and item details in parallel
+      const [historyResponse, itemResponse] = await Promise.all([
+        axios.get(`${API_BASE_URL}/jewelry/${itemId}/history`),
+        axios.get(`${API_BASE_URL}/jewelry/${itemId}`)
+      ]);
+
+      if (historyResponse.data) {
+        generateHistoryPDF(historyResponse.data.history, itemId, itemResponse.data);
       } else {
         console.log('No history data found');
         enqueueSnackbar('No history found for this item', { variant: 'info' });
@@ -69,24 +74,26 @@ function Jewelry() {
     }
   };
 
-  const generateHistoryPDF = (historyData, itemId) => {
+  const generateHistoryPDF = async (historyData, itemId, itemData) => {
     const doc = new jsPDF();
     const title = `Item History - #${itemId}`;
-    const headers = [['Date', 'Changed By', 'Field', 'From', 'To', 'Notes']];
+    const headers = [['Date', 'Changed By', 'Field', 'From', 'To', 'Source', 'Bought From', 'Notes']];
     // Sort history by date (newest first)
-    const sortedHistory = [...historyData].sort((a, b) => 
+    const sortedHistory = [...historyData].sort((a, b) =>
       new Date(b.changed_at) - new Date(a.changed_at)
     );
 
     // Process history data into table rows
     const tableData = [];
-    
+
     sortedHistory.forEach(entry => {
       const changedAt = new Date(entry.changed_at).toLocaleString();
-      const changedBy = entry.first_name && entry.last_name 
-        ? `${entry.first_name} ${entry.last_name}` 
+      const changedBy = entry.first_name && entry.last_name
+        ? `${entry.first_name} ${entry.last_name}`
         : `User ID: ${entry.changed_by || 'System'}`;
-      
+      const source = entry.source || '';
+      const boughtFrom = entry.bought_from || '';
+
       // Process each changed field
       const changes = entry.changed_fields;
       
@@ -126,19 +133,59 @@ function Jewelry() {
           change.field,
           change.from,
           change.to,
+          index === 0 ? source : '',
+          index === 0 ? boughtFrom : '',
           index === 0 ? (entry.change_notes || '') : ''
         ]);
       });
-      
+
       // Add a separator row between different history entries
       if (fieldChanges.length > 0) {
-        tableData.push(Array(6).fill(''));
+        tableData.push(Array(8).fill(''));
       }
     });
     
     // Remove the last separator row if it exists
     if (tableData.length > 0 && tableData[tableData.length - 1].every(cell => cell === '')) {
       tableData.pop();
+    }
+
+    // Add primary image to top right corner
+    try {
+      const imageUrl = getImageUrl(itemData.images);
+      if (imageUrl && !imageUrl.includes('placeholder')) {
+        // Load the image
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+
+        await new Promise((resolve, reject) => {
+          img.onload = () => {
+            try {
+              // Add image to PDF at top right corner
+              const imgWidth = 30;
+              const imgHeight = 30;
+              const xPos = doc.internal.pageSize.getWidth() - imgWidth - 14;
+              const yPos = 10;
+
+              doc.addImage(img, 'JPEG', xPos, yPos, imgWidth, imgHeight);
+              resolve();
+            } catch (error) {
+              console.error('Error adding image to PDF:', error);
+              resolve(); // Continue even if image fails
+            }
+          };
+
+          img.onerror = () => {
+            console.error('Failed to load image for PDF');
+            resolve(); // Continue even if image fails
+          };
+
+          img.src = imageUrl;
+        });
+      }
+    } catch (error) {
+      console.error('Error loading image for PDF:', error);
+      // Continue with PDF generation even if image fails
     }
 
     // Add title
@@ -157,19 +204,21 @@ function Jewelry() {
         fillColor: [41, 128, 185],
         textColor: 255,
         fontStyle: 'bold',
-        fontSize: 8
+        fontSize: 7
       },
       bodyStyles: {
-        fontSize: 8,
-        cellPadding: 2
+        fontSize: 7,
+        cellPadding: 1.5
       },
       columnStyles: {
-        0: { cellWidth: 25, fontStyle: 'bold' }, // Date
-        1: { cellWidth: 25 }, // Changed By
-        2: { cellWidth: 35 }, // Field
-        3: { cellWidth: 30 }, // From
-        4: { cellWidth: 30 }, // To
-        5: { cellWidth: 45 }  // Notes
+        0: { cellWidth: 22, fontStyle: 'bold' }, // Date
+        1: { cellWidth: 20 }, // Changed By
+        2: { cellWidth: 28 }, // Field
+        3: { cellWidth: 22 }, // From
+        4: { cellWidth: 22 }, // To
+        5: { cellWidth: 20 }, // Source
+        6: { cellWidth: 22 }, // Bought From
+        7: { cellWidth: 30 }  // Notes
       },
       alternateRowStyles: {
         fillColor: [245, 245, 245]
@@ -179,7 +228,7 @@ function Jewelry() {
         // Make the first column (Date) and second column (Changed By) bold for the first row of each change set
         if (data.column.index <= 1 && data.row.index > 0 && tableData[data.row.index - 1][0] === '') {
         }
-        
+
         // Add a border between different change sets
         if (data.row.index > 0 && data.column.index === 0 && tableData[data.row.index][0] === '') {
           data.cell.styles.lineWidth = 0.5;
@@ -242,8 +291,8 @@ function Jewelry() {
       // Call the move-to-scrap endpoint with the selected bucket name
       const response = await axios.post(
         `${API_BASE_URL}/jewelry/${itemToScrap.item_id}/move-to-scrap`,
-        { 
-          moved_by: currentUser?.employee_id || 1,
+        {
+          moved_by: currentUser?.id || 1,
           bucket_id: selectedBucket
         }
       );
@@ -268,21 +317,21 @@ function Jewelry() {
 
   const handleEditClick = async (item) => {
     try {
-      // Fetch all secondary gem details and latest history in parallel
+      // Fetch all secondary gem details and full history in parallel
       const [gemsResponse, historyResponse] = await Promise.all([
         axios.get(`${API_BASE_URL}/jewelry_secondary_gems/${item.item_id}`),
-        axios.get(`${API_BASE_URL}/jewelry/${item.item_id}/history?limit=1`)
+        axios.get(`${API_BASE_URL}/jewelry/${item.item_id}/history`)
       ]);
-      
+
       const secondaryGems = gemsResponse.data || [];
-      const latestHistory = historyResponse.data?.history?.[0];
-      
-      // Navigate with item ID, secondary gem data, and latest history
-      navigate('/jewelry-edit', { 
-        state: { 
+      const fullHistory = historyResponse.data?.history || [];
+
+      // Navigate with item ID, secondary gem data, and full history
+      navigate('/jewelry-edit', {
+        state: {
           itemId: item.item_id,
           secondaryGems: secondaryGems,
-          latestHistory: latestHistory
+          fullHistory: fullHistory
         },
         replace: true
       });
@@ -303,9 +352,83 @@ function Jewelry() {
       const response = await axios.get(`${API_BASE_URL}/jewelry`);
       // Filter out items with status 'SCRAP'
       const nonScrapItems = response.data.filter(item => item.status !== 'SCRAP');
-      setJewelryItems(nonScrapItems);
-      if (nonScrapItems.length > 0) {
-        setSelectedItem(nonScrapItems[0]);
+
+      // Fetch history for all items and apply latest changes
+      const itemsWithHistory = await Promise.all(
+        nonScrapItems.map(async (item) => {
+          try {
+            // Fetch history for this item
+            const historyResponse = await axios.get(`${API_BASE_URL}/jewelry/${item.item_id}/history`);
+            const history = historyResponse.data?.history || [];
+
+            if (history.length === 0) {
+              return item; // No history, return item as-is
+            }
+
+            // Sort history by date (newest first) to get latest changes
+            const sortedHistory = [...history].sort((a, b) =>
+              new Date(b.changed_at) - new Date(a.changed_at)
+            );
+
+            // Build current state by applying all history changes
+            const latestChanges = {};
+
+            // Process each history entry
+            sortedHistory.forEach(entry => {
+              const changedFields = typeof entry.changed_fields === 'string'
+                ? JSON.parse(entry.changed_fields)
+                : entry.changed_fields;
+
+              if (!changedFields) return;
+
+              // Process each field in this history entry
+              const processField = (fields, prefix = '') => {
+                Object.entries(fields).forEach(([key, value]) => {
+                  const fullKey = prefix ? `${prefix}.${key}` : key;
+
+                  // Skip if we already have a newer value for this field
+                  if (latestChanges.hasOwnProperty(fullKey)) {
+                    return;
+                  }
+
+                  // If value has 'to' property, it's a direct change
+                  if (value && typeof value === 'object' && 'to' in value) {
+                    latestChanges[fullKey] = value.to;
+                  }
+                  // If it's a nested object (like secondary_gem_1), process recursively
+                  else if (value && typeof value === 'object' && !Array.isArray(value)) {
+                    processField(value, fullKey);
+                  }
+                  // Simple value
+                  else {
+                    latestChanges[fullKey] = value;
+                  }
+                });
+              };
+
+              processField(changedFields);
+            });
+
+            // Apply the latest changes to the item
+            const updatedItem = { ...item };
+            Object.entries(latestChanges).forEach(([key, value]) => {
+              if (!key.includes('.')) {
+                // Simple field - apply directly
+                updatedItem[key] = value;
+              }
+            });
+
+            return updatedItem;
+          } catch (error) {
+            console.error(`Error fetching history for item ${item.item_id}:`, error);
+            return item; // Return item without history if fetch fails
+          }
+        })
+      );
+
+      setJewelryItems(itemsWithHistory);
+      if (itemsWithHistory.length > 0) {
+        setSelectedItem(itemsWithHistory[0]);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -344,12 +467,14 @@ function Jewelry() {
       // If relative path (starts with /uploads), prepend server base URL
       if (url.startsWith('/uploads')) {
         const serverBase = config.apiUrl.replace('/api', '');
-        return `${serverBase}${url}`;
+        const finalUrl = `${serverBase}${url}`;
+        return finalUrl;
       }
       return url;
     };
 
     try {
+
       // If images is a string (JSON string), try to parse it
       if (typeof images === 'string') {
         try {
@@ -367,12 +492,7 @@ function Jewelry() {
 
       // Try to find the primary image first - check multiple possible field names
       const primaryImage = images.find(img =>
-        img.isPrimary === true ||
-        img.is_primary === true ||
-        img.primary === true ||
-        img.isPrimary === 'true' ||
-        img.is_primary === 'true' ||
-        img.primary === 'true'
+        img.isPrimary === true
       );
 
       // If primary image found
@@ -594,9 +714,16 @@ function Jewelry() {
               <Box sx={{ display: 'flex', gap: 2 }}>
                 {/* Image */}
                 <Box sx={{ width: '120px', height: '120px', flexShrink: 0 }}>
-                  <img 
+                  <img
                     src={getImageUrl(selectedItem.images)}
                     alt={selectedItem.name || 'Item'}
+                    onError={(e) => {
+                      console.error('Image failed to load:', e.target.src);
+                      e.target.src = 'https://via.placeholder.com/150';
+                    }}
+                    onLoad={(e) => {
+                      console.log('Image loaded successfully:', e.target.src);
+                    }}
                     style={{
                       width: '100%',
                       height: '100%',

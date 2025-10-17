@@ -44,16 +44,16 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../context/AuthContext';
 
-function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, initialData = null, hideButtons = false }) {
+function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, initialData = null, hideButtons = false, editMode: editModeProp = false }) {
   const API_BASE_URL = config.apiUrl;
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  
+
   // App state
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [from, setFrom] = useState(location.state?.from || '');
-  const [editMode, setEditMode] = useState(location.state?.editMode || false);
+  const [editMode, setEditMode] = useState(editModeProp || location.state?.editMode || false);
   const [editingGemOnly, setEditingGemOnly] = useState(location.state?.editingGemOnly || false);
   const [returnToTicket, setReturnToTicket] = useState(location.state?.returnToTicket || false);
   const [ticketItemId, setTicketItemId] = useState(location.state?.ticketItemId || null);
@@ -62,7 +62,14 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
   // Tab state
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
   const [selectedSecondaryIndex, setSelectedSecondaryIndex] = useState(0);
-  
+
+  // Update editMode when prop changes
+  useEffect(() => {
+    if (editModeProp) {
+      setEditMode(true);
+    }
+  }, [editModeProp]);
+
   // Snackbar state
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -289,28 +296,33 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
   useEffect(() => {
     // Only run if we have secondary gems
     if (secondaryGems.length > 0) {
-      const gemIndex = Math.max(0, selectedSecondaryIndex || 0);
-      
+      // Use the current selectedSecondaryIndex, defaulting to 0 only if null/undefined
+      const gemIndex = selectedSecondaryIndex ?? 0;
+
+      // Ensure the index is within bounds
+      const validIndex = Math.max(0, Math.min(gemIndex, secondaryGems.length - 1));
+
       // Use the latest gem updates if available, otherwise fall back to the current gem
-      const currentGem = latestGemUpdates.current?.[gemIndex] || secondaryGems[gemIndex];
-      
+      const currentGem = latestGemUpdates.current?.[validIndex] || secondaryGems[validIndex];
+
       if (currentGem) {
         // Determine the gem type and set the active tab accordingly
         const gemType = currentGem.secondary_gem_category || (currentGem.type || '').toLowerCase();
         const expectedTab = `secondary_gem_${gemType}`;
-        
+
         // Only update the tab if we're not already on the correct tab
         if (!activeTab.startsWith(`secondary_gem_${gemType}`)) {
           setActiveTab(expectedTab);
         }
-        
+
         // Initialize the form with the current gem data
         initializeSecondaryGem(currentGem, false);
       }
-      
+
       // Ensure selectedSecondaryIndex is set and valid
-      if (selectedSecondaryIndex === undefined || 
-          selectedSecondaryIndex < 0 || 
+      if (selectedSecondaryIndex === undefined ||
+          selectedSecondaryIndex === null ||
+          selectedSecondaryIndex < 0 ||
           selectedSecondaryIndex >= secondaryGems.length) {
         setSelectedSecondaryIndex(0);
       }
@@ -319,7 +331,7 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
 
   // Initialize component with initialData
   useEffect(() => {
-    if (initialData) {
+    if (initialData && !isInitialized) {
       // Initialize primary gem type based on available data
       if (initialData.primary_gem_category || initialData.diamond_shape || initialData.stone_name) {
         const primaryGemType = initialData.primary_gem_category === 'diamond' || initialData.diamond_shape ? 'diamond' : 'stone';
@@ -339,7 +351,7 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
           secondary: secondaryGemTypes
         }));
 
-        // Initialize the first secondary gem for display
+        // Initialize the first secondary gem for display (only on initial load)
         const firstGem = secondaryGemsData[0];
         if (firstGem) {
           const gemType = firstGem.secondary_gem_category === 'diamond' ? 'diamond' : 'stone';
@@ -388,6 +400,28 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
       setIsInitialized(true);
     }
   }, [initialData, isInitialized]);
+
+  // Sync secondaryGems when initialData changes after initialization (without resetting selection)
+  useEffect(() => {
+    if (initialData && isInitialized) {
+      const secondaryGemsData = initialData.secondaryGems || initialData.secondary_gems;
+      if (secondaryGemsData && secondaryGemsData.length > 0) {
+        // Only update if the data has actually changed
+        const currentGemsJSON = JSON.stringify(secondaryGems);
+        const newGemsJSON = JSON.stringify(secondaryGemsData);
+
+        if (currentGemsJSON !== newGemsJSON) {
+          setSecondaryGems(secondaryGemsData);
+
+          // Update the current form with the selected gem (preserve selection)
+          const currentIndex = selectedSecondaryIndex ?? 0;
+          if (secondaryGemsData[currentIndex]) {
+            initializeSecondaryGem(secondaryGemsData[currentIndex], false);
+          }
+        }
+      }
+    }
+  }, [initialData?.secondaryGems, isInitialized]);
 
   // Update parent component with form state when it changes
   useEffect(() => {
@@ -2055,8 +2089,8 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
             <Typography variant="h6">
               {activeTab.startsWith('primary') ? 'EST. PRIMARY GEM' : 'EST. SECONDARY GEM'}
             </Typography>
-            {/* Show dropdown only when in edit mode and have multiple secondary gems */}
-            {activeTab.startsWith('secondary') && secondaryGems.length > 1 && editMode && (
+            {/* Show dropdown when have multiple secondary gems */}
+            {activeTab.startsWith('secondary') && secondaryGems.length > 1 && (
                   <FormControl size="small" sx={{ minWidth: 150 }}>
                     <Select
                       value={selectedSecondaryIndex}
