@@ -118,3 +118,7 @@ ADD COLUMN IF NOT EXISTS show_id_image_back BOOLEAN DEFAULT FALSE;
 -- Add comments for documentation
 COMMENT ON TABLE customer_headers_preferences IS 'Stores configuration for customer headers and display preferences with one boolean column per customer field';
 COMMENT ON COLUMN customer_headers_preferences.header_style IS 'Visual style of customer headers (standard, compact, detailed)';
+
+-- ALTER commands to make id_type and id_number nullable (not mandatory fields)
+ALTER TABLE customers ALTER COLUMN id_type DROP NOT NULL;
+ALTER TABLE customers ALTER COLUMN id_number DROP NOT NULL;

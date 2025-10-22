@@ -90,6 +90,12 @@ function Checkout() {
   const [currentTransactionId, setCurrentTransactionId] = useState(null);
   const [payments, setPayments] = useState([]);
   const [isFullyPaid, setIsFullyPaid] = useState(false);
+  const [fastSaleCustomerData, setFastSaleCustomerData] = useState({
+    first_name: '',
+    last_name: '',
+    phone: '',
+    email: ''
+  });
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
@@ -315,8 +321,76 @@ function Checkout() {
     }
   }, [checkoutItems, transactionCreated]);
 
+  // Handle fast sale customer data input
+  const handleFastSaleCustomerChange = (field) => (event) => {
+    setFastSaleCustomerData({
+      ...fastSaleCustomerData,
+      [field]: event.target.value
+    });
+  };
+
   const handleSubmit = async () => {
-    if (!selectedCustomer?.id) {
+    // Handle fast sale customer creation
+    if (selectedCustomer?.isFastSale && !selectedCustomer?.id) {
+      // Validate fast sale customer data
+      if (!fastSaleCustomerData.first_name || !fastSaleCustomerData.last_name) {
+        setSnackbar({
+          open: true,
+          message: 'First name and last name are required for fast sale',
+          severity: 'warning'
+        });
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error('Authentication token not found');
+        }
+
+        // Create customer first
+        const customerFormData = new FormData();
+        customerFormData.append('first_name', fastSaleCustomerData.first_name);
+        customerFormData.append('last_name', fastSaleCustomerData.last_name);
+        customerFormData.append('phone', fastSaleCustomerData.phone || '');
+        // Only append email if it has a value (avoid empty string for UNIQUE constraint)
+        if (fastSaleCustomerData.email && fastSaleCustomerData.email.trim()) {
+          customerFormData.append('email', fastSaleCustomerData.email.trim());
+        }
+        customerFormData.append('status', 'active');
+
+        const customerResponse = await fetch(`${config.apiUrl}/customers`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: customerFormData
+        });
+
+        if (!customerResponse.ok) throw new Error('Failed to create customer');
+        const createdCustomer = await customerResponse.json();
+
+        // Update the selected customer with the created customer data
+        const updatedCustomer = {
+          ...createdCustomer,
+          name: `${createdCustomer.first_name} ${createdCustomer.last_name}`
+        };
+        setCustomer(updatedCustomer);
+
+        setSnackbar({
+          open: true,
+          message: `Customer ${updatedCustomer.name} created successfully`,
+          severity: 'success'
+        });
+
+        // Continue with the normal payment process
+      } catch (error) {
+        setSnackbar({
+          open: true,
+          message: `Error creating customer: ${error.message}`,
+          severity: 'error'
+        });
+        return;
+      }
+    } else if (!selectedCustomer?.id) {
       setSnackbar({
         open: true,
         message: 'Please select a customer first',
@@ -1197,7 +1271,56 @@ function Checkout() {
                 </Box>
               ) : (
                 <Box>
-                  {selectedCustomer ? (
+                  {selectedCustomer?.isFastSale ? (
+                    <Box>
+                      <Typography variant="body2" color="primary" sx={{ mb: 2 }}>
+                        Fast Sale Mode - Enter customer information below
+                      </Typography>
+                      <Grid container spacing={2}>
+                        <Grid item xs={12} sm={6}>
+                          <TextField
+                            fullWidth
+                            label="First Name *"
+                            value={fastSaleCustomerData.first_name}
+                            onChange={handleFastSaleCustomerChange('first_name')}
+                            size="small"
+                            required
+                            error={!fastSaleCustomerData.first_name}
+                          />
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <TextField
+                            fullWidth
+                            label="Last Name *"
+                            value={fastSaleCustomerData.last_name}
+                            onChange={handleFastSaleCustomerChange('last_name')}
+                            size="small"
+                            required
+                            error={!fastSaleCustomerData.last_name}
+                          />
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <TextField
+                            fullWidth
+                            label="Phone"
+                            value={fastSaleCustomerData.phone}
+                            onChange={handleFastSaleCustomerChange('phone')}
+                            size="small"
+                          />
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <TextField
+                            fullWidth
+                            label="Email"
+                            type="email"
+                            value={fastSaleCustomerData.email}
+                            onChange={handleFastSaleCustomerChange('email')}
+                            size="small"
+                          />
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  ) : selectedCustomer ? (
                     <Grid container spacing={2}>
                       {/* Display customer details based on preferences */}
                       <Grid item xs={12}>
@@ -1217,7 +1340,7 @@ function Checkout() {
                           </Typography>
                         </Box>
                       </Grid>
-                      
+
                       {selectedCustomer.address && (
                         <Grid item xs={12}>
                           <Typography variant="subtitle1">

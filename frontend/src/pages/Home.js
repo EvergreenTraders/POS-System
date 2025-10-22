@@ -7,6 +7,7 @@ import { Add as AddIcon, Edit as EditIcon } from '@mui/icons-material';
 import DiamondIcon from '@mui/icons-material/Diamond';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import WatchIcon from '@mui/icons-material/Watch';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -435,6 +436,34 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
     handleCloseSearchDialog();
   };
 
+  const handleFastSale = () => {
+    // Create a temporary guest customer that will be updated at checkout
+    const guestCustomer = {
+      id: null, // No ID yet - will be created at checkout
+      name: 'Walk-in Customer',
+      isGuest: true,
+      isFastSale: true, // Flag to indicate this is a fast sale
+      status: 'active',
+      created_at: new Date().toISOString(),
+      email: '',
+      phone: '',
+      first_name: '',
+      last_name: ''
+    };
+    setCustomer(guestCustomer);
+    setSelectedCustomer(guestCustomer);
+
+    // Navigate directly to customer ticket for item entry
+    navigate('/customer-ticket', {
+      state: {
+        customer: guestCustomer,
+        isFastSale: true
+      }
+    });
+
+    showSnackbar('Fast Sale mode - Add items and customer details at checkout', 'info');
+  };
+
   return (
     <Box sx={{ p: { xs: 1, sm: 2 }, minHeight: '100vh' }}>
       {/* Main horizontal layout: left = Customer Lookup, right = main content */}
@@ -499,6 +528,18 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                   ) : (
                     'Search Customer'
                   )}
+                </Button>
+              </Grid>
+              <Grid item xs={12}>
+                <Button
+                  variant="contained"
+                  color="success"
+                  onClick={handleFastSale}
+                  fullWidth
+                  startIcon={<ShoppingCartIcon />}
+                  sx={{ height: '48px' }}
+                >
+                  Fast Sale
                 </Button>
               </Grid>
             </Grid>
