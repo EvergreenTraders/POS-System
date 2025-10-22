@@ -3159,6 +3159,79 @@ app.put('/api/transactions/:transaction_id', async (req, res) => {
   }
 });
 
+// Get customer sales history
+app.get('/api/customers/:customer_id/sales-history', async (req, res) => {
+  try {
+    const { customer_id } = req.params;
+
+    // Query to get all transactions for a specific customer with details
+    const query = `
+      WITH transaction_items_count AS (
+        SELECT
+          ti.transaction_id,
+          COUNT(*) as item_count,
+          STRING_AGG(DISTINCT tt.type, ', ') as transaction_types
+        FROM transaction_items ti
+        LEFT JOIN transaction_type tt ON ti.transaction_type_id = tt.id
+        GROUP BY ti.transaction_id
+      ),
+      transaction_payments AS (
+        SELECT
+          p.transaction_id,
+          SUM(p.amount) as total_paid,
+          STRING_AGG(DISTINCT p.payment_method, ', ') as payment_methods
+        FROM payments p
+        GROUP BY p.transaction_id
+      )
+      SELECT
+        t.transaction_id,
+        t.total_amount,
+        t.transaction_status,
+        t.transaction_date,
+        t.created_at,
+        t.updated_at,
+        TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as formatted_date,
+        c.first_name || ' ' || c.last_name as customer_name,
+        c.email as customer_email,
+        c.phone as customer_phone,
+        e.first_name || ' ' || e.last_name as employee_name,
+        COALESCE(tic.item_count, 0) as item_count,
+        COALESCE(tic.transaction_types, 'N/A') as transaction_types,
+        COALESCE(tp.total_paid, 0) as total_paid,
+        COALESCE(tp.payment_methods, 'N/A') as payment_methods,
+        (t.total_amount - COALESCE(tp.total_paid, 0)) as balance_due
+      FROM transactions t
+      LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN employees e ON t.employee_id = e.employee_id
+      LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
+      LEFT JOIN transaction_payments tp ON t.transaction_id = tp.transaction_id
+      WHERE t.customer_id = $1
+      ORDER BY t.created_at DESC
+    `;
+
+    const result = await pool.query(query, [customer_id]);
+
+    // Calculate summary statistics
+    const summary = {
+      total_transactions: result.rows.length,
+      total_spent: result.rows.reduce((sum, row) => sum + parseFloat(row.total_amount), 0),
+      total_paid: result.rows.reduce((sum, row) => sum + parseFloat(row.total_paid), 0),
+      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0),
+      completed_transactions: result.rows.filter(row => row.transaction_status === 'COMPLETED').length,
+      pending_transactions: result.rows.filter(row => row.transaction_status === 'PENDING').length
+    };
+
+    res.json({
+      customer_id: parseInt(customer_id),
+      summary: summary,
+      transactions: result.rows
+    });
+  } catch (err) {
+    console.error('Error fetching customer sales history:', err);
+    res.status(500).json({ error: 'Failed to fetch customer sales history' });
+  }
+});
+
 // Transaction Types API Endpoints
 app.get('/api/transaction-types', async (req, res) => {
   try {

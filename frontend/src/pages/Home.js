@@ -8,6 +8,7 @@ import DiamondIcon from '@mui/icons-material/Diamond';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import WatchIcon from '@mui/icons-material/Watch';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import HistoryIcon from '@mui/icons-material/History';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -399,6 +400,11 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
   };
   const handleQuickSale = (customer) => {
     navigate('/customer-ticket', { state: { customer } });
+  };
+
+  const handleViewSalesHistory = (customer) => {
+    navigate(`/customers/${customer.id}/sales-history`);
+    handleCloseSearchDialog();
   };
 
   const handleRegisterNew = () => {
@@ -811,7 +817,7 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                   <>
                     {/* Two separate sections: centered action buttons and right-aligned register button */}
                     <Box sx={{ position: 'relative', mt: 2, mb: 1 }}>
-                      {/* Centered Edit, Select, Quick Sale buttons */}
+                      {/* Centered Edit, Select, Quick Sale, Sales History buttons */}
                       <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, width: '100%' }}>
                         <Button
                           variant="outlined"
@@ -836,6 +842,16 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                           sx={{ minWidth: 70 }}
                         >
                           Quick Sale
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          color="info"
+                          startIcon={<HistoryIcon />}
+                          onClick={e => { e.stopPropagation(); handleViewSalesHistory(searchResults[selectedSearchIdx]); }}
+                          sx={{ minWidth: 100 }}
+                        >
+                          Sales History
                         </Button>
                       </Box>
                       

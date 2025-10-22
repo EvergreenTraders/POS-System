@@ -7,8 +7,9 @@ import {
   Chip, FormControl, InputLabel, Select, MenuItem, Accordion, AccordionSummary,
   AccordionDetails, Pagination, FormControlLabel, Checkbox
 } from '@mui/material';
-import { Add as AddIcon, Edit as EditIcon, FilterList as FilterListIcon, 
-  ExpandMore as ExpandMoreIcon, Clear as ClearIcon, Assessment as AssessmentIcon } from '@mui/icons-material';
+import { Add as AddIcon, Edit as EditIcon, FilterList as FilterListIcon,
+  ExpandMore as ExpandMoreIcon, Clear as ClearIcon, Assessment as AssessmentIcon,
+  History as HistoryIcon } from '@mui/icons-material';
 import CustomerReporting from './CustomerReporting';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
@@ -984,8 +985,16 @@ const CustomerManager = () => {
                     );
                   })}
                 <TableCell>
-                  <IconButton onClick={() => handleEdit(customer)} size="small">
+                  <IconButton onClick={() => handleEdit(customer)} size="small" title="Edit">
                     <EditIcon />
+                  </IconButton>
+                  <IconButton
+                    onClick={() => navigate(`/customers/${customer.id}/sales-history`)}
+                    size="small"
+                    color="info"
+                    title="View Sales History"
+                  >
+                    <HistoryIcon />
                   </IconButton>
                   <Button
                     variant="contained"

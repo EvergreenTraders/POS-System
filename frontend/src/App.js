@@ -26,6 +26,7 @@ import CustomerTicket from './pages/CustomerTicket';
 import CustomerReporting from './pages/CustomerReporting';
 import Cart from './pages/Cart';
 import JewelryEdit from './pages/JewelryEdit';
+import SalesHistory from './pages/SalesHistory';
 
 const theme = createTheme({
   palette: {
@@ -367,6 +368,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <QuoteManager />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/customers/:customer_id/sales-history"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <SalesHistory />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
