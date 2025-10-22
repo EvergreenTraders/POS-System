@@ -37,6 +37,8 @@ import {
   Snackbar,
   Alert,
   Chip,
+  Checkbox,
+  Switch,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PaymentIcon from '@mui/icons-material/Payment';
@@ -96,6 +98,9 @@ function Checkout() {
     phone: '',
     email: ''
   });
+  const [protectionPlanEnabled, setProtectionPlanEnabled] = useState(false);
+  const [taxRate, setTaxRate] = useState(0.13); // Default 13% tax rate
+  const PROTECTION_PLAN_RATE = 0.15; // 15% protection plan
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
@@ -219,7 +224,7 @@ function Checkout() {
     fetchTransactionTypes();
   }, []);
 
-  const calculateTotal = () => {
+  const calculateSubtotal = () => {
     return cartItems.reduce((total, item) => {
       let itemValue = 0;
       if (item.price !== undefined) itemValue = parseFloat(item.price);
@@ -228,6 +233,20 @@ function Checkout() {
       else if (item.amount !== undefined) itemValue = parseFloat(item.amount);
       return total + itemValue;
     }, 0);
+  };
+
+  const calculateProtectionPlan = () => {
+    if (!protectionPlanEnabled) return 0;
+    return calculateSubtotal() * PROTECTION_PLAN_RATE;
+  };
+
+  const calculateTax = () => {
+    const subtotalWithProtection = calculateSubtotal() + calculateProtectionPlan();
+    return subtotalWithProtection * taxRate;
+  };
+
+  const calculateTotal = () => {
+    return calculateSubtotal() + calculateProtectionPlan() + calculateTax();
   };
 
   const handlePaymentMethodChange = (event) => {
@@ -307,19 +326,12 @@ function Checkout() {
   };
 
   // Initialize remaining amount only when checkoutItems are set and transaction not yet created
+  // Also recalculate when protection plan or tax changes
   useEffect(() => {
     if (checkoutItems.length > 0 && !transactionCreated) {
-      const total = checkoutItems.reduce((sum, item) => {
-        let itemValue = 0;
-        if (item.price !== undefined) itemValue = parseFloat(item.price);
-        else if (item.value !== undefined) itemValue = parseFloat(item.value);
-        else if (item.fee !== undefined) itemValue = parseFloat(item.fee);
-        else if (item.amount !== undefined) itemValue = parseFloat(item.amount);
-        return sum + itemValue;
-      }, 0);
-      setRemainingAmount(total);
+      setRemainingAmount(calculateTotal());
     }
-  }, [checkoutItems, transactionCreated]);
+  }, [checkoutItems, transactionCreated, protectionPlanEnabled, taxRate]);
 
   // Handle fast sale customer data input
   const handleFastSaleCustomerChange = (field) => (event) => {
@@ -1465,18 +1477,48 @@ function Checkout() {
                   </TableBody>
                 </Table>
               </TableContainer>
-              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-                <Typography variant="h6">
-                  Total: ${checkoutItems.reduce((total, item) => {
-                    // Get the appropriate price value based on item structure
-                    let itemValue = 0;
-                    if (item.price !== undefined) itemValue = parseFloat(item.price);
-                    else if (item.value !== undefined) itemValue = parseFloat(item.value);
-                    else if (item.fee !== undefined) itemValue = parseFloat(item.fee);
-                    else if (item.amount !== undefined) itemValue = parseFloat(item.amount);
-                    return total + itemValue;
-                  }, 0).toFixed(2)}
-                </Typography>
+
+              <Divider sx={{ my: 2 }} />
+
+              {/* Price Breakdown */}
+              <Box sx={{ mt: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body1">Subtotal:</Typography>
+                  <Typography variant="body1">${calculateSubtotal().toFixed(2)}</Typography>
+                </Box>
+
+                {/* Protection Plan Toggle */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={protectionPlanEnabled}
+                          onChange={(e) => setProtectionPlanEnabled(e.target.checked)}
+                          color="primary"
+                        />
+                      }
+                      label={`Protection Plan (${(PROTECTION_PLAN_RATE * 100).toFixed(0)}%)`}
+                    />
+                  </Box>
+                  <Typography variant="body1" color={protectionPlanEnabled ? 'text.primary' : 'text.secondary'}>
+                    ${calculateProtectionPlan().toFixed(2)}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body1">Tax ({(taxRate * 100).toFixed(0)}%):</Typography>
+                  <Typography variant="body1">${calculateTax().toFixed(2)}</Typography>
+                </Box>
+
+                <Divider sx={{ my: 1 }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Typography variant="h6" fontWeight="bold">Total:</Typography>
+                  <Typography variant="h6" fontWeight="bold" color="primary">
+                    ${calculateTotal().toFixed(2)}
+                  </Typography>
+                </Box>
               </Box>
             </Paper>
           </Grid>
