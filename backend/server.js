@@ -2295,8 +2295,11 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
       id_type, id_number, id_expiry_date,
-      date_of_birth, status, risk_level, notes, gender, height, weight
+      date_of_birth, status, risk_level, notes, gender, height, weight, tax_exempt
     } = req.body;
+
+    // Convert tax_exempt string to boolean (FormData sends "true"/"false" as strings)
+    const taxExemptBool = tax_exempt === 'true' || tax_exempt === true;
     
     // Handle multiple image uploads
     let image = null;
@@ -2323,18 +2326,18 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
     
     const result = await pool.query(
       `INSERT INTO customers (
-        first_name, last_name, email, phone, 
+        first_name, last_name, email, phone,
         address_line1, address_line2, city, state, postal_code, country,
-        id_type, id_number, id_expiry_date, 
-        date_of_birth, status, risk_level, notes, gender, height, weight, 
-        image, id_image_front, id_image_back)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+        id_type, id_number, id_expiry_date,
+        date_of_birth, status, risk_level, notes, gender, height, weight,
+        image, id_image_front, id_image_back, tax_exempt)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
       RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
       [first_name, last_name, email, phone || '',
        address_line1, address_line2, city, state, postal_code, country,
        id_type, id_number, id_expiry_date || null,
-       date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null, 
-       image, id_image_front, id_image_back]
+       date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null,
+       image, id_image_front, id_image_back, taxExemptBool]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -2354,8 +2357,11 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
       id_type, id_number, id_expiry_date,
-      date_of_birth, status, risk_level, notes, gender, height, weight
+      date_of_birth, status, risk_level, notes, gender, height, weight, tax_exempt
     } = req.body;
+
+    // Convert tax_exempt string to boolean (FormData sends "true"/"false" as strings)
+    const taxExemptBool = tax_exempt === 'true' || tax_exempt === true;
 
     let query, values;
     
@@ -2414,14 +2420,16 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
       `notes = $${paramCount++}`,
       `gender = $${paramCount++}`,
       `height = $${paramCount++}`,
-      `weight = $${paramCount++}`
+      `weight = $${paramCount++}`,
+      `tax_exempt = $${paramCount++}`
     );
-    
+
     updateValues.push(
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
       id_type, id_number, id_expiry_date || null,
-      date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null
+      date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null,
+      taxExemptBool
     );
     
     // Add image fields if provided in the request, either as buffer or null
@@ -3159,6 +3167,147 @@ app.put('/api/transactions/:transaction_id', async (req, res) => {
   }
 });
 
+// Get customer sales history
+app.get('/api/customers/:customer_id/sales-history', async (req, res) => {
+  try {
+    const { customer_id } = req.params;
+
+    // Query to get all transactions for a specific customer with details
+    const query = `
+      WITH transaction_items_count AS (
+        SELECT
+          ti.transaction_id,
+          COUNT(*) as item_count,
+          STRING_AGG(DISTINCT tt.type, ', ') as transaction_types
+        FROM transaction_items ti
+        LEFT JOIN transaction_type tt ON ti.transaction_type_id = tt.id
+        GROUP BY ti.transaction_id
+      ),
+      transaction_payments AS (
+        SELECT
+          p.transaction_id,
+          SUM(p.amount) as total_paid,
+          STRING_AGG(DISTINCT p.payment_method, ', ') as payment_methods
+        FROM payments p
+        GROUP BY p.transaction_id
+      )
+      SELECT
+        t.transaction_id,
+        t.total_amount,
+        t.transaction_status,
+        t.transaction_date,
+        t.created_at,
+        t.updated_at,
+        TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as formatted_date,
+        c.first_name || ' ' || c.last_name as customer_name,
+        c.email as customer_email,
+        c.phone as customer_phone,
+        e.first_name || ' ' || e.last_name as employee_name,
+        COALESCE(tic.item_count, 0) as item_count,
+        COALESCE(tic.transaction_types, 'N/A') as transaction_types,
+        COALESCE(tp.total_paid, 0) as total_paid,
+        COALESCE(tp.payment_methods, 'N/A') as payment_methods,
+        (t.total_amount - COALESCE(tp.total_paid, 0)) as balance_due
+      FROM transactions t
+      LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN employees e ON t.employee_id = e.employee_id
+      LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
+      LEFT JOIN transaction_payments tp ON t.transaction_id = tp.transaction_id
+      WHERE t.customer_id = $1
+      ORDER BY t.created_at DESC
+    `;
+
+    const result = await pool.query(query, [customer_id]);
+
+    // Calculate summary statistics
+    const summary = {
+      total_transactions: result.rows.length,
+      total_spent: result.rows.reduce((sum, row) => sum + parseFloat(row.total_amount), 0),
+      total_paid: result.rows.reduce((sum, row) => sum + parseFloat(row.total_paid), 0),
+      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0),
+      completed_transactions: result.rows.filter(row => row.transaction_status === 'COMPLETED').length,
+      pending_transactions: result.rows.filter(row => row.transaction_status === 'PENDING').length
+    };
+
+    res.json({
+      customer_id: parseInt(customer_id),
+      summary: summary,
+      transactions: result.rows
+    });
+  } catch (err) {
+    console.error('Error fetching customer sales history:', err);
+    res.status(500).json({ error: 'Failed to fetch customer sales history' });
+  }
+});
+
+// Tax Configuration API Endpoints
+app.get('/api/tax-config', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM tax_config ORDER BY province_name';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching tax configuration:', error);
+    res.status(500).json({ error: 'Failed to fetch tax configuration' });
+  }
+});
+
+app.get('/api/tax-config/:province_code', async (req, res) => {
+  try {
+    const { province_code } = req.params;
+    const query = 'SELECT * FROM tax_config WHERE province_code = $1';
+    const result = await pool.query(query, [province_code.toUpperCase()]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Province not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching tax configuration for province:', error);
+    res.status(500).json({ error: 'Failed to fetch tax configuration' });
+  }
+});
+
+app.put('/api/tax-config/batch', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { taxRates } = req.body; // Array of { province_code, gst_rate, pst_rate, hst_rate }
+
+    await client.query('BEGIN');
+
+    const updatedRates = [];
+    for (const rate of taxRates) {
+      const query = `
+        UPDATE tax_config
+        SET gst_rate = $1, pst_rate = $2, hst_rate = $3, updated_at = CURRENT_TIMESTAMP
+        WHERE province_code = $4
+        RETURNING *
+      `;
+
+      const result = await client.query(query, [
+        rate.gst_rate,
+        rate.pst_rate,
+        rate.hst_rate,
+        rate.province_code
+      ]);
+
+      if (result.rows.length > 0) {
+        updatedRates.push(result.rows[0]);
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'Tax rates updated successfully', updated: updatedRates });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating tax configuration batch:', error);
+    res.status(500).json({ error: 'Failed to update tax configuration' });
+  } finally {
+    client.release();
+  }
+});
+
 // Transaction Types API Endpoints
 app.get('/api/transaction-types', async (req, res) => {
   try {
@@ -3733,8 +3882,10 @@ app.post('/api/payments', async (req, res) => {
     
     const paidAmount = parseFloat(paymentsResult.rows[0].paid_amount);
     const newTotalPaid = paidAmount + parseFloat(amount);
-    
-    if (newTotalPaid > transaction.total_amount) {
+
+    // Use epsilon tolerance to handle floating-point precision errors
+    const EPSILON = 0.01; // 1 cent tolerance
+    if (newTotalPaid > transaction.total_amount + EPSILON) {
       throw new Error('Payment amount exceeds remaining balance');
     }
     

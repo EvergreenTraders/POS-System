@@ -7,8 +7,9 @@ import {
   Chip, FormControl, InputLabel, Select, MenuItem, Accordion, AccordionSummary,
   AccordionDetails, Pagination, FormControlLabel, Checkbox
 } from '@mui/material';
-import { Add as AddIcon, Edit as EditIcon, FilterList as FilterListIcon, 
-  ExpandMore as ExpandMoreIcon, Clear as ClearIcon, Assessment as AssessmentIcon } from '@mui/icons-material';
+import { Add as AddIcon, Edit as EditIcon, FilterList as FilterListIcon,
+  ExpandMore as ExpandMoreIcon, Clear as ClearIcon, Assessment as AssessmentIcon,
+  History as HistoryIcon } from '@mui/icons-material';
 import CustomerReporting from './CustomerReporting';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
@@ -80,7 +81,8 @@ const CustomerManager = () => {
     notes: '',
     gender: '',
     height: '',
-    weight: ''
+    weight: '',
+    tax_exempt: false
   });
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
@@ -173,7 +175,6 @@ const CustomerManager = () => {
       
       try {
         // Fallback: fetch the database table structure directly
-        console.log('Attempting fallback: fetching schema info');
         const tableInfoResponse = await axios.get(`${API_BASE_URL}/database/table-info?table=customer_headers_preferences`);
         
         if (tableInfoResponse.data && tableInfoResponse.data.columns) {
@@ -192,7 +193,6 @@ const CustomerManager = () => {
             schemaPrefs[col.uiField] = col.defaultValue;
           });
           
-          console.log('Fallback column preferences from schema:', schemaPrefs);
           setColumnPreferences(schemaPrefs);
         } else {
           throw new Error('Failed to retrieve table structure');
@@ -552,30 +552,39 @@ const CustomerManager = () => {
       return d.toISOString().substring(0, 10);
     };
 
-    // Utility to fetch image as File
-    const urlToFile = async (url, filename = 'customer-photo.jpg') => {
-      try {
-        const res = await fetch(url);
-        const blob = await res.blob();
-        // Try to infer mime type from blob or fallback
-        const mime = blob.type || 'image/jpeg';
-        return new File([blob], filename, { type: mime });
-      } catch (e) {
-        return null;
-      }
-    };
-
+    // Process main customer photo
     let imageValue = null;
     if (customer.image && typeof customer.image === 'object' && customer.image.type === 'Buffer') {
       imageValue = bufferToDataUrl(customer.image);
     } else if (typeof customer.image === 'string' && customer.image.startsWith('http')) {
-      // Download image and convert to File
-      imageValue = await urlToFile(customer.image, `customer-photo-${customer.id || Date.now()}.jpg`);
+      imageValue = customer.image;
     } else {
       imageValue = customer.image || null;
     }
 
-    setFormData({
+    // Process ID front image
+    let idImageFront = null;
+    if (customer.id_image_front && typeof customer.id_image_front === 'object') {
+      if (customer.id_image_front.type === 'Buffer' || customer.id_image_front.data) {
+        idImageFront = bufferToDataUrl(customer.id_image_front);
+      } else {
+        idImageFront = customer.id_image_front;
+      }
+    }
+
+    // Process ID back image
+    let idImageBack = null;
+    if (customer.id_image_back && typeof customer.id_image_back === 'object') {
+      if (customer.id_image_back.type === 'Buffer' || customer.id_image_back.data) {
+        idImageBack = bufferToDataUrl(customer.id_image_back);
+      } else {
+        idImageBack = customer.id_image_back;
+      }
+    }
+
+    // Prepare customer data
+    const preparedCustomer = {
+      ...customer,
       first_name: customer.first_name || '',
       last_name: customer.last_name || '',
       email: customer.email || '',
@@ -596,9 +605,20 @@ const CustomerManager = () => {
       gender: customer.gender || '',
       height: customer.height || '',
       weight: customer.weight || '',
-      image: imageValue
+      tax_exempt: customer.tax_exempt || false,
+      image: imageValue,
+      id_image_front: idImageFront,
+      id_image_back: idImageBack
+    };
+
+    // Navigate to the CustomerEditor page
+    navigate('/customer-editor', {
+      state: {
+        customer: preparedCustomer,
+        mode: customer.id ? 'edit' : 'create',
+        returnTo: location.pathname
+      }
     });
-    setOpenDialog(true);
   };
 
   const handleCloseDialog = () => {
@@ -984,8 +1004,16 @@ const CustomerManager = () => {
                     );
                   })}
                 <TableCell>
-                  <IconButton onClick={() => handleEdit(customer)} size="small">
+                  <IconButton onClick={() => handleEdit(customer)} size="small" title="Edit">
                     <EditIcon />
+                  </IconButton>
+                  <IconButton
+                    onClick={() => navigate(`/customers/${customer.id}/sales-history`)}
+                    size="small"
+                    color="info"
+                    title="View Sales History"
+                  >
+                    <HistoryIcon />
                   </IconButton>
                   <Button
                     variant="contained"
@@ -1453,49 +1481,70 @@ const CustomerManager = () => {
                   />
                 </Grid>
               </Grid>
-              {/* New fields: Gender, Height, Weight */}
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  select
-                  name="gender"
-                  label="Gender"
-                  value={formData.gender || ''}
-                  onChange={handleFormChange}
-                  fullWidth
-                  margin="dense"
-                  SelectProps={{ native: true }}
-                >
-                  <option value=""></option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                  <option value="Prefer not to say">Prefer not to say</option>
-                </TextField>
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  name="height"
-                  label="Height (cm)"
-                  type="number"
-                  value={formData.height || ''}
-                  onChange={handleFormChange}
-                  fullWidth
-                  margin="dense"
-                  inputProps={{ min: 0, step: 0.1 }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  name="weight"
-                  label="Weight (kg)"
-                  type="number"
-                  value={formData.weight || ''}
-                  onChange={handleFormChange}
-                  fullWidth
-                  margin="dense"
-                  inputProps={{ min: 0, step: 0.1 }}
-                />
-              </Grid>
+
+              {/* Additional Information: Gender, Height, Weight, Tax Exempt */}
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  Additional Information
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={4}>
+                    <TextField
+                      select
+                      name="gender"
+                      label="Gender"
+                      value={formData.gender || ''}
+                      onChange={handleFormChange}
+                      fullWidth
+                      margin="dense"
+                      SelectProps={{ native: true }}
+                    >
+                      <option value=""></option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                      <option value="Prefer not to say">Prefer not to say</option>
+                    </TextField>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <TextField
+                      name="height"
+                      label="Height (cm)"
+                      type="number"
+                      value={formData.height || ''}
+                      onChange={handleFormChange}
+                      fullWidth
+                      margin="dense"
+                      inputProps={{ min: 0, step: 0.1 }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <TextField
+                      name="weight"
+                      label="Weight (kg)"
+                      type="number"
+                      value={formData.weight || ''}
+                      onChange={handleFormChange}
+                      fullWidth
+                      margin="dense"
+                      inputProps={{ min: 0, step: 0.1 }}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={formData.tax_exempt || false}
+                          onChange={(e) => setFormData({ ...formData, tax_exempt: e.target.checked })}
+                          name="tax_exempt"
+                          color="primary"
+                        />
+                      }
+                      label="Tax Exempt Customer"
+                    />
+                  </Grid>
+                </Grid>
+              </Box>
             </Box>
           </Box>
         </DialogContent>

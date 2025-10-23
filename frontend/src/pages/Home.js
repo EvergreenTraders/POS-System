@@ -7,6 +7,8 @@ import { Add as AddIcon, Edit as EditIcon } from '@mui/icons-material';
 import DiamondIcon from '@mui/icons-material/Diamond';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import WatchIcon from '@mui/icons-material/Watch';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import HistoryIcon from '@mui/icons-material/History';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -400,6 +402,11 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
     navigate('/customer-ticket', { state: { customer } });
   };
 
+  const handleViewSalesHistory = (customer) => {
+    navigate(`/customers/${customer.id}/sales-history`);
+    handleCloseSearchDialog();
+  };
+
   const handleRegisterNew = () => {
     const newCustomer = { first_name: '', last_name: '', email: '', phone: '', status: 'active', created_at: new Date().toISOString(), image: '' };
     setCustomer(newCustomer);
@@ -433,6 +440,34 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
     }
     showSnackbar('Proceeding as guest customer', 'info');
     handleCloseSearchDialog();
+  };
+
+  const handleFastSale = () => {
+    // Create a temporary guest customer that will be updated at checkout
+    const guestCustomer = {
+      id: null, // No ID yet - will be created at checkout
+      name: 'Walk-in Customer',
+      isGuest: true,
+      isFastSale: true, // Flag to indicate this is a fast sale
+      status: 'active',
+      created_at: new Date().toISOString(),
+      email: '',
+      phone: '',
+      first_name: '',
+      last_name: ''
+    };
+    setCustomer(guestCustomer);
+    setSelectedCustomer(guestCustomer);
+
+    // Navigate directly to customer ticket for item entry
+    navigate('/customer-ticket', {
+      state: {
+        customer: guestCustomer,
+        isFastSale: true
+      }
+    });
+
+    showSnackbar('Fast Sale mode - Add items and customer details at checkout', 'info');
   };
 
   return (
@@ -483,23 +518,33 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                 />
               </Grid>
               <Grid item xs={12}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleSearch}
-                  fullWidth
-                  disabled={loading || (!searchForm.first_name && !searchForm.last_name && !searchForm.id_number && !searchForm.phone)}
-                  sx={{ height: '48px' }}
-                >
-                  {loading ? (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'center' }}>
-                      <CircularProgress size={20} color="inherit" />
-                      <span>Searching...</span>
-                    </Box>
-                  ) : (
-                    'Search Customer'
-                  )}
-                </Button>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleSearch}
+                    fullWidth
+                    disabled={loading || (!searchForm.first_name && !searchForm.last_name && !searchForm.id_number && !searchForm.phone)}
+                    sx={{ height: '48px' }}
+                  >
+                    {loading ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'center' }}>
+                        <CircularProgress size={20} color="inherit" />
+                        <span>Searching...</span>
+                      </Box>
+                    ) : (
+                      'Search'
+                    )}
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={handleFastSale}
+                    sx={{ height: '48px', minWidth: '140px' }}
+                  >
+                    Fast Sale
+                  </Button>
+                </Box>
               </Grid>
             </Grid>
           </Paper>
@@ -770,7 +815,7 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                   <>
                     {/* Two separate sections: centered action buttons and right-aligned register button */}
                     <Box sx={{ position: 'relative', mt: 2, mb: 1 }}>
-                      {/* Centered Edit, Select, Quick Sale buttons */}
+                      {/* Centered Edit, Select, Sales History buttons */}
                       <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, width: '100%' }}>
                         <Button
                           variant="outlined"
@@ -791,10 +836,12 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                         <Button
                           variant="outlined"
                           size="small"
-                          onClick={e => { e.stopPropagation(); handleQuickSale(searchResults[selectedSearchIdx]); }}
-                          sx={{ minWidth: 70 }}
+                          color="info"
+                          startIcon={<HistoryIcon />}
+                          onClick={e => { e.stopPropagation(); handleViewSalesHistory(searchResults[selectedSearchIdx]); }}
+                          sx={{ minWidth: 100 }}
                         >
-                          Quick Sale
+                          Sales History
                         </Button>
                       </Box>
                       

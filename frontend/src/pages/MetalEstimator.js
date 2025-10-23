@@ -468,13 +468,49 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
       setMetalPurities([]);
       return;
     }
-    
+
     // Only fetch purities if we don't have any or if the metal type changed
-    if (!metalPurities.length || 
+    if (!metalPurities.length ||
         !metalPurities.some(p => p.metal_type_id === form.preciousMetalTypeId)) {
       fetchPurities(form.preciousMetalTypeId);
     }
   }, [form.preciousMetalTypeId, fetchPurities]);
+
+  // Update spot price when precious metal type or metalSpotPrice changes
+  useEffect(() => {
+    // Skip if we're in edit mode and still initializing
+    if (initialData && !isInitialized) return;
+
+    // Only update spot price if metalSpotPrice has been loaded
+    if (!metalSpotPrice.CADXAU && !metalSpotPrice.CADXAG && !metalSpotPrice.CADXPT && !metalSpotPrice.CADXPD) {
+      return;
+    }
+
+    let newSpotPrice = 0;
+    switch (form.preciousMetalType) {
+      case 'Silver':
+        newSpotPrice = metalSpotPrice.CADXAG;
+        break;
+      case 'Platinum':
+        newSpotPrice = metalSpotPrice.CADXPT;
+        break;
+      case 'Palladium':
+        newSpotPrice = metalSpotPrice.CADXPD;
+        break;
+      case 'Gold':
+      default:
+        newSpotPrice = metalSpotPrice.CADXAU;
+        break;
+    }
+
+    // Only update if the spot price has actually changed
+    if (newSpotPrice && parseFloat(form.spotPrice) !== parseFloat(newSpotPrice)) {
+      setForm(prev => ({
+        ...prev,
+        spotPrice: newSpotPrice
+      }));
+    }
+  }, [form.preciousMetalType, metalSpotPrice, initialData, isInitialized]);
 
   // Focus on weight input when component mounts
   // Skip focus when initializing with edit data to prevent focus stealing
