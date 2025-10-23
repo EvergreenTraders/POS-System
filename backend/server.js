@@ -2295,8 +2295,11 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
       id_type, id_number, id_expiry_date,
-      date_of_birth, status, risk_level, notes, gender, height, weight
+      date_of_birth, status, risk_level, notes, gender, height, weight, tax_exempt
     } = req.body;
+
+    // Convert tax_exempt string to boolean (FormData sends "true"/"false" as strings)
+    const taxExemptBool = tax_exempt === 'true' || tax_exempt === true;
     
     // Handle multiple image uploads
     let image = null;
@@ -2323,18 +2326,18 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
     
     const result = await pool.query(
       `INSERT INTO customers (
-        first_name, last_name, email, phone, 
+        first_name, last_name, email, phone,
         address_line1, address_line2, city, state, postal_code, country,
-        id_type, id_number, id_expiry_date, 
-        date_of_birth, status, risk_level, notes, gender, height, weight, 
-        image, id_image_front, id_image_back)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+        id_type, id_number, id_expiry_date,
+        date_of_birth, status, risk_level, notes, gender, height, weight,
+        image, id_image_front, id_image_back, tax_exempt)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
       RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
       [first_name, last_name, email, phone || '',
        address_line1, address_line2, city, state, postal_code, country,
        id_type, id_number, id_expiry_date || null,
-       date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null, 
-       image, id_image_front, id_image_back]
+       date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null,
+       image, id_image_front, id_image_back, taxExemptBool]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -2354,8 +2357,11 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
       id_type, id_number, id_expiry_date,
-      date_of_birth, status, risk_level, notes, gender, height, weight
+      date_of_birth, status, risk_level, notes, gender, height, weight, tax_exempt
     } = req.body;
+
+    // Convert tax_exempt string to boolean (FormData sends "true"/"false" as strings)
+    const taxExemptBool = tax_exempt === 'true' || tax_exempt === true;
 
     let query, values;
     
@@ -2414,14 +2420,16 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
       `notes = $${paramCount++}`,
       `gender = $${paramCount++}`,
       `height = $${paramCount++}`,
-      `weight = $${paramCount++}`
+      `weight = $${paramCount++}`,
+      `tax_exempt = $${paramCount++}`
     );
-    
+
     updateValues.push(
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
       id_type, id_number, id_expiry_date || null,
-      date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null
+      date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null,
+      taxExemptBool
     );
     
     // Add image fields if provided in the request, either as buffer or null

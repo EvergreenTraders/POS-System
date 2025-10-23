@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
@@ -266,7 +266,36 @@ function Checkout() {
     fetchProvinceTax();
   }, []);
 
-  const calculateSubtotal = () => {
+  // Fetch fresh customer data if tax_exempt is undefined (old cached data)
+  useEffect(() => {
+    const refreshCustomerData = async () => {
+      if (selectedCustomer && selectedCustomer.id && selectedCustomer.tax_exempt === undefined) {
+        try {
+          const response = await axios.get(`${config.apiUrl}/customers/${selectedCustomer.id}`);
+          const freshCustomer = response.data;
+
+          // Create updated customer object with fresh data
+          const updatedCustomer = {
+            ...selectedCustomer,
+            ...freshCustomer,
+            name: selectedCustomer.name || `${freshCustomer.first_name} ${freshCustomer.last_name}`
+          };
+
+          // Update the cart context with fresh customer data
+          setCustomer(updatedCustomer);
+
+          // Update sessionStorage with fresh data
+          sessionStorage.setItem('selectedCustomer', JSON.stringify(updatedCustomer));
+        } catch (error) {
+          console.error('Error fetching fresh customer data:', error);
+        }
+      }
+    };
+
+    refreshCustomerData();
+  }, [selectedCustomer, setCustomer]);
+
+  const calculateSubtotal = useCallback(() => {
     return cartItems.reduce((total, item) => {
       let itemValue = 0;
       if (item.price !== undefined) itemValue = parseFloat(item.price);
@@ -275,23 +304,27 @@ function Checkout() {
       else if (item.amount !== undefined) itemValue = parseFloat(item.amount);
       return total + itemValue;
     }, 0);
-  };
+  }, [cartItems]);
 
-  const calculateProtectionPlan = () => {
+  const calculateProtectionPlan = useCallback(() => {
     if (!protectionPlanEnabled) return 0;
     return calculateSubtotal() * PROTECTION_PLAN_RATE;
-  };
+  }, [protectionPlanEnabled, calculateSubtotal]);
 
-  const calculateTax = () => {
+  const calculateTax = useCallback(() => {
+    // Check if customer is tax exempt
+    if (selectedCustomer?.tax_exempt) {
+      return 0;
+    }
     const subtotalWithProtection = calculateSubtotal() + calculateProtectionPlan();
     return subtotalWithProtection * taxRate;
-  };
+  }, [selectedCustomer, taxRate, calculateSubtotal, calculateProtectionPlan]);
 
-  const calculateTotal = () => {
+  const calculateTotal = useCallback(() => {
     const total = calculateSubtotal() + calculateProtectionPlan() + calculateTax();
     // Round to 2 decimal places to avoid floating-point precision issues
     return parseFloat(total.toFixed(2));
-  };
+  }, [calculateSubtotal, calculateProtectionPlan, calculateTax]);
 
   const handlePaymentMethodChange = (event) => {
     setPaymentMethod(event.target.value);
@@ -370,12 +403,12 @@ function Checkout() {
   };
 
   // Initialize remaining amount only when checkoutItems are set and transaction not yet created
-  // Also recalculate when protection plan or tax changes
+  // Also recalculate when protection plan, tax, or customer changes
   useEffect(() => {
     if (checkoutItems.length > 0 && !transactionCreated) {
       setRemainingAmount(calculateTotal());
     }
-  }, [checkoutItems, transactionCreated, protectionPlanEnabled, taxRate]);
+  }, [checkoutItems, transactionCreated, calculateTotal]);
 
   // Handle fast sale customer data input
   const handleFastSaleCustomerChange = (field) => (event) => {
@@ -1404,6 +1437,26 @@ function Checkout() {
                           </Typography>
                         </Grid>
                       )}
+
+                      {selectedCustomer.tax_exempt && (
+                        <Grid item xs={12}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Typography
+                              variant="subtitle2"
+                              sx={{
+                                color: '#4caf50',
+                                fontWeight: 'bold',
+                                backgroundColor: '#e8f5e9',
+                                padding: '4px 12px',
+                                borderRadius: '4px',
+                                display: 'inline-block'
+                              }}
+                            >
+                              ✓ TAX EXEMPT CUSTOMER
+                            </Typography>
+                          </Box>
+                        </Grid>
+                      )}
                     </Grid>
                   ) : (
                     <Typography variant="body1" color="text.secondary" align="center">
@@ -1551,7 +1604,13 @@ function Checkout() {
                 </Box>
 
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body1">Tax ({(taxRate * 100).toFixed(0)}%):</Typography>
+                  <Typography variant="body1">
+                    {selectedCustomer?.tax_exempt ? (
+                      <span style={{ color: '#4caf50', fontWeight: 'bold' }}>Tax (EXEMPT)</span>
+                    ) : (
+                      `Tax (${(taxRate * 100).toFixed(0)}%)`
+                    )}:
+                  </Typography>
                   <Typography variant="body1">${calculateTax().toFixed(2)}</Typography>
                 </Box>
 

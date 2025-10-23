@@ -81,7 +81,8 @@ const CustomerManager = () => {
     notes: '',
     gender: '',
     height: '',
-    weight: ''
+    weight: '',
+    tax_exempt: false
   });
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
@@ -174,7 +175,6 @@ const CustomerManager = () => {
       
       try {
         // Fallback: fetch the database table structure directly
-        console.log('Attempting fallback: fetching schema info');
         const tableInfoResponse = await axios.get(`${API_BASE_URL}/database/table-info?table=customer_headers_preferences`);
         
         if (tableInfoResponse.data && tableInfoResponse.data.columns) {
@@ -193,7 +193,6 @@ const CustomerManager = () => {
             schemaPrefs[col.uiField] = col.defaultValue;
           });
           
-          console.log('Fallback column preferences from schema:', schemaPrefs);
           setColumnPreferences(schemaPrefs);
         } else {
           throw new Error('Failed to retrieve table structure');
@@ -597,6 +596,7 @@ const CustomerManager = () => {
       gender: customer.gender || '',
       height: customer.height || '',
       weight: customer.weight || '',
+      tax_exempt: customer.tax_exempt || false,
       image: imageValue
     });
     setOpenDialog(true);
@@ -1459,6 +1459,19 @@ const CustomerManager = () => {
                     multiline
                     rows={4}
                     margin="dense"
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={formData.tax_exempt || false}
+                        onChange={(e) => setFormData({ ...formData, tax_exempt: e.target.checked })}
+                        name="tax_exempt"
+                        color="primary"
+                      />
+                    }
+                    label="Tax Exempt Customer"
                   />
                 </Grid>
               </Grid>
