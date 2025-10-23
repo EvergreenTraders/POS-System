@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Box, Typography, Grid, Paper, TextField, Button, FormControl,
   InputLabel, Select, MenuItem, CircularProgress, Snackbar, Alert,
-  Dialog, DialogTitle, DialogContent, DialogActions, Container
+  Dialog, DialogTitle, DialogContent, DialogActions, Container,
+  FormControlLabel, Checkbox
 } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -690,6 +691,19 @@ const CustomerEditor = () => {
                     multiline
                     rows={3}
                     margin="dense"
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={formData.tax_exempt || false}
+                        onChange={(e) => setFormData({ ...formData, tax_exempt: e.target.checked })}
+                        name="tax_exempt"
+                        color="primary"
+                      />
+                    }
+                    label="Tax Exempt Customer"
                   />
                 </Grid>
               </Grid>
