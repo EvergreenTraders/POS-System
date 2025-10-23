@@ -21,7 +21,11 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  InputAdornment
+  InputAdornment,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
@@ -130,6 +134,24 @@ function SystemConfig() {
   const [loading, setLoading] = useState(false);
   const [customerColumns, setCustomerColumns] = useState([]);
   const [selectedCustomerColumns, setSelectedCustomerColumns] = useState({});
+
+  // Tax configuration state
+  const [provinceTaxRates, setProvinceTaxRates] = useState({
+    'AB': { gst: 5, pst: 0, hst: 0 },  // Alberta
+    'BC': { gst: 5, pst: 7, hst: 0 },  // British Columbia
+    'MB': { gst: 5, pst: 7, hst: 0 },  // Manitoba
+    'NB': { gst: 0, pst: 0, hst: 15 }, // New Brunswick
+    'NL': { gst: 0, pst: 0, hst: 15 }, // Newfoundland and Labrador
+    'NT': { gst: 5, pst: 0, hst: 0 },  // Northwest Territories
+    'NS': { gst: 0, pst: 0, hst: 15 }, // Nova Scotia
+    'NU': { gst: 5, pst: 0, hst: 0 },  // Nunavut
+    'ON': { gst: 0, pst: 0, hst: 13 }, // Ontario
+    'PE': { gst: 0, pst: 0, hst: 15 }, // Prince Edward Island
+    'QC': { gst: 5, pst: 9.975, hst: 0 }, // Quebec
+    'SK': { gst: 5, pst: 6, hst: 0 },  // Saskatchewan
+    'YT': { gst: 5, pst: 0, hst: 0 }   // Yukon
+  });
+  const [selectedProvince, setSelectedProvince] = useState('ON');
 
   const fetchCustomerHeaderPreferences = async () => {
     try {
@@ -325,6 +347,29 @@ function SystemConfig() {
       }
     };
 
+    const fetchTaxConfig = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/tax-config`);
+        const taxData = {};
+        response.data.forEach(province => {
+          taxData[province.province_code] = {
+            gst: parseFloat(province.gst_rate) || 0,
+            pst: parseFloat(province.pst_rate) || 0,
+            hst: parseFloat(province.hst_rate) || 0
+          };
+        });
+        setProvinceTaxRates(taxData);
+
+        // Load selected province from localStorage
+        const savedProvince = localStorage.getItem('selectedProvince');
+        if (savedProvince) {
+          setSelectedProvince(savedProvince);
+        }
+      } catch (error) {
+        console.error('Error fetching tax configuration:', error);
+      }
+    };
+
     // Fetch data on component mount
     fetchCustomerHeaderPreferences();
     fetchPreciousMetalNames();
@@ -335,6 +380,7 @@ function SystemConfig() {
     fetchUserPreference();
     fetchCaratConversion();
     fetchInventoryHoldPeriod();
+    fetchTaxConfig();
   }, []);
   
   const handleTabChange = (event, newValue) => {
@@ -626,6 +672,35 @@ function SystemConfig() {
     setSnackbar({ ...snackbar, open: false });
   };
 
+  const handleSaveTaxConfig = async () => {
+    try {
+      const taxRatesArray = Object.entries(provinceTaxRates).map(([code, rates]) => ({
+        province_code: code,
+        gst_rate: rates.gst,
+        pst_rate: rates.pst,
+        hst_rate: rates.hst
+      }));
+
+      await axios.put(`${API_BASE_URL}/tax-config/batch`, { taxRates: taxRatesArray });
+
+      // Save selected province to localStorage
+      localStorage.setItem('selectedProvince', selectedProvince);
+
+      setSnackbar({
+        open: true,
+        message: 'Tax configuration updated successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving tax configuration:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save tax configuration',
+        severity: 'error'
+      });
+    }
+  };
+
   // Convert input values to numbers
   const toNum = v => parseFloat(String(v).replace(',', '.'));
 
@@ -799,6 +874,7 @@ function SystemConfig() {
           <Tab label="General" />
           <Tab label="Security" />
           <Tab label="Notifications" />
+          <Tab label="Tax Configuration" />
           <Tab label="Pricing Calculator" />
         </Tabs>
       </Box>
@@ -1221,8 +1297,170 @@ function SystemConfig() {
           </ConfigSection>
         </StyledPaper>
       </TabPanel>
-      
+
       <TabPanel value={activeTab} index={3}>
+        <StyledPaper elevation={2}>
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Provincial Tax Rates
+            </Typography>
+            <Typography variant="body2" color="textSecondary" paragraph>
+              Configure tax rates for each Canadian province. Use GST + PST for provinces with separate taxes, or HST for harmonized sales tax provinces.
+            </Typography>
+
+            {/* Default Province Selector */}
+            <Paper sx={{ p: 2, mb: 3, bgcolor: 'primary.light', color: 'primary.contrastText' }}>
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1" fontWeight="bold">
+                    Default Province for Checkout
+                  </Typography>
+                  <Typography variant="body2">
+                    Select the province to use for tax calculations at checkout
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel sx={{ color: 'inherit' }}>Select Province</InputLabel>
+                    <Select
+                      value={selectedProvince}
+                      onChange={(e) => setSelectedProvince(e.target.value)}
+                      label="Select Province"
+                      sx={{
+                        bgcolor: 'white',
+                        '& .MuiSelect-select': { py: 1 }
+                      }}
+                    >
+                      <MenuItem value="AB">Alberta</MenuItem>
+                      <MenuItem value="BC">British Columbia</MenuItem>
+                      <MenuItem value="MB">Manitoba</MenuItem>
+                      <MenuItem value="NB">New Brunswick</MenuItem>
+                      <MenuItem value="NL">Newfoundland and Labrador</MenuItem>
+                      <MenuItem value="NT">Northwest Territories</MenuItem>
+                      <MenuItem value="NS">Nova Scotia</MenuItem>
+                      <MenuItem value="NU">Nunavut</MenuItem>
+                      <MenuItem value="ON">Ontario</MenuItem>
+                      <MenuItem value="PE">Prince Edward Island</MenuItem>
+                      <MenuItem value="QC">Quebec</MenuItem>
+                      <MenuItem value="SK">Saskatchewan</MenuItem>
+                      <MenuItem value="YT">Yukon</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              </Grid>
+            </Paper>
+
+            <TableContainer component={Paper} sx={{ mt: 2 }}>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell><strong>Province/Territory</strong></TableCell>
+                    <TableCell align="center"><strong>GST (%)</strong></TableCell>
+                    <TableCell align="center"><strong>PST (%)</strong></TableCell>
+                    <TableCell align="center"><strong>HST (%)</strong></TableCell>
+                    <TableCell align="center"><strong>Total Tax (%)</strong></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {Object.entries(provinceTaxRates).map(([code, rates]) => {
+                    const provinceNames = {
+                      'AB': 'Alberta',
+                      'BC': 'British Columbia',
+                      'MB': 'Manitoba',
+                      'NB': 'New Brunswick',
+                      'NL': 'Newfoundland and Labrador',
+                      'NT': 'Northwest Territories',
+                      'NS': 'Nova Scotia',
+                      'NU': 'Nunavut',
+                      'ON': 'Ontario',
+                      'PE': 'Prince Edward Island',
+                      'QC': 'Quebec',
+                      'SK': 'Saskatchewan',
+                      'YT': 'Yukon'
+                    };
+
+                    const totalTax = rates.hst || (rates.gst + rates.pst);
+
+                    return (
+                      <TableRow key={code}>
+                        <TableCell>{provinceNames[code]} ({code})</TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            type="number"
+                            value={rates.gst}
+                            onChange={(e) => {
+                              const newRates = { ...provinceTaxRates };
+                              newRates[code].gst = parseFloat(e.target.value) || 0;
+                              setProvinceTaxRates(newRates);
+                            }}
+                            inputProps={{ min: 0, max: 100, step: 0.1 }}
+                            sx={{ width: '80px' }}
+                            size="small"
+                            disabled={rates.hst > 0}
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            type="number"
+                            value={rates.pst}
+                            onChange={(e) => {
+                              const newRates = { ...provinceTaxRates };
+                              newRates[code].pst = parseFloat(e.target.value) || 0;
+                              setProvinceTaxRates(newRates);
+                            }}
+                            inputProps={{ min: 0, max: 100, step: 0.1 }}
+                            sx={{ width: '80px' }}
+                            size="small"
+                            disabled={rates.hst > 0}
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            type="number"
+                            value={rates.hst}
+                            onChange={(e) => {
+                              const newRates = { ...provinceTaxRates };
+                              newRates[code].hst = parseFloat(e.target.value) || 0;
+                              setProvinceTaxRates(newRates);
+                            }}
+                            inputProps={{ min: 0, max: 100, step: 0.1 }}
+                            sx={{ width: '80px' }}
+                            size="small"
+                            disabled={rates.gst > 0 || rates.pst > 0}
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <strong>{totalTax.toFixed(2)}%</strong>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="body2" color="textSecondary">
+                <strong>Note:</strong> GST (Goods and Services Tax), PST (Provincial Sales Tax), and HST (Harmonized Sales Tax) cannot be used together.
+                Provinces use either GST+PST or HST.
+              </Typography>
+            </Box>
+
+            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleSaveTaxConfig}
+                disabled={loading}
+              >
+                Save Tax Configuration
+              </Button>
+            </Box>
+          </ConfigSection>
+        </StyledPaper>
+      </TabPanel>
+
+      <TabPanel value={activeTab} index={4}>
         <StyledPaper elevation={2}>
           <Grid container spacing={3}>
             {/* Configuration Block - Left Side */}
@@ -1452,17 +1690,6 @@ function SystemConfig() {
           </Grid>
         </StyledPaper>
       </TabPanel>
-
-      <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={handleSaveSettings}
-          size="large"
-        >
-          Save Settings
-        </Button>
-      </Box>
 
       <Snackbar
         open={snackbar.open}

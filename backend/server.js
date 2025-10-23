@@ -3232,6 +3232,74 @@ app.get('/api/customers/:customer_id/sales-history', async (req, res) => {
   }
 });
 
+// Tax Configuration API Endpoints
+app.get('/api/tax-config', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM tax_config ORDER BY province_name';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching tax configuration:', error);
+    res.status(500).json({ error: 'Failed to fetch tax configuration' });
+  }
+});
+
+app.get('/api/tax-config/:province_code', async (req, res) => {
+  try {
+    const { province_code } = req.params;
+    const query = 'SELECT * FROM tax_config WHERE province_code = $1';
+    const result = await pool.query(query, [province_code.toUpperCase()]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Province not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching tax configuration for province:', error);
+    res.status(500).json({ error: 'Failed to fetch tax configuration' });
+  }
+});
+
+app.put('/api/tax-config/batch', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { taxRates } = req.body; // Array of { province_code, gst_rate, pst_rate, hst_rate }
+
+    await client.query('BEGIN');
+
+    const updatedRates = [];
+    for (const rate of taxRates) {
+      const query = `
+        UPDATE tax_config
+        SET gst_rate = $1, pst_rate = $2, hst_rate = $3, updated_at = CURRENT_TIMESTAMP
+        WHERE province_code = $4
+        RETURNING *
+      `;
+
+      const result = await client.query(query, [
+        rate.gst_rate,
+        rate.pst_rate,
+        rate.hst_rate,
+        rate.province_code
+      ]);
+
+      if (result.rows.length > 0) {
+        updatedRates.push(result.rows[0]);
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'Tax rates updated successfully', updated: updatedRates });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating tax configuration batch:', error);
+    res.status(500).json({ error: 'Failed to update tax configuration' });
+  } finally {
+    client.release();
+  }
+});
+
 // Transaction Types API Endpoints
 app.get('/api/transaction-types', async (req, res) => {
   try {
@@ -3806,8 +3874,10 @@ app.post('/api/payments', async (req, res) => {
     
     const paidAmount = parseFloat(paymentsResult.rows[0].paid_amount);
     const newTotalPaid = paidAmount + parseFloat(amount);
-    
-    if (newTotalPaid > transaction.total_amount) {
+
+    // Use epsilon tolerance to handle floating-point precision errors
+    const EPSILON = 0.01; // 1 cent tolerance
+    if (newTotalPaid > transaction.total_amount + EPSILON) {
       throw new Error('Payment amount exceeds remaining balance');
     }
     

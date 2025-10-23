@@ -100,6 +100,8 @@ function Checkout() {
   });
   const [protectionPlanEnabled, setProtectionPlanEnabled] = useState(false);
   const [taxRate, setTaxRate] = useState(0.13); // Default 13% tax rate
+  const [selectedProvince, setSelectedProvince] = useState('ON');
+  const [provinceName, setProvinceName] = useState('Ontario');
   const PROTECTION_PLAN_RATE = 0.15; // 15% protection plan
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
@@ -224,6 +226,46 @@ function Checkout() {
     fetchTransactionTypes();
   }, []);
 
+  // Fetch province tax rate on component mount
+  useEffect(() => {
+    const fetchProvinceTax = async () => {
+      try {
+        const savedProvince = localStorage.getItem('selectedProvince') || 'ON';
+        const response = await axios.get(`${config.apiUrl}/tax-config/${savedProvince}`);
+        const provinceData = response.data;
+
+        // Calculate total tax (use HST if present, otherwise sum GST + PST)
+        const totalTax = provinceData.hst_rate || (provinceData.gst_rate + provinceData.pst_rate);
+        setTaxRate(totalTax / 100); // Convert percentage to decimal
+
+        // Map province codes to full names
+        const provinceNames = {
+          'AB': 'Alberta',
+          'BC': 'British Columbia',
+          'MB': 'Manitoba',
+          'NB': 'New Brunswick',
+          'NL': 'Newfoundland and Labrador',
+          'NT': 'Northwest Territories',
+          'NS': 'Nova Scotia',
+          'NU': 'Nunavut',
+          'ON': 'Ontario',
+          'PE': 'Prince Edward Island',
+          'QC': 'Quebec',
+          'SK': 'Saskatchewan',
+          'YT': 'Yukon'
+        };
+
+        setSelectedProvince(savedProvince);
+        setProvinceName(provinceNames[savedProvince] || 'Ontario');
+      } catch (error) {
+        console.error('Error fetching province tax:', error);
+        // Keep default tax rate if fetch fails
+      }
+    };
+
+    fetchProvinceTax();
+  }, []);
+
   const calculateSubtotal = () => {
     return cartItems.reduce((total, item) => {
       let itemValue = 0;
@@ -246,7 +288,9 @@ function Checkout() {
   };
 
   const calculateTotal = () => {
-    return calculateSubtotal() + calculateProtectionPlan() + calculateTax();
+    const total = calculateSubtotal() + calculateProtectionPlan() + calculateTax();
+    // Round to 2 decimal places to avoid floating-point precision issues
+    return parseFloat(total.toFixed(2));
   };
 
   const handlePaymentMethodChange = (event) => {
@@ -752,7 +796,7 @@ function Checkout() {
           const transactionPayload = {
             customer_id: selectedCustomer.id,
             employee_id: employeeId,
-            total_amount: calculateTotal(),
+            total_amount: parseFloat(calculateTotal().toFixed(2)), // Round to 2 decimal places
             transaction_status: 'PENDING',
             transaction_date: new Date().toISOString().split('T')[0]
           };
@@ -795,7 +839,7 @@ function Checkout() {
               `${config.apiUrl}/payments`,
               {
                 transaction_id: realTransactionId,
-                amount: payment.amount,
+                amount: parseFloat(payment.amount.toFixed(2)), // Round to 2 decimal places
                 payment_method: payment.payment_method
               },
               {
