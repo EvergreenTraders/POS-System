@@ -24,6 +24,7 @@ import CustomerManager from './pages/CustomerManager';
 import CustomerEditor from './pages/CustomerEditor';
 import CustomerTicket from './pages/CustomerTicket';
 import CustomerReporting from './pages/CustomerReporting';
+import CustomerDashboard from './pages/CustomerDashboard';
 import Cart from './pages/Cart';
 import JewelryEdit from './pages/JewelryEdit';
 import SalesHistory from './pages/SalesHistory';
@@ -220,6 +221,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <CustomerManager />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/customer-dashboard"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CustomerDashboard />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
