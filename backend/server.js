@@ -3308,6 +3308,112 @@ app.put('/api/tax-config/batch', async (req, res) => {
   }
 });
 
+// Customer Dashboard API Endpoint
+app.get('/api/customer-dashboard', async (req, res) => {
+  try {
+    // Get total customers
+    const totalCustomersQuery = 'SELECT COUNT(*) as total FROM customers';
+    const totalCustomersResult = await pool.query(totalCustomersQuery);
+    const totalCustomers = parseInt(totalCustomersResult.rows[0].total);
+
+    // Get new customers this month
+    const newCustomersQuery = `
+      SELECT COUNT(*) as total
+      FROM customers
+      WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
+    `;
+    const newCustomersResult = await pool.query(newCustomersQuery);
+    const newCustomersThisMonth = parseInt(newCustomersResult.rows[0].total);
+
+    // Get total transactions and revenue
+    const transactionsQuery = `
+      SELECT
+        COUNT(*) as total_transactions,
+        COALESCE(SUM(total_amount), 0) as total_revenue
+      FROM transactions
+      WHERE transaction_status = 'COMPLETED'
+    `;
+    const transactionsResult = await pool.query(transactionsQuery);
+    const totalTransactions = parseInt(transactionsResult.rows[0].total_transactions);
+    const totalRevenue = parseFloat(transactionsResult.rows[0].total_revenue);
+    const averageTransactionValue = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
+
+    // Get top customers by revenue
+    const topCustomersQuery = `
+      SELECT
+        c.id,
+        CONCAT(c.first_name, ' ', c.last_name) as name,
+        c.tax_exempt,
+        COUNT(t.transaction_id) as transaction_count,
+        COALESCE(SUM(t.total_amount), 0) as total_spent
+      FROM customers c
+      LEFT JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      GROUP BY c.id, c.first_name, c.last_name, c.tax_exempt
+      HAVING COUNT(t.transaction_id) > 0
+      ORDER BY total_spent DESC
+      LIMIT 10
+    `;
+    const topCustomersResult = await pool.query(topCustomersQuery);
+
+    // Get recent customer activity
+    const recentCustomersQuery = `
+      SELECT
+        c.id,
+        CONCAT(c.first_name, ' ', c.last_name) as name,
+        c.email,
+        MAX(t.transaction_date) as last_transaction_date,
+        (
+          SELECT total_amount
+          FROM transactions
+          WHERE customer_id = c.id
+          AND transaction_status = 'COMPLETED'
+          ORDER BY transaction_date DESC
+          LIMIT 1
+        ) as last_transaction_amount
+      FROM customers c
+      INNER JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      GROUP BY c.id, c.first_name, c.last_name, c.email
+      ORDER BY last_transaction_date DESC
+      LIMIT 10
+    `;
+    const recentCustomersResult = await pool.query(recentCustomersQuery);
+
+    // Get inactive customers (no activity in 90+ days)
+    const inactiveCustomersQuery = `
+      SELECT
+        c.id,
+        CONCAT(c.first_name, ' ', c.last_name) as name,
+        c.phone,
+        c.email,
+        MAX(t.transaction_date) as last_transaction_date,
+        CURRENT_DATE - MAX(t.transaction_date)::date as days_inactive,
+        COALESCE(SUM(t.total_amount), 0) as total_spent
+      FROM customers c
+      LEFT JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      GROUP BY c.id, c.first_name, c.last_name, c.phone, c.email
+      HAVING MAX(t.transaction_date) IS NOT NULL
+        AND (CURRENT_DATE - MAX(t.transaction_date)::date) >= 90
+      ORDER BY days_inactive DESC
+      LIMIT 20
+    `;
+    const inactiveCustomersResult = await pool.query(inactiveCustomersQuery);
+
+    res.json({
+      totalCustomers,
+      newCustomersThisMonth,
+      totalTransactions,
+      totalRevenue,
+      averageTransactionValue,
+      topCustomers: topCustomersResult.rows,
+      recentCustomers: recentCustomersResult.rows,
+      inactiveCustomers: inactiveCustomersResult.rows
+    });
+  } catch (error) {
+    console.error('Error fetching customer dashboard data:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+  }
+});
+
 // Transaction Types API Endpoints
 app.get('/api/transaction-types', async (req, res) => {
   try {
