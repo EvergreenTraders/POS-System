@@ -3240,6 +3240,232 @@ app.get('/api/customers/:customer_id/sales-history', async (req, res) => {
   }
 });
 
+// Customer Account Linking API Endpoints
+
+// Get all linked accounts for a customer
+app.get('/api/customers/:id/linked-accounts', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const query = `
+      SELECT
+        cal.id,
+        cal.primary_customer_id,
+        cal.linked_customer_id,
+        cal.link_type,
+        cal.is_active,
+        cal.created_at,
+        cal.notes,
+        c.first_name || ' ' || c.last_name as linked_customer_name,
+        c.email as linked_customer_email,
+        c.phone as linked_customer_phone,
+        e.first_name || ' ' || e.last_name as created_by_name
+      FROM customer_account_links cal
+      LEFT JOIN customers c ON cal.linked_customer_id = c.id
+      LEFT JOIN employees e ON cal.created_by = e.employee_id
+      WHERE cal.primary_customer_id = $1
+      ORDER BY cal.created_at DESC
+    `;
+
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching linked accounts:', err);
+    res.status(500).json({ error: 'Failed to fetch linked accounts' });
+  }
+});
+
+// Create a new account link
+app.post('/api/customers/:id/link-account', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { linked_customer_id, link_type, created_by, notes } = req.body;
+
+    // Validate input
+    if (!linked_customer_id) {
+      return res.status(400).json({ error: 'linked_customer_id is required' });
+    }
+
+    // Prevent self-linking
+    if (parseInt(id) === parseInt(linked_customer_id)) {
+      return res.status(400).json({ error: 'Cannot link account to itself' });
+    }
+
+    // Check if both customers exist
+    const customerCheck = await pool.query(
+      'SELECT id FROM customers WHERE id IN ($1, $2)',
+      [id, linked_customer_id]
+    );
+
+    if (customerCheck.rows.length !== 2) {
+      return res.status(404).json({ error: 'One or both customers not found' });
+    }
+
+    // Check if link already exists
+    const existingLink = await pool.query(
+      'SELECT id FROM customer_account_links WHERE primary_customer_id = $1 AND linked_customer_id = $2',
+      [id, linked_customer_id]
+    );
+
+    if (existingLink.rows.length > 0) {
+      return res.status(409).json({ error: 'Account link already exists' });
+    }
+
+    // Create the link
+    const insertQuery = `
+      INSERT INTO customer_account_links (
+        primary_customer_id, linked_customer_id, link_type, created_by, notes
+      ) VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `;
+
+    const result = await pool.query(insertQuery, [
+      id,
+      linked_customer_id,
+      link_type || 'full_access',
+      created_by,
+      notes
+    ]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error creating account link:', err);
+    res.status(500).json({ error: 'Failed to create account link' });
+  }
+});
+
+// Update an account link
+app.put('/api/customers/account-links/:linkId', async (req, res) => {
+  try {
+    const { linkId } = req.params;
+    const { link_type, is_active, notes } = req.body;
+
+    const updateQuery = `
+      UPDATE customer_account_links
+      SET link_type = COALESCE($1, link_type),
+          is_active = COALESCE($2, is_active),
+          notes = COALESCE($3, notes)
+      WHERE id = $4
+      RETURNING *
+    `;
+
+    const result = await pool.query(updateQuery, [link_type, is_active, notes, linkId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Account link not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating account link:', err);
+    res.status(500).json({ error: 'Failed to update account link' });
+  }
+});
+
+// Delete (unlink) an account link
+app.delete('/api/customers/account-links/:linkId', async (req, res) => {
+  try {
+    const { linkId } = req.params;
+
+    const deleteQuery = 'DELETE FROM customer_account_links WHERE id = $1 RETURNING *';
+    const result = await pool.query(deleteQuery, [linkId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Account link not found' });
+    }
+
+    res.json({ message: 'Account link deleted successfully', deleted: result.rows[0] });
+  } catch (err) {
+    console.error('Error deleting account link:', err);
+    res.status(500).json({ error: 'Failed to delete account link' });
+  }
+});
+
+// Get all transactions accessible by a customer (including linked accounts)
+app.get('/api/customers/:id/all-accessible-transactions', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const query = `
+      WITH accessible_customers AS (
+        -- Include the customer's own ID
+        SELECT $1::integer as customer_id
+        UNION
+        -- Include linked customer IDs
+        SELECT linked_customer_id
+        FROM customer_account_links
+        WHERE primary_customer_id = $1 AND is_active = true
+      ),
+      transaction_items_count AS (
+        SELECT
+          ti.transaction_id,
+          COUNT(*) as item_count,
+          STRING_AGG(DISTINCT tt.type, ', ') as transaction_types
+        FROM transaction_items ti
+        LEFT JOIN transaction_type tt ON ti.transaction_type_id = tt.id
+        GROUP BY ti.transaction_id
+      ),
+      transaction_payments AS (
+        SELECT
+          p.transaction_id,
+          SUM(p.amount) as total_paid,
+          STRING_AGG(DISTINCT p.payment_method, ', ') as payment_methods
+        FROM payments p
+        GROUP BY p.transaction_id
+      )
+      SELECT
+        t.transaction_id,
+        t.customer_id,
+        t.total_amount,
+        t.transaction_status,
+        t.transaction_date,
+        t.created_at,
+        t.updated_at,
+        TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as formatted_date,
+        c.first_name || ' ' || c.last_name as customer_name,
+        c.email as customer_email,
+        c.phone as customer_phone,
+        e.first_name || ' ' || e.last_name as employee_name,
+        COALESCE(tic.item_count, 0) as item_count,
+        COALESCE(tic.transaction_types, 'N/A') as transaction_types,
+        COALESCE(tp.total_paid, 0) as total_paid,
+        COALESCE(tp.payment_methods, 'N/A') as payment_methods,
+        (t.total_amount - COALESCE(tp.total_paid, 0)) as balance_due,
+        CASE WHEN t.customer_id = $1 THEN false ELSE true END as is_linked_account
+      FROM transactions t
+      LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN employees e ON t.employee_id = e.employee_id
+      LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
+      LEFT JOIN transaction_payments tp ON t.transaction_id = tp.transaction_id
+      WHERE t.customer_id IN (SELECT customer_id FROM accessible_customers)
+      ORDER BY t.created_at DESC
+    `;
+
+    const result = await pool.query(query, [id]);
+
+    // Calculate summary statistics
+    const summary = {
+      total_transactions: result.rows.length,
+      own_transactions: result.rows.filter(row => !row.is_linked_account).length,
+      linked_transactions: result.rows.filter(row => row.is_linked_account).length,
+      total_spent: result.rows.reduce((sum, row) => sum + parseFloat(row.total_amount), 0),
+      total_paid: result.rows.reduce((sum, row) => sum + parseFloat(row.total_paid), 0),
+      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0),
+      completed_transactions: result.rows.filter(row => row.transaction_status === 'COMPLETED').length,
+      pending_transactions: result.rows.filter(row => row.transaction_status === 'PENDING').length
+    };
+
+    res.json({
+      customer_id: parseInt(id),
+      summary: summary,
+      transactions: result.rows
+    });
+  } catch (err) {
+    console.error('Error fetching accessible transactions:', err);
+    res.status(500).json({ error: 'Failed to fetch accessible transactions' });
+  }
+});
+
 // Tax Configuration API Endpoints
 app.get('/api/tax-config', async (req, res) => {
   try {
