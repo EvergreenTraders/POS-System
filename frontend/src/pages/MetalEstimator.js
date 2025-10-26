@@ -436,9 +436,10 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
             }
           } else {
             // For other metals (gold/silver), match by purity text
-            const matchingPurity = purities.find(p => 
+            const matchingPurity = purities.find(p =>
               p.purity === purityValue ||
-              p.purity.toLowerCase() === purityValue.toLowerCase()
+              (p.purity && purityValue && typeof p.purity === 'string' && typeof purityValue === 'string' &&
+               p.purity.toLowerCase() === purityValue.toLowerCase())
             );
             
             if (matchingPurity) {
