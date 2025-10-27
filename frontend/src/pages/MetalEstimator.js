@@ -830,7 +830,6 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
           name="nonPreciousMetalType"
           value={form.nonPreciousMetalType}
           onChange={(e) => handleSelectChange(e, form.preciousMetalType === 'Gold' ? jewelryColorRef : purityRef, handleChange)}
-          required
           inputRef={nonPreciousMetalTypeRef}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -859,6 +858,9 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
             }
           }}
         >
+          <MenuItem value="">
+            <em>None</em>
+          </MenuItem>
           {nonPreciousMetalTypes.map(type => (
             <MenuItem key={type.id} value={type.type}>{type.type}</MenuItem>
           ))}
