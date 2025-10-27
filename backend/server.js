@@ -2215,10 +2215,100 @@ app.put('/api/customer-preferences/config', async (req, res) => {
 // Customer routes
 app.get('/api/customers', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT *, TO_CHAR(date_of_birth, \'YYYY-MM-DD\') as date_of_birth, TO_CHAR(id_expiry_date, \'YYYY-MM-DD\') as id_expiry_date FROM customers ORDER BY created_at DESC'
-    );
-    res.json(result.rows);
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      risk_level,
+      created_from,
+      created_to,
+      id_type,
+      sort_by = 'created_at',
+      sort_order = 'desc'
+    } = req.query;
+
+    // Calculate offset
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Build WHERE clause
+    const conditions = [];
+    const params = [];
+    let paramCount = 1;
+
+    if (status) {
+      conditions.push(`status = $${paramCount}`);
+      params.push(status);
+      paramCount++;
+    }
+
+    if (risk_level) {
+      conditions.push(`risk_level = $${paramCount}`);
+      params.push(risk_level);
+      paramCount++;
+    }
+
+    if (id_type) {
+      conditions.push(`id_type = $${paramCount}`);
+      params.push(id_type);
+      paramCount++;
+    }
+
+    if (created_from) {
+      conditions.push(`created_at >= $${paramCount}`);
+      params.push(created_from);
+      paramCount++;
+    }
+
+    if (created_to) {
+      conditions.push(`created_at <= $${paramCount}`);
+      params.push(created_to + ' 23:59:59');
+      paramCount++;
+    }
+
+    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+
+    // Validate sort_by to prevent SQL injection
+    const allowedSortColumns = ['created_at', 'first_name', 'last_name', 'email', 'status', 'risk_level'];
+    const sortColumn = allowedSortColumns.includes(sort_by) ? sort_by : 'created_at';
+    const sortDirection = sort_order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    // Get total count
+    const countQuery = `SELECT COUNT(*) as total FROM customers ${whereClause}`;
+    const countResult = await pool.query(countQuery, params);
+    const totalCustomers = parseInt(countResult.rows[0].total);
+    const totalPages = Math.ceil(totalCustomers / parseInt(limit));
+
+    // Get paginated customers (including images for display)
+    const dataQuery = `
+      SELECT
+        id, first_name, last_name, email, phone,
+        address_line1, address_line2, city, state, postal_code, country,
+        id_type, id_number,
+        TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date,
+        TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth,
+        status, risk_level, notes, gender, height, weight, tax_exempt,
+        image, id_image_front, id_image_back,
+        created_at, updated_at
+      FROM customers
+      ${whereClause}
+      ORDER BY ${sortColumn} ${sortDirection}
+      LIMIT $${paramCount} OFFSET $${paramCount + 1}
+    `;
+    params.push(parseInt(limit), offset);
+
+    const result = await pool.query(dataQuery, params);
+
+    res.json({
+      customers: result.rows,
+      pagination: {
+        current_page: parseInt(page),
+        total_pages: totalPages,
+        total_customers: totalCustomers,
+        per_page: parseInt(limit),
+        has_next: parseInt(page) < totalPages,
+        has_previous: parseInt(page) > 1
+      }
+    });
   } catch (err) {
     console.error('Error fetching customers:', err);
     res.status(500).json({ error: 'Failed to fetch customers' });
@@ -2228,27 +2318,55 @@ app.get('/api/customers', async (req, res) => {
 app.get('/api/customers/search', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { first_name, last_name, phone, id_number } = req.query;
-    let query = 'SELECT * FROM customers WHERE 1=1';
+    const { first_name, last_name, phone, id_number, email, limit = 50 } = req.query;
+
+    // If all search terms are the same, use OR logic for general search
+    const isSameSearchTerm = first_name === last_name && last_name === phone && phone === email;
+
+    if (isSameSearchTerm && first_name) {
+      // General search - search across all fields with OR
+      const searchTerm = first_name.toLowerCase();
+      const query = `
+        SELECT id, first_name, last_name, email, phone, status
+        FROM customers
+        WHERE LOWER(first_name) LIKE $1
+           OR LOWER(last_name) LIKE $1
+           OR LOWER(email) LIKE $1
+           OR LOWER(phone) LIKE $1
+           OR LOWER(first_name || ' ' || last_name) LIKE $1
+        ORDER BY
+          CASE
+            WHEN LOWER(first_name) = $2 THEN 1
+            WHEN LOWER(last_name) = $2 THEN 2
+            WHEN LOWER(first_name || ' ' || last_name) = $2 THEN 3
+            ELSE 4
+          END,
+          created_at DESC
+        LIMIT $3
+      `;
+      const result = await client.query(query, [`%${searchTerm}%`, searchTerm, limit]);
+      res.json(result.rows);
+      return;
+    }
+
+    // Original logic for specific field searches (AND logic)
+    let query = 'SELECT id, first_name, last_name, email, phone, status FROM customers WHERE 1=1';
     const params = [];
     let paramCount = 1;
-    
-    // Handle case when first_name is provided separately
+
     if (first_name) {
       query += ` AND LOWER(first_name) LIKE $${paramCount}`;
-      params.push(`${first_name.toLowerCase()}%`); // Changed to only match beginning of first_name
+      params.push(`${first_name.toLowerCase()}%`);
       paramCount++;
     }
-    
-    // Handle case when last_name is provided separately
+
     if (last_name) {
       query += ` AND LOWER(last_name) LIKE $${paramCount}`;
-      params.push(`${last_name.toLowerCase()}%`); // Changed to only match beginning of last_name
+      params.push(`${last_name.toLowerCase()}%`);
       paramCount++;
     }
 
     if (id_number) {
-      // Allow partial and case-insensitive search for id_number
       query += ` AND CAST(id_number AS TEXT) ILIKE $${paramCount}`;
       params.push(`%${id_number}%`);
       paramCount++;
@@ -2260,7 +2378,14 @@ app.get('/api/customers/search', async (req, res) => {
       paramCount++;
     }
 
-    query += ' ORDER BY created_at DESC';
+    if (email) {
+      query += ` AND LOWER(email) LIKE $${paramCount}`;
+      params.push(`%${email}%`);
+      paramCount++;
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${paramCount}`;
+    params.push(limit);
 
     const result = await client.query(query, params);
     res.json(result.rows);

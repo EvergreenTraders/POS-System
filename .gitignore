@@ -39,3 +39,4 @@ Thumbs.db
 # Sample data generation
 scripts/generate_*.js
 scripts/demo_*.js
+scripts/test_*.js

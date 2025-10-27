@@ -290,9 +290,14 @@ const CustomerManager = () => {
       if (!response.ok) throw new Error('Failed to fetch customers');
       
       const data = await response.json();
-      
+
       // Check if response contains pagination info
-      if (data.customers && data.total_pages) {
+      if (data.customers && data.pagination) {
+        setCustomers(data.customers);
+        setFilteredCustomers(data.customers);
+        setTotalPages(data.pagination.total_pages);
+      } else if (data.customers && data.total_pages) {
+        // Backward compatibility
         setCustomers(data.customers);
         setFilteredCustomers(data.customers);
         setTotalPages(data.total_pages);

@@ -67,26 +67,33 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
     }
   };
 
-  const fetchAllCustomers = async () => {
+  const searchCustomers = async (searchTerm) => {
+    if (!searchTerm || searchTerm.length < 2) {
+      return [];
+    }
+
     setLoadingCustomers(true);
-    setError(null);
     try {
-      const response = await axios.get(`${API_BASE_URL}/customers`);
+      // Use search endpoint with query parameters
+      const response = await axios.get(`${API_BASE_URL}/customers/search`, {
+        params: {
+          first_name: searchTerm,
+          last_name: searchTerm,
+          phone: searchTerm,
+          email: searchTerm
+        }
+      });
 
       if (!response.data || !Array.isArray(response.data)) {
-        console.error('Invalid response format:', response.data);
-        setError('Invalid data received from server');
-        setAllCustomers([]);
-        return;
+        return [];
       }
 
       // Filter out the current customer
       const filtered = response.data.filter(c => c.id !== parseInt(customerId));
-      setAllCustomers(filtered);
+      return filtered;
     } catch (err) {
-      console.error('Error fetching customers:', err);
-      setError('Failed to load customers for linking: ' + (err.message || 'Unknown error'));
-      setAllCustomers([]);
+      console.error('Error searching customers:', err);
+      return [];
     } finally {
       setLoadingCustomers(false);
     }
@@ -98,8 +105,6 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
     setNotes('');
     setAllCustomers([]);
     setOpenLinkDialog(true);
-    // Fetch customers after dialog opens
-    setTimeout(() => fetchAllCustomers(), 100);
   };
 
   const handleCloseLinkDialog = () => {
@@ -283,7 +288,7 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
             )}
 
             <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
-              {loadingCustomers ? 'Loading customers...' : `${allCustomers.length} customers available`}
+              Type at least 2 characters to search for customers
             </Typography>
 
             <Autocomplete
@@ -297,18 +302,23 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
               onChange={(event, newValue) => {
                 setSelectedCustomer(newValue);
               }}
-              onInputChange={(event, value, reason) => {
-                console.log('Input changed:', value, 'Reason:', reason);
+              onInputChange={async (event, value, reason) => {
+                if (reason === 'input' && value && value.length >= 2) {
+                  const results = await searchCustomers(value);
+                  setAllCustomers(results);
+                } else if (reason === 'clear' || !value) {
+                  setAllCustomers([]);
+                }
               }}
               loading={loadingCustomers}
-              disabled={loadingCustomers}
+              filterOptions={(x) => x}
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  label="Select Customer to Link"
+                  label="Search Customer to Link"
                   required
-                  placeholder="Type to search by name, email or phone"
-                  helperText="Search by typing the customer's name, email, or phone number"
+                  placeholder="Type name, email or phone (min 2 chars)"
+                  helperText="Start typing to search - results will appear as you type"
                   InputProps={{
                     ...params.InputProps,
                     endAdornment: (
@@ -320,7 +330,7 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
                   }}
                 />
               )}
-              noOptionsText={loadingCustomers ? "Loading..." : (allCustomers.length === 0 ? "No customers available" : "No matching customers")}
+              noOptionsText={loadingCustomers ? "Searching..." : "Type to search for customers (min 2 characters)"}
               sx={{ mb: 2 }}
             />
 
