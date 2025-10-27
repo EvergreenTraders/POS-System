@@ -2215,10 +2215,100 @@ app.put('/api/customer-preferences/config', async (req, res) => {
 // Customer routes
 app.get('/api/customers', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT *, TO_CHAR(date_of_birth, \'YYYY-MM-DD\') as date_of_birth, TO_CHAR(id_expiry_date, \'YYYY-MM-DD\') as id_expiry_date FROM customers ORDER BY created_at DESC'
-    );
-    res.json(result.rows);
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      risk_level,
+      created_from,
+      created_to,
+      id_type,
+      sort_by = 'created_at',
+      sort_order = 'desc'
+    } = req.query;
+
+    // Calculate offset
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Build WHERE clause
+    const conditions = [];
+    const params = [];
+    let paramCount = 1;
+
+    if (status) {
+      conditions.push(`status = $${paramCount}`);
+      params.push(status);
+      paramCount++;
+    }
+
+    if (risk_level) {
+      conditions.push(`risk_level = $${paramCount}`);
+      params.push(risk_level);
+      paramCount++;
+    }
+
+    if (id_type) {
+      conditions.push(`id_type = $${paramCount}`);
+      params.push(id_type);
+      paramCount++;
+    }
+
+    if (created_from) {
+      conditions.push(`created_at >= $${paramCount}`);
+      params.push(created_from);
+      paramCount++;
+    }
+
+    if (created_to) {
+      conditions.push(`created_at <= $${paramCount}`);
+      params.push(created_to + ' 23:59:59');
+      paramCount++;
+    }
+
+    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+
+    // Validate sort_by to prevent SQL injection
+    const allowedSortColumns = ['created_at', 'first_name', 'last_name', 'email', 'status', 'risk_level'];
+    const sortColumn = allowedSortColumns.includes(sort_by) ? sort_by : 'created_at';
+    const sortDirection = sort_order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    // Get total count
+    const countQuery = `SELECT COUNT(*) as total FROM customers ${whereClause}`;
+    const countResult = await pool.query(countQuery, params);
+    const totalCustomers = parseInt(countResult.rows[0].total);
+    const totalPages = Math.ceil(totalCustomers / parseInt(limit));
+
+    // Get paginated customers (including images for display)
+    const dataQuery = `
+      SELECT
+        id, first_name, last_name, email, phone,
+        address_line1, address_line2, city, state, postal_code, country,
+        id_type, id_number,
+        TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date,
+        TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth,
+        status, risk_level, notes, gender, height, weight, tax_exempt,
+        image, id_image_front, id_image_back,
+        created_at, updated_at
+      FROM customers
+      ${whereClause}
+      ORDER BY ${sortColumn} ${sortDirection}
+      LIMIT $${paramCount} OFFSET $${paramCount + 1}
+    `;
+    params.push(parseInt(limit), offset);
+
+    const result = await pool.query(dataQuery, params);
+
+    res.json({
+      customers: result.rows,
+      pagination: {
+        current_page: parseInt(page),
+        total_pages: totalPages,
+        total_customers: totalCustomers,
+        per_page: parseInt(limit),
+        has_next: parseInt(page) < totalPages,
+        has_previous: parseInt(page) > 1
+      }
+    });
   } catch (err) {
     console.error('Error fetching customers:', err);
     res.status(500).json({ error: 'Failed to fetch customers' });
@@ -2228,27 +2318,55 @@ app.get('/api/customers', async (req, res) => {
 app.get('/api/customers/search', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { first_name, last_name, phone, id_number } = req.query;
-    let query = 'SELECT * FROM customers WHERE 1=1';
+    const { first_name, last_name, phone, id_number, email, limit = 50 } = req.query;
+
+    // If all search terms are the same, use OR logic for general search
+    const isSameSearchTerm = first_name === last_name && last_name === phone && phone === email;
+
+    if (isSameSearchTerm && first_name) {
+      // General search - search across all fields with OR
+      const searchTerm = first_name.toLowerCase();
+      const query = `
+        SELECT id, first_name, last_name, email, phone, status
+        FROM customers
+        WHERE LOWER(first_name) LIKE $1
+           OR LOWER(last_name) LIKE $1
+           OR LOWER(email) LIKE $1
+           OR LOWER(phone) LIKE $1
+           OR LOWER(first_name || ' ' || last_name) LIKE $1
+        ORDER BY
+          CASE
+            WHEN LOWER(first_name) = $2 THEN 1
+            WHEN LOWER(last_name) = $2 THEN 2
+            WHEN LOWER(first_name || ' ' || last_name) = $2 THEN 3
+            ELSE 4
+          END,
+          created_at DESC
+        LIMIT $3
+      `;
+      const result = await client.query(query, [`%${searchTerm}%`, searchTerm, limit]);
+      res.json(result.rows);
+      return;
+    }
+
+    // Original logic for specific field searches (AND logic)
+    let query = 'SELECT id, first_name, last_name, email, phone, status FROM customers WHERE 1=1';
     const params = [];
     let paramCount = 1;
-    
-    // Handle case when first_name is provided separately
+
     if (first_name) {
       query += ` AND LOWER(first_name) LIKE $${paramCount}`;
-      params.push(`${first_name.toLowerCase()}%`); // Changed to only match beginning of first_name
+      params.push(`${first_name.toLowerCase()}%`);
       paramCount++;
     }
-    
-    // Handle case when last_name is provided separately
+
     if (last_name) {
       query += ` AND LOWER(last_name) LIKE $${paramCount}`;
-      params.push(`${last_name.toLowerCase()}%`); // Changed to only match beginning of last_name
+      params.push(`${last_name.toLowerCase()}%`);
       paramCount++;
     }
 
     if (id_number) {
-      // Allow partial and case-insensitive search for id_number
       query += ` AND CAST(id_number AS TEXT) ILIKE $${paramCount}`;
       params.push(`%${id_number}%`);
       paramCount++;
@@ -2260,7 +2378,14 @@ app.get('/api/customers/search', async (req, res) => {
       paramCount++;
     }
 
-    query += ' ORDER BY created_at DESC';
+    if (email) {
+      query += ` AND LOWER(email) LIKE $${paramCount}`;
+      params.push(`%${email}%`);
+      paramCount++;
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${paramCount}`;
+    params.push(limit);
 
     const result = await client.query(query, params);
     res.json(result.rows);
@@ -3240,6 +3365,232 @@ app.get('/api/customers/:customer_id/sales-history', async (req, res) => {
   }
 });
 
+// Customer Account Linking API Endpoints
+
+// Get all linked accounts for a customer
+app.get('/api/customers/:id/linked-accounts', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const query = `
+      SELECT
+        cal.id,
+        cal.primary_customer_id,
+        cal.linked_customer_id,
+        cal.link_type,
+        cal.is_active,
+        cal.created_at,
+        cal.notes,
+        c.first_name || ' ' || c.last_name as linked_customer_name,
+        c.email as linked_customer_email,
+        c.phone as linked_customer_phone,
+        e.first_name || ' ' || e.last_name as created_by_name
+      FROM customer_account_links cal
+      LEFT JOIN customers c ON cal.linked_customer_id = c.id
+      LEFT JOIN employees e ON cal.created_by = e.employee_id
+      WHERE cal.primary_customer_id = $1
+      ORDER BY cal.created_at DESC
+    `;
+
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching linked accounts:', err);
+    res.status(500).json({ error: 'Failed to fetch linked accounts' });
+  }
+});
+
+// Create a new account link
+app.post('/api/customers/:id/link-account', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { linked_customer_id, link_type, created_by, notes } = req.body;
+
+    // Validate input
+    if (!linked_customer_id) {
+      return res.status(400).json({ error: 'linked_customer_id is required' });
+    }
+
+    // Prevent self-linking
+    if (parseInt(id) === parseInt(linked_customer_id)) {
+      return res.status(400).json({ error: 'Cannot link account to itself' });
+    }
+
+    // Check if both customers exist
+    const customerCheck = await pool.query(
+      'SELECT id FROM customers WHERE id IN ($1, $2)',
+      [id, linked_customer_id]
+    );
+
+    if (customerCheck.rows.length !== 2) {
+      return res.status(404).json({ error: 'One or both customers not found' });
+    }
+
+    // Check if link already exists
+    const existingLink = await pool.query(
+      'SELECT id FROM customer_account_links WHERE primary_customer_id = $1 AND linked_customer_id = $2',
+      [id, linked_customer_id]
+    );
+
+    if (existingLink.rows.length > 0) {
+      return res.status(409).json({ error: 'Account link already exists' });
+    }
+
+    // Create the link
+    const insertQuery = `
+      INSERT INTO customer_account_links (
+        primary_customer_id, linked_customer_id, link_type, created_by, notes
+      ) VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `;
+
+    const result = await pool.query(insertQuery, [
+      id,
+      linked_customer_id,
+      link_type || 'full_access',
+      created_by,
+      notes
+    ]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error creating account link:', err);
+    res.status(500).json({ error: 'Failed to create account link' });
+  }
+});
+
+// Update an account link
+app.put('/api/customers/account-links/:linkId', async (req, res) => {
+  try {
+    const { linkId } = req.params;
+    const { link_type, is_active, notes } = req.body;
+
+    const updateQuery = `
+      UPDATE customer_account_links
+      SET link_type = COALESCE($1, link_type),
+          is_active = COALESCE($2, is_active),
+          notes = COALESCE($3, notes)
+      WHERE id = $4
+      RETURNING *
+    `;
+
+    const result = await pool.query(updateQuery, [link_type, is_active, notes, linkId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Account link not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating account link:', err);
+    res.status(500).json({ error: 'Failed to update account link' });
+  }
+});
+
+// Delete (unlink) an account link
+app.delete('/api/customers/account-links/:linkId', async (req, res) => {
+  try {
+    const { linkId } = req.params;
+
+    const deleteQuery = 'DELETE FROM customer_account_links WHERE id = $1 RETURNING *';
+    const result = await pool.query(deleteQuery, [linkId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Account link not found' });
+    }
+
+    res.json({ message: 'Account link deleted successfully', deleted: result.rows[0] });
+  } catch (err) {
+    console.error('Error deleting account link:', err);
+    res.status(500).json({ error: 'Failed to delete account link' });
+  }
+});
+
+// Get all transactions accessible by a customer (including linked accounts)
+app.get('/api/customers/:id/all-accessible-transactions', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const query = `
+      WITH accessible_customers AS (
+        -- Include the customer's own ID
+        SELECT $1::integer as customer_id
+        UNION
+        -- Include linked customer IDs
+        SELECT linked_customer_id
+        FROM customer_account_links
+        WHERE primary_customer_id = $1 AND is_active = true
+      ),
+      transaction_items_count AS (
+        SELECT
+          ti.transaction_id,
+          COUNT(*) as item_count,
+          STRING_AGG(DISTINCT tt.type, ', ') as transaction_types
+        FROM transaction_items ti
+        LEFT JOIN transaction_type tt ON ti.transaction_type_id = tt.id
+        GROUP BY ti.transaction_id
+      ),
+      transaction_payments AS (
+        SELECT
+          p.transaction_id,
+          SUM(p.amount) as total_paid,
+          STRING_AGG(DISTINCT p.payment_method, ', ') as payment_methods
+        FROM payments p
+        GROUP BY p.transaction_id
+      )
+      SELECT
+        t.transaction_id,
+        t.customer_id,
+        t.total_amount,
+        t.transaction_status,
+        t.transaction_date,
+        t.created_at,
+        t.updated_at,
+        TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as formatted_date,
+        c.first_name || ' ' || c.last_name as customer_name,
+        c.email as customer_email,
+        c.phone as customer_phone,
+        e.first_name || ' ' || e.last_name as employee_name,
+        COALESCE(tic.item_count, 0) as item_count,
+        COALESCE(tic.transaction_types, 'N/A') as transaction_types,
+        COALESCE(tp.total_paid, 0) as total_paid,
+        COALESCE(tp.payment_methods, 'N/A') as payment_methods,
+        (t.total_amount - COALESCE(tp.total_paid, 0)) as balance_due,
+        CASE WHEN t.customer_id = $1 THEN false ELSE true END as is_linked_account
+      FROM transactions t
+      LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN employees e ON t.employee_id = e.employee_id
+      LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
+      LEFT JOIN transaction_payments tp ON t.transaction_id = tp.transaction_id
+      WHERE t.customer_id IN (SELECT customer_id FROM accessible_customers)
+      ORDER BY t.created_at DESC
+    `;
+
+    const result = await pool.query(query, [id]);
+
+    // Calculate summary statistics
+    const summary = {
+      total_transactions: result.rows.length,
+      own_transactions: result.rows.filter(row => !row.is_linked_account).length,
+      linked_transactions: result.rows.filter(row => row.is_linked_account).length,
+      total_spent: result.rows.reduce((sum, row) => sum + parseFloat(row.total_amount), 0),
+      total_paid: result.rows.reduce((sum, row) => sum + parseFloat(row.total_paid), 0),
+      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0),
+      completed_transactions: result.rows.filter(row => row.transaction_status === 'COMPLETED').length,
+      pending_transactions: result.rows.filter(row => row.transaction_status === 'PENDING').length
+    };
+
+    res.json({
+      customer_id: parseInt(id),
+      summary: summary,
+      transactions: result.rows
+    });
+  } catch (err) {
+    console.error('Error fetching accessible transactions:', err);
+    res.status(500).json({ error: 'Failed to fetch accessible transactions' });
+  }
+});
+
 // Tax Configuration API Endpoints
 app.get('/api/tax-config', async (req, res) => {
   try {
@@ -3305,6 +3656,112 @@ app.put('/api/tax-config/batch', async (req, res) => {
     res.status(500).json({ error: 'Failed to update tax configuration' });
   } finally {
     client.release();
+  }
+});
+
+// Customer Dashboard API Endpoint
+app.get('/api/customer-dashboard', async (req, res) => {
+  try {
+    // Get total customers
+    const totalCustomersQuery = 'SELECT COUNT(*) as total FROM customers';
+    const totalCustomersResult = await pool.query(totalCustomersQuery);
+    const totalCustomers = parseInt(totalCustomersResult.rows[0].total);
+
+    // Get new customers this month
+    const newCustomersQuery = `
+      SELECT COUNT(*) as total
+      FROM customers
+      WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
+    `;
+    const newCustomersResult = await pool.query(newCustomersQuery);
+    const newCustomersThisMonth = parseInt(newCustomersResult.rows[0].total);
+
+    // Get total transactions and revenue
+    const transactionsQuery = `
+      SELECT
+        COUNT(*) as total_transactions,
+        COALESCE(SUM(total_amount), 0) as total_revenue
+      FROM transactions
+      WHERE transaction_status = 'COMPLETED'
+    `;
+    const transactionsResult = await pool.query(transactionsQuery);
+    const totalTransactions = parseInt(transactionsResult.rows[0].total_transactions);
+    const totalRevenue = parseFloat(transactionsResult.rows[0].total_revenue);
+    const averageTransactionValue = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
+
+    // Get top customers by revenue
+    const topCustomersQuery = `
+      SELECT
+        c.id,
+        CONCAT(c.first_name, ' ', c.last_name) as name,
+        c.tax_exempt,
+        COUNT(t.transaction_id) as transaction_count,
+        COALESCE(SUM(t.total_amount), 0) as total_spent
+      FROM customers c
+      LEFT JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      GROUP BY c.id, c.first_name, c.last_name, c.tax_exempt
+      HAVING COUNT(t.transaction_id) > 0
+      ORDER BY total_spent DESC
+      LIMIT 10
+    `;
+    const topCustomersResult = await pool.query(topCustomersQuery);
+
+    // Get recent customer activity
+    const recentCustomersQuery = `
+      SELECT
+        c.id,
+        CONCAT(c.first_name, ' ', c.last_name) as name,
+        c.email,
+        MAX(t.transaction_date) as last_transaction_date,
+        (
+          SELECT total_amount
+          FROM transactions
+          WHERE customer_id = c.id
+          AND transaction_status = 'COMPLETED'
+          ORDER BY transaction_date DESC
+          LIMIT 1
+        ) as last_transaction_amount
+      FROM customers c
+      INNER JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      GROUP BY c.id, c.first_name, c.last_name, c.email
+      ORDER BY last_transaction_date DESC
+      LIMIT 10
+    `;
+    const recentCustomersResult = await pool.query(recentCustomersQuery);
+
+    // Get inactive customers (no activity in 90+ days)
+    const inactiveCustomersQuery = `
+      SELECT
+        c.id,
+        CONCAT(c.first_name, ' ', c.last_name) as name,
+        c.phone,
+        c.email,
+        MAX(t.transaction_date) as last_transaction_date,
+        CURRENT_DATE - MAX(t.transaction_date)::date as days_inactive,
+        COALESCE(SUM(t.total_amount), 0) as total_spent
+      FROM customers c
+      LEFT JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      GROUP BY c.id, c.first_name, c.last_name, c.phone, c.email
+      HAVING MAX(t.transaction_date) IS NOT NULL
+        AND (CURRENT_DATE - MAX(t.transaction_date)::date) >= 90
+      ORDER BY days_inactive DESC
+      LIMIT 20
+    `;
+    const inactiveCustomersResult = await pool.query(inactiveCustomersQuery);
+
+    res.json({
+      totalCustomers,
+      newCustomersThisMonth,
+      totalTransactions,
+      totalRevenue,
+      averageTransactionValue,
+      topCustomers: topCustomersResult.rows,
+      recentCustomers: recentCustomersResult.rows,
+      inactiveCustomers: inactiveCustomersResult.rows
+    });
+  } catch (error) {
+    console.error('Error fetching customer dashboard data:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
   }
 });
 

@@ -9,8 +9,9 @@ import {
 } from '@mui/material';
 import { Add as AddIcon, Edit as EditIcon, FilterList as FilterListIcon,
   ExpandMore as ExpandMoreIcon, Clear as ClearIcon, Assessment as AssessmentIcon,
-  History as HistoryIcon } from '@mui/icons-material';
+  History as HistoryIcon, Link as LinkIcon } from '@mui/icons-material';
 import CustomerReporting from './CustomerReporting';
+import LinkedAccountsManager from '../components/LinkedAccountsManager';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -98,6 +99,10 @@ const CustomerManager = () => {
   
   // State for reporting dialog - set to false by default so it only opens on button click
   const [openReportingDialog, setOpenReportingDialog] = useState(false);
+
+  // State for linked accounts manager
+  const [openLinkedAccountsDialog, setOpenLinkedAccountsDialog] = useState(false);
+  const [linkedAccountsCustomer, setLinkedAccountsCustomer] = useState(null);
   
   // State for column preferences
   const [columnPreferences, setColumnPreferences] = useState({});
@@ -285,9 +290,14 @@ const CustomerManager = () => {
       if (!response.ok) throw new Error('Failed to fetch customers');
       
       const data = await response.json();
-      
+
       // Check if response contains pagination info
-      if (data.customers && data.total_pages) {
+      if (data.customers && data.pagination) {
+        setCustomers(data.customers);
+        setFilteredCustomers(data.customers);
+        setTotalPages(data.pagination.total_pages);
+      } else if (data.customers && data.total_pages) {
+        // Backward compatibility
         setCustomers(data.customers);
         setFilteredCustomers(data.customers);
         setTotalPages(data.total_pages);
@@ -539,6 +549,16 @@ const CustomerManager = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleOpenLinkedAccounts = (customer) => {
+    setLinkedAccountsCustomer(customer);
+    setOpenLinkedAccountsDialog(true);
+  };
+
+  const handleCloseLinkedAccounts = () => {
+    setOpenLinkedAccountsDialog(false);
+    setLinkedAccountsCustomer(null);
   };
 
   const handleEdit = async (customer) => {
@@ -1014,6 +1034,14 @@ const CustomerManager = () => {
                     title="View Sales History"
                   >
                     <HistoryIcon />
+                  </IconButton>
+                  <IconButton
+                    onClick={() => handleOpenLinkedAccounts(customer)}
+                    size="small"
+                    color="primary"
+                    title="Manage Linked Accounts"
+                  >
+                    <LinkIcon />
                   </IconButton>
                   <Button
                     variant="contained"
@@ -1596,6 +1624,16 @@ const CustomerManager = () => {
           <Button onClick={() => setOpenReportingDialog(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Linked Accounts Manager Dialog */}
+      {linkedAccountsCustomer && (
+        <LinkedAccountsManager
+          customerId={linkedAccountsCustomer.id}
+          customerName={`${linkedAccountsCustomer.first_name} ${linkedAccountsCustomer.last_name}`}
+          open={openLinkedAccountsDialog}
+          onClose={handleCloseLinkedAccounts}
+        />
+      )}
     </Container>
   );
 };

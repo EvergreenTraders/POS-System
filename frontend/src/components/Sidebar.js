@@ -26,6 +26,7 @@ import {
   LocalAtm as PawnsIcon,
   Description as QuoteIcon,
   People as PeopleIcon,
+  Assessment as AssessmentIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
@@ -66,6 +67,7 @@ const StyledLink = styled(Link)({
 function Sidebar() {
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [systemConfigOpen, setSystemConfigOpen] = useState(false);
+  const [customersOpen, setCustomersOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(true);
   const location = useLocation();
 
@@ -75,6 +77,10 @@ function Sidebar() {
 
   const handleSystemConfigClick = () => {
     setSystemConfigOpen(!systemConfigOpen);
+  };
+
+  const handleCustomersClick = () => {
+    setCustomersOpen(!customersOpen);
   };
 
   const handleDrawerToggle = () => {
@@ -144,14 +150,32 @@ function Sidebar() {
           </StyledListItem>
         </StyledLink>
 
-        <StyledLink to="/customers">
-          <StyledListItem active={isActive('/customers')}>
-            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
-              <PeopleIcon />
-            </ListItemIcon>
-            {isOpen && <ListItemText primary="Customers" />}
-          </StyledListItem>
-        </StyledLink>
+        <ListItem button onClick={handleCustomersClick}>
+          <ListItemIcon sx={{ color: 'white', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+            <PeopleIcon />
+          </ListItemIcon>
+          {isOpen && (
+            <>
+              <ListItemText primary="Customers" />
+              {customersOpen ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
+            </>
+          )}
+        </ListItem>
+
+        <Collapse in={customersOpen && isOpen} timeout="auto" unmountOnExit>
+          <List component="div" disablePadding>
+            <StyledLink to="/customers">
+              <StyledListItem active={isActive('/customers')} sx={{ pl: 4 }}>
+                {isOpen && <ListItemText primary="Customer Manager" />}
+              </StyledListItem>
+            </StyledLink>
+            <StyledLink to="/customer-dashboard">
+              <StyledListItem active={isActive('/customer-dashboard')} sx={{ pl: 4 }}>
+                {isOpen && <ListItemText primary="Customer Dashboard" />}
+              </StyledListItem>
+            </StyledLink>
+          </List>
+        </Collapse>
 
         <ListItem button onClick={handleInventoryClick}>
           <ListItemIcon sx={{ color: 'white', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>

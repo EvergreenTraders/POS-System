@@ -30,6 +30,7 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ReceiptIcon from '@mui/icons-material/Receipt';
 import CloseIcon from '@mui/icons-material/Close';
+import LinkIcon from '@mui/icons-material/Link';
 import config from '../config';
 
 const SalesHistory = () => {
@@ -50,7 +51,8 @@ const SalesHistory = () => {
   const fetchSalesHistory = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${config.apiUrl}/customers/${customer_id}/sales-history`, {
+      // Use the all-accessible-transactions endpoint to get combined transactions
+      const response = await fetch(`${config.apiUrl}/customers/${customer_id}/all-accessible-transactions`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -182,6 +184,17 @@ const SalesHistory = () => {
         </Paper>
       )}
 
+      {/* Linked Account Info */}
+      {salesData?.summary?.linked_transactions > 0 && (
+        <Alert severity="info" icon={<LinkIcon />} sx={{ mb: 3 }}>
+          <Typography variant="body2">
+            This customer has access to linked accounts. Transactions marked with a "Linked" badge are from linked customer accounts.
+            {' '}
+            <strong>{salesData.summary.linked_transactions}</strong> of <strong>{salesData.summary.total_transactions}</strong> transactions shown are from linked accounts.
+          </Typography>
+        </Alert>
+      )}
+
       {/* Summary Statistics */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
@@ -190,9 +203,16 @@ const SalesHistory = () => {
               <Typography color="text.secondary" gutterBottom>
                 Total Transactions
               </Typography>
-              <Typography variant="h5">
-                {salesData?.summary?.total_transactions || 0}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                <Typography variant="h5">
+                  {salesData?.summary?.total_transactions || 0}
+                </Typography>
+                {salesData?.summary?.linked_transactions > 0 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                    ({salesData.summary.own_transactions} own + {salesData.summary.linked_transactions} linked)
+                  </Typography>
+                )}
+              </Box>
             </CardContent>
           </Card>
         </Grid>
@@ -241,6 +261,7 @@ const SalesHistory = () => {
             <TableHead>
               <TableRow>
                 <TableCell><strong>Transaction ID</strong></TableCell>
+                <TableCell><strong>Customer</strong></TableCell>
                 <TableCell><strong>Date</strong></TableCell>
                 <TableCell><strong>Type(s)</strong></TableCell>
                 <TableCell align="right"><strong>Items</strong></TableCell>
@@ -256,8 +277,29 @@ const SalesHistory = () => {
             <TableBody>
               {salesData?.transactions?.length > 0 ? (
                 salesData.transactions.map((transaction) => (
-                  <TableRow key={transaction.transaction_id} hover>
+                  <TableRow
+                    key={transaction.transaction_id}
+                    hover
+                    sx={{
+                      backgroundColor: transaction.is_linked_account ? 'rgba(33, 150, 243, 0.05)' : 'inherit'
+                    }}
+                  >
                     <TableCell>{transaction.transaction_id}</TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        {transaction.customer_name}
+                        {transaction.is_linked_account && (
+                          <Chip
+                            icon={<LinkIcon />}
+                            label="Linked"
+                            size="small"
+                            color="primary"
+                            variant="outlined"
+                            sx={{ ml: 1 }}
+                          />
+                        )}
+                      </Box>
+                    </TableCell>
                     <TableCell>{new Date(transaction.created_at).toLocaleDateString()}</TableCell>
                     <TableCell>{transaction.transaction_types}</TableCell>
                     <TableCell align="right">{transaction.item_count}</TableCell>
@@ -288,7 +330,7 @@ const SalesHistory = () => {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={11} align="center">
+                  <TableCell colSpan={12} align="center">
                     <Typography variant="body1" color="text.secondary" sx={{ py: 3 }}>
                       No sales history found for this customer
                     </Typography>
