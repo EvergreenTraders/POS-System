@@ -58,7 +58,23 @@ function JewelEstimator() {
   const [metalFormState, setMetalFormState] = useState({});
   const [totalMetalValue, setTotalMetalValue] = useState(0);
   const [addMetal, setAddMetal] = useState(() => {
-    // Initialize from location state if available
+    // Skip localStorage restoration if in edit mode
+    if (location.state?.editMode) {
+      const lastItem = location.state?.items?.[location.state.items.length - 1];
+      return lastItem ? [lastItem] : [];
+    }
+
+    // Try to restore from localStorage
+    try {
+      const savedMetalSummary = localStorage.getItem('jewelEstimator_metalSummary');
+      if (savedMetalSummary) {
+        return JSON.parse(savedMetalSummary);
+      }
+    } catch (error) {
+      console.error('[JewelEstimator] Error parsing saved metal summary:', error);
+    }
+
+    // Fallback to location state or empty array
     const lastItem = location.state?.items?.[location.state.items.length - 1];
     return lastItem ? [lastItem] : [];
   });
@@ -90,8 +106,36 @@ function JewelEstimator() {
   const [customer, setCustomer] = useState(location.state?.customer || null);
   const [transactionType, setTransactionType] = useState(location.state?.itemToEdit?.transaction_type || 'buy');
   const [freeText, setFreeText] = useState(location.state?.itemToEdit?.notes || '');
-  const [diamondSummary, setDiamondSummary] = useState([]);
-  const [stoneSummary, setStoneSummary] = useState([]);
+  const [diamondSummary, setDiamondSummary] = useState(() => {
+    // Skip localStorage restoration if in edit mode
+    if (location.state?.editMode) return [];
+
+    // Try to restore from localStorage
+    try {
+      const savedDiamondSummary = localStorage.getItem('jewelEstimator_diamondSummary');
+      if (savedDiamondSummary) {
+        return JSON.parse(savedDiamondSummary);
+      }
+    } catch (error) {
+      console.error('[JewelEstimator] Error parsing saved diamond summary:', error);
+    }
+    return [];
+  });
+  const [stoneSummary, setStoneSummary] = useState(() => {
+    // Skip localStorage restoration if in edit mode
+    if (location.state?.editMode) return [];
+
+    // Try to restore from localStorage
+    try {
+      const savedStoneSummary = localStorage.getItem('jewelEstimator_stoneSummary');
+      if (savedStoneSummary) {
+        return JSON.parse(savedStoneSummary);
+      }
+    } catch (error) {
+      console.error('[JewelEstimator] Error parsing saved stone summary:', error);
+    }
+    return [];
+  });
   const [gemFormData, setGemFormData] = useState({});
   const [totalGemValue, setTotalGemValue] = useState(0);
   const [gemSummary, setGemSummary] = useState([]);
@@ -417,6 +461,14 @@ function JewelEstimator() {
     setTimeout(() => {
       setImages([]);
     }, 1000);
+
+    // Clear localStorage when form is reset after adding item
+    localStorage.removeItem('jewelEstimator_metalForm');
+    localStorage.removeItem('jewelEstimator_metalValue');
+    localStorage.removeItem('jewelEstimator_gemForm');
+    localStorage.removeItem('jewelEstimator_metalSummary');
+    localStorage.removeItem('jewelEstimator_diamondSummary');
+    localStorage.removeItem('jewelEstimator_stoneSummary');
   };
 
   const [addedGemTypes, setAddedGemTypes] = useState({
@@ -525,6 +577,32 @@ function JewelEstimator() {
   const [exactColor, setExactColor] = useState('D');
   const [metalTypes, setMetalTypes] = useState([]);
 
+  // Save summaries to localStorage whenever they change (except in edit mode)
+  useEffect(() => {
+    if (!editMode && addMetal.length > 0) {
+      localStorage.setItem('jewelEstimator_metalSummary', JSON.stringify(addMetal));
+    } else if (!editMode && addMetal.length === 0) {
+      // Clear if empty
+      localStorage.removeItem('jewelEstimator_metalSummary');
+    }
+  }, [addMetal, editMode]);
+
+  useEffect(() => {
+    if (!editMode && diamondSummary.length > 0) {
+      localStorage.setItem('jewelEstimator_diamondSummary', JSON.stringify(diamondSummary));
+    } else if (!editMode && diamondSummary.length === 0) {
+      localStorage.removeItem('jewelEstimator_diamondSummary');
+    }
+  }, [diamondSummary, editMode]);
+
+  useEffect(() => {
+    if (!editMode && stoneSummary.length > 0) {
+      localStorage.setItem('jewelEstimator_stoneSummary', JSON.stringify(stoneSummary));
+    } else if (!editMode && stoneSummary.length === 0) {
+      localStorage.removeItem('jewelEstimator_stoneSummary');
+    }
+  }, [stoneSummary, editMode]);
+
   // Fetch metal types when component mounts
   useEffect(() => {
     const fetchMetalTypes = async () => {
@@ -535,7 +613,7 @@ function JewelEstimator() {
         console.error('Error fetching metal types:', error);
       }
     };
-    
+
     fetchMetalTypes();
   }, []);
 
@@ -2229,6 +2307,14 @@ function JewelEstimator() {
       sessionStorage.removeItem('estimationState');
     }
 
+    // Clear form localStorage when proceeding to checkout
+    localStorage.removeItem('jewelEstimator_metalForm');
+    localStorage.removeItem('jewelEstimator_metalValue');
+    localStorage.removeItem('jewelEstimator_gemForm');
+    localStorage.removeItem('jewelEstimator_metalSummary');
+    localStorage.removeItem('jewelEstimator_diamondSummary');
+    localStorage.removeItem('jewelEstimator_stoneSummary');
+
     // Add items to cart before navigation (cart is in-memory)
     updatedItems.forEach(item => addToCart(item));
 
@@ -2236,7 +2322,6 @@ function JewelEstimator() {
 
     if (customerData) {
       // If customer exists, navigate to checkout page with customer and items
-      console.log("items", updatedItems);
       navigate('/checkout', {
         state: {
           customer: customerData,

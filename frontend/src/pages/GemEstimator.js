@@ -398,6 +398,48 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
 
 
       setIsInitialized(true);
+    } else if (!initialData && !isInitialized) {
+      // Restore from localStorage when not in edit mode
+      const savedGemState = localStorage.getItem('jewelEstimator_gemForm');
+
+      if (savedGemState) {
+        try {
+          const parsedState = JSON.parse(savedGemState);
+
+          // Restore all form states
+          if (parsedState.primaryDiamondForm) {
+            setPrimaryDiamondForm(parsedState.primaryDiamondForm);
+          }
+          if (parsedState.primaryStoneForm) {
+            setPrimaryStoneForm(parsedState.primaryStoneForm);
+          }
+          if (parsedState.secondaryDiamondForm) {
+            setSecondaryDiamondForm(parsedState.secondaryDiamondForm);
+          }
+          if (parsedState.secondaryStoneForm) {
+            setSecondaryStoneForm(parsedState.secondaryStoneForm);
+          }
+          if (parsedState.addedGemTypes) {
+            setAddedGemTypes(parsedState.addedGemTypes);
+          }
+          if (parsedState.secondaryGems) {
+            setSecondaryGems(parsedState.secondaryGems);
+          }
+          if (parsedState.activeTab) {
+            setActiveTab(parsedState.activeTab);
+          }
+          if (parsedState.selectedSecondaryIndex !== undefined) {
+            setSelectedSecondaryIndex(parsedState.selectedSecondaryIndex);
+          }
+        } catch (error) {
+          console.error('[GemEstimator] Error parsing saved gem form data:', error);
+        }
+      }
+
+      // Use setTimeout to delay initialization flag to ensure all state updates complete
+      setTimeout(() => {
+        setIsInitialized(true);
+      }, 100);
     }
   }, [initialData, isInitialized]);
 
@@ -438,12 +480,12 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
         formState.secondaryGems = [...latestGemUpdates.current || secondaryGems];
       } else {
         // Fallback to the current form state if no secondaryGems array is available
-        const currentSecondaryGem = addedGemTypes.secondary === 'diamond' 
+        const currentSecondaryGem = addedGemTypes.secondary === 'diamond'
           ? { ...secondaryDiamondForm, secondary_gem_category: 'diamond' }
           : addedGemTypes.secondary === 'stone'
             ? { ...secondaryStoneForm, secondary_gem_category: 'stone' }
             : null;
-        
+
         if (currentSecondaryGem) {
           formState.secondaryGems.push(currentSecondaryGem);
         }
@@ -451,13 +493,41 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
       setGemFormState(formState);
     }
   }, [
-    primaryDiamondForm, 
-    primaryStoneForm, 
+    primaryDiamondForm,
+    primaryStoneForm,
     secondaryDiamondForm,
     secondaryStoneForm,
-    addedGemTypes, 
+    addedGemTypes,
     setGemFormState,
     secondaryGems,
+    isInitialized
+  ]);
+
+  // Save gem form state to localStorage when it changes (except in edit mode)
+  useEffect(() => {
+    if (!initialData && isInitialized) {
+      const gemState = {
+        primaryDiamondForm,
+        primaryStoneForm,
+        secondaryDiamondForm,
+        secondaryStoneForm,
+        addedGemTypes,
+        secondaryGems,
+        activeTab,
+        selectedSecondaryIndex
+      };
+      localStorage.setItem('jewelEstimator_gemForm', JSON.stringify(gemState));
+    }
+  }, [
+    primaryDiamondForm,
+    primaryStoneForm,
+    secondaryDiamondForm,
+    secondaryStoneForm,
+    addedGemTypes,
+    secondaryGems,
+    activeTab,
+    selectedSecondaryIndex,
+    initialData,
     isInitialized
   ]);
 
@@ -980,7 +1050,6 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
           // If still no match, use the first color as default
           if (!matchingColor && stoneColors.length > 0) {
             matchingColor = stoneColors[0];
-            console.log('No matching color found, using default:', matchingColor.name);
           }
           
           if (matchingColor) {            
