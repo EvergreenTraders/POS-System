@@ -85,7 +85,24 @@ function JewelEstimator() {
   const [editingGemOnly, setEditingGemOnly] = useState(location.state?.editingGemOnly || false);
   const [returnToTicket, setReturnToTicket] = useState(location.state?.returnToTicket || false);
   const [ticketItemId, setTicketItemId] = useState(location.state?.ticketItemId || null);
-  const [priceEstimates, setPriceEstimates] = useState({ pawn: 0, buy: 0, melt: 0, retail: 0 });
+  const [priceEstimates, setPriceEstimates] = useState(() => {
+    // Skip localStorage restoration if in edit mode
+    if (location.state?.editMode) {
+      return { pawn: 0, buy: 0, melt: 0, retail: 0 };
+    }
+
+    // Try to restore from localStorage
+    try {
+      const savedPriceEstimates = localStorage.getItem('jewelEstimator_priceEstimates');
+      if (savedPriceEstimates) {
+        return JSON.parse(savedPriceEstimates);
+      }
+    } catch (error) {
+      console.error('[JewelEstimator] Error parsing saved price estimates:', error);
+    }
+
+    return { pawn: 0, buy: 0, melt: 0, retail: 0 };
+  });
   
   // Snackbar state
   const [snackbar, setSnackbar] = useState({
@@ -139,6 +156,31 @@ function JewelEstimator() {
   const [gemFormData, setGemFormData] = useState({});
   const [totalGemValue, setTotalGemValue] = useState(0);
   const [gemSummary, setGemSummary] = useState([]);
+
+  // Images state with localStorage restoration
+  const [images, setImages] = useState(() => {
+    // Skip localStorage restoration if in edit mode
+    if (location.state?.editMode) return [];
+
+    // Try to restore from localStorage
+    try {
+      const savedImages = localStorage.getItem('jewelEstimator_images');
+      if (savedImages) {
+        const parsedImages = JSON.parse(savedImages);
+        // Convert base64 back to displayable URLs
+        return parsedImages.map((img, index) => ({
+          url: img.base64 || img.url, // Use base64 as the URL (it's a data URL)
+          file: null, // Can't restore File objects
+          type: img.type || 'upload',
+          isPrimary: img.isPrimary || index === 0
+        }));
+      }
+    } catch (error) {
+      console.error('[JewelEstimator] Error parsing saved images:', error);
+    }
+
+    return [];
+  });
 
   const handleMetalFormChange = (formState) => {
       setMetalFormState(formState);
@@ -227,7 +269,10 @@ function JewelEstimator() {
   };
 
   const handleDeleteMetal = (index) => {
-    setAddMetal(prev => prev.filter((_, i) => i !== index)); // Deletes the selected metal
+    setAddMetal(prev => {
+      const newMetal = prev.filter((_, i) => i !== index);
+      return newMetal;
+    });
   };
 
   const handleDeleteGem = (index, type, isPrimary) => {
@@ -469,6 +514,8 @@ function JewelEstimator() {
     localStorage.removeItem('jewelEstimator_metalSummary');
     localStorage.removeItem('jewelEstimator_diamondSummary');
     localStorage.removeItem('jewelEstimator_stoneSummary');
+    localStorage.removeItem('jewelEstimator_priceEstimates');
+    localStorage.removeItem('jewelEstimator_images');
   };
 
   const [addedGemTypes, setAddedGemTypes] = useState({
@@ -602,6 +649,53 @@ function JewelEstimator() {
       localStorage.removeItem('jewelEstimator_stoneSummary');
     }
   }, [stoneSummary, editMode]);
+
+  // Save price estimates to localStorage
+  useEffect(() => {
+    if (!editMode) {
+      localStorage.setItem('jewelEstimator_priceEstimates', JSON.stringify(priceEstimates));
+    }
+  }, [priceEstimates, editMode]);
+
+  // Save images to localStorage
+  useEffect(() => {
+    if (!editMode && images.length > 0) {
+      // Convert images to a serializable format
+      const saveImages = async () => {
+        const imagesToSave = await Promise.all(images.map(async (img) => {
+          // If image has a file, convert to base64
+          if (img.file) {
+            return new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                resolve({
+                  url: img.url,
+                  base64: reader.result,
+                  type: img.type,
+                  isPrimary: img.isPrimary
+                });
+              };
+              reader.readAsDataURL(img.file);
+            });
+          }
+
+          // If no file (already restored from localStorage), keep the existing base64
+          return {
+            url: img.url,
+            base64: img.url, // The url IS the base64 data URL after restoration
+            type: img.type,
+            isPrimary: img.isPrimary
+          };
+        }));
+
+        localStorage.setItem('jewelEstimator_images', JSON.stringify(imagesToSave));
+      };
+
+      saveImages();
+    } else if (!editMode && images.length === 0) {
+      localStorage.removeItem('jewelEstimator_images');
+    }
+  }, [images, editMode]);
 
   // Fetch metal types when component mounts
   useEffect(() => {
@@ -1170,7 +1264,6 @@ function JewelEstimator() {
     }
   };
 
-  const [images, setImages] = useState([]);
   const [showCamera, setShowCamera] = useState(false);
   const videoRef = React.useRef(null);
   const [stream, setStream] = useState(null);
@@ -2314,6 +2407,8 @@ function JewelEstimator() {
     localStorage.removeItem('jewelEstimator_metalSummary');
     localStorage.removeItem('jewelEstimator_diamondSummary');
     localStorage.removeItem('jewelEstimator_stoneSummary');
+    localStorage.removeItem('jewelEstimator_priceEstimates');
+    localStorage.removeItem('jewelEstimator_images');
 
     // Add items to cart before navigation (cart is in-memory)
     updatedItems.forEach(item => addToCart(item));
