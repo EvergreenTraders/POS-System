@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import axios from 'axios';
 import config from '../config';
+import { useAuth } from '../context/AuthContext';
 
 const API_BASE_URL = config.apiUrl;
 // Constants
@@ -110,7 +111,8 @@ const useMetalForm = ({
   onMetalValueChange,
   preciousMetalTypes,
   metalPurities,
-  fetchPurities
+  fetchPurities,
+  getUserStorageKey
 }) => {
   const [form, setForm] = useState(initialState);
   const [totalValue, setTotalValue] = useState(0);
@@ -245,8 +247,10 @@ const useMetalForm = ({
     setIsManualOverride(false);
 
     // Clear localStorage when form is reset
-    localStorage.removeItem('jewelEstimator_metalForm');
-    localStorage.removeItem('jewelEstimator_metalValue');
+    if (getUserStorageKey) {
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_metalForm'));
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_metalValue'));
+    }
   }, [initialState, metalSpotPrice]);
 
   const handleManualValueChange = useCallback((value) => {
@@ -305,6 +309,14 @@ const useSpotPriceCalculator = (metalSpotPrice, metalFormState) => {
 };
 
 const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, setMetalFormState, initialData = null, buttonText = 'Add Metal', hideButtons = false }) => {
+  const { user } = useAuth();
+
+  // Helper function to create user-specific localStorage keys
+  const getUserStorageKey = (key) => {
+    const userId = user?.id || 'guest';
+    return `${key}_user_${userId}`;
+  };
+
   // Add a state to track initialization status
   const [isInitialized, setIsInitialized] = useState(false);
   const [hasRestoredFromStorage, setHasRestoredFromStorage] = useState(false);
@@ -351,7 +363,8 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
     onMetalValueChange,
     preciousMetalTypes,
     metalPurities: metalPurities || [], // Ensure metalPurities is always an array
-    fetchPurities
+    fetchPurities,
+    getUserStorageKey
   });
 
   const { calculateSpotPrice, updateSpotPrice } = useSpotPriceCalculator(metalSpotPrice, form);
@@ -581,14 +594,14 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
   // Save form state to localStorage whenever it changes (except in edit mode)
   useEffect(() => {
     if (!initialData && isInitialized) {
-      localStorage.setItem('jewelEstimator_metalForm', JSON.stringify(form));
+      localStorage.setItem(getUserStorageKey('jewelEstimator_metalForm'), JSON.stringify(form));
     }
   }, [form, initialData, isInitialized]);
 
   // Save total value to localStorage
   useEffect(() => {
     if (!initialData && isInitialized) {
-      localStorage.setItem('jewelEstimator_metalValue', totalValue.toString());
+      localStorage.setItem(getUserStorageKey('jewelEstimator_metalValue'), totalValue.toString());
     }
   }, [totalValue, initialData, isInitialized]);
 
@@ -639,8 +652,8 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
     const restoreFormData = async () => {
       // Only restore if not in edit mode
       if (!initialData) {
-        const savedForm = localStorage.getItem('jewelEstimator_metalForm');
-        const savedValue = localStorage.getItem('jewelEstimator_metalValue');
+        const savedForm = localStorage.getItem(getUserStorageKey('jewelEstimator_metalForm'));
+        const savedValue = localStorage.getItem(getUserStorageKey('jewelEstimator_metalValue'));
 
         if (savedForm) {
           try {
@@ -673,7 +686,7 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
       await restoreFormData();
 
       // Default to Gold (ID 1) only when not in edit mode and no saved data
-      if (!initialData && !localStorage.getItem('jewelEstimator_metalForm')) {
+      if (!initialData && !localStorage.getItem(getUserStorageKey('jewelEstimator_metalForm'))) {
         fetchPurities(1);
       }
 

@@ -55,6 +55,12 @@ function JewelEstimator() {
   const { addToCart } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Helper function to create user-specific localStorage keys
+  const getUserStorageKey = (key) => {
+    const userId = user?.id || 'guest';
+    return `${key}_user_${userId}`;
+  };
   const [metalFormState, setMetalFormState] = useState({});
   const [totalMetalValue, setTotalMetalValue] = useState(0);
   const [addMetal, setAddMetal] = useState(() => {
@@ -64,9 +70,10 @@ function JewelEstimator() {
       return lastItem ? [lastItem] : [];
     }
 
-    // Try to restore from localStorage
+    // Try to restore from localStorage with user-specific key
     try {
-      const savedMetalSummary = localStorage.getItem('jewelEstimator_metalSummary');
+      const userId = user?.id || 'guest';
+      const savedMetalSummary = localStorage.getItem(`jewelEstimator_metalSummary_user_${userId}`);
       if (savedMetalSummary) {
         return JSON.parse(savedMetalSummary);
       }
@@ -91,9 +98,10 @@ function JewelEstimator() {
       return { pawn: 0, buy: 0, melt: 0, retail: 0 };
     }
 
-    // Try to restore from localStorage
+    // Try to restore from localStorage with user-specific key
     try {
-      const savedPriceEstimates = localStorage.getItem('jewelEstimator_priceEstimates');
+      const userId = user?.id || 'guest';
+      const savedPriceEstimates = localStorage.getItem(`jewelEstimator_priceEstimates_user_${userId}`);
       if (savedPriceEstimates) {
         return JSON.parse(savedPriceEstimates);
       }
@@ -127,9 +135,10 @@ function JewelEstimator() {
     // Skip localStorage restoration if in edit mode
     if (location.state?.editMode) return [];
 
-    // Try to restore from localStorage
+    // Try to restore from localStorage with user-specific key
     try {
-      const savedDiamondSummary = localStorage.getItem('jewelEstimator_diamondSummary');
+      const userId = user?.id || 'guest';
+      const savedDiamondSummary = localStorage.getItem(`jewelEstimator_diamondSummary_user_${userId}`);
       if (savedDiamondSummary) {
         return JSON.parse(savedDiamondSummary);
       }
@@ -142,9 +151,10 @@ function JewelEstimator() {
     // Skip localStorage restoration if in edit mode
     if (location.state?.editMode) return [];
 
-    // Try to restore from localStorage
+    // Try to restore from localStorage with user-specific key
     try {
-      const savedStoneSummary = localStorage.getItem('jewelEstimator_stoneSummary');
+      const userId = user?.id || 'guest';
+      const savedStoneSummary = localStorage.getItem(`jewelEstimator_stoneSummary_user_${userId}`);
       if (savedStoneSummary) {
         return JSON.parse(savedStoneSummary);
       }
@@ -162,9 +172,10 @@ function JewelEstimator() {
     // Skip localStorage restoration if in edit mode
     if (location.state?.editMode) return [];
 
-    // Try to restore from localStorage
+    // Try to restore from localStorage with user-specific key
     try {
-      const savedImages = localStorage.getItem('jewelEstimator_images');
+      const userId = user?.id || 'guest';
+      const savedImages = localStorage.getItem(`jewelEstimator_images_user_${userId}`);
       if (savedImages) {
         const parsedImages = JSON.parse(savedImages);
         // Convert base64 back to displayable URLs
@@ -508,14 +519,14 @@ function JewelEstimator() {
     }, 1000);
 
     // Clear localStorage when form is reset after adding item
-    localStorage.removeItem('jewelEstimator_metalForm');
-    localStorage.removeItem('jewelEstimator_metalValue');
-    localStorage.removeItem('jewelEstimator_gemForm');
-    localStorage.removeItem('jewelEstimator_metalSummary');
-    localStorage.removeItem('jewelEstimator_diamondSummary');
-    localStorage.removeItem('jewelEstimator_stoneSummary');
-    localStorage.removeItem('jewelEstimator_priceEstimates');
-    localStorage.removeItem('jewelEstimator_images');
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalForm'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalValue'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_gemForm'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_diamondSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_stoneSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_priceEstimates'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_images'));
   };
 
   const [addedGemTypes, setAddedGemTypes] = useState({
@@ -627,33 +638,33 @@ function JewelEstimator() {
   // Save summaries to localStorage whenever they change (except in edit mode)
   useEffect(() => {
     if (!editMode && addMetal.length > 0) {
-      localStorage.setItem('jewelEstimator_metalSummary', JSON.stringify(addMetal));
+      localStorage.setItem(getUserStorageKey('jewelEstimator_metalSummary'), JSON.stringify(addMetal));
     } else if (!editMode && addMetal.length === 0) {
       // Clear if empty
-      localStorage.removeItem('jewelEstimator_metalSummary');
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_metalSummary'));
     }
   }, [addMetal, editMode]);
 
   useEffect(() => {
     if (!editMode && diamondSummary.length > 0) {
-      localStorage.setItem('jewelEstimator_diamondSummary', JSON.stringify(diamondSummary));
+      localStorage.setItem(getUserStorageKey('jewelEstimator_diamondSummary'), JSON.stringify(diamondSummary));
     } else if (!editMode && diamondSummary.length === 0) {
-      localStorage.removeItem('jewelEstimator_diamondSummary');
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_diamondSummary'));
     }
   }, [diamondSummary, editMode]);
 
   useEffect(() => {
     if (!editMode && stoneSummary.length > 0) {
-      localStorage.setItem('jewelEstimator_stoneSummary', JSON.stringify(stoneSummary));
+      localStorage.setItem(getUserStorageKey('jewelEstimator_stoneSummary'), JSON.stringify(stoneSummary));
     } else if (!editMode && stoneSummary.length === 0) {
-      localStorage.removeItem('jewelEstimator_stoneSummary');
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_stoneSummary'));
     }
   }, [stoneSummary, editMode]);
 
   // Save price estimates to localStorage
   useEffect(() => {
     if (!editMode) {
-      localStorage.setItem('jewelEstimator_priceEstimates', JSON.stringify(priceEstimates));
+      localStorage.setItem(getUserStorageKey('jewelEstimator_priceEstimates'), JSON.stringify(priceEstimates));
     }
   }, [priceEstimates, editMode]);
 
@@ -688,12 +699,12 @@ function JewelEstimator() {
           };
         }));
 
-        localStorage.setItem('jewelEstimator_images', JSON.stringify(imagesToSave));
+        localStorage.setItem(getUserStorageKey('jewelEstimator_images'), JSON.stringify(imagesToSave));
       };
 
       saveImages();
     } else if (!editMode && images.length === 0) {
-      localStorage.removeItem('jewelEstimator_images');
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_images'));
     }
   }, [images, editMode]);
 
@@ -2401,14 +2412,14 @@ function JewelEstimator() {
     }
 
     // Clear form localStorage when proceeding to checkout
-    localStorage.removeItem('jewelEstimator_metalForm');
-    localStorage.removeItem('jewelEstimator_metalValue');
-    localStorage.removeItem('jewelEstimator_gemForm');
-    localStorage.removeItem('jewelEstimator_metalSummary');
-    localStorage.removeItem('jewelEstimator_diamondSummary');
-    localStorage.removeItem('jewelEstimator_stoneSummary');
-    localStorage.removeItem('jewelEstimator_priceEstimates');
-    localStorage.removeItem('jewelEstimator_images');
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalForm'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalValue'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_gemForm'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_diamondSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_stoneSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_priceEstimates'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_images'));
 
     // Add items to cart before navigation (cart is in-memory)
     updatedItems.forEach(item => addToCart(item));

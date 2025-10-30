@@ -50,6 +50,12 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Helper function to create user-specific localStorage keys
+  const getUserStorageKey = (key) => {
+    const userId = user?.id || 'guest';
+    return `${key}_user_${userId}`;
+  };
+
   // App state
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [from, setFrom] = useState(location.state?.from || '');
@@ -423,8 +429,8 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
 
       setIsInitialized(true);
     } else if (!initialData && !isInitialized) {
-      // Restore from localStorage when not in edit mode
-      const savedGemState = localStorage.getItem('jewelEstimator_gemForm');
+      // Restore from localStorage when not in edit mode with user-specific key
+      const savedGemState = localStorage.getItem(getUserStorageKey('jewelEstimator_gemForm'));
 
       if (savedGemState) {
         try {
@@ -630,9 +636,9 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
         secondaryGems,
         activeTab,
         selectedSecondaryIndex,
-        estimatedValues  
+        estimatedValues
       };
-      localStorage.setItem('jewelEstimator_gemForm', JSON.stringify(gemState));
+      localStorage.setItem(getUserStorageKey('jewelEstimator_gemForm'), JSON.stringify(gemState));
     }
   }, [
     primaryDiamondForm,
@@ -1233,7 +1239,7 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
 
         // Update the initial stone form with the first color from the data
         // ONLY if we're not restoring from localStorage (to avoid overwriting restored data)
-        const hasRestoredData = localStorage.getItem('jewelEstimator_gemForm');
+        const hasRestoredData = localStorage.getItem(getUserStorageKey('jewelEstimator_gemForm'));
         if (stoneTypesData.length > 0 && !hasRestoredData) {
           setPrimaryStoneForm(prev => ({
             ...prev,
