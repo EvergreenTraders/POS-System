@@ -3319,6 +3319,13 @@ function JewelEstimator() {
                               const newItems = [...estimatedItems];
                               newItems.splice(index, 1);
                               setEstimatedItems(newItems);
+
+                              // Update sessionStorage immediately to persist the deletion
+                              if (newItems.length > 0) {
+                                sessionStorage.setItem('jewelEstimatorItems', JSON.stringify(newItems));
+                              } else {
+                                sessionStorage.removeItem('jewelEstimatorItems');
+                              }
                             }}
                             size="small"
                             sx={{ color: 'error.main' }}
