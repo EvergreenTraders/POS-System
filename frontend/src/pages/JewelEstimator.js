@@ -2469,10 +2469,10 @@ function JewelEstimator() {
   const handleAddDiamond = (newDiamond, isPrimary = true) => {
     // Calculate price estimates for the diamond
     const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
-    
+
     // Calculate the price estimates
     const estimates = calculateGemPriceEstimates(diamondValue);
-    
+
     // Add the diamond with its value and price estimates
     const diamondWithValue = {
       ...newDiamond,
@@ -2480,21 +2480,42 @@ function JewelEstimator() {
       priceEstimates: estimates
     };
     setDiamondSummary(prev => [...prev, diamondWithValue]);
-    
+
     // Update the added gem types
     setAddedGemTypes(prev => ({
       ...prev,
       [isPrimary ? 'primary' : 'secondary']: 'diamond'
     }));
+
+    // If adding a secondary gem, immediately update localStorage to clear secondary form data
+    if (!isPrimary) {
+      // Get current saved state
+      const savedGemState = localStorage.getItem(getUserStorageKey('jewelEstimator_gemForm'));
+      if (savedGemState) {
+        try {
+          const parsedState = JSON.parse(savedGemState);
+          // Clear secondary forms but keep everything else
+          parsedState.secondaryDiamondForm = null;
+          parsedState.secondaryStoneForm = null;
+          parsedState.addedGemTypes = {
+            ...parsedState.addedGemTypes,
+            secondary: 'diamond'
+          };
+          localStorage.setItem(getUserStorageKey('jewelEstimator_gemForm'), JSON.stringify(parsedState));
+        } catch (error) {
+          console.error('[JewelEstimator] Error updating localStorage:', error);
+        }
+      }
+    }
   };
 
   const handleAddStone = (newStone, isPrimary = true) => {
     // Calculate price estimates for the stone
     const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
-    
+
     // Calculate the price estimates
     const estimates = calculateGemPriceEstimates(stoneValue);
-    
+
     // Add the stone with its value and price estimates
     const stoneWithValue = {
       ...newStone,
@@ -2502,12 +2523,33 @@ function JewelEstimator() {
       priceEstimates: estimates
     };
     setStoneSummary(prev => [...prev, stoneWithValue]);
-    
+
     // Update the added gem types
     setAddedGemTypes(prev => ({
       ...prev,
       [isPrimary ? 'primary' : 'secondary']: 'stone'
     }));
+
+    // If adding a secondary gem, immediately update localStorage to clear secondary form data
+    if (!isPrimary) {
+      // Get current saved state
+      const savedGemState = localStorage.getItem(getUserStorageKey('jewelEstimator_gemForm'));
+      if (savedGemState) {
+        try {
+          const parsedState = JSON.parse(savedGemState);
+          // Clear secondary forms but keep everything else
+          parsedState.secondaryDiamondForm = null;
+          parsedState.secondaryStoneForm = null;
+          parsedState.addedGemTypes = {
+            ...parsedState.addedGemTypes,
+            secondary: 'stone'
+          };
+          localStorage.setItem(getUserStorageKey('jewelEstimator_gemForm'), JSON.stringify(parsedState));
+        } catch (error) {
+          console.error('[JewelEstimator] Error updating localStorage:', error);
+        }
+      }
+    }
   };
 
   return (

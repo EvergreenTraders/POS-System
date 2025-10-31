@@ -436,6 +436,14 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
         try {
           const parsedState = JSON.parse(savedGemState);
 
+          // Check if any secondary gems have been added to the summary
+          // Note: In JewelEstimator, secondary can be a string ('diamond' or 'stone')
+          // In GemEstimator, secondary is an array
+          const hasSecondaryGems = parsedState.addedGemTypes && (
+            (typeof parsedState.addedGemTypes.secondary === 'string' && parsedState.addedGemTypes.secondary !== '') ||
+            (Array.isArray(parsedState.addedGemTypes.secondary) && parsedState.addedGemTypes.secondary.length > 0)
+          );
+
           // Restore all form states
           if (parsedState.primaryDiamondForm) {
             setPrimaryDiamondForm(parsedState.primaryDiamondForm);
@@ -443,11 +451,15 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
           if (parsedState.primaryStoneForm) {
             setPrimaryStoneForm(parsedState.primaryStoneForm);
           }
-          if (parsedState.secondaryDiamondForm) {
-            setSecondaryDiamondForm(parsedState.secondaryDiamondForm);
-          }
-          if (parsedState.secondaryStoneForm) {
-            setSecondaryStoneForm(parsedState.secondaryStoneForm);
+
+          // Only restore secondary forms if NO secondary gems have been added
+          if (!hasSecondaryGems) {
+            if (parsedState.secondaryDiamondForm) {
+              setSecondaryDiamondForm(parsedState.secondaryDiamondForm);
+            }
+            if (parsedState.secondaryStoneForm) {
+              setSecondaryStoneForm(parsedState.secondaryStoneForm);
+            }
           }
           if (parsedState.addedGemTypes) {
             setAddedGemTypes(parsedState.addedGemTypes);
@@ -627,6 +639,20 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
   // Save gem form state to localStorage when it changes (except in edit mode)
   useEffect(() => {
     if (!initialData && isInitialized) {
+      // Check if any secondary gems have been added to the summary
+      // Note: In JewelEstimator, secondary can be a string ('diamond' or 'stone')
+      // In GemEstimator, secondary is an array
+      const hasSecondaryGems = (
+        (typeof addedGemTypes.secondary === 'string' && addedGemTypes.secondary !== '') ||
+        (Array.isArray(addedGemTypes.secondary) && addedGemTypes.secondary.length > 0)
+      );
+
+      // If secondary gems have been added, DON'T save at all - let the immediate clear handle it
+      if (hasSecondaryGems) {
+        return;
+      }
+
+      // Only save if NO secondary gems have been added yet
       const gemState = {
         primaryDiamondForm,
         primaryStoneForm,
@@ -649,7 +675,7 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     secondaryGems,
     activeTab,
     selectedSecondaryIndex,
-    estimatedValues, 
+    estimatedValues,
     initialData,
     isInitialized
   ]);
@@ -1044,13 +1070,18 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
 
   // Update secondary gem forms when estimatedValues, selectedSecondaryIndex, or activeTab changes
   useEffect(() => {
-    // Only proceed if we're on a secondary gem tab
-    if (activeTab === 'secondary_gem_diamond' || activeTab === 'secondary_gem_stone') {
+    // Check if any secondary gems have been added to the summary
+    const hasSecondaryGems = (
+      (typeof addedGemTypes.secondary === 'string' && addedGemTypes.secondary !== '') ||
+      (Array.isArray(addedGemTypes.secondary) && addedGemTypes.secondary.length > 0)
+    );
+
+    // Only proceed if we're on a secondary gem tab AND no secondary gems have been added yet
+    if ((activeTab === 'secondary_gem_diamond' || activeTab === 'secondary_gem_stone') && !hasSecondaryGems) {
       const isDiamond = activeTab === 'secondary_gem_diamond';
-      const secondaryGemValue = isDiamond 
-        ? estimatedValues.secondaryDiamond 
+      const secondaryGemValue = isDiamond
+        ? estimatedValues.secondaryDiamond
         : estimatedValues.secondaryGemstone;
-      
       if (isDiamond) {
         setSecondaryDiamondForm(prev => ({
           ...prev,
@@ -1062,7 +1093,7 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
           estimatedValue: secondaryGemValue
         }));
       }
-      
+
       // Update the gem form state with the new value
       if (selectedSecondaryIndex !== null && selectedSecondaryIndex >= 0) {
         const updatedGems = latestGemUpdates.current ? [...latestGemUpdates.current] : [...secondaryGems];
@@ -1094,7 +1125,7 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
         }
       }
     }
-  }, [estimatedValues.secondaryDiamond, estimatedValues.secondaryGemstone, selectedSecondaryIndex, activeTab]);
+  }, [estimatedValues.secondaryDiamond, estimatedValues.secondaryGemstone, selectedSecondaryIndex, activeTab, addedGemTypes]);
   
   // Effect to fetch diamond sizes when diamondShapes are loaded in edit mode
   useEffect(() => {
@@ -1692,9 +1723,33 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
       primary: isPrimary ? 'diamond' : prev.primary,
       secondary: isPrimary ? prev.secondary : [...(Array.isArray(prev.secondary) ? prev.secondary : []), 'diamond']
     }));
-    
+
+    // If adding a secondary gem, immediately clear secondary forms from localStorage
+    if (!isPrimary) {
+
+      // Clear the secondaryGems array in state
+      setSecondaryGems([]);
+
+      const savedGemState = localStorage.getItem(getUserStorageKey('jewelEstimator_gemForm'));
+      if (savedGemState) {
+        try {
+          const parsedState = JSON.parse(savedGemState);
+          parsedState.secondaryDiamondForm = null;
+          parsedState.secondaryStoneForm = null;
+          parsedState.secondaryGems = [];  // Clear secondaryGems array too!
+          parsedState.addedGemTypes = {
+            ...parsedState.addedGemTypes,
+            secondary: [...(Array.isArray(parsedState.addedGemTypes?.secondary) ? parsedState.addedGemTypes.secondary : []), 'diamond']
+          };
+          localStorage.setItem(getUserStorageKey('jewelEstimator_gemForm'), JSON.stringify(parsedState));
+        } catch (error) {
+          console.error('[GemEstimator addDiamond] Error updating localStorage:', error);
+        }
+      }
+    }
+
     // Reset the current form after adding
-    const resetForm = {
+    setCurrentForm({
       shape: 'Round',
       clarity: 'Flawless',
       color: 'Colorless',
@@ -1705,10 +1760,9 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
       exactColor: 'D',
       size: '',
       estimatedValue: 0
-    };
-    setCurrentForm(resetForm);
+    });
     setCurrentShapeIndex(0);
-    
+
     // Reset exact color to default
     setExactColor('D');
     
@@ -1813,7 +1867,31 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
       primary: isPrimary ? 'stone' : prev.primary,
       secondary: isPrimary ? prev.secondary : [...(Array.isArray(prev.secondary) ? prev.secondary : []), 'stone']
     }));
-    
+
+    // If adding a secondary gem, immediately clear secondary forms from localStorage
+    if (!isPrimary) {
+
+      // Clear the secondaryGems array in state
+      setSecondaryGems([]);
+
+      const savedGemState = localStorage.getItem(getUserStorageKey('jewelEstimator_gemForm'));
+      if (savedGemState) {
+        try {
+          const parsedState = JSON.parse(savedGemState);
+          parsedState.secondaryDiamondForm = null;
+          parsedState.secondaryStoneForm = null;
+          parsedState.secondaryGems = [];  // Clear secondaryGems array too!
+          parsedState.addedGemTypes = {
+            ...parsedState.addedGemTypes,
+            secondary: [...(Array.isArray(parsedState.addedGemTypes?.secondary) ? parsedState.addedGemTypes.secondary : []), 'stone']
+          };
+          localStorage.setItem(getUserStorageKey('jewelEstimator_gemForm'), JSON.stringify(parsedState));
+        } catch (error) {
+          console.error('[GemEstimator addStone] Error updating localStorage:', error);
+        }
+      }
+    }
+
     // Reset the form after adding
     if (activeTab.startsWith('primary')) {
       setPrimaryStoneForm(initialStoneForm);
