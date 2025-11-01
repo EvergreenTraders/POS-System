@@ -1954,6 +1954,35 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
         <Grid item xs={12} md={8}>
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Type *</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+            {/* Unknown stone type option */}
+            <Paper
+              elevation={getCurrentStoneForm().type === 'Unknown' ? 8 : 1}
+              sx={{
+                p: 1,
+                cursor: 'pointer',
+                width: 80,
+                height: 80,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onClick={() => {
+                const currentForm = getCurrentStoneForm();
+                const stoneName = currentForm.color ? `${currentForm.color} Stone` : 'Unknown Stone';
+                setCurrentStoneForm(prev => ({
+                  ...prev,
+                  type: 'Unknown',
+                  name: stoneName
+                }));
+              }}
+            >
+              <Typography variant="h6" sx={{ fontSize: 40 }}>?</Typography>
+              <Typography variant="caption" align="center">
+                Unknown
+              </Typography>
+            </Paper>
+
             {colorSpecificStoneTypes
               .filter(stone => {
                 const currentForm = getCurrentStoneForm();
@@ -2001,10 +2030,13 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
                   <Paper
                     onClick={() => {
                       setCurrentStoneForm(prev => {
+                        // If type is "Unknown", update the name to be "{Color} Stone"
+                        const stoneName = prev.type === 'Unknown' ? `${color.color} Stone` : prev.name;
                         const newForm = {
                           ...prev,
                           color: color.color,
-                          color_id: color.id
+                          color_id: color.id,
+                          name: stoneName
                         };
                         return newForm;
                       });

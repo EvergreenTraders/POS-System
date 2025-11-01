@@ -425,7 +425,7 @@ function JewelEstimator() {
       notes: freeText || '',
       
       // Additional jewelry details - update short_desc to handle multiple secondary gems
-      long_desc: latestMetalData.metal_weight ? `${latestMetalData.metal_weight}g ${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
+      long_desc: latestMetalData.metal_weight ? `${latestMetalData.metal_weight}g ${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.name}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
 
       short_desc: latestMetalData.metal_weight ? `${latestMetalData.metal_weight}g ${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}` : ''
     };
@@ -3199,7 +3199,7 @@ function JewelEstimator() {
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Box>
                             <Typography sx={{ fontWeight: 500, mb: 0.2 }}>
-                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.metal_category}
+                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type || ''} {item.secondary_gem_type || ''} {item.metal_category}
                             </Typography>
                             <TextField
                               variant="standard"
