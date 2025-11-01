@@ -2421,6 +2421,9 @@ function JewelEstimator() {
     localStorage.removeItem(getUserStorageKey('jewelEstimator_priceEstimates'));
     localStorage.removeItem(getUserStorageKey('jewelEstimator_images'));
 
+    // Clear estimated items from sessionStorage when proceeding to checkout
+    sessionStorage.removeItem('jewelEstimatorItems');
+
     // Add items to cart before navigation (cart is in-memory)
     updatedItems.forEach(item => addToCart(item));
 
