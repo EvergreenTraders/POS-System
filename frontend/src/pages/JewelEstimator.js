@@ -3033,7 +3033,7 @@ function JewelEstimator() {
                             <Typography variant="body2">Color: {gem.color}</Typography>
                             <Typography variant="body2">Weight: {gem.weight}</Typography>
                             <Typography variant="body2">Quantity: {gem.quantity}</Typography>
-                            <Typography variant="body2">Authentic: {gem.authentic ? 'Yes' : 'No'}</Typography>
+                            <Typography variant="body2">Authentic: {gem.authentic ? 'Yes' : 'Unknown'}</Typography>
                             <Typography variant="body2">Value: ${gem.value ? gem.value.toFixed(2) : '0.00'}</Typography>
                           </>
                         )}
@@ -3093,7 +3093,7 @@ function JewelEstimator() {
                             <Typography variant="body2">Color: {stone.color}</Typography>
                             <Typography variant="body2">Weight: {stone.weight}</Typography>
                             <Typography variant="body2">Quantity: {stone.quantity}</Typography>
-                            <Typography variant="body2">Authentic: {stone.authentic ? 'Yes' : 'No'}</Typography>
+                            <Typography variant="body2">Authentic: {stone.authentic ? 'Yes' : 'Unknown'}</Typography>
                             </div>
                             <IconButton variant="outlined" onClick={() => handleDeleteGem(index, stone.type, stone.isPrimary)}
                                 sx={{

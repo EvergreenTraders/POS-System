@@ -1942,7 +1942,7 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
                   }))}
                 />
               }
-              label="Authentic"
+              label="Genuine"
             />
           </Box>
         </Grid>
