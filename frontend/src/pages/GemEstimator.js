@@ -1785,8 +1785,8 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     setCurrentStoneForm(prev => ({
       ...prev,
       type: selectedStone ? selectedStone.type : '',
-      name: selectedStone ? selectedStone.type : '',
-      color: selectedStone ? selectedStone.color : prev.color
+      name: selectedStone ? selectedStone.type : ''
+      // Keep the previously selected color - don't override it
     }));
   };
 
