@@ -55,10 +55,33 @@ function JewelEstimator() {
   const { addToCart } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Helper function to create user-specific localStorage keys
+  const getUserStorageKey = (key) => {
+    const userId = user?.id || 'guest';
+    return `${key}_user_${userId}`;
+  };
   const [metalFormState, setMetalFormState] = useState({});
   const [totalMetalValue, setTotalMetalValue] = useState(0);
   const [addMetal, setAddMetal] = useState(() => {
-    // Initialize from location state if available
+    // Skip localStorage restoration if in edit mode
+    if (location.state?.editMode) {
+      const lastItem = location.state?.items?.[location.state.items.length - 1];
+      return lastItem ? [lastItem] : [];
+    }
+
+    // Try to restore from localStorage with user-specific key
+    try {
+      const userId = user?.id || 'guest';
+      const savedMetalSummary = localStorage.getItem(`jewelEstimator_metalSummary_user_${userId}`);
+      if (savedMetalSummary) {
+        return JSON.parse(savedMetalSummary);
+      }
+    } catch (error) {
+      console.error('[JewelEstimator] Error parsing saved metal summary:', error);
+    }
+
+    // Fallback to location state or empty array
     const lastItem = location.state?.items?.[location.state.items.length - 1];
     return lastItem ? [lastItem] : [];
   });
@@ -69,7 +92,25 @@ function JewelEstimator() {
   const [editingGemOnly, setEditingGemOnly] = useState(location.state?.editingGemOnly || false);
   const [returnToTicket, setReturnToTicket] = useState(location.state?.returnToTicket || false);
   const [ticketItemId, setTicketItemId] = useState(location.state?.ticketItemId || null);
-  const [priceEstimates, setPriceEstimates] = useState({ pawn: 0, buy: 0, melt: 0, retail: 0 });
+  const [priceEstimates, setPriceEstimates] = useState(() => {
+    // Skip localStorage restoration if in edit mode
+    if (location.state?.editMode) {
+      return { pawn: 0, buy: 0, melt: 0, retail: 0 };
+    }
+
+    // Try to restore from localStorage with user-specific key
+    try {
+      const userId = user?.id || 'guest';
+      const savedPriceEstimates = localStorage.getItem(`jewelEstimator_priceEstimates_user_${userId}`);
+      if (savedPriceEstimates) {
+        return JSON.parse(savedPriceEstimates);
+      }
+    } catch (error) {
+      console.error('[JewelEstimator] Error parsing saved price estimates:', error);
+    }
+
+    return { pawn: 0, buy: 0, melt: 0, retail: 0 };
+  });
   
   // Snackbar state
   const [snackbar, setSnackbar] = useState({
@@ -90,11 +131,67 @@ function JewelEstimator() {
   const [customer, setCustomer] = useState(location.state?.customer || null);
   const [transactionType, setTransactionType] = useState(location.state?.itemToEdit?.transaction_type || 'buy');
   const [freeText, setFreeText] = useState(location.state?.itemToEdit?.notes || '');
-  const [diamondSummary, setDiamondSummary] = useState([]);
-  const [stoneSummary, setStoneSummary] = useState([]);
+  const [diamondSummary, setDiamondSummary] = useState(() => {
+    // Skip localStorage restoration if in edit mode
+    if (location.state?.editMode) return [];
+
+    // Try to restore from localStorage with user-specific key
+    try {
+      const userId = user?.id || 'guest';
+      const savedDiamondSummary = localStorage.getItem(`jewelEstimator_diamondSummary_user_${userId}`);
+      if (savedDiamondSummary) {
+        return JSON.parse(savedDiamondSummary);
+      }
+    } catch (error) {
+      console.error('[JewelEstimator] Error parsing saved diamond summary:', error);
+    }
+    return [];
+  });
+  const [stoneSummary, setStoneSummary] = useState(() => {
+    // Skip localStorage restoration if in edit mode
+    if (location.state?.editMode) return [];
+
+    // Try to restore from localStorage with user-specific key
+    try {
+      const userId = user?.id || 'guest';
+      const savedStoneSummary = localStorage.getItem(`jewelEstimator_stoneSummary_user_${userId}`);
+      if (savedStoneSummary) {
+        return JSON.parse(savedStoneSummary);
+      }
+    } catch (error) {
+      console.error('[JewelEstimator] Error parsing saved stone summary:', error);
+    }
+    return [];
+  });
   const [gemFormData, setGemFormData] = useState({});
   const [totalGemValue, setTotalGemValue] = useState(0);
   const [gemSummary, setGemSummary] = useState([]);
+
+  // Images state with localStorage restoration
+  const [images, setImages] = useState(() => {
+    // Skip localStorage restoration if in edit mode
+    if (location.state?.editMode) return [];
+
+    // Try to restore from localStorage with user-specific key
+    try {
+      const userId = user?.id || 'guest';
+      const savedImages = localStorage.getItem(`jewelEstimator_images_user_${userId}`);
+      if (savedImages) {
+        const parsedImages = JSON.parse(savedImages);
+        // Convert base64 back to displayable URLs
+        return parsedImages.map((img, index) => ({
+          url: img.base64 || img.url, // Use base64 as the URL (it's a data URL)
+          file: null, // Can't restore File objects
+          type: img.type || 'upload',
+          isPrimary: img.isPrimary || index === 0
+        }));
+      }
+    } catch (error) {
+      console.error('[JewelEstimator] Error parsing saved images:', error);
+    }
+
+    return [];
+  });
 
   const handleMetalFormChange = (formState) => {
       setMetalFormState(formState);
@@ -124,7 +221,7 @@ function JewelEstimator() {
   };
 
   const handleAddGem = (gemData) => {
-    
+
     // Ensure gemData has all required fields with defaults
     const gemWithDefaults = {
       ...gemData,
@@ -134,15 +231,23 @@ function JewelEstimator() {
       weight: gemData.weight || 0,
       quantity: gemData.quantity || 1
     };
-    
-    
+
+    // VALIDATE: Only allow one primary gem
+    if (gemWithDefaults.isPrimary && addedGemTypes.primary) {
+      const existingType = addedGemTypes.primary === 'diamond' ? 'diamond' : 'stone';
+      const newType = gemWithDefaults.type === 'diamond' ? 'diamond' : 'stone';
+      alert(`Only one primary gem is allowed. Please delete the existing primary ${existingType} before adding a primary ${newType}.`);
+      return false; // Indicate failure
+    }
+
+
     // Update the appropriate summary based on gem type
     if (gemWithDefaults.type === 'diamond') {
       setDiamondSummary(prev => [...prev, gemWithDefaults]);
     } else if (gemWithDefaults.type === 'stone') {
       setStoneSummary(prev => [...prev, gemWithDefaults]);
     }
-    
+
     // Update addedGemTypes if this is a primary gem
     if (gemWithDefaults.isPrimary) {
       setAddedGemTypes(prev => ({
@@ -150,7 +255,7 @@ function JewelEstimator() {
         primary: gemWithDefaults.type === 'diamond' ? 'diamond' : 'stone'
       }));
     }
-    
+
     return true; // Indicate success
   };
 
@@ -183,7 +288,10 @@ function JewelEstimator() {
   };
 
   const handleDeleteMetal = (index) => {
-    setAddMetal(prev => prev.filter((_, i) => i !== index)); // Deletes the selected metal
+    setAddMetal(prev => {
+      const newMetal = prev.filter((_, i) => i !== index);
+      return newMetal;
+    });
   };
 
   const handleDeleteGem = (index, type, isPrimary) => {
@@ -199,6 +307,14 @@ function JewelEstimator() {
         newSummary.splice(index, 1);
         return newSummary;
       });
+    }
+
+    // If deleting a primary gem, clear the addedGemTypes.primary
+    if (isPrimary) {
+      setAddedGemTypes(prev => ({
+        ...prev,
+        primary: null
+      }));
     }
   };
   
@@ -325,7 +441,7 @@ function JewelEstimator() {
       notes: freeText || '',
       
       // Additional jewelry details - update short_desc to handle multiple secondary gems
-      long_desc: latestMetalData.metal_weight ? `${latestMetalData.metal_weight}g ${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.type}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
+      long_desc: latestMetalData.metal_weight ? `${latestMetalData.metal_weight}g ${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}${addedGemTypes.primary ? ` ${addedGemTypes.primary === 'diamond' && primaryDiamond ? primaryDiamond?.shape : primaryStone?.name}` : ''}${secondaryDiamonds.length > 0 || secondaryStones.length > 0 ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems` : ''}` : '',
 
       short_desc: latestMetalData.metal_weight ? `${latestMetalData.metal_weight}g ${latestMetalData.metal_purity || latestMetalData.purity_value} ${latestMetalData.precious_metal_type} ${latestMetalData.metal_category}` : ''
     };
@@ -417,12 +533,47 @@ function JewelEstimator() {
     setTimeout(() => {
       setImages([]);
     }, 1000);
+
+    // Clear localStorage when form is reset after adding item
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalForm'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalValue'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_gemForm'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_diamondSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_stoneSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_priceEstimates'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_images'));
   };
 
   const [addedGemTypes, setAddedGemTypes] = useState({
     primary: null,  // can be 'diamond' or 'stone'
     secondary: null // can be 'diamond' or 'stone'
   });
+
+  // Sync addedGemTypes.primary with actual gem summaries after navigation/restoration
+  useEffect(() => {
+    // Check if there's a primary diamond in diamondSummary
+    const hasPrimaryDiamond = diamondSummary.some(gem => gem.isPrimary);
+    // Check if there's a primary stone in stoneSummary
+    const hasPrimaryStone = stoneSummary.some(stone => stone.isPrimary);
+
+    if (hasPrimaryDiamond && addedGemTypes.primary !== 'diamond') {
+      setAddedGemTypes(prev => ({
+        ...prev,
+        primary: 'diamond'
+      }));
+    } else if (hasPrimaryStone && addedGemTypes.primary !== 'stone') {
+      setAddedGemTypes(prev => ({
+        ...prev,
+        primary: 'stone'
+      }));
+    } else if (!hasPrimaryDiamond && !hasPrimaryStone && addedGemTypes.primary !== null) {
+      setAddedGemTypes(prev => ({
+        ...prev,
+        primary: null
+      }));
+    }
+  }, [diamondSummary, stoneSummary]);
 
   // Define activeTab state
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');
@@ -525,6 +676,79 @@ function JewelEstimator() {
   const [exactColor, setExactColor] = useState('D');
   const [metalTypes, setMetalTypes] = useState([]);
 
+  // Save summaries to localStorage whenever they change (except in edit mode)
+  useEffect(() => {
+    if (!editMode && addMetal.length > 0) {
+      localStorage.setItem(getUserStorageKey('jewelEstimator_metalSummary'), JSON.stringify(addMetal));
+    } else if (!editMode && addMetal.length === 0) {
+      // Clear if empty
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_metalSummary'));
+    }
+  }, [addMetal, editMode]);
+
+  useEffect(() => {
+    if (!editMode && diamondSummary.length > 0) {
+      localStorage.setItem(getUserStorageKey('jewelEstimator_diamondSummary'), JSON.stringify(diamondSummary));
+    } else if (!editMode && diamondSummary.length === 0) {
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_diamondSummary'));
+    }
+  }, [diamondSummary, editMode]);
+
+  useEffect(() => {
+    if (!editMode && stoneSummary.length > 0) {
+      localStorage.setItem(getUserStorageKey('jewelEstimator_stoneSummary'), JSON.stringify(stoneSummary));
+    } else if (!editMode && stoneSummary.length === 0) {
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_stoneSummary'));
+    }
+  }, [stoneSummary, editMode]);
+
+  // Save price estimates to localStorage
+  useEffect(() => {
+    if (!editMode) {
+      localStorage.setItem(getUserStorageKey('jewelEstimator_priceEstimates'), JSON.stringify(priceEstimates));
+    }
+  }, [priceEstimates, editMode]);
+
+  // Save images to localStorage
+  useEffect(() => {
+    if (!editMode && images.length > 0) {
+      // Convert images to a serializable format
+      const saveImages = async () => {
+        const imagesToSave = await Promise.all(images.map(async (img) => {
+          // If image has a file, convert to base64
+          if (img.file) {
+            return new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                resolve({
+                  url: img.url,
+                  base64: reader.result,
+                  type: img.type,
+                  isPrimary: img.isPrimary
+                });
+              };
+              reader.readAsDataURL(img.file);
+            });
+          }
+
+          // If no file (already restored from localStorage), keep the existing base64
+          return {
+            url: img.url,
+            base64: img.url, // The url IS the base64 data URL after restoration
+            type: img.type,
+            isPrimary: img.isPrimary
+          };
+        }));
+
+        localStorage.setItem(getUserStorageKey('jewelEstimator_images'), JSON.stringify(imagesToSave));
+      };
+
+      saveImages();
+    } else if (!editMode && images.length === 0) {
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_images'));
+    }
+  }, [images, editMode]);
+
   // Fetch metal types when component mounts
   useEffect(() => {
     const fetchMetalTypes = async () => {
@@ -535,7 +759,7 @@ function JewelEstimator() {
         console.error('Error fetching metal types:', error);
       }
     };
-    
+
     fetchMetalTypes();
   }, []);
 
@@ -1092,7 +1316,6 @@ function JewelEstimator() {
     }
   };
 
-  const [images, setImages] = useState([]);
   const [showCamera, setShowCamera] = useState(false);
   const videoRef = React.useRef(null);
   const [stream, setStream] = useState(null);
@@ -2229,6 +2452,19 @@ function JewelEstimator() {
       sessionStorage.removeItem('estimationState');
     }
 
+    // Clear form localStorage when proceeding to checkout
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalForm'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalValue'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_gemForm'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_metalSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_diamondSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_stoneSummary'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_priceEstimates'));
+    localStorage.removeItem(getUserStorageKey('jewelEstimator_images'));
+
+    // Clear estimated items from sessionStorage when proceeding to checkout
+    sessionStorage.removeItem('jewelEstimatorItems');
+
     // Add items to cart before navigation (cart is in-memory)
     updatedItems.forEach(item => addToCart(item));
 
@@ -2236,7 +2472,6 @@ function JewelEstimator() {
 
     if (customerData) {
       // If customer exists, navigate to checkout page with customer and items
-      console.log("items", updatedItems);
       navigate('/checkout', {
         state: {
           customer: customerData,
@@ -2278,10 +2513,10 @@ function JewelEstimator() {
   const handleAddDiamond = (newDiamond, isPrimary = true) => {
     // Calculate price estimates for the diamond
     const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
-    
+
     // Calculate the price estimates
     const estimates = calculateGemPriceEstimates(diamondValue);
-    
+
     // Add the diamond with its value and price estimates
     const diamondWithValue = {
       ...newDiamond,
@@ -2289,21 +2524,42 @@ function JewelEstimator() {
       priceEstimates: estimates
     };
     setDiamondSummary(prev => [...prev, diamondWithValue]);
-    
+
     // Update the added gem types
     setAddedGemTypes(prev => ({
       ...prev,
       [isPrimary ? 'primary' : 'secondary']: 'diamond'
     }));
+
+    // If adding a secondary gem, immediately update localStorage to clear secondary form data
+    if (!isPrimary) {
+      // Get current saved state
+      const savedGemState = localStorage.getItem(getUserStorageKey('jewelEstimator_gemForm'));
+      if (savedGemState) {
+        try {
+          const parsedState = JSON.parse(savedGemState);
+          // Clear secondary forms but keep everything else
+          parsedState.secondaryDiamondForm = null;
+          parsedState.secondaryStoneForm = null;
+          parsedState.addedGemTypes = {
+            ...parsedState.addedGemTypes,
+            secondary: 'diamond'
+          };
+          localStorage.setItem(getUserStorageKey('jewelEstimator_gemForm'), JSON.stringify(parsedState));
+        } catch (error) {
+          console.error('[JewelEstimator] Error updating localStorage:', error);
+        }
+      }
+    }
   };
 
   const handleAddStone = (newStone, isPrimary = true) => {
     // Calculate price estimates for the stone
     const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
-    
+
     // Calculate the price estimates
     const estimates = calculateGemPriceEstimates(stoneValue);
-    
+
     // Add the stone with its value and price estimates
     const stoneWithValue = {
       ...newStone,
@@ -2311,12 +2567,33 @@ function JewelEstimator() {
       priceEstimates: estimates
     };
     setStoneSummary(prev => [...prev, stoneWithValue]);
-    
+
     // Update the added gem types
     setAddedGemTypes(prev => ({
       ...prev,
       [isPrimary ? 'primary' : 'secondary']: 'stone'
     }));
+
+    // If adding a secondary gem, immediately update localStorage to clear secondary form data
+    if (!isPrimary) {
+      // Get current saved state
+      const savedGemState = localStorage.getItem(getUserStorageKey('jewelEstimator_gemForm'));
+      if (savedGemState) {
+        try {
+          const parsedState = JSON.parse(savedGemState);
+          // Clear secondary forms but keep everything else
+          parsedState.secondaryDiamondForm = null;
+          parsedState.secondaryStoneForm = null;
+          parsedState.addedGemTypes = {
+            ...parsedState.addedGemTypes,
+            secondary: 'stone'
+          };
+          localStorage.setItem(getUserStorageKey('jewelEstimator_gemForm'), JSON.stringify(parsedState));
+        } catch (error) {
+          console.error('[JewelEstimator] Error updating localStorage:', error);
+        }
+      }
+    }
   };
 
   return (
@@ -2800,7 +3077,7 @@ function JewelEstimator() {
                             <Typography variant="body2">Color: {gem.color}</Typography>
                             <Typography variant="body2">Weight: {gem.weight}</Typography>
                             <Typography variant="body2">Quantity: {gem.quantity}</Typography>
-                            <Typography variant="body2">Authentic: {gem.authentic ? 'Yes' : 'No'}</Typography>
+                            <Typography variant="body2">Authentic: {gem.authentic ? 'Yes' : 'Unknown'}</Typography>
                             <Typography variant="body2">Value: ${gem.value ? gem.value.toFixed(2) : '0.00'}</Typography>
                           </>
                         )}
@@ -2860,7 +3137,7 @@ function JewelEstimator() {
                             <Typography variant="body2">Color: {stone.color}</Typography>
                             <Typography variant="body2">Weight: {stone.weight}</Typography>
                             <Typography variant="body2">Quantity: {stone.quantity}</Typography>
-                            <Typography variant="body2">Authentic: {stone.authentic ? 'Yes' : 'No'}</Typography>
+                            <Typography variant="body2">Authentic: {stone.authentic ? 'Yes' : 'Unknown'}</Typography>
                             </div>
                             <IconButton variant="outlined" onClick={() => handleDeleteGem(index, stone.type, stone.isPrimary)}
                                 sx={{
@@ -2966,7 +3243,7 @@ function JewelEstimator() {
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Box>
                             <Typography sx={{ fontWeight: 500, mb: 0.2 }}>
-                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type ? item.primary_gem_type.split(' ')[0] : ''} {item.secondary_gem_type ? item.secondary_gem_type.split(' ')[0] : ''} {item.metal_category}
+                              {item.metal_weight}g {item.metal_purity} {item.precious_metal_type === 'Gold' && item.jewelry_color ? `${item.jewelry_color[0]}` : ''} {item.precious_metal_type} {item.primary_gem_type || ''} {item.secondary_gem_type || ''} {item.metal_category}
                             </Typography>
                             <TextField
                               variant="standard"
@@ -3086,6 +3363,13 @@ function JewelEstimator() {
                               const newItems = [...estimatedItems];
                               newItems.splice(index, 1);
                               setEstimatedItems(newItems);
+
+                              // Update sessionStorage immediately to persist the deletion
+                              if (newItems.length > 0) {
+                                sessionStorage.setItem('jewelEstimatorItems', JSON.stringify(newItems));
+                              } else {
+                                sessionStorage.removeItem('jewelEstimatorItems');
+                              }
                             }}
                             size="small"
                             sx={{ color: 'error.main' }}

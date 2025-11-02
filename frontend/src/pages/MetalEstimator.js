@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import axios from 'axios';
 import config from '../config';
+import { useAuth } from '../context/AuthContext';
 
 const API_BASE_URL = config.apiUrl;
 // Constants
@@ -110,7 +111,8 @@ const useMetalForm = ({
   onMetalValueChange,
   preciousMetalTypes,
   metalPurities,
-  fetchPurities
+  fetchPurities,
+  getUserStorageKey
 }) => {
   const [form, setForm] = useState(initialState);
   const [totalValue, setTotalValue] = useState(0);
@@ -121,11 +123,10 @@ const useMetalForm = ({
     
     // Handle weight field specifically
     if (name === 'weight') {
-      // If weight is cleared, set to '0' instead of empty string
-      const newValue = value === '' ? '0' : value;
+      // Keep the value as-is (empty string or number)
       setForm(prev => ({
         ...prev,
-        [name]: newValue
+        [name]: value
       }));
       return;
     }
@@ -178,7 +179,6 @@ const useMetalForm = ({
 
     if (name === 'purity') {
       const selectedPurity = metalPurities.find(p => String(p.id) === String(value));
-      console.log('Selected purity:', selectedPurity);
       setForm(prev => ({
         ...prev,
         purity: selectedPurity || { purity: '', value: 0 }
@@ -211,8 +211,18 @@ const useMetalForm = ({
   }, [metalSpotPrice, preciousMetalTypes, metalPurities, fetchPurities]);
 
   const calculateValue = useCallback(() => {
-    if (!isManualOverride && form.weight && form.spotPrice && form.purity) {
-      const newValue = form.spotPrice * form.purity.value * form.weight;
+    // Check all required fields are present and valid
+    const hasWeight = form.weight && parseFloat(form.weight) > 0;
+    const hasSpotPrice = form.spotPrice && parseFloat(form.spotPrice) > 0;
+    const hasPurityValue = form.purity && form.purity.value && parseFloat(form.purity.value) > 0;
+
+    if (!isManualOverride && hasWeight && hasSpotPrice && hasPurityValue) {
+      const weight = parseFloat(form.weight);
+      const spotPrice = parseFloat(form.spotPrice);
+      const purityValue = parseFloat(form.purity.value);
+
+      const newValue = spotPrice * purityValue * weight;
+
       setTotalValue(newValue);
       onMetalValueChange(newValue);
       // Update the form state with the new calculated value
@@ -235,6 +245,12 @@ const useMetalForm = ({
     });
     setTotalValue(0);
     setIsManualOverride(false);
+
+    // Clear localStorage when form is reset
+    if (getUserStorageKey) {
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_metalForm'));
+      localStorage.removeItem(getUserStorageKey('jewelEstimator_metalValue'));
+    }
   }, [initialState, metalSpotPrice]);
 
   const handleManualValueChange = useCallback((value) => {
@@ -257,7 +273,8 @@ const useMetalForm = ({
     totalValue,
     setTotalValue: handleManualValueChange,
     handleChange,
-    resetForm
+    resetForm,
+    calculateValue
   };
 };
 
@@ -292,8 +309,17 @@ const useSpotPriceCalculator = (metalSpotPrice, metalFormState) => {
 };
 
 const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, setMetalFormState, initialData = null, buttonText = 'Add Metal', hideButtons = false }) => {
+  const { user } = useAuth();
+
+  // Helper function to create user-specific localStorage keys
+  const getUserStorageKey = (key) => {
+    const userId = user?.id || 'guest';
+    return `${key}_user_${userId}`;
+  };
+
   // Add a state to track initialization status
   const [isInitialized, setIsInitialized] = useState(false);
+  const [hasRestoredFromStorage, setHasRestoredFromStorage] = useState(false);
   
   const [preciousMetalTypes, setPreciousMetalTypes] = useState([]);
   const [nonPreciousMetalTypes, setNonPreciousMetalTypes] = useState([]);
@@ -323,20 +349,22 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
     }
   };
 
-  const { 
-    form, 
-    setForm, 
-    totalValue, 
+  const {
+    form,
+    setForm,
+    totalValue,
     setTotalValue,
-    handleChange, 
-    resetForm 
+    handleChange,
+    resetForm,
+    calculateValue
   } = useMetalForm({
     initialState: INITIAL_FORM_STATE,
     metalSpotPrice,
     onMetalValueChange,
     preciousMetalTypes,
     metalPurities: metalPurities || [], // Ensure metalPurities is always an array
-    fetchPurities
+    fetchPurities,
+    getUserStorageKey
   });
 
   const { calculateSpotPrice, updateSpotPrice } = useSpotPriceCalculator(metalSpotPrice, form);
@@ -479,6 +507,9 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
 
   // Update spot price when precious metal type or metalSpotPrice changes
   useEffect(() => {
+    // Skip if not yet initialized (during restoration)
+    if (!isInitialized) return;
+
     // Skip if we're in edit mode and still initializing
     if (initialData && !isInitialized) return;
 
@@ -560,6 +591,30 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
     }
   }, [form, setMetalFormState, isInitialized]);
 
+  // Save form state to localStorage whenever it changes (except in edit mode)
+  useEffect(() => {
+    if (!initialData && isInitialized) {
+      localStorage.setItem(getUserStorageKey('jewelEstimator_metalForm'), JSON.stringify(form));
+    }
+  }, [form, initialData, isInitialized]);
+
+  // Save total value to localStorage
+  useEffect(() => {
+    if (!initialData && isInitialized) {
+      localStorage.setItem(getUserStorageKey('jewelEstimator_metalValue'), totalValue.toString());
+    }
+  }, [totalValue, initialData, isInitialized]);
+
+  // Force recalculation after initialization is complete (for restored data)
+  useEffect(() => {
+    if (isInitialized && hasRestoredFromStorage) {
+      // Use setTimeout to ensure all state updates have settled
+      setTimeout(() => {
+        calculateValue();
+      }, 200);
+    }
+  }, [isInitialized, hasRestoredFromStorage, calculateValue]);
+
   useEffect(() => {
     const fetchAllData = async () => {
       try {
@@ -594,13 +649,54 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
       }
     };
 
-    fetchAllData();
-    fetchLivePricing();
-    
-    // Default to Gold (ID 1) only when not in edit mode
-    if (!initialData) {
-      fetchPurities(1);
-    }
+    const restoreFormData = async () => {
+      // Only restore if not in edit mode
+      if (!initialData) {
+        const savedForm = localStorage.getItem(getUserStorageKey('jewelEstimator_metalForm'));
+        const savedValue = localStorage.getItem(getUserStorageKey('jewelEstimator_metalValue'));
+
+        if (savedForm) {
+          try {
+            const parsedForm = JSON.parse(savedForm);
+            setForm(parsedForm);
+            setHasRestoredFromStorage(true);
+
+            // Fetch purities for the saved metal type
+            if (parsedForm.preciousMetalTypeId) {
+              await fetchPurities(parsedForm.preciousMetalTypeId);
+            }
+          } catch (error) {
+            console.error('[MetalEstimator] Error parsing saved form data:', error);
+          }
+        }
+
+        if (savedValue) {
+          const parsedValue = parseFloat(savedValue);
+          if (!isNaN(parsedValue)) {
+            setTotalValue(parsedValue);
+            onMetalValueChange(parsedValue);
+          }
+        } 
+      }
+    };
+
+    const initializeComponent = async () => {
+      await fetchAllData();
+      await fetchLivePricing();
+      await restoreFormData();
+
+      // Default to Gold (ID 1) only when not in edit mode and no saved data
+      if (!initialData && !localStorage.getItem(getUserStorageKey('jewelEstimator_metalForm'))) {
+        fetchPurities(1);
+      }
+
+      // Mark as initialized after restoration - use setTimeout to ensure state updates complete
+      setTimeout(() => {
+        setIsInitialized(true);
+      }, 100);
+    };
+
+    initializeComponent();
   }, []);
   
   // This useEffect runs when preciousMetalTypes are loaded
@@ -830,7 +926,6 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
           name="nonPreciousMetalType"
           value={form.nonPreciousMetalType}
           onChange={(e) => handleSelectChange(e, form.preciousMetalType === 'Gold' ? jewelryColorRef : purityRef, handleChange)}
-          required
           inputRef={nonPreciousMetalTypeRef}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -859,6 +954,9 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
             }
           }}
         >
+          <MenuItem value="">
+            <em>None</em>
+          </MenuItem>
           {nonPreciousMetalTypes.map(type => (
             <MenuItem key={type.id} value={type.type}>{type.type}</MenuItem>
           ))}
