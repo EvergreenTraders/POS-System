@@ -221,7 +221,7 @@ function JewelEstimator() {
   };
 
   const handleAddGem = (gemData) => {
-    
+
     // Ensure gemData has all required fields with defaults
     const gemWithDefaults = {
       ...gemData,
@@ -231,15 +231,23 @@ function JewelEstimator() {
       weight: gemData.weight || 0,
       quantity: gemData.quantity || 1
     };
-    
-    
+
+    // VALIDATE: Only allow one primary gem
+    if (gemWithDefaults.isPrimary && addedGemTypes.primary) {
+      const existingType = addedGemTypes.primary === 'diamond' ? 'diamond' : 'stone';
+      const newType = gemWithDefaults.type === 'diamond' ? 'diamond' : 'stone';
+      alert(`Only one primary gem is allowed. Please delete the existing primary ${existingType} before adding a primary ${newType}.`);
+      return false; // Indicate failure
+    }
+
+
     // Update the appropriate summary based on gem type
     if (gemWithDefaults.type === 'diamond') {
       setDiamondSummary(prev => [...prev, gemWithDefaults]);
     } else if (gemWithDefaults.type === 'stone') {
       setStoneSummary(prev => [...prev, gemWithDefaults]);
     }
-    
+
     // Update addedGemTypes if this is a primary gem
     if (gemWithDefaults.isPrimary) {
       setAddedGemTypes(prev => ({
@@ -247,7 +255,7 @@ function JewelEstimator() {
         primary: gemWithDefaults.type === 'diamond' ? 'diamond' : 'stone'
       }));
     }
-    
+
     return true; // Indicate success
   };
 
@@ -299,6 +307,14 @@ function JewelEstimator() {
         newSummary.splice(index, 1);
         return newSummary;
       });
+    }
+
+    // If deleting a primary gem, clear the addedGemTypes.primary
+    if (isPrimary) {
+      setAddedGemTypes(prev => ({
+        ...prev,
+        primary: null
+      }));
     }
   };
   
@@ -533,6 +549,31 @@ function JewelEstimator() {
     primary: null,  // can be 'diamond' or 'stone'
     secondary: null // can be 'diamond' or 'stone'
   });
+
+  // Sync addedGemTypes.primary with actual gem summaries after navigation/restoration
+  useEffect(() => {
+    // Check if there's a primary diamond in diamondSummary
+    const hasPrimaryDiamond = diamondSummary.some(gem => gem.isPrimary);
+    // Check if there's a primary stone in stoneSummary
+    const hasPrimaryStone = stoneSummary.some(stone => stone.isPrimary);
+
+    if (hasPrimaryDiamond && addedGemTypes.primary !== 'diamond') {
+      setAddedGemTypes(prev => ({
+        ...prev,
+        primary: 'diamond'
+      }));
+    } else if (hasPrimaryStone && addedGemTypes.primary !== 'stone') {
+      setAddedGemTypes(prev => ({
+        ...prev,
+        primary: 'stone'
+      }));
+    } else if (!hasPrimaryDiamond && !hasPrimaryStone && addedGemTypes.primary !== null) {
+      setAddedGemTypes(prev => ({
+        ...prev,
+        primary: null
+      }));
+    }
+  }, [diamondSummary, stoneSummary]);
 
   // Define activeTab state
   const [activeTab, setActiveTab] = useState('primary_gem_diamond');

@@ -1642,24 +1642,23 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     const currentForm = getCurrentForm();
     const isPrimary = activeTab.startsWith('primary');
 
-    // Call parent component's onAddGem function if provided
-    if (onAddGem) {
 
     // Check if we can add this type of gem - only for primary gems
     if (isPrimary) {
-      // Check if there's already a primary stone
-      if (addedGemTypes.primary === 'stone') {
-        alert('Please delete the existing primary stone before adding a diamond');
-        return;
-      }
-
-      // Check if there's already one primary gem in the array
-      if (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary)) {
-        alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
+      // Check if there's already a primary gem of any type
+      if (addedGemTypes.primary) {
+        if (addedGemTypes.primary === 'stone') {
+          alert('Please delete the existing primary stone before adding a diamond');
+        } else {
+          alert('Only one primary gem is allowed. Please delete the existing primary diamond first.');
+        }
         return;
       }
     }
     // For secondary gems, allow multiple types (both diamonds and stones)
+
+    // Call parent component's onAddGem function if provided
+    if (onAddGem) {
 
     const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
 
@@ -1718,11 +1717,14 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     }
     
     // Update added gem types
-    setAddedGemTypes(prev => ({
-      ...prev,
-      primary: isPrimary ? 'diamond' : prev.primary,
-      secondary: isPrimary ? prev.secondary : [...(Array.isArray(prev.secondary) ? prev.secondary : []), 'diamond']
-    }));
+    setAddedGemTypes(prev => {
+      const updated = {
+        ...prev,
+        primary: isPrimary ? 'diamond' : prev.primary,
+        secondary: isPrimary ? prev.secondary : [...(Array.isArray(prev.secondary) ? prev.secondary : []), 'diamond']
+      };
+      return updated;
+    });
 
     // If adding a secondary gem, immediately clear secondary forms from localStorage
     if (!isPrimary) {
@@ -1798,24 +1800,23 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     const currentForm = getCurrentStoneForm();
     const isPrimary = activeTab.startsWith('primary');
 
-    // Call parent component's onAddGem function if provided
-    if (onAddGem) {
 
     // Check if we can add this type of gem - only for primary gems
     if (isPrimary) {
-      // Check if there's already a primary diamond
-      if (addedGemTypes.primary === 'diamond') {
-        alert('Please delete the existing primary diamond before adding a stone');
-        return;
-      }
-
-      // Check if there's already one primary gem in the array
-      if (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary)) {
-        alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
+      // Check if there's already a primary gem of any type
+      if (addedGemTypes.primary) {
+        if (addedGemTypes.primary === 'diamond') {
+          alert('Please delete the existing primary diamond before adding a stone');
+        } else {
+          alert('Only one primary gem is allowed. Please delete the existing primary stone first.');
+        }
         return;
       }
     }
     // For secondary gems, allow multiple types (both diamonds and stones)
+
+    // Call parent component's onAddGem function if provided
+    if (onAddGem) {
 
     const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
     
@@ -1862,11 +1863,14 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
     }
     
     // Update added gem types
-    setAddedGemTypes(prev => ({
-      ...prev,
-      primary: isPrimary ? 'stone' : prev.primary,
-      secondary: isPrimary ? prev.secondary : [...(Array.isArray(prev.secondary) ? prev.secondary : []), 'stone']
-    }));
+    setAddedGemTypes(prev => {
+      const updated = {
+        ...prev,
+        primary: isPrimary ? 'stone' : prev.primary,
+        secondary: isPrimary ? prev.secondary : [...(Array.isArray(prev.secondary) ? prev.secondary : []), 'stone']
+      };
+      return updated;
+    });
 
     // If adding a secondary gem, immediately clear secondary forms from localStorage
     if (!isPrimary) {
