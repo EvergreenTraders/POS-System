@@ -448,7 +448,6 @@ const CustomerTicket = () => {
           break;
           
         default:
-          console.log('Unknown transaction type for updated item:', transactionType);
           showSnackbar('Unknown transaction type: ' + transactionType, 'warning');
       }
       
@@ -1302,6 +1301,12 @@ const CustomerTicket = () => {
     
     // Instead of navigating, save to session storage first
     try {
+      // Generate a unique ticket ID for this batch of items with sequential 8-digit number
+      let lastTicketNumber = parseInt(localStorage.getItem('lastBuyTicketNumber') || '0');
+      lastTicketNumber += 1;
+      localStorage.setItem('lastBuyTicketNumber', lastTicketNumber.toString());
+      const buyTicketId = `BT-${lastTicketNumber.toString().padStart(8, '0')}`;
+
       // Add item type, customer, and employee data to each item
       // Using user from component scope instead of calling useAuth() here
       const itemsWithMetadata = filteredItems.map(item => {
@@ -1309,6 +1314,7 @@ const CustomerTicket = () => {
         const baseItem = {
           ...item,
           transaction_type: transaction_type,
+          buyTicketId: buyTicketId, // Assign the ticket ID to all items in this batch
           customer: customer ? {
             id: customer.id,
             name: `${customer.first_name} ${customer.last_name}`,

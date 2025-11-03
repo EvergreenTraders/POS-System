@@ -58,11 +58,13 @@ const Cart = () => {
   const [customerFilter, setCustomerFilter] = useState('all');
   const [filteredItems, setFilteredItems] = useState([]);
   const [uniqueCustomers, setUniqueCustomers] = useState([]);
-  const [selectedItems, setSelectedItems] = useState([]);
+  const [selectedItems, setSelectedItems] = useState([]); // Now stores ticket IDs instead of item indices
+  const [selectedTickets, setSelectedTickets] = useState([]); // Store selected ticket IDs
   const [confirmDialog, setConfirmDialog] = useState({
     open: false,
     itemIndex: null
   });
+  const [groupedByTicket, setGroupedByTicket] = useState({}); // Group items by buyTicketId
   
   // Get customer from session storage or location state
   const [customer, setCustomer] = useState(() => {
@@ -118,20 +120,34 @@ const Cart = () => {
     }
   }, [cartItems]);
 
+  // Group cart items by buyTicketId
+  useEffect(() => {
+    const grouped = {};
+    cartItems.forEach((item, index) => {
+      const ticketId = item.buyTicketId || `item-${index}`; // Fallback for items without buyTicketId
+      if (!grouped[ticketId]) {
+        grouped[ticketId] = [];
+      }
+      grouped[ticketId].push({ ...item, originalIndex: index });
+    });
+    setGroupedByTicket(grouped);
+  }, [cartItems]);
+
   // Filter cart items based on selected customer
   useEffect(() => {
     if (customerFilter === 'all') {
       setFilteredItems(cartItems);
     } else {
-      const filtered = cartItems.filter(item => 
-        item.customer && 
+      const filtered = cartItems.filter(item =>
+        item.customer &&
         (item.customer.id === customerFilter || item.customer.name === customerFilter)
       );
       setFilteredItems(filtered);
     }
-    
+
     // Reset selected items when filter changes
     setSelectedItems([]);
+    setSelectedTickets([]);
   }, [cartItems, customerFilter]);
 
   // Handle customer filter change
@@ -139,29 +155,39 @@ const Cart = () => {
     setCustomerFilter(e.target.value);
   };
   
-  // Handle individual item selection toggle
+  // Handle ticket selection toggle
+  const handleTicketSelect = (ticketId) => {
+    setSelectedTickets(prev => {
+      const newSelection = prev.includes(ticketId)
+        ? prev.filter(id => id !== ticketId)
+        : [...prev, ticketId];
+      return newSelection;
+    });
+  };
+
+  // Handle individual item selection toggle (deprecated, keeping for backwards compatibility)
   const handleItemSelect = (index) => {
     setSelectedItems(prev => {
-      const newSelection = prev.includes(index) 
-        ? prev.filter(idx => idx !== index) 
+      const newSelection = prev.includes(index)
+        ? prev.filter(idx => idx !== index)
         : [...prev, index];
       return newSelection;
     });
   };
   
-  // Check if all filtered items are selected
-  const isAllSelected = filteredItems.length > 0 && 
-    filteredItems.every((_, index) => selectedItems.includes(index));
-  
-  // Handle select/deselect all filtered items
+  // Check if all tickets are selected
+  const isAllSelected = Object.keys(groupedByTicket).length > 0 &&
+    Object.keys(groupedByTicket).every(ticketId => selectedTickets.includes(ticketId));
+
+  // Handle select/deselect all tickets
   const handleSelectAll = () => {
     if (isAllSelected) {
-      // Deselect all items
-      setSelectedItems([]);
+      // Deselect all tickets
+      setSelectedTickets([]);
     } else {
-      // Select all currently filtered items
-      const allIndices = filteredItems.map((_, index) => index);
-      setSelectedItems(allIndices);
+      // Select all tickets
+      const allTicketIds = Object.keys(groupedByTicket);
+      setSelectedTickets(allTicketIds);
     }
   };
 
@@ -252,14 +278,16 @@ const Cart = () => {
     }, 0);
   };
   
-  // Calculate total for selected items only
+  // Calculate total for selected tickets only
   const calculateSelectedTotal = () => {
-    if (selectedItems.length === 0) return 0;
-    
-    return selectedItems.reduce((total, index) => {
-      const item = filteredItems[index];
-      if (!item) return total; // Skip if item doesn't exist
-      return total + parseFloat(getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)) || 0);
+    if (selectedTickets.length === 0) return 0;
+
+    return selectedTickets.reduce((total, ticketId) => {
+      const ticketItems = groupedByTicket[ticketId] || [];
+      const ticketTotal = ticketItems.reduce((subtotal, item) => {
+        return subtotal + parseFloat(getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)) || 0);
+      }, 0);
+      return total + ticketTotal;
     }, 0);
   };
 
@@ -317,17 +345,25 @@ const Cart = () => {
 
   // Handle proceed to checkout
   const handleProceedToCheckout = () => {
-    // If items are selected, only checkout those items
+    // If tickets are selected, only checkout items from those tickets
     // Otherwise, checkout all filtered items
-    let itemsToCheckout = selectedItems.length > 0 
-      ? cartItems.filter((_, index) => selectedItems.includes(index))
-      : filteredItems;
+    let itemsToCheckout;
+    if (selectedTickets.length > 0) {
+      itemsToCheckout = [];
+      selectedTickets.forEach(ticketId => {
+        const ticketItems = groupedByTicket[ticketId] || [];
+        ticketItems.forEach(item => {
+          itemsToCheckout.push(item);
+        });
+      });
+    } else {
+      itemsToCheckout = filteredItems;
+    }
       
     // Make sure we're preserving all jewelry-specific fields for items from the gem estimator
     itemsToCheckout = itemsToCheckout.map(item => {
       // If this is a jewelry item from the gem estimator, ensure all fields are preserved
       if (item.sourceEstimator === 'jewelry') {
-        console.log('Passing jewelry item to checkout:', item);
         return {
           ...item,
           // Ensure these critical fields are included
@@ -402,10 +438,10 @@ const Cart = () => {
         
 
 
-        {/* Cart Items */}
+        {/* Cart Items - Grouped by Ticket */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="h6">
-            Items ({filteredItems.length})
+            Tickets ({Object.keys(groupedByTicket).length}) - Items ({filteredItems.length})
           </Typography>
           {customer && (
             <Typography variant="body2" color="text.secondary">
@@ -414,131 +450,153 @@ const Cart = () => {
           )}
         </Box>
 
-        {filteredItems.length > 0 ? (
-          <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
-            <Table size="small">
-              <TableHead>
-                <TableRow sx={{ bgcolor: 'grey.100' }}>
-                  <TableCell padding="checkbox" width="5%">
+        {Object.keys(groupedByTicket).length > 0 ? (
+          <Box sx={{ mb: 3 }}>
+            {/* Select All Checkbox */}
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+              <Checkbox
+                indeterminate={selectedTickets.length > 0 && !isAllSelected}
+                checked={isAllSelected}
+                onChange={handleSelectAll}
+              />
+              <Typography variant="body2" fontWeight="bold">
+                Select All Tickets
+              </Typography>
+            </Box>
+
+            {/* Render each ticket */}
+            {Object.entries(groupedByTicket).map(([ticketId, ticketItems]) => {
+              const ticketTotal = ticketItems.reduce((sum, item) =>
+                sum + getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)), 0
+              );
+              const isTicketSelected = selectedTickets.includes(ticketId);
+
+              return (
+                <Paper
+                  key={ticketId}
+                  variant="outlined"
+                  sx={{
+                    mb: 2,
+                    border: isTicketSelected ? '2px solid' : '1px solid',
+                    borderColor: isTicketSelected ? '#4caf50' : 'divider',
+                    bgcolor: isTicketSelected ? '#e8f5e9' : 'background.paper'
+                  }}
+                >
+                  {/* Ticket Header */}
+                  <Box sx={{
+                    p: 2,
+                    bgcolor: isTicketSelected ? '#c8e6c9' : 'grey.100',
+                    display: 'flex',
+                    alignItems: 'center',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => handleTicketSelect(ticketId)}
+                  >
                     <Checkbox
-                      indeterminate={selectedItems.length > 0 && !isAllSelected}
-                      checked={isAllSelected}
-                      onChange={handleSelectAll}
+                      checked={isTicketSelected}
+                      onChange={() => handleTicketSelect(ticketId)}
+                      onClick={(e) => e.stopPropagation()}
                     />
-                  </TableCell>
-                  <TableCell width="10%"><strong>Type</strong></TableCell>
-                  <TableCell width="20%"><strong>Description</strong></TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <strong>Customer</strong>
-                      <FormControl size="small" sx={{ ml: 1, minWidth: 120 }}>
-                        <Select
-                          value={customerFilter}
-                          onChange={handleCustomerFilterChange}
-                          displayEmpty
-                          variant="standard"
-                          startAdornment={<FilterListIcon fontSize="small" sx={{ mr: 0.5 }} />}
-                        >
-                          <MenuItem value="all">All Customers</MenuItem>
-                          {uniqueCustomers.map((customer) => (
-                            <MenuItem 
-                              key={customer.id || customer.name} 
-                              value={customer.id || customer.name}
-                            >
-                              {customer.name}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        Ticket ID: {ticketId}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {ticketItems.length} item{ticketItems.length !== 1 ? 's' : ''} • Total: {formatCurrency(ticketTotal)}
+                      </Typography>
                     </Box>
-                  </TableCell>
-                  <TableCell><strong>Employee</strong></TableCell>
-                  <TableCell align="right"><strong>Price</strong></TableCell>
-                  <TableCell align="center"><strong>Actions</strong></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredItems.map((item, index) => (
-                  <TableRow key={index} hover>
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        checked={selectedItems.includes(index)}
-                        onChange={() => handleItemSelect(index)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Chip 
-                        label={getItemTypeLabel(item.transaction_type || getItemTypeFromStructure(item))}
-                        color={getItemTypeColor(item.transaction_type || getItemTypeFromStructure(item))}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>{getItemDescription(item, item.transaction_type || getItemTypeFromStructure(item))}</TableCell>
-                    <TableCell>
-                      {item.customer ? (
-                        <Typography variant="body2">
-                          <strong>{item.customer.name}</strong><br />
-                          {item.customer.phone}
-                        </Typography>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">
-                          No customer
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {item.employee ? (
-                        <Typography variant="body2">
-                          <strong>{item.employee.name} </strong><br />
-                          {item.employee.role}
-                        </Typography>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">
-                          No employee
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell align="right">{formatCurrency(getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)))}</TableCell>
-                    <TableCell align="center">
-                      <Tooltip title="Edit">
-                        <IconButton 
-                          color="primary" 
-                          size="small" 
-                          onClick={() => handleEditItem(index)}
-                          sx={{ mr: 1 }}
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Void">
-                        <IconButton 
-                          color="error" 
-                          size="small" 
-                          onClick={() => handleRemoveItem(index)}
-                        >
-                          <BlockIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {/* Total Row */}
-                <TableRow sx={{ bgcolor: 'grey.50' }}>
-                  <TableCell colSpan={5} /> {/* Empty cells for Checkbox, Type, Description, Customer, Employee */}
-                  <TableCell align="right">
-                    <Typography fontWeight="bold">
-                      {selectedItems.length > 0 ? (
-                        `Selected Total: ${formatCurrency(calculateSelectedTotal())}`
-                      ) : (
-                        `Total: ${formatCurrency(calculateTotal(filteredItems))}`
-                      )}
-                    </Typography>
-                  </TableCell>
-                  <TableCell />
-                </TableRow>
-              </TableBody>
-            </Table>
-          </TableContainer>
+                  </Box>
+
+                  {/* Ticket Items */}
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: 'grey.50' }}>
+                        <TableCell width="10%"><strong>Type</strong></TableCell>
+                        <TableCell width="30%"><strong>Description</strong></TableCell>
+                        <TableCell width="20%"><strong>Customer</strong></TableCell>
+                        <TableCell width="20%"><strong>Employee</strong></TableCell>
+                        <TableCell align="right" width="10%"><strong>Price</strong></TableCell>
+                        <TableCell align="center" width="10%"><strong>Actions</strong></TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {ticketItems.map((item, itemIndex) => (
+                        <TableRow key={itemIndex} hover>
+                          <TableCell>
+                            <Chip
+                              label={getItemTypeLabel(item.transaction_type || getItemTypeFromStructure(item))}
+                              color={getItemTypeColor(item.transaction_type || getItemTypeFromStructure(item))}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell>{getItemDescription(item, item.transaction_type || getItemTypeFromStructure(item))}</TableCell>
+                          <TableCell>
+                            {item.customer ? (
+                              <Typography variant="body2">
+                                <strong>{item.customer.name}</strong><br />
+                                {item.customer.phone}
+                              </Typography>
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">
+                                No customer
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {item.employee ? (
+                              <Typography variant="body2">
+                                <strong>{item.employee.name}</strong><br />
+                                {item.employee.role}
+                              </Typography>
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">
+                                No employee
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="right">
+                            {formatCurrency(getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)))}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Tooltip title="Edit">
+                              <IconButton
+                                color="primary"
+                                size="small"
+                                onClick={() => handleEditItem(item.originalIndex)}
+                                sx={{ mr: 1 }}
+                              >
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Void">
+                              <IconButton
+                                color="error"
+                                size="small"
+                                onClick={() => handleRemoveItem(item.originalIndex)}
+                              >
+                                <BlockIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Paper>
+              );
+            })}
+
+            {/* Grand Total */}
+            <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
+              <Typography variant="h6" align="right" fontWeight="bold">
+                {selectedTickets.length > 0 ? (
+                  `Selected Total: ${formatCurrency(calculateSelectedTotal())}`
+                ) : (
+                  `Grand Total: ${formatCurrency(calculateTotal(cartItems))}`
+                )}
+              </Typography>
+            </Paper>
+          </Box>
         ) : (
           <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', mb: 3 }}>
             <Typography variant="body1" color="text.secondary">
@@ -551,30 +609,30 @@ const Cart = () => {
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
           <Box>
             <Typography variant="body2" color="text.secondary">
-              {customerFilter !== 'all' && 
+              {customerFilter !== 'all' &&
                `Showing ${filteredItems.length} of ${cartItems.length} items`}
-              {selectedItems.length > 0 && 
-               ` • ${selectedItems.length} item${selectedItems.length === 1 ? '' : 's'} selected`}
+              {selectedTickets.length > 0 &&
+               ` • ${selectedTickets.length} ticket${selectedTickets.length === 1 ? '' : 's'} selected`}
             </Typography>
-            {selectedItems.length > 0 && (
-              <Button 
-                variant="outlined" 
+            {selectedTickets.length > 0 && (
+              <Button
+                variant="outlined"
                 size="small"
-                onClick={() => setSelectedItems([])}
+                onClick={() => setSelectedTickets([])}
                 sx={{ mt: 1 }}
               >
                 Clear Selection
               </Button>
             )}
           </Box>
-          <Button 
-            variant="contained" 
-            color="primary" 
-            disabled={cartItems.length === 0 || (selectedItems.length > 0 && calculateSelectedTotal() === 0)}
+          <Button
+            variant="contained"
+            color="primary"
+            disabled={cartItems.length === 0 || (selectedTickets.length > 0 && calculateSelectedTotal() === 0)}
             onClick={handleProceedToCheckout}
           >
-            {selectedItems.length > 0 ? 
-              `Checkout Selected (${formatCurrency(calculateSelectedTotal())})` : 
+            {selectedTickets.length > 0 ?
+              `Checkout Selected (${formatCurrency(calculateSelectedTotal())})` :
               'Proceed to Checkout'}
           </Button>
         </Box>
