@@ -133,6 +133,28 @@ const Cart = () => {
     setGroupedByTicket(grouped);
   }, [cartItems]);
 
+  // Auto-select tickets belonging to the current customer by default
+  useEffect(() => {
+    if (Object.keys(groupedByTicket).length > 0 && customer) {
+      // Find all ticket IDs that belong to the current customer
+      const customerTicketIds = Object.entries(groupedByTicket)
+        .filter(([ticketId, ticketItems]) => {
+          // Check if any items in this ticket belong to the current customer
+          return ticketItems.some(item =>
+            item.customer &&
+            (item.customer.id === customer.id || item.customer.name === `${customer.first_name} ${customer.last_name}`)
+          );
+        })
+        .map(([ticketId]) => ticketId);
+
+      setSelectedTickets(customerTicketIds);
+    } else if (Object.keys(groupedByTicket).length > 0 && !customer) {
+      // If no specific customer, select all tickets by default
+      const allTicketIds = Object.keys(groupedByTicket);
+      setSelectedTickets(allTicketIds);
+    }
+  }, [groupedByTicket, customer]);
+
   // Filter cart items based on selected customer
   useEffect(() => {
     if (customerFilter === 'all') {
