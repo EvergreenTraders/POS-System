@@ -2362,12 +2362,12 @@ function JewelEstimator() {
 
   const handleAddToTicket = () => {
     const customerData = location.state?.customer;
-    
+
     // Process items with a simplified approach similar to handleCheckout
     const processedItems = estimatedItems.map((item) => {
       // Preserve original images if they exist
       let itemImages = [];
-      
+
       // If item already has images array, use it
       if (item.images && Array.isArray(item.images)) {
         itemImages = [...item.images]; // Create a copy to avoid reference issues
@@ -2380,7 +2380,7 @@ function JewelEstimator() {
           isPrimary: true
         }];
       }
-      
+
       // For testing, add a dummy image if no images exist
       if (itemImages.length === 0) {
         itemImages = [{
@@ -2388,7 +2388,7 @@ function JewelEstimator() {
           isPrimary: true
         }];
       }
-      
+
       // Similar to handleCheckout, create a clean processed item
       return {
         ...item, // Include all item properties
@@ -2397,13 +2397,15 @@ function JewelEstimator() {
         images: itemImages
       };
     });
-    
+
+    // Clear estimated items from sessionStorage when adding to ticket
+    sessionStorage.removeItem('jewelEstimatorItems');
     if (editMode && ticketItemId) {
       // In edit mode, we now only have one item (the edited one)
       // No need to search, just use the first item in the processed items
       if (processedItems.length > 0) {
         const editedItem = processedItems[0]; // Use the first item
-        
+
         navigate('/customer-ticket', {
           state: {
             customer: customerData,
