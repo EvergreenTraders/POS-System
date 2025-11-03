@@ -2350,7 +2350,12 @@ app.get('/api/customers/search', async (req, res) => {
     }
 
     // Original logic for specific field searches (AND logic)
-    let query = 'SELECT id, first_name, last_name, email, phone, status FROM customers WHERE 1=1';
+    // Return all customer fields including images for the search dialog
+    let query = `SELECT
+      id, first_name, last_name, email, phone, status,
+      TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth,
+      id_number, image, id_image_front, id_image_back
+      FROM customers WHERE 1=1`;
     const params = [];
     let paramCount = 1;
 
