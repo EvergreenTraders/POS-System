@@ -1405,9 +1405,8 @@ const CustomerTicket = () => {
           break;
       }
       
-      // Show success message and navigate to cart
+      // Show success message - stay on ticket screen to enter more items
       showSnackbar('Items added to cart', 'success');
-      navigate('/cart');
       
     } catch (error) {
       console.error('Error adding items to cart:', error);
