@@ -166,10 +166,6 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
   };
   const handleSearch = async (e) => {
     e.preventDefault();
-    if (!searchForm.first_name && !searchForm.last_name && !searchForm.id_number && !searchForm.phone) {
-      showSnackbar('Please enter at least one search criteria', 'warning');
-      return;
-    }
     setLoading(true);
     try {
       const params = {};
@@ -177,8 +173,14 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
       if (searchForm.last_name && searchForm.last_name.trim()) params.last_name = searchForm.last_name.trim();
       if (searchForm.id_number && searchForm.id_number.trim()) params.id_number = searchForm.id_number.trim();
       if (searchForm.phone && searchForm.phone.trim()) params.phone = searchForm.phone.trim();
+
+      // Build query string - if empty, just use empty string (which returns all customers)
       const queryParams = new URLSearchParams(params).toString();
-      const response = await fetch(`${config.apiUrl}/customers/search?${queryParams}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+      const url = queryParams ? `${config.apiUrl}/customers/search?${queryParams}` : `${config.apiUrl}/customers/search`;
+
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
       if (!response.ok) throw new Error('Failed to search customers');
       const data = await response.json();
       setSearchResults(data);
@@ -524,7 +526,7 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                     color="primary"
                     onClick={handleSearch}
                     fullWidth
-                    disabled={loading || (!searchForm.first_name && !searchForm.last_name && !searchForm.id_number && !searchForm.phone)}
+                    disabled={loading}
                     sx={{ height: '48px' }}
                   >
                     {loading ? (
@@ -699,6 +701,19 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
           {/* Extreme top-right action bar */}
           {searchResults.length > 0 && (
             <Box sx={{ position: 'absolute', top: 12, right: 20, zIndex: 10, display: 'flex', gap: 1 }}>
+              <Button
+                variant="outlined"
+                color="primary"
+                size="small"
+                onClick={() => {
+                  handleCloseSearchDialog();
+                  // Clear search form
+                  setSearchForm({ first_name: '', last_name: '', id_number: '', phone: '' });
+                }}
+                sx={{ minWidth: 100, px: 2, fontWeight: 600, borderRadius: 2, fontSize: 14 }}
+              >
+                Search Again
+              </Button>
               <Button
                 variant="outlined"
                 color="secondary"

@@ -31,7 +31,7 @@ function Navbar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const cartItemCount = cartItems.reduce((total, item) => total + item.quantity, 0);
+  const cartItemCount = cartItems.length; // Just count number of items, not quantity
 
   const handleMenu = (event) => {
     setAnchorEl(event.currentTarget);

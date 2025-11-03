@@ -485,8 +485,6 @@ const CustomerEditor = () => {
                     value={formData.email || ''}
                     onChange={handleFormChange}
                     fullWidth
-                    required={!formData.isGuest}
-                    error={!formData.isGuest && !formData.email}
                     margin="dense"
                   />
                 </Grid>
@@ -611,8 +609,6 @@ const CustomerEditor = () => {
                     value={formData.id_type || ''}
                     onChange={handleFormChange}
                     fullWidth
-                    required
-                    error={!formData.id_type}
                     margin="dense"
                   />
                 </Grid>
@@ -623,8 +619,6 @@ const CustomerEditor = () => {
                     value={formData.id_number || ''}
                     onChange={handleFormChange}
                     fullWidth
-                    required
-                    error={!formData.id_number}
                     margin="dense"
                   />
                 </Grid>
@@ -724,7 +718,7 @@ const CustomerEditor = () => {
               variant="contained"
               color="primary"
               type="submit"
-              disabled={loading || !formData.first_name || !formData.last_name || (!formData.isGuest && !formData.email)}
+              disabled={loading || !formData.first_name || !formData.last_name}
               size="small"
               sx={{ minWidth: 130 }}
             >
