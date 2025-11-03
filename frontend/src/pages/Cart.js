@@ -56,8 +56,13 @@ const Cart = () => {
   // State for cart items, customer data
   const [cartItems, setCartItems] = useState([]);
   const [customerFilter, setCustomerFilter] = useState('all');
+  const [employeeFilter, setEmployeeFilter] = useState(() => {
+    // Auto-select current logged-in employee by default
+    return user ? user.id : 'all';
+  });
   const [filteredItems, setFilteredItems] = useState([]);
   const [uniqueCustomers, setUniqueCustomers] = useState([]);
+  const [uniqueEmployees, setUniqueEmployees] = useState([]);
   const [selectedItems, setSelectedItems] = useState([]); // Now stores ticket IDs instead of item indices
   const [selectedTickets, setSelectedTickets] = useState([]); // Store selected ticket IDs
   const [confirmDialog, setConfirmDialog] = useState({
@@ -97,7 +102,7 @@ const Cart = () => {
     }
   }, []);
 
-  // Extract unique customers from cart items
+  // Extract unique customers and employees from cart items
   useEffect(() => {
     if (cartItems.length > 0) {
       // Get unique customers
@@ -113,10 +118,26 @@ const Cart = () => {
           }
         }
       });
-      
+
+      // Get unique employees
+      const employeesSet = new Set();
+      const employees = [];
+      cartItems.forEach(item => {
+        if (item.employee && item.employee.name) {
+          // Use employee ID or name as unique identifier
+          const employeeId = item.employee.id || item.employee.name;
+          if (!employeesSet.has(employeeId)) {
+            employeesSet.add(employeeId);
+            employees.push(item.employee);
+          }
+        }
+      });
+
       setUniqueCustomers(customers);
+      setUniqueEmployees(employees);
     } else {
       setUniqueCustomers([]);
+      setUniqueEmployees([]);
     }
   }, [cartItems]);
 
@@ -155,26 +176,41 @@ const Cart = () => {
     }
   }, [groupedByTicket, customer]);
 
-  // Filter cart items based on selected customer
+  // Filter cart items based on selected customer and employee
   useEffect(() => {
-    if (customerFilter === 'all') {
-      setFilteredItems(cartItems);
-    } else {
-      const filtered = cartItems.filter(item =>
+    let filtered = cartItems;
+
+    // Filter by customer
+    if (customerFilter !== 'all') {
+      filtered = filtered.filter(item =>
         item.customer &&
         (item.customer.id === customerFilter || item.customer.name === customerFilter)
       );
-      setFilteredItems(filtered);
     }
+
+    // Filter by employee
+    if (employeeFilter !== 'all') {
+      filtered = filtered.filter(item => {
+        return item.employee &&
+          (item.employee.id === employeeFilter || item.employee.name === employeeFilter);
+      });
+    }
+
+    setFilteredItems(filtered);
 
     // Reset selected items when filter changes
     setSelectedItems([]);
     setSelectedTickets([]);
-  }, [cartItems, customerFilter]);
+  }, [cartItems, customerFilter, employeeFilter, user]);
 
   // Handle customer filter change
   const handleCustomerFilterChange = (e) => {
     setCustomerFilter(e.target.value);
+  };
+
+  // Handle employee filter change
+  const handleEmployeeFilterChange = (e) => {
+    setEmployeeFilter(e.target.value);
   };
   
   // Handle ticket selection toggle
@@ -474,21 +510,104 @@ const Cart = () => {
 
         {Object.keys(groupedByTicket).length > 0 ? (
           <Box sx={{ mb: 3 }}>
-            {/* Select All Checkbox */}
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
-              <Checkbox
-                indeterminate={selectedTickets.length > 0 && !isAllSelected}
-                checked={isAllSelected}
-                onChange={handleSelectAll}
-              />
-              <Typography variant="body2" fontWeight="bold">
-                Select All Tickets
-              </Typography>
+            {/* Filters and Select All - Same Row */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+              {/* Left Side - Select All Checkbox */}
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Checkbox
+                  indeterminate={selectedTickets.length > 0 && !isAllSelected}
+                  checked={isAllSelected}
+                  onChange={handleSelectAll}
+                />
+                <Typography variant="body2" fontWeight="bold">
+                  Select All Tickets
+                </Typography>
+              </Box>
+
+              {/* Right Side - Filters */}
+              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                {/* Customer Filter */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 200 }}>
+                  <Typography variant="body2" fontWeight="bold">
+                    Customer
+                  </Typography>
+                  <FilterListIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                  <Select
+                    value={customerFilter}
+                    onChange={handleCustomerFilterChange}
+                    size="small"
+                    variant="standard"
+                    sx={{
+                      minWidth: 120,
+                      '& .MuiSelect-select': {
+                        py: 0.5
+                      }
+                    }}
+                  >
+                    <MenuItem value="all">All Customers</MenuItem>
+                    {uniqueCustomers.map((customer) => (
+                      <MenuItem
+                        key={customer.id || customer.name}
+                        value={customer.id || customer.name}
+                      >
+                        {customer.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </Box>
+
+                {/* Employee Filter */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 200 }}>
+                  <Typography variant="body2" fontWeight="bold">
+                    Employee
+                  </Typography>
+                  <FilterListIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                  <Select
+                    value={employeeFilter}
+                    onChange={handleEmployeeFilterChange}
+                    size="small"
+                    variant="standard"
+                    sx={{
+                      minWidth: 120,
+                      '& .MuiSelect-select': {
+                        py: 0.5
+                      }
+                    }}
+                  >
+                    <MenuItem value="all">All Employees</MenuItem>
+                    {uniqueEmployees.map((employee) => (
+                      <MenuItem
+                        key={employee.id || employee.name}
+                        value={employee.id || employee.name}
+                      >
+                        {employee.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </Box>
+              </Box>
             </Box>
 
-            {/* Render each ticket */}
-            {Object.entries(groupedByTicket).map(([ticketId, ticketItems]) => {
-              const ticketTotal = ticketItems.reduce((sum, item) =>
+            {/* Render each ticket - Only show tickets with filtered items */}
+            {Object.entries(groupedByTicket)
+              .filter(([ticketId, ticketItems]) => {
+                // Check if this ticket has any items in the filteredItems
+                // Compare by originalIndex which is the position in cartItems array
+                return ticketItems.some(item =>
+                  filteredItems.some(filteredItem =>
+                    cartItems.indexOf(filteredItem) === item.originalIndex
+                  )
+                );
+              })
+              .map(([ticketId, ticketItems]) => {
+              // Filter ticket items to only show those that pass the filter
+              const filteredTicketItems = ticketItems.filter(item =>
+                filteredItems.some(filteredItem =>
+                  cartItems.indexOf(filteredItem) === item.originalIndex
+                )
+              );
+
+              const ticketTotal = filteredTicketItems.reduce((sum, item) =>
                 sum + getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)), 0
               );
               const isTicketSelected = selectedTickets.includes(ticketId);
@@ -524,7 +643,7 @@ const Cart = () => {
                         Ticket ID: {ticketId}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {ticketItems.length} item{ticketItems.length !== 1 ? 's' : ''} • Total: {formatCurrency(ticketTotal)}
+                        {filteredTicketItems.length} item{filteredTicketItems.length !== 1 ? 's' : ''} • Total: {formatCurrency(ticketTotal)}
                       </Typography>
                     </Box>
                   </Box>
@@ -542,7 +661,7 @@ const Cart = () => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {ticketItems.map((item, itemIndex) => (
+                      {filteredTicketItems.map((item, itemIndex) => (
                         <TableRow key={itemIndex} hover>
                           <TableCell>
                             <Chip
