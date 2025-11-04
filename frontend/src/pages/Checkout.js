@@ -544,7 +544,8 @@ function Checkout() {
       }
 
       const paymentAmount = parseFloat(paymentDetails.cashAmount) || 0;
-      if (paymentAmount <= 0 || paymentAmount > remainingAmount) {
+      // Compare absolute values - payment shouldn't exceed the absolute balance amount
+      if (paymentAmount <= 0 || paymentAmount > Math.abs(remainingAmount)) {
         setSnackbar({
           open: true,
           message: paymentAmount <= 0 ? 'Invalid payment amount' : 'Payment amount exceeds remaining balance',
@@ -585,11 +586,15 @@ function Checkout() {
       setPayments(updatedPayments);
       
       // Fix floating point precision issues by rounding to 2 decimal places
-      const newRemainingAmount = parseFloat((remainingAmount - paymentAmount).toFixed(2));
+      // For positive balance (receivable): subtract payment
+      // For negative balance (payable): add payment (moving towards zero)
+      const newRemainingAmount = remainingAmount >= 0
+        ? parseFloat((remainingAmount - paymentAmount).toFixed(2))
+        : parseFloat((remainingAmount + paymentAmount).toFixed(2));
       setRemainingAmount(newRemainingAmount);
-      
-      // Check if payment is complete
-      const isPaid = newRemainingAmount == 0;
+
+      // Check if payment is complete (use tolerance for floating point comparison)
+      const isPaid = Math.abs(newRemainingAmount) < 0.01;
       setIsFullyPaid(isPaid);
 
       if (isPaid) {
@@ -1763,7 +1768,9 @@ function Checkout() {
                   onClick={handleSubmit}
                   color="primary"
                 >
-                  Process Payment
+                  {parseFloat(paymentDetails.cashAmount || 0) >= Math.abs(remainingAmount)
+                    ? 'Process Payment'
+                    : 'Add Payment'}
                 </Button>
               </Box>
               
