@@ -92,7 +92,29 @@ const Cart = () => {
     if (savedCartItems) {
       try {
         const parsedItems = JSON.parse(savedCartItems);
-        setCartItems(parsedItems);
+
+        // Fix customer data for items that don't have first_name and last_name
+        const fixedItems = parsedItems.map(item => {
+          if (item.customer && !item.customer.first_name && !item.customer.last_name && item.customer.name) {
+            const nameParts = item.customer.name.split(' ');
+            return {
+              ...item,
+              customer: {
+                ...item.customer,
+                first_name: nameParts[0] || '',
+                last_name: nameParts.slice(1).join(' ') || ''
+              }
+            };
+          }
+          return item;
+        });
+
+        setCartItems(fixedItems);
+
+        // Save the fixed items back to sessionStorage
+        if (JSON.stringify(fixedItems) !== JSON.stringify(parsedItems)) {
+          sessionStorage.setItem('cartItems', JSON.stringify(fixedItems));
+        }
       } catch (error) {
         console.error('Error parsing cart items from session storage:', error);
         // If there's an error parsing, reset the cart
@@ -369,15 +391,68 @@ const Cart = () => {
   // Handle editing an item by returning to the ticket with the specific item
   const handleEditItem = (index) => {
     const item = cartItems[index];
-    // Navigate back to CustomerTicket with the item to edit
-    navigate('/customer-ticket', {
-      state: {
-        customer,
-        editItem: item,
-        editItemIndex: index,
-        editItemType: item.transaction_type
+    const itemType = item.transaction_type || getItemTypeFromStructure(item);
+
+    // Use the Cart's customer state first, fallback to item's customer
+    let customerToPass = customer || item.customer;
+
+    // If customer doesn't have first_name and last_name but has name, try to parse it
+    if (customerToPass && !customerToPass.first_name && !customerToPass.last_name && customerToPass.name) {
+      const nameParts = customerToPass.name.split(' ');
+      customerToPass = {
+        ...customerToPass,
+        first_name: nameParts[0] || '',
+        last_name: nameParts.slice(1).join(' ') || ''
+      };
+    }
+
+    // If still no customer data, try to get from sessionStorage
+    if (!customerToPass) {
+      const savedCustomer = sessionStorage.getItem('selectedCustomer');
+      if (savedCustomer) {
+        try {
+          customerToPass = JSON.parse(savedCustomer);
+        } catch (error) {
+          console.error('[Cart] Error parsing customer from sessionStorage:', error);
+        }
       }
-    });
+    }
+
+    // Check if this is a jewelry item (from jewelry estimator)
+    if (item.category === 'Jewelry' || item.fromEstimator === 'jewelry') {
+      // Navigate to jewelry estimator for editing
+      const editItemData = {
+        free_text: item.description || '',
+        category: item.category,
+        price: item.price || item.value,
+        transaction_type: itemType,
+        notes: item.notes || '',
+        images: item.images || []
+      };
+
+      navigate('/jewel-estimator', {
+        state: {
+          customer: customerToPass,
+          editMode: true,
+          itemToEdit: editItemData,
+          returnToTicket: true,
+          ticketItemId: index // Use cart index as temporary ID
+        }
+      });
+    } else {
+      // For non-jewelry items, navigate back to CustomerTicket
+      // The item will be loaded into the appropriate tab
+      navigate('/customer-ticket', {
+        state: {
+          customer: customerToPass,
+          editItem: item,
+          editItemIndex: index,
+          editItemType: itemType,
+          buyTicketId: item.buyTicketId, // Preserve the ticket ID
+          fromCart: true
+        }
+      });
+    }
   };
 
   // Get customer image source

@@ -260,12 +260,15 @@ const CustomerTicket = () => {
   
   const estimatedItems = location.state?.estimatedItems || [];
   const from = location.state?.from || '';
-  
+
   const [activeTab, setActiveTab] = React.useState(0);
-  
+
   // State for convert dropdown menu
   const [convertMenuAnchor, setConvertMenuAnchor] = React.useState(null);
   const [convertItemId, setConvertItemId] = React.useState(null);
+
+  // Store buyTicketId when editing from cart to preserve ticket grouping
+  const [preservedBuyTicketId, setPreservedBuyTicketId] = React.useState(null);
   
   // Helper function to save ticket items in localStorage
   const saveTicketItems = (type, items) => {
@@ -599,6 +602,70 @@ const CustomerTicket = () => {
       window.history.replaceState({}, document.title);
     }
     
+    // Handle edit item coming from Cart
+    else if (location.state?.editItem && location.state?.fromCart) {
+      // Skip if we've already processed this state
+      const stateHash = JSON.stringify({ editItem: location.state.editItem, fromCart: location.state.fromCart, editItemIndex: location.state.editItemIndex });
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+
+      const editItem = location.state.editItem;
+      const editItemType = location.state.editItemType;
+      const editItemIndex = location.state.editItemIndex;
+      const buyTicketId = location.state.buyTicketId;
+
+      // Store the buyTicketId so we can use it when adding back to cart
+      if (buyTicketId) {
+        setPreservedBuyTicketId(buyTicketId);
+      }
+
+      // Load the item into the appropriate tab with a fresh ID
+      const itemWithNewId = {
+        ...editItem,
+        id: Date.now() // Use timestamp as new unique ID
+      };
+
+      switch (editItemType) {
+        case 'pawn':
+          setActiveTab(0);
+          setPawnItems([itemWithNewId]); // Replace all items with just this one
+          break;
+        case 'buy':
+          setActiveTab(1);
+          setBuyItems([itemWithNewId]);
+          break;
+        case 'trade':
+          setActiveTab(2);
+          setTradeItems([itemWithNewId]);
+          break;
+        case 'sale':
+          setActiveTab(3);
+          setSaleItems([itemWithNewId]);
+          break;
+        case 'repair':
+          setActiveTab(4);
+          setRepairItems([itemWithNewId]);
+          break;
+        case 'payment':
+          setActiveTab(5);
+          setPaymentItems([itemWithNewId]);
+          break;
+        case 'refund':
+          setActiveTab(6);
+          setRefundItems([itemWithNewId]);
+          break;
+        default:
+          console.warn('[CustomerTicket] Unknown edit item type:', editItemType);
+      }
+
+      showSnackbar('Item loaded for editing', 'info');
+
+      // Clear the location state
+      window.history.replaceState({}, document.title);
+    }
+
     // Handle items coming from CoinsBullions
     else if (location.state?.addedItems && location.state?.from === 'coinsbullions') {
       // Skip if we've already processed this state
@@ -1301,11 +1368,21 @@ const CustomerTicket = () => {
     
     // Instead of navigating, save to session storage first
     try {
-      // Generate a unique ticket ID for this batch of items with sequential 8-digit number
-      let lastTicketNumber = parseInt(localStorage.getItem('lastBuyTicketNumber') || '0');
-      lastTicketNumber += 1;
-      localStorage.setItem('lastBuyTicketNumber', lastTicketNumber.toString());
-      const buyTicketId = `BT-${lastTicketNumber.toString().padStart(8, '0')}`;
+      // Use preserved buyTicketId if editing from cart, otherwise generate new one
+      let buyTicketId;
+      const isEditingFromCart = preservedBuyTicketId !== null;
+
+      if (preservedBuyTicketId) {
+        buyTicketId = preservedBuyTicketId;
+        // Clear the preserved ID after using it
+        setPreservedBuyTicketId(null);
+      } else {
+        // Generate a unique ticket ID for this batch of items with sequential 8-digit number
+        let lastTicketNumber = parseInt(localStorage.getItem('lastBuyTicketNumber') || '0');
+        lastTicketNumber += 1;
+        localStorage.setItem('lastBuyTicketNumber', lastTicketNumber.toString());
+        buyTicketId = `BT-${lastTicketNumber.toString().padStart(8, '0')}`;
+      }
 
       // Add item type, customer, and employee data to each item
       // Using user from component scope instead of calling useAuth() here
@@ -1317,7 +1394,9 @@ const CustomerTicket = () => {
           buyTicketId: buyTicketId, // Assign the ticket ID to all items in this batch
           customer: customer ? {
             id: customer.id,
-            name: `${customer.first_name} ${customer.last_name}`,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
             email: customer.email || 'N/A'
           } : null,
@@ -1359,12 +1438,18 @@ const CustomerTicket = () => {
       // Get existing cart items from session storage
       const existingCartItems = sessionStorage.getItem('cartItems');
       let cartItems = [];
-      
+
       if (existingCartItems) {
         cartItems = JSON.parse(existingCartItems);
       }
-      
-      // Add new items to cart
+
+      // If we're editing an item (isEditingFromCart is true), replace old items with new ones
+      if (isEditingFromCart) {
+        // Remove all items with the same buyTicketId
+        cartItems = cartItems.filter(item => item.buyTicketId !== buyTicketId);
+      }
+
+      // Add new/edited items to cart
       cartItems = [...cartItems, ...itemsWithMetadata];
       
       // Save to session storage
@@ -1435,7 +1520,9 @@ const CustomerTicket = () => {
         transaction_type: 'pawn',
         customer: customer ? {
           id: customer.id,
-          name: `${customer.first_name} ${customer.last_name}`,
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
           phone: customer.phone || 'N/A',
           email: customer.email || 'N/A'
         } : null,
@@ -1455,7 +1542,9 @@ const CustomerTicket = () => {
         transaction_type: 'buy',
         customer: customer ? {
           id: customer.id,
-          name: `${customer.first_name} ${customer.last_name}`,
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
           phone: customer.phone || 'N/A',
           email: customer.email || 'N/A'
         } : null,
@@ -1475,7 +1564,9 @@ const CustomerTicket = () => {
         transaction_type: 'trade',
         customer: customer ? {
           id: customer.id,
-          name: `${customer.first_name} ${customer.last_name}`,
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
           phone: customer.phone || 'N/A',
           email: customer.email || 'N/A'
         } : null,
@@ -1495,7 +1586,9 @@ const CustomerTicket = () => {
         transaction_type: 'sale',
         customer: customer ? {
           id: customer.id,
-          name: `${customer.first_name} ${customer.last_name}`,
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
           phone: customer.phone || 'N/A',
           email: customer.email || 'N/A'
         } : null,
@@ -1515,7 +1608,9 @@ const CustomerTicket = () => {
         transaction_type: 'repair',
         customer: customer ? {
           id: customer.id,
-          name: `${customer.first_name} ${customer.last_name}`,
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
           phone: customer.phone || 'N/A',
           email: customer.email || 'N/A'
         } : null,
@@ -1535,7 +1630,9 @@ const CustomerTicket = () => {
         transaction_type: 'payment',
         customer: customer ? {
           id: customer.id,
-          name: `${customer.first_name} ${customer.last_name}`,
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
           phone: customer.phone || 'N/A',
           email: customer.email || 'N/A'
         } : null,
@@ -1555,7 +1652,9 @@ const CustomerTicket = () => {
         transaction_type: 'refund',
         customer: customer ? {
           id: customer.id,
-          name: `${customer.first_name} ${customer.last_name}`,
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
           phone: customer.phone || 'N/A',
           email: customer.email || 'N/A'
         } : null,
