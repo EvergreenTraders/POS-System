@@ -58,7 +58,7 @@ const API_BASE_URL = config.apiUrl;
 function Checkout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { cartItems, addToCart, selectedCustomer, setCustomer, clearCart } = useCart();
+  const { cartItems, addToCart, selectedCustomer, setCustomer, clearCart, removeMultipleItems } = useCart();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -177,14 +177,9 @@ function Checkout() {
         const filteredJewelryItems = items.filter(item => item.sourceEstimator === 'jewelry');
         setJewelryItems(filteredJewelryItems);
 
-        if (filteredJewelryItems.length > 0) {
-          console.log('Jewelry items from gem estimator found in checkout:', filteredJewelryItems);
-        }
-
-        // Clear cart and add items with normalized price field
-        clearCart();
-        items.forEach(item => {
-          // Normalize the price field for consistent calculations
+        // Normalize price field for items without clearing/re-adding to cart
+        // Since items are already in the cart context, we just need to set them for checkout
+        const normalizedItems = items.map(item => {
           const normalizedItem = { ...item };
           if (normalizedItem.price === undefined) {
             if (normalizedItem.value !== undefined) normalizedItem.price = normalizedItem.value;
@@ -192,11 +187,11 @@ function Checkout() {
             else if (normalizedItem.amount !== undefined) normalizedItem.price = normalizedItem.amount;
             else normalizedItem.price = 0;
           }
-          addToCart(normalizedItem);
+          return normalizedItem;
         });
 
         // Set the checkout items, ensuring jewelry items retain all fields
-        setCheckoutItems(items);
+        setCheckoutItems(normalizedItems);
         setAllCartItems(allCartItemsData || items);
 
         // Set the customer if provided
@@ -296,8 +291,8 @@ function Checkout() {
   }, [selectedCustomer, setCustomer]);
 
   const calculateSubtotal = useCallback(() => {
-    // Use checkoutItems instead of cartItems to avoid double counting
-    // checkoutItems contains only the items selected for checkout
+    // Always use checkoutItems if available, as it contains the items selected for checkout
+    // Only fall back to cartItems if checkoutItems is empty (e.g., coming from estimator)
     const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
     return itemsToCalculate.reduce((total, item) => {
       let itemValue = 0;
@@ -545,7 +540,7 @@ function Checkout() {
       // Check if payment is complete
       const isPaid = newRemainingAmount == 0;
       setIsFullyPaid(isPaid);
-      
+
       if (isPaid) {
         // Only create database records when payment is fully completed
         // This ensures we don't save to jewelry database unless payments and transactions succeed
@@ -557,7 +552,8 @@ function Checkout() {
 
         try {
           // Check if items are jewelry items (have jewelry-specific fields or sourceEstimator flag)
-          const hasJewelryItems = cartItems.some(item =>
+          // Use checkoutItems instead of cartItems to only process items being checked out
+          const hasJewelryItems = checkoutItems.some(item =>
             item.sourceEstimator === 'jewelry' ||
             item.metal_weight ||
             item.metal_purity ||
@@ -580,7 +576,7 @@ function Checkout() {
             // Push data to jewelry_secondary_gems for items converted from quotes
             for (const item of createdJewelryItems) {
               // Find matching cart item to get secondary gem data
-              const originalItem = cartItems.find(cartItem => 
+              const originalItem = checkoutItems.find(cartItem =>
                 cartItem.item_id && cartItem.item_id.startsWith(quoteId));
               
                 try {
@@ -637,7 +633,7 @@ function Checkout() {
             // If coming from estimator, create new jewelry items (only if we have jewelry items)
 
             // Check if any items have actual file objects (not just blob URLs)
-            const hasImageFiles = cartItems.some(item =>
+            const hasImageFiles = checkoutItems.some(item =>
               item.images && Array.isArray(item.images) &&
               item.images.some(img => img.file instanceof File)
             );
@@ -652,7 +648,7 @@ function Checkout() {
 
               // Collect all image files from all items and track their metadata
               const imageMetadata = [];
-              cartItems.forEach((item, itemIndex) => {
+              checkoutItems.forEach((item, itemIndex) => {
                 if (item.images && Array.isArray(item.images)) {
                   item.images.forEach((img, imgIndex) => {
                     if (img.file instanceof File) {
@@ -669,7 +665,7 @@ function Checkout() {
               });
 
               // Process cart items to remove file objects but keep image metadata
-              const processedItems = cartItems.map(item => {
+              const processedItems = checkoutItems.map(item => {
                 const { images, ...itemWithoutImages } = item;
 
                 // Keep image metadata (isPrimary flag) but remove file objects
@@ -718,7 +714,7 @@ function Checkout() {
               );
             } else {
               // No files, use regular JSON approach (for backward compatibility)
-              const processedItems = cartItems.map(item => {
+              const processedItems = checkoutItems.map(item => {
                 const { images, ...itemWithoutImages } = item;
 
                 let processedImages = [];
@@ -840,16 +836,16 @@ function Checkout() {
           // Only add cartItems if we have jewelry items (which need item_id linking)
           if (createdJewelryItems && createdJewelryItems.length > 0) {
             transactionPayload.cartItems = createdJewelryItems.map((item, index) => {
-              const type = cartItems[index].transaction_type.toLowerCase();
+              const type = checkoutItems[index].transaction_type.toLowerCase();
               return {
                 item_id: item.item_id,
                 transaction_type_id: transactionTypes[type],
-                price: cartItems[index].price
+                price: checkoutItems[index].price
               };
             });
           } else {
             // For non-jewelry items from CustomerTicket, just send transaction type and price
-            transactionPayload.cartItems = cartItems.map(item => {
+            transactionPayload.cartItems = checkoutItems.map(item => {
               const type = item.transaction_type.toLowerCase();
               return {
                 transaction_type_id: transactionTypes[type],
@@ -885,11 +881,18 @@ function Checkout() {
           }
 
           // Step 4: Update transaction status to COMPLETED after all payments succeed
-          await axios.put(
-            `${config.apiUrl}/transactions/${realTransactionId}`,
-            { transaction_status: 'COMPLETED' },
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
+          try {
+            await axios.put(
+              `${config.apiUrl}/transactions/${realTransactionId}`,
+              { transaction_status: 'COMPLETED' },
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+          } catch (statusUpdateError) {
+            console.error('Error updating transaction status:', statusUpdateError);
+            console.error('Error details:', statusUpdateError.response?.data);
+            // Continue with cart removal even if status update fails
+            // The transaction and payments are already recorded
+          }
 
           // Step 5: Display success message and navigate to home
           setLoading(false);
@@ -899,10 +902,49 @@ function Checkout() {
             severity: 'success'
           });
 
-          // Navigate to jewel estimator, then clear cart
-          // This prevents the useEffect redirect from interfering
+          // Remove only the checked out items from cart, keeping other items
+          // This allows multiple tickets to be managed independently
           setTimeout(() => {
-            clearCart();
+            try {
+              // Read current cart items from sessionStorage to get the most up-to-date state
+              const sessionCartItems = sessionStorage.getItem('cartItems');
+              let currentCartItems = [];
+
+              if (sessionCartItems) {
+                currentCartItems = JSON.parse(sessionCartItems);
+              }
+
+              // Create a set of ticket IDs from checkoutItems for efficient lookup
+              const checkedOutTicketIds = new Set(
+                checkoutItems
+                  .filter(item => item.buyTicketId)
+                  .map(item => item.buyTicketId)
+              );
+
+
+              // Filter out all items that belong to the checked out tickets
+              const remainingItems = currentCartItems.filter(item => {
+                // If item has a buyTicketId and it matches one of the checked out tickets, remove it
+                if (item.buyTicketId && checkedOutTicketIds.has(item.buyTicketId)) {
+                  return false;
+                }
+
+                return true;
+              });
+
+              // Update sessionStorage directly to ensure persistence
+              sessionStorage.setItem('cartItems', JSON.stringify(remainingItems));
+
+              // If all items were checked out, clear the cart entirely
+              if (remainingItems.length === 0) {
+                clearCart();
+              }
+            } catch (error) {
+              console.error('Error removing checked out items from cart:', error);
+              // Fallback to clearing everything on error
+              clearCart();
+            }
+
             setTransactionCreated(false);
             setCurrentTransactionId(null);
             setPayments([]);
@@ -1164,57 +1206,8 @@ function Checkout() {
     }  
   };
 
-  // Set customer info and cart items from quote or cart
-  useEffect(() => {    
-    if (!isInitialized) {
-      // Handle items from cart
-      if (location.state?.items && location.state?.from === 'cart') {        
-        setCheckoutItems(location.state.items);
-        
-        // Add each item individually to the cart
-        if (Array.isArray(location.state.items)) {
-          location.state.items.forEach(item => addToCart(item));
-        }
-        
-        // Get customer from state if available
-        if (location.state.customer) {
-          setCustomer(location.state.customer);
-        }
-        
-        setIsInitialized(true);
-      }
-      // Handle items from estimator
-      else if (location.state?.items && location.state?.from === 'jewelry') {
-        setCheckoutItems(location.state.items);
-        
-        // Add each item individually to the cart if not already added
-        if (Array.isArray(location.state.items) && cartItems.length === 0) {
-          location.state.items.forEach(item => addToCart(item));
-        }
-        
-        // Get customer from state if available
-        if (location.state.customer) {
-          setCustomer(location.state.customer);
-        }
-        setIsInitialized(true);
-      }
-      // Handle items from quote
-      else if (location.state?.items && location.state?.customerName) {        
-        // Set the customer info
-        const customer = {
-          name: location.state.customerName,
-          email: location.state.customerEmail || '',
-          phone: location.state.customerPhone || '',
-          id: null // For quotes, we don't have a customer ID
-        };
-        setCustomer(customer);
-
-        // Set the cart items
-        addToCart(location.state.items);
-        setIsInitialized(true);
-      }
-    }
-  }, [location.state, setCustomer, addToCart, isInitialized]);
+  // This useEffect is now redundant - all initialization logic is handled in the first useEffect (lines 108-210)
+  // Keeping this comment for reference but the logic has been consolidated
 
   // Only redirect if we have no data after initialization
   useEffect(() => {

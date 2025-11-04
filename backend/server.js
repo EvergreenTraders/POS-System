@@ -3286,7 +3286,8 @@ app.put('/api/transactions/:transaction_id', async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Transaction not found' });
     }
-    await client.query('COMMIT');    
+    await client.query('COMMIT');
+    res.json({ message: 'Transaction updated successfully', transaction: result.rows[0] });
 
   } catch (err) {
     await client.query('ROLLBACK');
