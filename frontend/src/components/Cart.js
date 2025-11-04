@@ -80,13 +80,15 @@ function Cart({ open, onClose }) {
   };
 
   // Get item value
+  // Money going OUT (buy/pawn) = negative values
+  // Money coming IN (sale) = positive values
   const getItemValue = (item, type) => {
     switch (type) {
-      case 'pawn': return parseFloat(item.value || 0);
-      case 'buy': return parseFloat(item.price || 0);
-      case 'sale': return parseFloat(item.price || 0);
+      case 'pawn': return -parseFloat(item.value || 0); // Money going out (negative)
+      case 'buy': return -parseFloat(item.price || 0); // Money going out (negative)
+      case 'sale': return parseFloat(item.price || 0); // Money coming in (positive)
       case 'trade': return parseFloat(item.priceDiff || 0);
-      case 'repair': return parseFloat(item.fee || 0);
+      case 'repair': return parseFloat(item.fee || 0); // Money coming in (positive)
       case 'payment': return parseFloat(item.amount || 0);
       default: return 0;
     }

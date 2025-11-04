@@ -296,27 +296,68 @@ function Checkout() {
     const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
     return itemsToCalculate.reduce((total, item) => {
       let itemValue = 0;
+      const transactionType = item.transaction_type?.toLowerCase() || '';
+
       if (item.price !== undefined) itemValue = parseFloat(item.price);
       else if (item.value !== undefined) itemValue = parseFloat(item.value);
       else if (item.fee !== undefined) itemValue = parseFloat(item.fee);
       else if (item.amount !== undefined) itemValue = parseFloat(item.amount);
+
+      // Apply sign based on transaction type
+      // Money going OUT (buy/pawn) = negative values
+      // Money coming IN (sale/repair) = positive values
+      if (transactionType === 'buy' || transactionType === 'pawn') {
+        itemValue = -Math.abs(itemValue);
+      } else {
+        itemValue = Math.abs(itemValue);
+      }
+
       return total + itemValue;
     }, 0);
   }, [checkoutItems, cartItems]);
 
   const calculateProtectionPlan = useCallback(() => {
     if (!protectionPlanEnabled) return 0;
-    return calculateSubtotal() * PROTECTION_PLAN_RATE;
-  }, [protectionPlanEnabled, calculateSubtotal]);
+    // Protection plan only applies to sales (positive values)
+    // Calculate based only on items where money is coming in
+    const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
+    const salesSubtotal = itemsToCalculate.reduce((total, item) => {
+      const transactionType = item.transaction_type?.toLowerCase() || '';
+      // Only include sale/repair transactions
+      if (transactionType === 'sale' || transactionType === 'repair') {
+        let itemValue = 0;
+        if (item.price !== undefined) itemValue = parseFloat(item.price);
+        else if (item.value !== undefined) itemValue = parseFloat(item.value);
+        else if (item.fee !== undefined) itemValue = parseFloat(item.fee);
+        return total + Math.abs(itemValue);
+      }
+      return total;
+    }, 0);
+    return salesSubtotal * PROTECTION_PLAN_RATE;
+  }, [protectionPlanEnabled, checkoutItems, cartItems]);
 
   const calculateTax = useCallback(() => {
     // Check if customer is tax exempt
     if (selectedCustomer?.tax_exempt) {
       return 0;
     }
-    const subtotalWithProtection = calculateSubtotal() + calculateProtectionPlan();
+    // Tax only applies to sales (positive values)
+    const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
+    const salesSubtotal = itemsToCalculate.reduce((total, item) => {
+      const transactionType = item.transaction_type?.toLowerCase() || '';
+      // Only include sale/repair transactions
+      if (transactionType === 'sale' || transactionType === 'repair') {
+        let itemValue = 0;
+        if (item.price !== undefined) itemValue = parseFloat(item.price);
+        else if (item.value !== undefined) itemValue = parseFloat(item.value);
+        else if (item.fee !== undefined) itemValue = parseFloat(item.fee);
+        return total + Math.abs(itemValue);
+      }
+      return total;
+    }, 0);
+    const subtotalWithProtection = salesSubtotal + calculateProtectionPlan();
     return subtotalWithProtection * taxRate;
-  }, [selectedCustomer, taxRate, calculateSubtotal, calculateProtectionPlan]);
+  }, [selectedCustomer, taxRate, checkoutItems, cartItems, calculateProtectionPlan]);
 
   const calculateTotal = useCallback(() => {
     const total = calculateSubtotal() + calculateProtectionPlan() + calculateTax();
@@ -1532,7 +1573,17 @@ function Checkout() {
                       else if (item.value !== undefined) price = item.value;
                       else if (item.fee !== undefined) price = item.fee;
                       else if (item.amount !== undefined) price = item.amount;
-                      
+
+                      // Apply sign based on transaction type
+                      // Money going OUT (buy/pawn) = negative values
+                      // Money coming IN (sale/repair/other) = positive values
+                      const itemTransactionType = (item.transaction_type || item.transactionType || '').toLowerCase();
+                      if (itemTransactionType === 'buy' || itemTransactionType === 'pawn') {
+                        price = -Math.abs(price);
+                      } else {
+                        price = Math.abs(price);
+                      }
+
                       return (
                         <TableRow key={index}>
                           <TableCell>
@@ -1561,7 +1612,10 @@ function Checkout() {
                             </Box>
                           </TableCell>
                           <TableCell>{transactionType}</TableCell>
-                          <TableCell align="right">
+                          <TableCell align="right" sx={{
+                            color: price < 0 ? 'error.main' : 'success.main',
+                            fontWeight: 'bold'
+                          }}>
                             ${parseFloat(price).toFixed(2)}
                           </TableCell>
                         </TableRow>
