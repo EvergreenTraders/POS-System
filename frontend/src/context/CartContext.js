@@ -129,6 +129,34 @@ export function CartProvider({ children }) {
     setSelectedCustomer(null);
   };
 
+  const removeMultipleItems = (itemsToRemove) => {
+    setCartItems(prevItems => {
+      // Create a set of unique identifiers from items to remove
+      // Use buyTicketId and originalIndex or a combination of identifying fields
+      const itemsToRemoveIdentifiers = new Set(
+        itemsToRemove.map(item => {
+          // Create a unique identifier based on multiple fields
+          if (item.buyTicketId && item.originalIndex !== undefined) {
+            return `${item.buyTicketId}-${item.originalIndex}`;
+          }
+          // Fallback to comparing key fields
+          return `${item.description || ''}-${item.price || item.value || 0}-${item.transaction_type || ''}-${item.customer?.id || ''}`;
+        })
+      );
+
+      // Filter out items that match
+      return prevItems.filter((item, index) => {
+        let identifier;
+        if (item.buyTicketId && item.originalIndex !== undefined) {
+          identifier = `${item.buyTicketId}-${item.originalIndex}`;
+        } else {
+          identifier = `${item.description || ''}-${item.price || item.value || 0}-${item.transaction_type || ''}-${item.customer?.id || ''}`;
+        }
+        return !itemsToRemoveIdentifiers.has(identifier);
+      });
+    });
+  };
+
   return (
     <CartContext.Provider value={{
       cartItems,
@@ -140,6 +168,7 @@ export function CartProvider({ children }) {
       setCustomer,
       clearCustomer,
       clearCart,
+      removeMultipleItems,
     }}>
       {children}
     </CartContext.Provider>
