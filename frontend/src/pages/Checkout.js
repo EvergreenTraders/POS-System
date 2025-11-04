@@ -296,7 +296,10 @@ function Checkout() {
   }, [selectedCustomer, setCustomer]);
 
   const calculateSubtotal = useCallback(() => {
-    return cartItems.reduce((total, item) => {
+    // Use checkoutItems instead of cartItems to avoid double counting
+    // checkoutItems contains only the items selected for checkout
+    const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
+    return itemsToCalculate.reduce((total, item) => {
       let itemValue = 0;
       if (item.price !== undefined) itemValue = parseFloat(item.price);
       else if (item.value !== undefined) itemValue = parseFloat(item.value);
@@ -304,7 +307,7 @@ function Checkout() {
       else if (item.amount !== undefined) itemValue = parseFloat(item.amount);
       return total + itemValue;
     }, 0);
-  }, [cartItems]);
+  }, [checkoutItems, cartItems]);
 
   const calculateProtectionPlan = useCallback(() => {
     if (!protectionPlanEnabled) return 0;
