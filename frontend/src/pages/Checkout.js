@@ -1012,9 +1012,10 @@ function Checkout() {
         }
       } else {
         // Show partial payment message
+        const balanceLabel = newRemainingAmount >= 0 ? 'Balance Receivable' : 'Balance Payable';
         setSnackbar({
           open: true,
-          message: `Payment of $${paymentAmount} accepted. Remaining: $${newRemainingAmount}`,
+          message: `Payment of $${paymentAmount} accepted. ${balanceLabel}: $${Math.abs(newRemainingAmount).toFixed(2)}`,
           severity: 'info'
         });
       }
@@ -1694,8 +1695,10 @@ function Checkout() {
                    location.state?.from === 'coinsbullions' ? 'Bullion Est.' : 'Jewelry Est.'}
                 </Button>
               </Box>
-              <Typography variant="h6" color="primary" gutterBottom>
-                Remaining: ${remainingAmount.toFixed(2)}
+              <Typography variant="h6" gutterBottom sx={{
+                color: remainingAmount >= 0 ? 'success.main' : 'error.main'
+              }}>
+                {remainingAmount >= 0 ? 'Balance Receivable' : 'Balance Payable'}: ${Math.abs(remainingAmount).toFixed(2)}
               </Typography>
               <FormControl component="fieldset" sx={{ mb: 2 }}>
                 <RadioGroup
