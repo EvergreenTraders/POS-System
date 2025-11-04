@@ -18,6 +18,9 @@ import {
   FormControlLabel,
   Radio,
   RadioGroup,
+  Select,
+  MenuItem,
+  InputLabel,
   Table,
   Dialog,
   DialogTitle,
@@ -367,11 +370,7 @@ function Checkout() {
 
   const handlePaymentMethodChange = (event) => {
     setPaymentMethod(event.target.value);
-    // Reset cash amount when switching payment methods
-    setPaymentDetails({
-      ...paymentDetails,
-      cashAmount: ''
-    });
+    // Keep the payment amount when switching payment methods
   };
 
   const handleInputChange = (field) => (event) => {
@@ -446,6 +445,17 @@ function Checkout() {
   useEffect(() => {
     if (checkoutItems.length > 0 && !transactionCreated) {
       setRemainingAmount(calculateTotal());
+    }
+  }, [checkoutItems, transactionCreated, calculateTotal]);
+
+  // Set default payment method based on balance type
+  // Cash for payables (negative balance), Debit for receivables (positive balance)
+  useEffect(() => {
+    if (checkoutItems.length > 0 && !transactionCreated) {
+      const total = calculateTotal();
+      // If balance is negative (payable), default to cash
+      // If balance is positive (receivable), default to debit
+      setPaymentMethod(total < 0 ? 'cash' : 'debit');
     }
   }, [checkoutItems, transactionCreated, calculateTotal]);
 
@@ -1020,11 +1030,11 @@ function Checkout() {
         });
       }
 
-      // Reset payment form but keep card number if using card
+      // Reset payment form but keep card number if using debit or credit card
       setPaymentDetails({
         ...paymentDetails,
         cashAmount: '',
-        cardNumber: paymentMethod === 'credit_card' ? paymentDetails.cardNumber : ''
+        cardNumber: (paymentMethod === 'debit' || paymentMethod === 'credit') ? paymentDetails.cardNumber : ''
       });
     } catch (error) {
       if (error.message === 'Authentication token not found') {
@@ -1700,51 +1710,42 @@ function Checkout() {
               }}>
                 {remainingAmount >= 0 ? 'Balance Receivable' : 'Balance Payable'}: ${Math.abs(remainingAmount).toFixed(2)}
               </Typography>
-              <FormControl component="fieldset" sx={{ mb: 2 }}>
-                <RadioGroup
+
+              {/* Amount field first */}
+              <TextField
+                fullWidth
+                label="Payment Amount"
+                type="number"
+                value={paymentDetails.cashAmount}
+                onChange={handleInputChange('cashAmount')}
+                sx={{ mb: 2 }}
+              />
+
+              {/* Payment method selection */}
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel id="payment-method-label">Payment Method</InputLabel>
+                <Select
+                  labelId="payment-method-label"
+                  id="payment-method-select"
                   value={paymentMethod}
+                  label="Payment Method"
                   onChange={handlePaymentMethodChange}
                 >
-                  <FormControlLabel
-                    value="cash"
-                    control={<Radio />}
-                    label="Cash"
-                  />
-                  <FormControlLabel
-                    value="credit_card"
-                    control={<Radio />}
-                    label="Credit/Debit Card"
-                  />
-                </RadioGroup>
+                  <MenuItem value="cash">Cash</MenuItem>
+                  <MenuItem value="debit">Debit Card</MenuItem>
+                  <MenuItem value="credit">Credit Card</MenuItem>
+                </Select>
               </FormControl>
 
-              {paymentMethod === 'cash' ? (
+              {/* Card number field for debit or credit card */}
+              {(paymentMethod === 'debit' || paymentMethod === 'credit') && (
                 <TextField
                   fullWidth
-                  label="Cash Amount"
-                  type="number"
-                  value={paymentDetails.cashAmount}
-                  onChange={handleInputChange('cashAmount')}
+                  label="Card Number"
+                  value={paymentDetails.cardNumber}
+                  onChange={handleInputChange('cardNumber')}
                   sx={{ mb: 2 }}
                 />
-              ) : (
-                <>
-                  <TextField
-                    fullWidth
-                    label="Card Number"
-                    value={paymentDetails.cardNumber}
-                    onChange={handleInputChange('cardNumber')}
-                    sx={{ mb: 2 }}
-                  />
-                  <TextField
-                    fullWidth
-                    label="Amount"
-                    type="number"
-                    value={paymentDetails.cashAmount}
-                    onChange={handleInputChange('cashAmount')}
-                    sx={{ mb: 2 }}
-                  />
-                </>
               )}
               {/* Action Buttons */}
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
@@ -1770,16 +1771,23 @@ function Checkout() {
               {payments.length > 0 && (
                 <Box sx={{ mt: 4 }}>
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                    {payments.map((payment, index) => (
-                      <Chip
-                        key={index}
-                        icon={payment.method === 'cash' ? <AttachMoneyIcon /> : <CreditCardIcon />}
-                        label={`${payment.method === 'cash' ? 'Cash' : 'Credit Card'} $${parseFloat(payment.amount).toFixed(2)}`}
-                        color={payment.method === 'cash' ? 'success' : 'primary'}
-                        variant="outlined"
-                        sx={{ paddingY: 2.5, paddingX: 0.5, fontSize: '0.9rem' }}
-                      />
-                    ))}
+                    {payments.map((payment, index) => {
+                      const isCash = payment.method === 'cash';
+                      const methodLabel = payment.method === 'cash' ? 'Cash' :
+                                         payment.method === 'debit' ? 'Debit Card' :
+                                         payment.method === 'credit' ? 'Credit Card' : 'Card';
+
+                      return (
+                        <Chip
+                          key={index}
+                          icon={isCash ? <AttachMoneyIcon /> : <CreditCardIcon />}
+                          label={`${methodLabel} $${parseFloat(payment.amount).toFixed(2)}`}
+                          color={isCash ? 'success' : payment.method === 'debit' ? 'info' : 'primary'}
+                          variant="outlined"
+                          sx={{ paddingY: 2.5, paddingX: 0.5, fontSize: '0.9rem' }}
+                        />
+                      );
+                    })}
                   </Box>
                 </Box>
               )}
