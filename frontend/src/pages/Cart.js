@@ -56,8 +56,13 @@ const Cart = () => {
   // State for cart items, customer data
   const [cartItems, setCartItems] = useState([]);
   const [customerFilter, setCustomerFilter] = useState('all');
+  const [employeeFilter, setEmployeeFilter] = useState(() => {
+    // Auto-select current logged-in employee by default
+    return user ? user.id : 'all';
+  });
   const [filteredItems, setFilteredItems] = useState([]);
   const [uniqueCustomers, setUniqueCustomers] = useState([]);
+  const [uniqueEmployees, setUniqueEmployees] = useState([]);
   const [selectedItems, setSelectedItems] = useState([]); // Now stores ticket IDs instead of item indices
   const [selectedTickets, setSelectedTickets] = useState([]); // Store selected ticket IDs
   const [confirmDialog, setConfirmDialog] = useState({
@@ -87,7 +92,29 @@ const Cart = () => {
     if (savedCartItems) {
       try {
         const parsedItems = JSON.parse(savedCartItems);
-        setCartItems(parsedItems);
+
+        // Fix customer data for items that don't have first_name and last_name
+        const fixedItems = parsedItems.map(item => {
+          if (item.customer && !item.customer.first_name && !item.customer.last_name && item.customer.name) {
+            const nameParts = item.customer.name.split(' ');
+            return {
+              ...item,
+              customer: {
+                ...item.customer,
+                first_name: nameParts[0] || '',
+                last_name: nameParts.slice(1).join(' ') || ''
+              }
+            };
+          }
+          return item;
+        });
+
+        setCartItems(fixedItems);
+
+        // Save the fixed items back to sessionStorage
+        if (JSON.stringify(fixedItems) !== JSON.stringify(parsedItems)) {
+          sessionStorage.setItem('cartItems', JSON.stringify(fixedItems));
+        }
       } catch (error) {
         console.error('Error parsing cart items from session storage:', error);
         // If there's an error parsing, reset the cart
@@ -97,7 +124,7 @@ const Cart = () => {
     }
   }, []);
 
-  // Extract unique customers from cart items
+  // Extract unique customers and employees from cart items
   useEffect(() => {
     if (cartItems.length > 0) {
       // Get unique customers
@@ -113,10 +140,26 @@ const Cart = () => {
           }
         }
       });
-      
+
+      // Get unique employees
+      const employeesSet = new Set();
+      const employees = [];
+      cartItems.forEach(item => {
+        if (item.employee && item.employee.name) {
+          // Use employee ID or name as unique identifier
+          const employeeId = item.employee.id || item.employee.name;
+          if (!employeesSet.has(employeeId)) {
+            employeesSet.add(employeeId);
+            employees.push(item.employee);
+          }
+        }
+      });
+
       setUniqueCustomers(customers);
+      setUniqueEmployees(employees);
     } else {
       setUniqueCustomers([]);
+      setUniqueEmployees([]);
     }
   }, [cartItems]);
 
@@ -133,26 +176,63 @@ const Cart = () => {
     setGroupedByTicket(grouped);
   }, [cartItems]);
 
-  // Filter cart items based on selected customer
+  // Auto-select tickets belonging to the current customer by default
   useEffect(() => {
-    if (customerFilter === 'all') {
-      setFilteredItems(cartItems);
-    } else {
-      const filtered = cartItems.filter(item =>
+    if (Object.keys(groupedByTicket).length > 0 && customer) {
+      // Find all ticket IDs that belong to the current customer
+      const customerTicketIds = Object.entries(groupedByTicket)
+        .filter(([ticketId, ticketItems]) => {
+          // Check if any items in this ticket belong to the current customer
+          return ticketItems.some(item =>
+            item.customer &&
+            (item.customer.id === customer.id || item.customer.name === `${customer.first_name} ${customer.last_name}`)
+          );
+        })
+        .map(([ticketId]) => ticketId);
+
+      setSelectedTickets(customerTicketIds);
+    } else if (Object.keys(groupedByTicket).length > 0 && !customer) {
+      // If no specific customer, select all tickets by default
+      const allTicketIds = Object.keys(groupedByTicket);
+      setSelectedTickets(allTicketIds);
+    }
+  }, [groupedByTicket, customer]);
+
+  // Filter cart items based on selected customer and employee
+  useEffect(() => {
+    let filtered = cartItems;
+
+    // Filter by customer
+    if (customerFilter !== 'all') {
+      filtered = filtered.filter(item =>
         item.customer &&
         (item.customer.id === customerFilter || item.customer.name === customerFilter)
       );
-      setFilteredItems(filtered);
     }
+
+    // Filter by employee
+    if (employeeFilter !== 'all') {
+      filtered = filtered.filter(item => {
+        return item.employee &&
+          (item.employee.id === employeeFilter || item.employee.name === employeeFilter);
+      });
+    }
+
+    setFilteredItems(filtered);
 
     // Reset selected items when filter changes
     setSelectedItems([]);
     setSelectedTickets([]);
-  }, [cartItems, customerFilter]);
+  }, [cartItems, customerFilter, employeeFilter, user]);
 
   // Handle customer filter change
   const handleCustomerFilterChange = (e) => {
     setCustomerFilter(e.target.value);
+  };
+
+  // Handle employee filter change
+  const handleEmployeeFilterChange = (e) => {
+    setEmployeeFilter(e.target.value);
   };
   
   // Handle ticket selection toggle
@@ -311,15 +391,68 @@ const Cart = () => {
   // Handle editing an item by returning to the ticket with the specific item
   const handleEditItem = (index) => {
     const item = cartItems[index];
-    // Navigate back to CustomerTicket with the item to edit
-    navigate('/customer-ticket', {
-      state: {
-        customer,
-        editItem: item,
-        editItemIndex: index,
-        editItemType: item.transaction_type
+    const itemType = item.transaction_type || getItemTypeFromStructure(item);
+
+    // Use the Cart's customer state first, fallback to item's customer
+    let customerToPass = customer || item.customer;
+
+    // If customer doesn't have first_name and last_name but has name, try to parse it
+    if (customerToPass && !customerToPass.first_name && !customerToPass.last_name && customerToPass.name) {
+      const nameParts = customerToPass.name.split(' ');
+      customerToPass = {
+        ...customerToPass,
+        first_name: nameParts[0] || '',
+        last_name: nameParts.slice(1).join(' ') || ''
+      };
+    }
+
+    // If still no customer data, try to get from sessionStorage
+    if (!customerToPass) {
+      const savedCustomer = sessionStorage.getItem('selectedCustomer');
+      if (savedCustomer) {
+        try {
+          customerToPass = JSON.parse(savedCustomer);
+        } catch (error) {
+          console.error('[Cart] Error parsing customer from sessionStorage:', error);
+        }
       }
-    });
+    }
+
+    // Check if this is a jewelry item (from jewelry estimator)
+    if (item.category === 'Jewelry' || item.fromEstimator === 'jewelry') {
+      // Navigate to jewelry estimator for editing
+      const editItemData = {
+        free_text: item.description || '',
+        category: item.category,
+        price: item.price || item.value,
+        transaction_type: itemType,
+        notes: item.notes || '',
+        images: item.images || []
+      };
+
+      navigate('/jewel-estimator', {
+        state: {
+          customer: customerToPass,
+          editMode: true,
+          itemToEdit: editItemData,
+          returnToTicket: true,
+          ticketItemId: index // Use cart index as temporary ID
+        }
+      });
+    } else {
+      // For non-jewelry items, navigate back to CustomerTicket
+      // The item will be loaded into the appropriate tab
+      navigate('/customer-ticket', {
+        state: {
+          customer: customerToPass,
+          editItem: item,
+          editItemIndex: index,
+          editItemType: itemType,
+          buyTicketId: item.buyTicketId, // Preserve the ticket ID
+          fromCart: true
+        }
+      });
+    }
   };
 
   // Get customer image source
@@ -452,21 +585,104 @@ const Cart = () => {
 
         {Object.keys(groupedByTicket).length > 0 ? (
           <Box sx={{ mb: 3 }}>
-            {/* Select All Checkbox */}
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
-              <Checkbox
-                indeterminate={selectedTickets.length > 0 && !isAllSelected}
-                checked={isAllSelected}
-                onChange={handleSelectAll}
-              />
-              <Typography variant="body2" fontWeight="bold">
-                Select All Tickets
-              </Typography>
+            {/* Filters and Select All - Same Row */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+              {/* Left Side - Select All Checkbox */}
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Checkbox
+                  indeterminate={selectedTickets.length > 0 && !isAllSelected}
+                  checked={isAllSelected}
+                  onChange={handleSelectAll}
+                />
+                <Typography variant="body2" fontWeight="bold">
+                  Select All Tickets
+                </Typography>
+              </Box>
+
+              {/* Right Side - Filters */}
+              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                {/* Customer Filter */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 200 }}>
+                  <Typography variant="body2" fontWeight="bold">
+                    Customer
+                  </Typography>
+                  <FilterListIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                  <Select
+                    value={customerFilter}
+                    onChange={handleCustomerFilterChange}
+                    size="small"
+                    variant="standard"
+                    sx={{
+                      minWidth: 120,
+                      '& .MuiSelect-select': {
+                        py: 0.5
+                      }
+                    }}
+                  >
+                    <MenuItem value="all">All Customers</MenuItem>
+                    {uniqueCustomers.map((customer) => (
+                      <MenuItem
+                        key={customer.id || customer.name}
+                        value={customer.id || customer.name}
+                      >
+                        {customer.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </Box>
+
+                {/* Employee Filter */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 200 }}>
+                  <Typography variant="body2" fontWeight="bold">
+                    Employee
+                  </Typography>
+                  <FilterListIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+                  <Select
+                    value={employeeFilter}
+                    onChange={handleEmployeeFilterChange}
+                    size="small"
+                    variant="standard"
+                    sx={{
+                      minWidth: 120,
+                      '& .MuiSelect-select': {
+                        py: 0.5
+                      }
+                    }}
+                  >
+                    <MenuItem value="all">All Employees</MenuItem>
+                    {uniqueEmployees.map((employee) => (
+                      <MenuItem
+                        key={employee.id || employee.name}
+                        value={employee.id || employee.name}
+                      >
+                        {employee.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </Box>
+              </Box>
             </Box>
 
-            {/* Render each ticket */}
-            {Object.entries(groupedByTicket).map(([ticketId, ticketItems]) => {
-              const ticketTotal = ticketItems.reduce((sum, item) =>
+            {/* Render each ticket - Only show tickets with filtered items */}
+            {Object.entries(groupedByTicket)
+              .filter(([ticketId, ticketItems]) => {
+                // Check if this ticket has any items in the filteredItems
+                // Compare by originalIndex which is the position in cartItems array
+                return ticketItems.some(item =>
+                  filteredItems.some(filteredItem =>
+                    cartItems.indexOf(filteredItem) === item.originalIndex
+                  )
+                );
+              })
+              .map(([ticketId, ticketItems]) => {
+              // Filter ticket items to only show those that pass the filter
+              const filteredTicketItems = ticketItems.filter(item =>
+                filteredItems.some(filteredItem =>
+                  cartItems.indexOf(filteredItem) === item.originalIndex
+                )
+              );
+
+              const ticketTotal = filteredTicketItems.reduce((sum, item) =>
                 sum + getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)), 0
               );
               const isTicketSelected = selectedTickets.includes(ticketId);
@@ -502,7 +718,7 @@ const Cart = () => {
                         Ticket ID: {ticketId}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {ticketItems.length} item{ticketItems.length !== 1 ? 's' : ''} • Total: {formatCurrency(ticketTotal)}
+                        {filteredTicketItems.length} item{filteredTicketItems.length !== 1 ? 's' : ''} • Total: {formatCurrency(ticketTotal)}
                       </Typography>
                     </Box>
                   </Box>
@@ -520,7 +736,7 @@ const Cart = () => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {ticketItems.map((item, itemIndex) => (
+                      {filteredTicketItems.map((item, itemIndex) => (
                         <TableRow key={itemIndex} hover>
                           <TableCell>
                             <Chip
