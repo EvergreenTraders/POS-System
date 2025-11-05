@@ -28,7 +28,8 @@ import {
   CircularProgress,
   List,
   ListItem,
-  ListItemText
+  ListItemText,
+  Tooltip
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search';
@@ -37,6 +38,7 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import axios from 'axios';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
@@ -151,7 +153,8 @@ const Scrap = () => {
         // Wait for all requests to complete
         const items = await Promise.all(itemPromises);
         // Filter out any null values from failed requests
-        setBucketItems(items.filter(item => item !== null));
+        const validItems = items.filter(item => item !== null);
+        setBucketItems(validItems);
       } else {
         // If no items, set empty array
         setBucketItems([]);
@@ -175,37 +178,21 @@ const Scrap = () => {
   useEffect(() => {
     const initialize = async () => {
       const buckets = await fetchScrapBuckets();
-      
-      // Find and select 'Gold scrap' bucket by default
+
+      // Select the first bucket by default (most recently created)
       if (buckets && buckets.length > 0) {
-        const goldBucket = buckets.find(bucket => 
-          bucket.bucket_name && bucket.bucket_name.toLowerCase().includes('gold')
-        );
-        
-        if (goldBucket) {
-          handleBucketSelect(goldBucket);
-        } else if (buckets.length > 0) {
-          // If no gold bucket, select the first one
-          handleBucketSelect(buckets[0]);
-        }
+        handleBucketSelect(buckets[0]);
       }
     };
-    
+
     initialize();
   }, []);
   
   // Update selected bucket when scrapBuckets changes
   useEffect(() => {
     if (scrapBuckets.length > 0 && !selectedBucket) {
-      const goldBucket = scrapBuckets.find(bucket => 
-        bucket.bucket_name && bucket.bucket_name.toLowerCase().includes('gold')
-      );
-      
-      if (goldBucket) {
-        handleBucketSelect(goldBucket);
-      } else {
-        handleBucketSelect(scrapBuckets[0]);
-      }
+      // Select the first bucket (most recently created)
+      handleBucketSelect(scrapBuckets[0]);
     }
   }, [scrapBuckets]);
 
@@ -316,6 +303,64 @@ const Scrap = () => {
       currency: 'USD',
       minimumFractionDigits: 2
     }).format(amount);
+  };
+
+  // Helper function to get proper image URL
+  const getImageUrl = (images) => {
+    const placeholderImage = 'https://via.placeholder.com/150';
+
+    const makeAbsoluteUrl = (url) => {
+      if (!url) return placeholderImage;
+
+      // Ensure url is a string
+      if (typeof url !== 'string') {
+        return placeholderImage;
+      }
+
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        return url;
+      }
+      if (url.startsWith('/uploads')) {
+        const serverBase = config.apiUrl.replace('/api', '');
+        return `${serverBase}${url}`;
+      }
+      return url;
+    };
+
+    try {
+      // If images is a string, try to parse it
+      if (typeof images === 'string') {
+        try {
+          images = JSON.parse(images);
+        } catch (e) {
+          return placeholderImage;
+        }
+      }
+
+      // If images is an array and has at least one element
+      if (Array.isArray(images) && images.length > 0) {
+        // Find the primary image first, or use the first image
+        const primaryImage = images.find(img => img.isPrimary === true);
+        const imageToUse = primaryImage || images[0];
+
+        // Extract the URL from the image object
+        let imageUrl;
+        if (typeof imageToUse === 'string') {
+          imageUrl = imageToUse;
+        } else if (imageToUse && typeof imageToUse === 'object') {
+          imageUrl = imageToUse.url || imageToUse.image_url || imageToUse.path;
+        }
+
+        if (imageUrl) {
+          return makeAbsoluteUrl(imageUrl);
+        }
+      }
+
+      return placeholderImage;
+    } catch (error) {
+      console.error('Error processing image URL:', error);
+      return placeholderImage;
+    }
   };
 
   // Calculate total cost of all items in the bucket
@@ -726,10 +771,11 @@ const Scrap = () => {
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Item ID</TableCell>
+                        <TableCell>ID</TableCell>
+                        <TableCell>Image</TableCell>
                         <TableCell>Description</TableCell>
-                        <TableCell>Category</TableCell>
-                        <TableCell>Price</TableCell>
+                        <TableCell>Weight (g)</TableCell>
+                        <TableCell>Cost</TableCell>
                         <TableCell>Actions</TableCell>
                       </TableRow>
                     </TableHead>
@@ -737,17 +783,39 @@ const Scrap = () => {
                       {bucketItems.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell>{item.item_id || 'N/A'}</TableCell>
-                          <TableCell>{item.long_desc || 'Unnamed Item'}</TableCell>
-                          <TableCell>{item.category || 'N/A'}</TableCell>
-                          <TableCell>${item.item_price || '0.00'}</TableCell>
+
                           <TableCell>
-                            <IconButton
-                              size="small"
-                              onClick={() => handleDeleteClick(item)}
-                              title="Remove from scrap bucket"
-                            >
-                              <DeleteIcon fontSize="small" color="error" />
-                            </IconButton>
+                            <Box
+                              key={`img-${item.item_id}`}
+                              component="img"
+                              src={getImageUrl(item.images)}
+                              alt={item.long_desc || 'Item'}
+                              sx={{
+                                width: 50,
+                                height: 50,
+                                objectFit: 'cover',
+                                borderRadius: 1,
+                                border: '1px solid',
+                                borderColor: 'divider'
+                              }}
+                              onError={(e) => {
+                                e.target.onerror = null; // Prevent infinite loop
+                                e.target.src = `https://via.placeholder.com/50?text=No+Image`;
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell>{item.long_desc || 'Unnamed Item'}</TableCell>
+                          <TableCell>{parseFloat(item.metal_weight || item.weight_grams || 0).toFixed(2)}</TableCell>
+                          <TableCell>{formatCurrency(parseFloat(item.item_price || item.buy_price || item.retail_price || 0))}</TableCell>
+                          <TableCell>
+                            <Tooltip title="Remove from Scrap" arrow>
+                              <IconButton
+                                size="small"
+                                onClick={() => handleDeleteClick(item)}
+                              >
+                                <RemoveCircleOutlineIcon fontSize="small" color="error" />
+                              </IconButton>
+                            </Tooltip>
                           </TableCell>
                         </TableRow>
                       ))}
