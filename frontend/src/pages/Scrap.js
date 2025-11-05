@@ -29,6 +29,8 @@ import {
   List,
   ListItem,
   ListItemText,
+  ListItemButton,
+  Checkbox,
   Tooltip
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
@@ -58,7 +60,7 @@ const Scrap = () => {
   const [bucketType, setBucketType] = useState('gold');
   const [description, setDescription] = useState('');
   const [errors, setErrors] = useState({});
-  const { currentUser } = useAuth();
+  const { user: currentUser } = useAuth();
 
   const [scrapBuckets, setScrapBuckets] = useState([]);
   const [bucketTotalCosts, setBucketTotalCosts] = useState({});
@@ -72,6 +74,25 @@ const Scrap = () => {
   const [completeDialog, setCompleteDialog] = useState({
     open: false,
     bucket: null
+  });
+
+  const [editBucketDialog, setEditBucketDialog] = useState({
+    open: false,
+    bucket: null,
+    name: '',
+    notes: ''
+  });
+
+  const [deleteBucketDialog, setDeleteBucketDialog] = useState({
+    open: false,
+    bucket: null
+  });
+
+  const [addItemDialog, setAddItemDialog] = useState({
+    open: false,
+    availableItems: [],
+    selectedItems: [],
+    loading: false
   });
 
   // Fetch scrap buckets from API
@@ -225,7 +246,7 @@ const Scrap = () => {
       const response = await axios.post(`${API_BASE_URL}/scrap/buckets`, {
         bucket_name: bucketName,
         notes: description,
-        created_by: currentUser?.employee_id || 1,
+        created_by: currentUser?.id || 1,
         status: 'ACTIVE'
       }, {
         headers: {
@@ -494,6 +515,228 @@ const Scrap = () => {
     });
   };
 
+  // Open edit bucket dialog
+  const handleEditBucketClick = (bucket) => {
+    setEditBucketDialog({
+      open: true,
+      bucket: bucket,
+      name: bucket.bucket_name || '',
+      notes: bucket.notes || ''
+    });
+  };
+
+  // Close edit bucket dialog
+  const handleCloseEditBucketDialog = () => {
+    setEditBucketDialog({
+      open: false,
+      bucket: null,
+      name: '',
+      notes: ''
+    });
+  };
+
+  // Handle saving edited bucket
+  const handleSaveEditedBucket = async () => {
+    const { bucket, name, notes } = editBucketDialog;
+    if (!bucket || !name.trim()) {
+      setError('Bucket name is required');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Authentication token not found');
+        return;
+      }
+
+      await axios.put(
+        `${API_BASE_URL}/scrap/buckets/${bucket.bucket_id}`,
+        {
+          bucket_name: name,
+          notes: notes || null
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Close dialog
+      handleCloseEditBucketDialog();
+
+      // Refresh buckets
+      const updatedBuckets = await fetchScrapBuckets();
+      const updatedBucket = updatedBuckets.find(b => b.bucket_id === bucket.bucket_id);
+      if (updatedBucket && selectedBucket?.bucket_id === bucket.bucket_id) {
+        setSelectedBucket(updatedBucket);
+      }
+
+      setError(null);
+    } catch (err) {
+      console.error('Error updating bucket:', err);
+      setError(err.response?.data?.error || 'Failed to update bucket');
+    }
+  };
+
+  // Open delete bucket confirmation dialog
+  const handleDeleteBucketClick = (bucket) => {
+    setDeleteBucketDialog({
+      open: true,
+      bucket: bucket
+    });
+  };
+
+  // Close delete bucket dialog
+  const handleCloseDeleteBucketDialog = () => {
+    setDeleteBucketDialog({
+      open: false,
+      bucket: null
+    });
+  };
+
+  // Handle deleting bucket
+  const handleDeleteBucket = async () => {
+    const bucket = deleteBucketDialog.bucket;
+    if (!bucket) return;
+
+    // Close dialog
+    handleCloseDeleteBucketDialog();
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Authentication token not found');
+        return;
+      }
+
+      await axios.delete(
+        `${API_BASE_URL}/scrap/buckets/${bucket.bucket_id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Refresh buckets and select first one if available
+      const updatedBuckets = await fetchScrapBuckets();
+      if (updatedBuckets.length > 0) {
+        handleBucketSelect(updatedBuckets[0]);
+      } else {
+        setSelectedBucket(null);
+        setBucketItems([]);
+      }
+
+      setError(null);
+    } catch (err) {
+      console.error('Error deleting bucket:', err);
+      setError(err.response?.data?.error || 'Failed to delete bucket');
+    }
+  };
+
+  // Handle opening add item dialog
+  const handleAddItemClick = async () => {
+    if (!selectedBucket) {
+      setError('Please select a bucket first');
+      return;
+    }
+
+    try {
+      setAddItemDialog({ ...addItemDialog, open: true, loading: true });
+
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Authentication token not found');
+        return;
+      }
+
+      // Fetch all jewelry items that are available for scrap (not already in scrap)
+      const response = await axios.get(`${API_BASE_URL}/jewelry`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      // Filter items that are not in 'SCRAP' or 'SCRAP PROCESS' or 'SOLD TO REFINER' status
+      const availableItems = response.data.filter(item =>
+        item.status !== 'SCRAP' &&
+        item.status !== 'SCRAP PROCESS' &&
+        item.status !== 'SOLD TO REFINER'
+      );
+
+      setAddItemDialog({
+        open: true,
+        availableItems: availableItems,
+        selectedItems: [],
+        loading: false
+      });
+    } catch (err) {
+      console.error('Error fetching available items:', err);
+      setError('Failed to load available items');
+      setAddItemDialog({ ...addItemDialog, open: false, loading: false });
+    }
+  };
+
+  // Handle closing add item dialog
+  const handleCloseAddItemDialog = () => {
+    setAddItemDialog({
+      open: false,
+      availableItems: [],
+      selectedItems: [],
+      loading: false
+    });
+  };
+
+  // Handle toggling item selection
+  const handleToggleItemSelection = (itemId) => {
+    setAddItemDialog(prev => {
+      const isSelected = prev.selectedItems.includes(itemId);
+      return {
+        ...prev,
+        selectedItems: isSelected
+          ? prev.selectedItems.filter(id => id !== itemId)
+          : [...prev.selectedItems, itemId]
+      };
+    });
+  };
+
+  // Handle adding selected items to bucket
+  const handleAddItemsToBucket = async () => {
+    if (addItemDialog.selectedItems.length === 0) {
+      setError('Please select at least one item');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Authentication token not found');
+        return;
+      }
+
+      // Add each selected item to the scrap bucket
+      for (const itemId of addItemDialog.selectedItems) {
+        await axios.post(
+          `${API_BASE_URL}/jewelry/${itemId}/move-to-scrap`,
+          {
+            moved_by: currentUser?.id || 1,
+            bucket_id: selectedBucket.bucket_id
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+      }
+
+      // Close dialog
+      handleCloseAddItemDialog();
+
+      // Refresh buckets to update item counts
+      const updatedBuckets = await fetchScrapBuckets();
+
+      // Find and refresh the current bucket to show newly added items
+      const refreshedBucket = updatedBuckets.find(b => b.bucket_id === selectedBucket.bucket_id);
+      if (refreshedBucket) {
+        await handleBucketSelect(refreshedBucket);
+      }
+
+      setError(null);
+    } catch (err) {
+      console.error('Error adding items to bucket:', err);
+      setError(err.response?.data?.error || 'Failed to add items to bucket');
+    }
+  };
+
   // Handle marking bucket as COMPLETE (after confirmation)
   const handleMarkComplete = async () => {
     const bucket = completeDialog.bucket;
@@ -514,7 +757,7 @@ const Scrap = () => {
         `${API_BASE_URL}/scrap/buckets/${bucket.bucket_id}`,
         {
           status: 'COMPLETE',
-          updated_by: currentUser?.employee_id || 1
+          updated_by: currentUser?.id || 1
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -675,6 +918,30 @@ const Scrap = () => {
                     {selectedBucket.bucket_name}
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 1 }}>
+                    {selectedBucket.status === 'ACTIVE' && (
+                      <>
+                        <Button
+                          variant="outlined"
+                          color="primary"
+                          size="small"
+                          startIcon={<EditIcon />}
+                          onClick={() => handleEditBucketClick(selectedBucket)}
+                        >
+                          Edit
+                        </Button>
+                        {bucketItems.length === 0 && (
+                          <Button
+                            variant="outlined"
+                            color="error"
+                            size="small"
+                            startIcon={<DeleteIcon />}
+                            onClick={() => handleDeleteBucketClick(selectedBucket)}
+                          >
+                            Delete
+                          </Button>
+                        )}
+                      </>
+                    )}
                     {selectedBucket.status !== 'COMPLETE' && bucketItems.length > 0 && (
                       <Button
                         variant="contained"
@@ -690,7 +957,7 @@ const Scrap = () => {
                       color="primary"
                       size="small"
                       startIcon={<AddIcon />}
-                      onClick={() => { /* Handle add item */ }}
+                      onClick={handleAddItemClick}
                     >
                       Add Item
                     </Button>
@@ -825,16 +1092,7 @@ const Scrap = () => {
                 </>
               ) : (
                 <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
-                  <Typography>No items in this bucket yet.</Typography>
-                  <Button 
-                    variant="outlined" 
-                    color="primary" 
-                    startIcon={<AddIcon />} 
-                    sx={{ mt: 2 }}
-                    onClick={() => { /* Handle add item */ }}
-                  >
-                    Add First Item
-                  </Button>
+                  <Typography>No items in this bucket yet. Click "Add Item" above to add items.</Typography>
                 </Box>
               )}
             </>
@@ -993,6 +1251,136 @@ const Scrap = () => {
           </Button>
           <Button onClick={handleMarkComplete} variant="contained" color="success">
             Yes, Mark as Complete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Bucket Dialog */}
+      <Dialog open={editBucketDialog.open} onClose={handleCloseEditBucketDialog}>
+        <DialogTitle>Edit Bucket</DialogTitle>
+        <DialogContent>
+          <TextField
+            label="Bucket Name"
+            value={editBucketDialog.name}
+            onChange={(e) => setEditBucketDialog({...editBucketDialog, name: e.target.value})}
+            fullWidth
+            margin="dense"
+            required
+          />
+          <TextField
+            label="Notes/Description"
+            value={editBucketDialog.notes}
+            onChange={(e) => setEditBucketDialog({...editBucketDialog, notes: e.target.value})}
+            fullWidth
+            multiline
+            rows={3}
+            margin="dense"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseEditBucketDialog} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleSaveEditedBucket} variant="contained" color="primary">
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Bucket Confirmation Dialog */}
+      <Dialog open={deleteBucketDialog.open} onClose={handleCloseDeleteBucketDialog}>
+        <DialogTitle>Delete Bucket?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete this bucket? This action cannot be undone.
+          </Typography>
+          {deleteBucketDialog.bucket && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+              <Typography variant="body2">
+                <strong>Bucket:</strong> {deleteBucketDialog.bucket.bucket_name}
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDeleteBucketDialog} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleDeleteBucket} variant="contained" color="error">
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add Item Dialog */}
+      <Dialog
+        open={addItemDialog.open}
+        onClose={handleCloseAddItemDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Add Items to Bucket</DialogTitle>
+        <DialogContent>
+          {addItemDialog.loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <>
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                Select items to add to <strong>{selectedBucket?.bucket_name}</strong>
+              </Typography>
+              {addItemDialog.availableItems.length === 0 ? (
+                <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center', p: 3 }}>
+                  No items available to add to scrap
+                </Typography>
+              ) : (
+                <List sx={{ maxHeight: 400, overflow: 'auto' }}>
+                  {addItemDialog.availableItems.map((item) => (
+                    <ListItemButton
+                      key={item.item_id}
+                      onClick={() => handleToggleItemSelection(item.item_id)}
+                      dense
+                    >
+                      <Checkbox
+                        edge="start"
+                        checked={addItemDialog.selectedItems.includes(item.item_id)}
+                        tabIndex={-1}
+                        disableRipple
+                      />
+                      <ListItemText
+                        primary={`${item.item_id} - ${item.long_desc || 'No description'}`}
+                        secondary={
+                          <>
+                            {item.metal_weight && `${item.metal_weight}g | `}
+                            {item.precious_metal_type && `${item.precious_metal_type} | `}
+                            {item.status}
+                          </>
+                        }
+                      />
+                    </ListItemButton>
+                  ))}
+                </List>
+              )}
+              {addItemDialog.selectedItems.length > 0 && (
+                <Typography variant="body2" color="primary" sx={{ mt: 2 }}>
+                  {addItemDialog.selectedItems.length} item(s) selected
+                </Typography>
+              )}
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseAddItemDialog} color="inherit">
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAddItemsToBucket}
+            variant="contained"
+            color="primary"
+            disabled={addItemDialog.selectedItems.length === 0}
+          >
+            Add to Bucket
           </Button>
         </DialogActions>
       </Dialog>

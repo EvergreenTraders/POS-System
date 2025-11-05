@@ -4327,6 +4327,47 @@ app.put('/api/scrap/buckets/:id', async (req, res) => {
   }
 });
 
+// DELETE a scrap bucket
+app.delete('/api/scrap/buckets/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+
+    await client.query('BEGIN');
+
+    // Check if bucket exists
+    const checkQuery = 'SELECT * FROM scrap WHERE bucket_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Scrap bucket not found' });
+    }
+
+    const bucket = checkResult.rows[0];
+
+    // Check if bucket has items
+    if (bucket.item_id && bucket.item_id.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Cannot delete bucket with items. Please remove all items first.' });
+    }
+
+    // Delete the bucket
+    const deleteQuery = 'DELETE FROM scrap WHERE bucket_id = $1 RETURNING *';
+    const result = await client.query(deleteQuery, [id]);
+
+    await client.query('COMMIT');
+    res.json({ message: 'Bucket deleted successfully', bucket: result.rows[0] });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting scrap bucket:', err);
+    res.status(500).json({ error: 'Failed to delete scrap bucket' });
+  } finally {
+    client.release();
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
