@@ -60,7 +60,6 @@ function Jewelry() {
       if (historyResponse.data) {
         generateHistoryPDF(historyResponse.data.history, itemId, itemResponse.data);
       } else {
-        console.log('No history data found');
         enqueueSnackbar('No history found for this item', { variant: 'info' });
       }
     } catch (error) {
@@ -263,9 +262,11 @@ function Jewelry() {
     try {
       setLoadingBuckets(true);
       const response = await axios.get(`${API_BASE_URL}/scrap/buckets`);
-      setScrapBuckets(response.data);
-      if (response.data.length > 0) {
-        setSelectedBucket(response.data[0].bucket_id);
+      // Filter to show only ACTIVE buckets
+      const activeBuckets = response.data.filter(bucket => bucket.status === 'ACTIVE');
+      setScrapBuckets(activeBuckets);
+      if (activeBuckets.length > 0) {
+        setSelectedBucket(activeBuckets[0].bucket_id);
       }
     } catch (error) {
       console.error('Error fetching scrap buckets:', error);
@@ -482,7 +483,6 @@ function Jewelry() {
         try {
           images = JSON.parse(images);
         } catch (e) {
-          console.log('Failed to parse images string:', e);
           return placeholderImage;
         }
       }
