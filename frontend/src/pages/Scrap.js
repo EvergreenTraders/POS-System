@@ -41,6 +41,8 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import axios from 'axios';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
@@ -781,6 +783,101 @@ const Scrap = () => {
     }
   };
 
+  // Define status flow
+  const STATUS_FLOW = ['ACTIVE', 'CLOSED', 'SHIPPED', 'PROCESSING', 'COMPLETE'];
+
+  // Get next status in the flow
+  const getNextStatus = (currentStatus) => {
+    const currentIndex = STATUS_FLOW.indexOf(currentStatus);
+    if (currentIndex >= 0 && currentIndex < STATUS_FLOW.length - 1) {
+      return STATUS_FLOW[currentIndex + 1];
+    }
+    return null;
+  };
+
+  // Get previous status in the flow
+  const getPreviousStatus = (currentStatus) => {
+    const currentIndex = STATUS_FLOW.indexOf(currentStatus);
+    if (currentIndex > 0) {
+      return STATUS_FLOW[currentIndex - 1];
+    }
+    return null;
+  };
+
+  // Handle moving bucket to next status
+  const handleNextStatus = async () => {
+    if (!selectedBucket) return;
+
+    const nextStatus = getNextStatus(selectedBucket.status);
+    if (!nextStatus) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Authentication token not found');
+        return;
+      }
+
+      await axios.put(
+        `${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}`,
+        {
+          status: nextStatus,
+          updated_by: currentUser?.id || 1
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Refresh buckets and bucket items
+      const updatedBuckets = await fetchScrapBuckets();
+      const refreshedBucket = updatedBuckets.find(b => b.bucket_id === selectedBucket.bucket_id);
+      if (refreshedBucket) {
+        handleBucketSelect(refreshedBucket);
+      }
+
+      setError(null);
+    } catch (err) {
+      console.error('Error updating bucket status:', err);
+      setError(err.response?.data?.error || 'Failed to update bucket status');
+    }
+  };
+
+  // Handle moving bucket to previous status
+  const handlePreviousStatus = async () => {
+    if (!selectedBucket) return;
+
+    const previousStatus = getPreviousStatus(selectedBucket.status);
+    if (!previousStatus) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Authentication token not found');
+        return;
+      }
+
+      await axios.put(
+        `${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}`,
+        {
+          status: previousStatus,
+          updated_by: currentUser?.id || 1
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Refresh buckets and bucket items
+      const updatedBuckets = await fetchScrapBuckets();
+      const refreshedBucket = updatedBuckets.find(b => b.bucket_id === selectedBucket.bucket_id);
+      if (refreshedBucket) {
+        handleBucketSelect(refreshedBucket);
+      }
+
+      setError(null);
+    } catch (err) {
+      console.error('Error updating bucket status:', err);
+      setError(err.response?.data?.error || 'Failed to update bucket status');
+    }
+  };
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       {error && (
@@ -917,7 +1014,36 @@ const Scrap = () => {
                   <Typography variant="h6">
                     {selectedBucket.bucket_name}
                   </Typography>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    {/* Status Transition Buttons */}
+                    {getPreviousStatus(selectedBucket.status) && (
+                      <Tooltip title={`Move back to ${getPreviousStatus(selectedBucket.status)}`}>
+                        <Button
+                          variant="outlined"
+                          color="secondary"
+                          size="small"
+                          startIcon={<ArrowBackIcon />}
+                          onClick={handlePreviousStatus}
+                        >
+                          {getPreviousStatus(selectedBucket.status)}
+                        </Button>
+                      </Tooltip>
+                    )}
+                    {getNextStatus(selectedBucket.status) && (
+                      <Tooltip title={`Move forward to ${getNextStatus(selectedBucket.status)}`}>
+                        <Button
+                          variant="outlined"
+                          color="primary"
+                          size="small"
+                          endIcon={<ArrowForwardIcon />}
+                          onClick={handleNextStatus}
+                        >
+                          {getNextStatus(selectedBucket.status)}
+                        </Button>
+                      </Tooltip>
+                    )}
+
+                    {/* Edit and Delete Buttons for ACTIVE status */}
                     {selectedBucket.status === 'ACTIVE' && (
                       <>
                         <Button
@@ -942,16 +1068,8 @@ const Scrap = () => {
                         )}
                       </>
                     )}
-                    {selectedBucket.status !== 'COMPLETE' && bucketItems.length > 0 && (
-                      <Button
-                        variant="contained"
-                        color="success"
-                        size="small"
-                        onClick={() => handleCompleteClick(selectedBucket)}
-                      >
-                        Mark as Complete
-                      </Button>
-                    )}
+
+                    {/* Add Item Button */}
                     <Button
                       variant="contained"
                       color="primary"
