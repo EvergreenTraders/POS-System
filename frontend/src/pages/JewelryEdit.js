@@ -1983,7 +1983,7 @@ function JewelryEdit() {
         return 'warning.main';
       case 'RESERVED':
         return 'primary.main';
-      case 'SCRAP':
+      case 'SCRAP PROCESS':
         return 'error.main';
       default:
         return 'text.secondary';

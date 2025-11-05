@@ -350,8 +350,8 @@ function Jewelry() {
     try {
       setLoading(true);
       const response = await axios.get(`${API_BASE_URL}/jewelry`);
-      // Filter out items with status 'SCRAP'
-      const nonScrapItems = response.data.filter(item => item.status !== 'SCRAP');
+      // Filter out items with status 'SCRAP PROCESS'
+      const nonScrapItems = response.data.filter(item => item.status !== 'SCRAP PROCESS');
 
       // Fetch history for all items and apply latest changes
       const itemsWithHistory = await Promise.all(
@@ -654,7 +654,7 @@ function Jewelry() {
                           >
                             Edit
                           </Button>
-                          {item.status !== 'SCRAP' && (
+                          {item.status !== 'SCRAP PROCESS' && (
                             <Button 
                               variant="outlined" 
                               color="error"

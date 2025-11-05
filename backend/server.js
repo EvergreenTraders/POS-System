@@ -1285,7 +1285,7 @@ app.post('/api/jewelry/:id/move-to-scrap', async (req, res) => {
     const changedFields = {
       status: {
         old: oldStatus,
-        new: 'SCRAP'
+        new: 'SCRAP PROCESS'
       }
     };
     // Get the next version number
@@ -1298,18 +1298,18 @@ app.post('/api/jewelry/:id/move-to-scrap', async (req, res) => {
     // Insert the history record
     await client.query(
       `INSERT INTO jewelry_item_history (
-        item_id, 
+        item_id,
         version_number,
-        changed_by, 
-        action_type, 
-        changed_fields, 
+        changed_by,
+        action_type,
+        changed_fields,
         change_notes
-      ) VALUES ($1, $2, $3, 'STATUS_CHANGE', $4, 'Moved to SCRAP')`,
+      ) VALUES ($1, $2, $3, 'STATUS_CHANGE', $4, 'Moved to SCRAP PROCESS')`,
       [id, version_number, moved_by, changedFields]
     );
-    // 1. Update the jewelry item status to SCRAP
+    // 1. Update the jewelry item status to SCRAP PROCESS
     const updateJewelryQuery = await client.query(
-      `UPDATE jewelry SET status = 'SCRAP', updated_at = CURRENT_TIMESTAMP WHERE item_id = $1 RETURNING *`,
+      `UPDATE jewelry SET status = 'SCRAP PROCESS', updated_at = CURRENT_TIMESTAMP WHERE item_id = $1 RETURNING *`,
       [id]
     );
     // 2. Add item_id to the selected bucket's item_id array
@@ -1388,7 +1388,6 @@ app.put('/api/jewelry/:id', async (req, res) => {
       if (updates.hasOwnProperty(field)) {
         fields.push(`${field} = $${paramCount}`);
         values.push(updates[field]);
-        console.log(`Adding field: ${field} = ${updates[field]}`);
         paramCount++;
       }
     }

@@ -93,8 +93,8 @@ BEGIN
      WHERE s.bucket_id = v_bucket_id;
 
     -- Update the item status in jewelry (do not delete)
-    UPDATE jewelry 
-       SET status = 'SCRAP',
+    UPDATE jewelry
+       SET status = 'SCRAP PROCESS',
            updated_at = CURRENT_TIMESTAMP,
            moved_to_scrap_at = CURRENT_TIMESTAMP,
            moved_by = p_moved_by
@@ -116,7 +116,7 @@ BEGIN
         jsonb_build_object(
             'status', jsonb_build_object(
                 'from', v_old_status,
-                'to', 'SCRAP'
+                'to', 'SCRAP PROCESS'
             )
         ),
         'Item moved to scrap and added to bucket '
