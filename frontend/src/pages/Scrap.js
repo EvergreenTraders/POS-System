@@ -60,6 +60,10 @@ const Scrap = () => {
   const [scrapBuckets, setScrapBuckets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState({
+    open: false,
+    item: null
+  });
 
   // Fetch scrap buckets from API
   const fetchScrapBuckets = async () => {
@@ -267,8 +271,29 @@ const Scrap = () => {
     fetchScrapBuckets();
   };
 
-  // Handle delete item from scrap bucket
-  const handleDeleteItem = async (item) => {
+  // Open confirmation dialog
+  const handleDeleteClick = (item) => {
+    setConfirmDialog({
+      open: true,
+      item: item
+    });
+  };
+
+  // Close confirmation dialog
+  const handleCloseConfirmDialog = () => {
+    setConfirmDialog({
+      open: false,
+      item: null
+    });
+  };
+
+  // Handle delete item from scrap bucket (after confirmation)
+  const handleDeleteItem = async () => {
+    const item = confirmDialog.item;
+    if (!item) return;
+
+    // Close dialog
+    handleCloseConfirmDialog();
     try {
       const token = localStorage.getItem('token');
       if (!token) {
@@ -471,7 +496,7 @@ const Scrap = () => {
                           <TableCell>
                             <IconButton
                               size="small"
-                              onClick={() => handleDeleteItem(item)}
+                              onClick={() => handleDeleteClick(item)}
                               title="Remove from scrap bucket"
                             >
                               <DeleteIcon fontSize="small" color="error" />
@@ -582,6 +607,40 @@ const Scrap = () => {
           <Button onClick={handleCloseDialog}>Cancel</Button>
           <Button onClick={handleCreateBucket} variant="contained" color="primary">
             Create
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirmation Dialog for Delete */}
+      <Dialog
+        open={confirmDialog.open}
+        onClose={handleCloseConfirmDialog}
+        aria-labelledby="confirm-dialog-title"
+      >
+        <DialogTitle id="confirm-dialog-title">
+          Move Item to Inventory?
+        </DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to move this item back to inventory?
+          </Typography>
+          {confirmDialog.item && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+              <Typography variant="body2" color="textSecondary">
+                <strong>Item ID:</strong> {confirmDialog.item.item_id}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                <strong>Description:</strong> {confirmDialog.item.long_desc || 'Unnamed Item'}
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseConfirmDialog} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleDeleteItem} variant="contained" color="primary">
+            Yes, Move to Inventory
           </Button>
         </DialogActions>
       </Dialog>
