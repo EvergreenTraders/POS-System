@@ -65,6 +65,11 @@ const Scrap = () => {
     item: null
   });
 
+  const [completeDialog, setCompleteDialog] = useState({
+    open: false,
+    bucket: null
+  });
+
   // Fetch scrap buckets from API
   const fetchScrapBuckets = async () => {
     try {
@@ -334,6 +339,66 @@ const Scrap = () => {
     }
   };
 
+  // Open complete bucket confirmation dialog
+  const handleCompleteClick = (bucket) => {
+    setCompleteDialog({
+      open: true,
+      bucket: bucket
+    });
+  };
+
+  // Close complete bucket confirmation dialog
+  const handleCloseCompleteDialog = () => {
+    setCompleteDialog({
+      open: false,
+      bucket: null
+    });
+  };
+
+  // Handle marking bucket as COMPLETE (after confirmation)
+  const handleMarkComplete = async () => {
+    const bucket = completeDialog.bucket;
+    if (!bucket) return;
+
+    // Close dialog
+    handleCloseCompleteDialog();
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Authentication token not found');
+        return;
+      }
+
+      // Update bucket status to COMPLETE with employee ID
+      await axios.put(
+        `${API_BASE_URL}/scrap/buckets/${bucket.bucket_id}`,
+        {
+          status: 'COMPLETE',
+          updated_by: currentUser?.employee_id || 1
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Refresh the buckets
+      const updatedBuckets = await fetchScrapBuckets();
+      const completedBucket = updatedBuckets.find(b => b.bucket_id === bucket.bucket_id);
+
+      // If the completed bucket was selected, refresh its items
+      if (selectedBucket?.bucket_id === bucket.bucket_id && completedBucket) {
+        handleBucketSelect(completedBucket);
+      }
+
+      // Show success message
+      setError(null);
+    } catch (err) {
+      console.error('Error marking bucket as complete:', err);
+      console.error('Error details:', err.response?.data);
+      const errorMessage = err.response?.data?.error || err.message || 'Failed to mark bucket as complete';
+      setError(errorMessage);
+    }
+  };
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       {error && (
@@ -411,9 +476,9 @@ const Scrap = () => {
                       fontWeight: selectedBucket?.bucket_id === bucket.bucket_id ? 'bold' : 'normal',
                     }}
                   />
-                  <Chip 
-                    label={bucket.status || 'ACTIVE'} 
-                    color={bucket.status === 'ACTIVE' ? 'success' : 'default'}
+                  <Chip
+                    label={bucket.status || 'ACTIVE'}
+                    color={bucket.status === 'COMPLETE' ? 'info' : bucket.status === 'ACTIVE' ? 'success' : 'default'}
                     size="small"
                     sx={{ ml: 1 }}
                   />
@@ -434,15 +499,27 @@ const Scrap = () => {
                 <Typography variant="h6">
                   {selectedBucket.bucket_name} ({bucketItems.length} items)
                 </Typography>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  size="small"
-                  startIcon={<AddIcon />}
-                  onClick={() => { /* Handle add item */ }}
-                >
-                  Add Item
-                </Button>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  {selectedBucket.status !== 'COMPLETE' && bucketItems.length > 0 && (
+                    <Button
+                      variant="contained"
+                      color="success"
+                      size="small"
+                      onClick={() => handleCompleteClick(selectedBucket)}
+                    >
+                      Mark as Complete
+                    </Button>
+                  )}
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={() => { /* Handle add item */ }}
+                  >
+                    Add Item
+                  </Button>
+                </Box>
               </Box>
               
               {/* Metal Type Summary and Items Table */}
@@ -641,6 +718,43 @@ const Scrap = () => {
           </Button>
           <Button onClick={handleDeleteItem} variant="contained" color="primary">
             Yes, Move to Inventory
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirmation Dialog for Mark as Complete */}
+      <Dialog
+        open={completeDialog.open}
+        onClose={handleCloseCompleteDialog}
+        aria-labelledby="complete-dialog-title"
+      >
+        <DialogTitle id="complete-dialog-title">
+          Mark Bucket as Complete?
+        </DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to mark this bucket as complete?
+          </Typography>
+          <Typography variant="body2" color="warning.main" sx={{ mt: 2, fontWeight: 'bold' }}>
+            Warning: All items in this bucket will be marked as "SOLD TO REFINER" and removed from active inventory.
+          </Typography>
+          {completeDialog.bucket && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+              <Typography variant="body2" color="textSecondary">
+                <strong>Bucket:</strong> {completeDialog.bucket.bucket_name}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                <strong>Number of Items:</strong> {completeDialog.bucket.item_id?.length || 0}
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseCompleteDialog} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleMarkComplete} variant="contained" color="success">
+            Yes, Mark as Complete
           </Button>
         </DialogActions>
       </Dialog>

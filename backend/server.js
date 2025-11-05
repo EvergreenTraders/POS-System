@@ -4201,7 +4201,7 @@ app.put('/api/scrap/buckets/:id', async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { bucket_name, notes, status, item_id } = req.body;
+    const { bucket_name, notes, status, item_id, updated_by } = req.body;
 
     await client.query('BEGIN');
 
@@ -4215,6 +4215,54 @@ app.put('/api/scrap/buckets/:id', async (req, res) => {
     }
 
     const existingBucket = checkResult.rows[0];
+
+    // If status is being changed to COMPLETE, update all items in the bucket to 'SOLD TO REFINER'
+    if (status === 'COMPLETE' && existingBucket.status !== 'COMPLETE') {
+      const itemIds = existingBucket.item_id;
+
+      if (itemIds && itemIds.length > 0) {
+        // Get employee ID from request body or use a default value (1 for system)
+        const employeeId = updated_by || 1;
+
+        // Update each item's status to 'SOLD TO REFINER'
+        for (const itemId of itemIds) {
+          // Get current item details
+          const itemResult = await client.query(
+            'SELECT status FROM jewelry WHERE item_id = $1',
+            [itemId]
+          );
+
+          if (itemResult.rows.length > 0) {
+            const oldStatus = itemResult.rows[0].status;
+
+            // Update jewelry item status to 'SOLD TO REFINER'
+            await client.query(
+              `UPDATE jewelry SET status = 'SOLD TO REFINER', updated_at = CURRENT_TIMESTAMP WHERE item_id = $1`,
+              [itemId]
+            );
+
+            // Get the next version number for history
+            const versionResult = await client.query(
+              'SELECT COALESCE(MAX(version_number), 0) + 1 as next_version FROM jewelry_item_history WHERE item_id = $1',
+              [itemId]
+            );
+            const version_number = versionResult.rows[0].next_version;
+
+            // Log the status change in jewelry_item_history
+            const changedFields = {
+              status: { old: oldStatus, new: 'SOLD TO REFINER' }
+            };
+
+            await client.query(
+              `INSERT INTO jewelry_item_history (
+                item_id, version_number, changed_by, action_type, changed_fields, change_notes
+              ) VALUES ($1, $2, $3, 'STATUS_CHANGE', $4, 'Item sold to refiner from bucket: ' || $5)`,
+              [itemId, version_number, employeeId, changedFields, existingBucket.bucket_name]
+            );
+          }
+        }
+      }
+    }
 
     // Build update query dynamically based on provided fields
     const updates = [];
@@ -4264,14 +4312,14 @@ app.put('/api/scrap/buckets/:id', async (req, res) => {
 
     await client.query('COMMIT');
     res.json(result.rows[0]);
-    
+
   } catch (err) {
     await client.query('ROLLBACK');
-    
+
     if (err.code === '23505') { // Unique violation
       return res.status(409).json({ error: 'A bucket with this name already exists' });
     }
-    
+
     console.error('Error updating scrap bucket:', err);
     res.status(500).json({ error: 'Failed to update scrap bucket' });
   } finally {

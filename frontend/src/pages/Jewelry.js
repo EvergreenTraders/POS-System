@@ -350,8 +350,10 @@ function Jewelry() {
     try {
       setLoading(true);
       const response = await axios.get(`${API_BASE_URL}/jewelry`);
-      // Filter out items with status 'SCRAP PROCESS'
-      const nonScrapItems = response.data.filter(item => item.status !== 'SCRAP PROCESS');
+      // Filter out items with status 'SCRAP PROCESS' and 'SOLD TO REFINER'
+      const nonScrapItems = response.data.filter(item =>
+        item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER'
+      );
 
       // Fetch history for all items and apply latest changes
       const itemsWithHistory = await Promise.all(
@@ -654,9 +656,9 @@ function Jewelry() {
                           >
                             Edit
                           </Button>
-                          {item.status !== 'SCRAP PROCESS' && (
-                            <Button 
-                              variant="outlined" 
+                          {item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER' && (
+                            <Button
+                              variant="outlined"
                               color="error"
                               size="small"
                               onClick={(e) => {
@@ -819,7 +821,6 @@ function Jewelry() {
         <DialogContent>
           <DialogContentText id="scrap-dialog-description" sx={{ mb: 2 }}>
             Are you sure you want to move item <strong>{itemToScrap?.item_id}</strong> to scrap?
-            This action cannot be undone.
           </DialogContentText>
           
           {loadingBuckets ? (
