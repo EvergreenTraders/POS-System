@@ -1165,7 +1165,7 @@ app.delete('/api/quotes/:id', async (req, res) => {
 });
 
 // Jewelry update endpoint for quote conversion
-app.put('/api/jewelry/:quoteId', async (req, res) => {
+app.put('/api/jewelry/quote/:quoteId/convert', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1341,6 +1341,84 @@ app.post('/api/jewelry/:id/move-to-scrap', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to move item to scrap',
       details: err.message 
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Update jewelry item (general update endpoint)
+app.put('/api/jewelry/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    await client.query('BEGIN');
+
+    // Check if item exists
+    const checkQuery = 'SELECT * FROM jewelry WHERE item_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+
+    if (checkResult.rows.length === 0) {
+      console.log('Item not found:', id);
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+
+    // Build dynamic update query
+    const fields = [];
+    const values = [];
+    let paramCount = 1;
+
+    // List of allowed fields to update
+    const allowedFields = [
+      'status', 'category', 'short_desc', 'long_desc',
+      'precious_metal_type', 'metal_purity', 'metal_weight',
+      'primary_gem_type', 'primary_gem_category', 'primary_gem_size',
+      'primary_gem_quantity', 'primary_gem_shape', 'primary_gem_color',
+      'primary_gem_quality', 'primary_gem_weight', 'secondary_gem_type',
+      'secondary_gem_category', 'secondary_gem_size', 'secondary_gem_quantity',
+      'secondary_gem_shape', 'secondary_gem_color', 'secondary_gem_quality',
+      'secondary_gem_weight', 'metal_spot_price', 'notes', 'price',
+      'melt_value', 'weight_grams', 'metal_category'
+    ];
+
+    for (const field of allowedFields) {
+      if (updates.hasOwnProperty(field)) {
+        fields.push(`${field} = $${paramCount}`);
+        values.push(updates[field]);
+        console.log(`Adding field: ${field} = ${updates[field]}`);
+        paramCount++;
+      }
+    }
+
+    if (fields.length === 0) {
+      console.log('No valid fields to update');
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(id);
+
+    const updateQuery = `
+      UPDATE jewelry
+      SET ${fields.join(', ')}
+      WHERE item_id = $${paramCount}
+      RETURNING *
+    `;
+
+    const result = await client.query(updateQuery, values);
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating jewelry item:', err);
+    res.status(500).json({
+      error: 'Failed to update jewelry item',
+      details: err.message
     });
   } finally {
     client.release();
@@ -4124,41 +4202,67 @@ app.put('/api/scrap/buckets/:id', async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { bucket_name, notes, status } = req.body;
-    
-    if (!bucket_name) {
-      return res.status(400).json({ error: 'Bucket name is required' });
-    }
-    
+    const { bucket_name, notes, status, item_id } = req.body;
+
     await client.query('BEGIN');
-    
+
     // First check if the bucket exists
-    const checkQuery = 'SELECT 1 FROM scrap WHERE bucket_id = $1';
+    const checkQuery = 'SELECT * FROM scrap WHERE bucket_id = $1';
     const checkResult = await client.query(checkQuery, [id]);
-    
+
     if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Scrap bucket not found' });
     }
-    
-    // Update the bucket
+
+    const existingBucket = checkResult.rows[0];
+
+    // Build update query dynamically based on provided fields
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (bucket_name !== undefined) {
+      updates.push(`bucket_name = $${paramCount}`);
+      values.push(bucket_name);
+      paramCount++;
+    }
+
+    if (notes !== undefined) {
+      updates.push(`notes = $${paramCount}`);
+      values.push(notes || null);
+      paramCount++;
+    }
+
+    if (status !== undefined) {
+      updates.push(`status = $${paramCount}`);
+      values.push(status);
+      paramCount++;
+    }
+
+    if (item_id !== undefined) {
+      updates.push(`item_id = $${paramCount}`);
+      values.push(JSON.stringify(item_id));
+      paramCount++;
+    }
+
+    if (updates.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(id);
+
     const updateQuery = `
       UPDATE scrap
-      SET 
-        bucket_name = $1,
-        notes = $2,
-        status = $3,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE bucket_id = $4
+      SET ${updates.join(', ')}
+      WHERE bucket_id = $${paramCount}
       RETURNING *
     `;
-    
-    const result = await client.query(updateQuery, [
-      bucket_name,
-      notes || null,
-      status || 'ACTIVE',
-      id
-    ]);
-    
+
+    const result = await client.query(updateQuery, values);
+
     await client.query('COMMIT');
     res.json(result.rows[0]);
     

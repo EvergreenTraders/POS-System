@@ -267,6 +267,48 @@ const Scrap = () => {
     fetchScrapBuckets();
   };
 
+  // Handle delete item from scrap bucket
+  const handleDeleteItem = async (item) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Authentication token not found');
+        return;
+      }
+
+      // Update the jewelry item status back to AVAILABLE
+      await axios.put(
+        `${API_BASE_URL}/jewelry/${item.item_id}`,
+        { status: 'AVAILABLE' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Remove item from the scrap bucket's item_id array
+      const updatedItemIds = selectedBucket.item_id.filter(id => id !== item.item_id);
+
+      await axios.put(
+        `${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}`,
+        { item_id: updatedItemIds },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Refresh the buckets and bucket items
+      const updatedBuckets = await fetchScrapBuckets();
+      const refreshedBucket = updatedBuckets.find(b => b.bucket_id === selectedBucket.bucket_id);
+      if (refreshedBucket) {
+        handleBucketSelect(refreshedBucket);
+      }
+
+      // Show success message
+      setError(null);
+    } catch (err) {
+      console.error('Error removing item from scrap bucket:', err);
+      console.error('Error details:', err.response?.data);
+      const errorMessage = err.response?.data?.error || err.message || 'Failed to remove item from scrap bucket';
+      setError(errorMessage);
+    }
+  };
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       {error && (
@@ -427,7 +469,11 @@ const Scrap = () => {
                           <TableCell>{item.category || 'N/A'}</TableCell>
                           <TableCell>${item.item_price || '0.00'}</TableCell>
                           <TableCell>
-                            <IconButton size="small" onClick={() => { /* Handle delete */ }}>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleDeleteItem(item)}
+                              title="Remove from scrap bucket"
+                            >
                               <DeleteIcon fontSize="small" color="error" />
                             </IconButton>
                           </TableCell>
