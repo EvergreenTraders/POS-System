@@ -327,11 +327,42 @@ const Scrap = () => {
   };
 
   const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric'
     });
+  };
+
+  // Calculate total weight from bucket items
+  const calculateTotalWeight = () => {
+    return bucketItems.reduce((total, item) => {
+      const weight = parseFloat(item.metal_weight || item.weight_grams || 0);
+      return total + weight;
+    }, 0);
+  };
+
+  // Calculate weighted average purity
+  const calculateAveragePurity = () => {
+    const totalWeight = calculateTotalWeight();
+    if (totalWeight === 0) return 0;
+
+    const weightedPuritySum = bucketItems.reduce((sum, item) => {
+      const weight = parseFloat(item.metal_weight || item.weight_grams || 0);
+      const purity = parseFloat(item.purity_value || 0);
+      return sum + (weight * purity);
+    }, 0);
+
+    return weightedPuritySum / totalWeight;
+  };
+
+  // Calculate estimated melt value
+  const calculateMeltValue = () => {
+    return bucketItems.reduce((total, item) => {
+      const meltValue = parseFloat(item.melt_value || 0);
+      return total + meltValue;
+    }, 0);
   };
 
   // Handle refresh after creating a bucket
@@ -592,63 +623,105 @@ const Scrap = () => {
         <Paper sx={{ flex: 1, p: 2, maxHeight: '70vh', overflow: 'auto' }}>
           {selectedBucket ? (
             <>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6">
-                  {selectedBucket.bucket_name} ({bucketItems.length} items)
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  {selectedBucket.status !== 'COMPLETE' && bucketItems.length > 0 && (
+              {/* Bucket Header with Info */}
+              <Box sx={{ mb: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6">
+                    {selectedBucket.bucket_name}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    {selectedBucket.status !== 'COMPLETE' && bucketItems.length > 0 && (
+                      <Button
+                        variant="contained"
+                        color="success"
+                        size="small"
+                        onClick={() => handleCompleteClick(selectedBucket)}
+                      >
+                        Mark as Complete
+                      </Button>
+                    )}
                     <Button
                       variant="contained"
-                      color="success"
+                      color="primary"
                       size="small"
-                      onClick={() => handleCompleteClick(selectedBucket)}
+                      startIcon={<AddIcon />}
+                      onClick={() => { /* Handle add item */ }}
                     >
-                      Mark as Complete
+                      Add Item
                     </Button>
-                  )}
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    size="small"
-                    startIcon={<AddIcon />}
-                    onClick={() => { /* Handle add item */ }}
-                  >
-                    Add Item
-                  </Button>
+                  </Box>
+                </Box>
+
+                {/* Bucket Details Grid */}
+                <Box sx={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: 2,
+                  p: 2,
+                  bgcolor: 'background.default',
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'divider'
+                }}>
+                  <Box>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Date Created
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      {formatDate(selectedBucket.created_at)}
+                    </Typography>
+                  </Box>
+
+                  <Box>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Status Date
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      {formatDate(selectedBucket.updated_at)}
+                    </Typography>
+                  </Box>
+
+                  <Box>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Total Items
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      {bucketItems.length}
+                    </Typography>
+                  </Box>
+
+                  <Box>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Total Weight
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      {calculateTotalWeight().toFixed(2)} g
+                    </Typography>
+                  </Box>
+
+                  <Box>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Calculated Purity
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      {(calculateAveragePurity() * 100).toFixed(2)}%
+                    </Typography>
+                  </Box>
+
+                  <Box>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Estimated Melt Value
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium" color="primary">
+                      {formatCurrency(calculateMeltValue())}
+                    </Typography>
+                  </Box>
                 </Box>
               </Box>
-              
+
               {/* Metal Type Summary and Items Table */}
               {bucketItems.length > 0 ? (
                 <>
-                  <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                    <Typography variant="subtitle2" color="textSecondary" gutterBottom>
-                      Total Weight by Metal Type:
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                      {Object.entries(
-                        bucketItems.reduce((acc, item) => {
-                          const metalType = item.precious_metal_type?.toLowerCase() || 'other';
-                          const weight = parseFloat(item.weight_grams) || 0;
-                          acc[metalType] = item.total_weight || 0;
-                          return acc;
-                        }, {})
-                      ).map(([metalType, totalWeight]) => (
-                        <Chip
-                          key={metalType}
-                          label={`${metalType.charAt(0).toUpperCase() + metalType.slice(1)}: ${totalWeight}g`}
-                          color="primary"
-                          variant="outlined"
-                          size="small"
-                          sx={{ 
-                            fontWeight: 'medium',
-                            '& .MuiChip-label': { px: 1 }
-                          }}
-                        />
-                      ))}
-                    </Box>
-                  </Box>
                   <TableContainer>
                   <Table size="small">
                     <TableHead>
