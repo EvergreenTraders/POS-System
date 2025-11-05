@@ -46,6 +46,7 @@ const Scrap = () => {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ACTIVE');
   const [openCreateDialog, setOpenCreateDialog] = useState(false);
   const [bucketName, setBucketName] = useState('');
   const [selectedBucket, setSelectedBucket] = useState(null);
@@ -58,6 +59,7 @@ const Scrap = () => {
   const { currentUser } = useAuth();
 
   const [scrapBuckets, setScrapBuckets] = useState([]);
+  const [bucketTotalCosts, setBucketTotalCosts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState({
@@ -76,6 +78,10 @@ const Scrap = () => {
       setLoading(true);
       const response = await axios.get(`${API_BASE_URL}/scrap/buckets`);
       setScrapBuckets(response.data);
+
+      // Calculate total cost for each bucket
+      await calculateBucketTotalCosts(response.data);
+
       setError(null);
       return response.data; // Return the fetched data for chaining
     } catch (err) {
@@ -85,6 +91,45 @@ const Scrap = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Calculate total costs for all buckets
+  const calculateBucketTotalCosts = async (buckets) => {
+    const costs = {};
+
+    for (const bucket of buckets) {
+      if (bucket.item_id && bucket.item_id.length > 0) {
+        try {
+          // Fetch items for this bucket
+          const itemPromises = bucket.item_id.map(id =>
+            axios.get(`${API_BASE_URL}/jewelry/${id}`)
+              .then(res => res.data)
+              .catch(err => {
+                console.error(`Error fetching item ${id}:`, err);
+                return null;
+              })
+          );
+
+          const items = await Promise.all(itemPromises);
+          const validItems = items.filter(item => item !== null);
+
+          // Calculate total cost
+          const totalCost = validItems.reduce((total, item) => {
+            const itemPrice = parseFloat(item.item_price || item.buy_price || item.retail_price || 0);
+            return total + itemPrice;
+          }, 0);
+
+          costs[bucket.bucket_id] = totalCost;
+        } catch (err) {
+          console.error(`Error calculating cost for bucket ${bucket.bucket_id}:`, err);
+          costs[bucket.bucket_id] = 0;
+        }
+      } else {
+        costs[bucket.bucket_id] = 0;
+      }
+    }
+
+    setBucketTotalCosts(costs);
   };
 
   // Fetch items for a specific bucket
@@ -238,14 +283,24 @@ const Scrap = () => {
     setCurrentPage(1);
   };
 
+  const handleStatusFilterChange = (event) => {
+    setStatusFilter(event.target.value);
+    setCurrentPage(1);
+  };
 
   const filteredBuckets = scrapBuckets.filter(bucket => {
     const searchLower = searchTerm.toLowerCase();
-    return (
+    const matchesSearch = (
       bucket.bucket_name.toLowerCase().includes(searchLower) ||
       (bucket.notes && bucket.notes.toLowerCase().includes(searchLower)) ||
       `SCRP-${bucket.bucket_id}`.toLowerCase().includes(searchLower)
     );
+
+    // Filter by status
+    const bucketStatus = bucket.status || 'ACTIVE';
+    const matchesStatus = statusFilter === 'ALL' || bucketStatus === statusFilter;
+
+    return matchesSearch && matchesStatus;
   });
 
   // Pagination logic
@@ -261,6 +316,14 @@ const Scrap = () => {
       currency: 'USD',
       minimumFractionDigits: 2
     }).format(amount);
+  };
+
+  // Calculate total cost of all items in the bucket
+  const calculateTotalCost = () => {
+    return bucketItems.reduce((total, item) => {
+      const itemPrice = parseFloat(item.item_price || item.buy_price || item.retail_price || 0);
+      return total + itemPrice;
+    }, 0);
   };
 
   const formatDate = (dateString) => {
@@ -449,7 +512,25 @@ const Scrap = () => {
           <Box sx={{ display: 'flex', gap: 3, mt: 3 }}>
         {/* Bucket List */}
         <Paper sx={{ width: '30%', p: 2, maxHeight: '70vh', overflow: 'auto' }}>
-          <Typography variant="h6" gutterBottom>Buckets</Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">Buckets</Typography>
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel id="status-filter-label">Status</InputLabel>
+              <Select
+                labelId="status-filter-label"
+                value={statusFilter}
+                label="Status"
+                onChange={handleStatusFilterChange}
+              >
+                <MenuItem value="ACTIVE">Active</MenuItem>
+                <MenuItem value="CLOSED">Closed</MenuItem>
+                <MenuItem value="SHIPPED">Shipped</MenuItem>
+                <MenuItem value="PROCESSING">Processing</MenuItem>
+                <MenuItem value="COMPLETE">Complete</MenuItem>
+                <MenuItem value="ALL">All</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
           <List>
             {paginatedBuckets.length > 0 ? (
               paginatedBuckets.map((bucket) => (
@@ -462,23 +543,39 @@ const Scrap = () => {
                     mb: 1,
                     borderRadius: 1,
                     '&.Mui-selected': {
-                      backgroundColor: 'primary.light',
+                      backgroundColor: '#c8e6c9',
                       '&:hover': {
-                        backgroundColor: 'primary.light',
+                        backgroundColor: '#c8e6c9',
                       },
                     },
                   }}
                 >
                   <ListItemText
                     primary={bucket.bucket_name}
-                    secondary={`${bucket.item_count || 0} items`}
+                    secondary={
+                      <>
+                        <Typography component="span" variant="body2" color="textSecondary">
+                          Items: {bucket.item_id?.length || 0}
+                        </Typography>
+                        <br />
+                        <Typography component="span" variant="body2" fontWeight="bold" color="primary">
+                          Total: {formatCurrency(bucketTotalCosts[bucket.bucket_id] || 0)}
+                        </Typography>
+                      </>
+                    }
                     primaryTypographyProps={{
                       fontWeight: selectedBucket?.bucket_id === bucket.bucket_id ? 'bold' : 'normal',
                     }}
                   />
                   <Chip
                     label={bucket.status || 'ACTIVE'}
-                    color={bucket.status === 'COMPLETE' ? 'info' : bucket.status === 'ACTIVE' ? 'success' : 'default'}
+                    color={
+                      bucket.status === 'ACTIVE' ? 'success' :
+                      bucket.status === 'COMPLETE' ? 'info' :
+                      bucket.status === 'PROCESSING' ? 'warning' :
+                      bucket.status === 'SHIPPED' ? 'primary' :
+                      'default'
+                    }
                     size="small"
                     sx={{ ml: 1 }}
                   />
