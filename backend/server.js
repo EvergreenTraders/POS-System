@@ -56,6 +56,17 @@ if (!fs.existsSync(jewelryUploadDir)) {
   fs.mkdirSync(jewelryUploadDir, { recursive: true });
 }
 
+const scrapUploadDir = 'uploads/scrap/';
+if (!fs.existsSync(scrapUploadDir)) {
+  fs.mkdirSync(scrapUploadDir, { recursive: true });
+}
+
+// Configure multer for scrap weight photo uploads
+const uploadScrapPhoto = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10 MB limit per file
+}).single('weight_photo');
+
 // Function to update quote days remaining
 const updateQuoteDaysRemaining = async () => {
   try {
@@ -4365,6 +4376,67 @@ app.delete('/api/scrap/buckets/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete scrap bucket' });
   } finally {
     client.release();
+  }
+});
+
+// Upload weight photo for scrap bucket
+app.post('/api/scrap/buckets/:id/weight-photo', uploadScrapPhoto, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No photo file provided' });
+    }
+
+    // Store image as binary data (BYTEA) in database
+    const imageBuffer = req.file.buffer;
+
+    // Update database with weight photo binary data
+    const updateQuery = `
+      UPDATE scrap
+      SET weight_photo = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE bucket_id = $2
+      RETURNING bucket_id, bucket_name, status, created_at, updated_at, notes
+    `;
+    const result = await pool.query(updateQuery, [imageBuffer, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Scrap bucket not found' });
+    }
+
+    res.json({
+      message: 'Weight photo uploaded successfully',
+      bucket: result.rows[0]
+    });
+
+  } catch (err) {
+    console.error('Error uploading weight photo:', err);
+    res.status(500).json({ error: 'Failed to upload weight photo' });
+  }
+});
+
+// Get weight photo for scrap bucket
+app.get('/api/scrap/buckets/:id/weight-photo', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const query = 'SELECT weight_photo FROM scrap WHERE bucket_id = $1';
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0 || !result.rows[0].weight_photo) {
+      return res.status(404).json({ error: 'Weight photo not found' });
+    }
+
+    const imageBuffer = result.rows[0].weight_photo;
+
+    // Set appropriate content type
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Content-Length', imageBuffer.length);
+    res.send(imageBuffer);
+
+  } catch (err) {
+    console.error('Error retrieving weight photo:', err);
+    res.status(500).json({ error: 'Failed to retrieve weight photo' });
   }
 });
 

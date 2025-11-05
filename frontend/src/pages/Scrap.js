@@ -43,6 +43,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import PrintIcon from '@mui/icons-material/Print';
 import axios from 'axios';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
@@ -95,6 +97,13 @@ const Scrap = () => {
     availableItems: [],
     selectedItems: [],
     loading: false
+  });
+
+  const [weightPhotoDialog, setWeightPhotoDialog] = useState({
+    open: false,
+    selectedFile: null,
+    preview: null,
+    uploading: false
   });
 
   // Fetch scrap buckets from API
@@ -878,6 +887,171 @@ const Scrap = () => {
     }
   };
 
+  // Handle opening weight photo dialog
+  const handleOpenWeightPhotoDialog = () => {
+    setWeightPhotoDialog({
+      open: true,
+      selectedFile: null,
+      preview: null,
+      uploading: false
+    });
+  };
+
+  // Handle closing weight photo dialog
+  const handleCloseWeightPhotoDialog = () => {
+    setWeightPhotoDialog({
+      open: false,
+      selectedFile: null,
+      preview: null,
+      uploading: false
+    });
+  };
+
+  // Handle file selection for weight photo
+  const handleWeightPhotoFileSelect = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      // Create preview URL
+      const previewUrl = URL.createObjectURL(file);
+      setWeightPhotoDialog(prev => ({
+        ...prev,
+        selectedFile: file,
+        preview: previewUrl
+      }));
+    }
+  };
+
+  // Handle weight photo upload
+  const handleUploadWeightPhoto = async () => {
+    if (!weightPhotoDialog.selectedFile || !selectedBucket) {
+      setError('Please select a photo to upload');
+      return;
+    }
+
+    try {
+      setWeightPhotoDialog(prev => ({ ...prev, uploading: true }));
+
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Authentication token not found');
+        return;
+      }
+
+      // Create form data for file upload
+      const formData = new FormData();
+      formData.append('weight_photo', weightPhotoDialog.selectedFile);
+      formData.append('bucket_id', selectedBucket.bucket_id);
+
+      // Upload photo
+      await axios.post(
+        `${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}/weight-photo`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+
+      // Close dialog
+      handleCloseWeightPhotoDialog();
+
+      // Refresh buckets
+      const updatedBuckets = await fetchScrapBuckets();
+      const refreshedBucket = updatedBuckets.find(b => b.bucket_id === selectedBucket.bucket_id);
+      if (refreshedBucket) {
+        handleBucketSelect(refreshedBucket);
+      }
+
+      setError(null);
+    } catch (err) {
+      console.error('Error uploading weight photo:', err);
+      setError(err.response?.data?.error || 'Failed to upload weight photo');
+      setWeightPhotoDialog(prev => ({ ...prev, uploading: false }));
+    }
+  };
+
+  // Handle print packing list
+  const handlePrintPackingList = () => {
+    if (!selectedBucket || !bucketItems.length) {
+      setError('No items to print');
+      return;
+    }
+
+    // Create a printable view
+    const printWindow = window.open('', '_blank');
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Packing List - ${selectedBucket.bucket_name}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; margin-bottom: 10px; }
+            .header-info { margin-bottom: 20px; }
+            .header-info p { margin: 5px 0; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f2f2f2; }
+            .summary { margin-top: 20px; }
+            .summary p { margin: 5px 0; font-weight: bold; }
+            @media print {
+              button { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>Scrap Packing List</h1>
+          <div class="header-info">
+            <p><strong>Bucket Name:</strong> ${selectedBucket.bucket_name}</p>
+            <p><strong>Bucket ID:</strong> SCRP-${selectedBucket.bucket_id}</p>
+            <p><strong>Status:</strong> ${selectedBucket.status}</p>
+            <p><strong>Date Created:</strong> ${new Date(selectedBucket.created_at).toLocaleDateString()}</p>
+            <p><strong>Notes:</strong> ${selectedBucket.notes || 'N/A'}</p>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Item ID</th>
+                <th>Description</th>
+                <th>Weight (g)</th>
+                <th>Metal Type</th>
+                <th>Purity</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${bucketItems.map(item => `
+                <tr>
+                  <td>${item.item_id || 'N/A'}</td>
+                  <td>${item.long_desc || 'N/A'}</td>
+                  <td>${parseFloat(item.metal_weight || 0).toFixed(2)}</td>
+                  <td>${item.precious_metal_type || 'N/A'}</td>
+                  <td>${item.metal_purity || 'N/A'}</td>
+                  <td>$${parseFloat(item.item_price || item.buy_price || item.retail_price || 0).toFixed(2)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <div class="summary">
+            <p>Total Items: ${bucketItems.length}</p>
+            <p>Total Weight: ${bucketItems.reduce((sum, item) => sum + parseFloat(item.metal_weight || 0), 0).toFixed(2)} g</p>
+            <p>Total Cost: $${bucketItems.reduce((sum, item) => sum + parseFloat(item.item_price || item.buy_price || item.retail_price || 0), 0).toFixed(2)}</p>
+          </div>
+
+          <button onclick="window.print()" style="margin-top: 20px; padding: 10px 20px; background: #1976d2; color: white; border: none; cursor: pointer;">Print</button>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+  };
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       {error && (
@@ -1069,6 +1243,19 @@ const Scrap = () => {
                       </>
                     )}
 
+                    {/* CLOSED Status Actions */}
+                    {selectedBucket.status === 'CLOSED' && (
+                      <Button
+                        variant="outlined"
+                        color="primary"
+                        size="small"
+                        startIcon={<PhotoCameraIcon />}
+                        onClick={handleOpenWeightPhotoDialog}
+                      >
+                        Add Weight Photo
+                      </Button>
+                    )}
+
                     {/* Add Item Button */}
                     <Button
                       variant="contained"
@@ -1081,6 +1268,21 @@ const Scrap = () => {
                     </Button>
                   </Box>
                 </Box>
+
+                {/* Print Packing List Button - Below header */}
+                {selectedBucket.status === 'CLOSED' && (
+                  <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      size="small"
+                      startIcon={<PrintIcon />}
+                      onClick={handlePrintPackingList}
+                    >
+                      Print Packing List
+                    </Button>
+                  </Box>
+                )}
 
                 {/* Bucket Details Grid */}
                 <Box sx={{
@@ -1147,6 +1349,28 @@ const Scrap = () => {
                     </Typography>
                   </Box>
                 </Box>
+
+                {/* Weight Photo Display */}
+                {selectedBucket.bucket_id && (
+                  <Box sx={{ mt: 2, textAlign: 'center' }}>
+                    <Typography variant="caption" color="textSecondary" display="block" sx={{ mb: 1 }}>
+                      Weight Photo
+                    </Typography>
+                    <img
+                      src={`${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}/weight-photo`}
+                      alt="Bucket weight"
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '200px',
+                        borderRadius: '4px',
+                        border: '1px solid #ddd'
+                      }}
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                      }}
+                    />
+                  </Box>
+                )}
               </Box>
 
               {/* Metal Type Summary and Items Table */}
@@ -1193,13 +1417,22 @@ const Scrap = () => {
                           <TableCell>{parseFloat(item.metal_weight || item.weight_grams || 0).toFixed(2)}</TableCell>
                           <TableCell>{formatCurrency(parseFloat(item.item_price || item.buy_price || item.retail_price || 0))}</TableCell>
                           <TableCell>
-                            <Tooltip title="Remove from Scrap" arrow>
-                              <IconButton
-                                size="small"
-                                onClick={() => handleDeleteClick(item)}
-                              >
-                                <RemoveCircleOutlineIcon fontSize="small" color="error" />
-                              </IconButton>
+                            <Tooltip
+                              title={selectedBucket.status === 'CLOSED' ? "Cannot remove items from closed bucket" : "Remove from Scrap"}
+                              arrow
+                            >
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleDeleteClick(item)}
+                                  disabled={selectedBucket.status === 'CLOSED'}
+                                >
+                                  <RemoveCircleOutlineIcon
+                                    fontSize="small"
+                                    color={selectedBucket.status === 'CLOSED' ? "disabled" : "error"}
+                                  />
+                                </IconButton>
+                              </span>
                             </Tooltip>
                           </TableCell>
                         </TableRow>
@@ -1499,6 +1732,87 @@ const Scrap = () => {
             disabled={addItemDialog.selectedItems.length === 0}
           >
             Add to Bucket
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Weight Photo Upload Dialog */}
+      <Dialog
+        open={weightPhotoDialog.open}
+        onClose={handleCloseWeightPhotoDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Add Weight Photo</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            Upload a photo showing the total weight for <strong>{selectedBucket?.bucket_name}</strong>
+          </Typography>
+
+          <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+            {/* Camera Capture */}
+            <input
+              accept="image/*"
+              capture="environment"
+              style={{ display: 'none' }}
+              id="weight-photo-camera"
+              type="file"
+              onChange={handleWeightPhotoFileSelect}
+            />
+            <label htmlFor="weight-photo-camera" style={{ flex: 1 }}>
+              <Button
+                variant="outlined"
+                component="span"
+                startIcon={<PhotoCameraIcon />}
+                fullWidth
+              >
+                Take Photo
+              </Button>
+            </label>
+
+            {/* File Upload */}
+            <input
+              accept="image/*"
+              style={{ display: 'none' }}
+              id="weight-photo-upload"
+              type="file"
+              onChange={handleWeightPhotoFileSelect}
+            />
+            <label htmlFor="weight-photo-upload" style={{ flex: 1 }}>
+              <Button
+                variant="outlined"
+                component="span"
+                startIcon={<AddIcon />}
+                fullWidth
+              >
+                Select Photo
+              </Button>
+            </label>
+          </Box>
+
+          {weightPhotoDialog.preview && (
+            <Box sx={{ mt: 2, textAlign: 'center' }}>
+              <Typography variant="body2" sx={{ mb: 1 }}>Preview:</Typography>
+              <img
+                src={weightPhotoDialog.preview}
+                alt="Weight preview"
+                style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '4px' }}
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseWeightPhotoDialog} color="inherit">
+            Cancel
+          </Button>
+          <Button
+            onClick={handleUploadWeightPhoto}
+            variant="contained"
+            color="primary"
+            disabled={!weightPhotoDialog.selectedFile || weightPhotoDialog.uploading}
+            startIcon={weightPhotoDialog.uploading ? <CircularProgress size={20} /> : null}
+          >
+            {weightPhotoDialog.uploading ? 'Uploading...' : 'Upload'}
           </Button>
         </DialogActions>
       </Dialog>

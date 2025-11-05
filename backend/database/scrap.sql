@@ -1,7 +1,4 @@
--- Drop existing tables if they exist
-DROP TABLE IF EXISTS scrap_bucket_items;
-DROP TABLE IF EXISTS scrap_buckets;
-DROP TABLE IF EXISTS scrap;
+
 
 -- Create scrap table with bucket information and jewelry items array
 CREATE TABLE IF NOT EXISTS scrap (
@@ -13,7 +10,8 @@ CREATE TABLE IF NOT EXISTS scrap (
     created_by INTEGER,
     updated_by INTEGER,
     notes TEXT,
-    status VARCHAR(20) DEFAULT 'ACTIVE'
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    weight_photo BYTEA
 );
 
 -- Create index on bucket_name for faster lookups
@@ -125,3 +123,16 @@ BEGIN
 
 END;
 $$ LANGUAGE plpgsql;
+
+-- Add weight_photo column if it doesn't exist (for existing tables)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'weight_photo'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN weight_photo BYTEA;
+    END IF;
+END $$;
