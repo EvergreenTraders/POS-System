@@ -45,12 +45,15 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import PrintIcon from '@mui/icons-material/Print';
+import CloseIcon from '@mui/icons-material/Close';
 import axios from 'axios';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
 
 const Scrap = () => {
   const API_BASE_URL = config.apiUrl;
+
+  // Debug logging
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
@@ -103,7 +106,16 @@ const Scrap = () => {
     open: false,
     selectedFile: null,
     preview: null,
-    uploading: false
+    uploading: false,
+    cameraMode: false,
+    stream: null
+  });
+
+  const [photoTimestamp, setPhotoTimestamp] = useState(Date.now());
+
+  const [imagePreviewDialog, setImagePreviewDialog] = useState({
+    open: false,
+    imageUrl: null
   });
 
   // Fetch scrap buckets from API
@@ -220,6 +232,17 @@ const Scrap = () => {
     initialize();
   }, []);
   
+  // Handle video stream for camera
+  useEffect(() => {
+    if (weightPhotoDialog.cameraMode && weightPhotoDialog.stream) {
+      const video = document.getElementById('camera-video');
+      if (video) {
+        video.srcObject = weightPhotoDialog.stream;
+        video.play();
+      }
+    }
+  }, [weightPhotoDialog.cameraMode, weightPhotoDialog.stream]);
+
   // Update selected bucket when scrapBuckets changes
   useEffect(() => {
     if (scrapBuckets.length > 0 && !selectedBucket) {
@@ -893,18 +916,83 @@ const Scrap = () => {
       open: true,
       selectedFile: null,
       preview: null,
-      uploading: false
+      uploading: false,
+      cameraMode: false,
+      stream: null
     });
   };
 
   // Handle closing weight photo dialog
   const handleCloseWeightPhotoDialog = () => {
+    // Stop camera stream if active
+    if (weightPhotoDialog.stream) {
+      weightPhotoDialog.stream.getTracks().forEach(track => track.stop());
+    }
     setWeightPhotoDialog({
       open: false,
       selectedFile: null,
       preview: null,
-      uploading: false
+      uploading: false,
+      cameraMode: false,
+      stream: null
     });
+  };
+
+  // Handle opening camera
+  const handleOpenCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+      setWeightPhotoDialog(prev => ({
+        ...prev,
+        cameraMode: true,
+        stream: stream,
+        selectedFile: null,
+        preview: null
+      }));
+    } catch (err) {
+      console.error('Error accessing camera:', err);
+      setError('Unable to access camera. Please check permissions.');
+    }
+  };
+
+  // Handle capturing photo from camera
+  const handleCapturePhoto = () => {
+    const video = document.getElementById('camera-video');
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+
+    canvas.toBlob((blob) => {
+      const file = new File([blob], `weight-photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const previewUrl = URL.createObjectURL(blob);
+
+      // Stop camera stream
+      if (weightPhotoDialog.stream) {
+        weightPhotoDialog.stream.getTracks().forEach(track => track.stop());
+      }
+
+      setWeightPhotoDialog(prev => ({
+        ...prev,
+        selectedFile: file,
+        preview: previewUrl,
+        cameraMode: false,
+        stream: null
+      }));
+    }, 'image/jpeg', 0.95);
+  };
+
+  // Handle retaking photo
+  const handleRetakePhoto = () => {
+    setWeightPhotoDialog(prev => ({
+      ...prev,
+      selectedFile: null,
+      preview: null,
+      cameraMode: false
+    }));
   };
 
   // Handle file selection for weight photo
@@ -919,6 +1007,22 @@ const Scrap = () => {
         preview: previewUrl
       }));
     }
+  };
+
+  // Handle opening image preview dialog
+  const handleOpenImagePreview = (imageUrl) => {
+    setImagePreviewDialog({
+      open: true,
+      imageUrl: imageUrl
+    });
+  };
+
+  // Handle closing image preview dialog
+  const handleCloseImagePreview = () => {
+    setImagePreviewDialog({
+      open: false,
+      imageUrl: null
+    });
   };
 
   // Handle weight photo upload
@@ -956,6 +1060,9 @@ const Scrap = () => {
 
       // Close dialog
       handleCloseWeightPhotoDialog();
+
+      // Refresh timestamp to reload image
+      setPhotoTimestamp(Date.now());
 
       // Refresh buckets
       const updatedBuckets = await fetchScrapBuckets();
@@ -1287,14 +1394,16 @@ const Scrap = () => {
                 {/* Bucket Details Grid */}
                 <Box sx={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
-                  gap: 2,
-                  p: 2,
+                  gridTemplateColumns: selectedBucket.status === 'CLOSED' ? 'repeat(3, 1fr) 120px' : 'repeat(3, 1fr)',
+                  gridTemplateRows: '35px 35px',
+                  gap: 1,
+                  p: 1,
                   bgcolor: 'background.default',
                   borderRadius: 1,
                   border: '1px solid',
                   borderColor: 'divider'
                 }}>
+                  {/* Row 1, Col 1 */}
                   <Box>
                     <Typography variant="caption" color="textSecondary" display="block">
                       Date Created
@@ -1304,6 +1413,7 @@ const Scrap = () => {
                     </Typography>
                   </Box>
 
+                  {/* Row 1, Col 2 */}
                   <Box>
                     <Typography variant="caption" color="textSecondary" display="block">
                       Status Date
@@ -1313,6 +1423,7 @@ const Scrap = () => {
                     </Typography>
                   </Box>
 
+                  {/* Row 1, Col 3 */}
                   <Box>
                     <Typography variant="caption" color="textSecondary" display="block">
                       Total Items
@@ -1322,6 +1433,54 @@ const Scrap = () => {
                     </Typography>
                   </Box>
 
+                  {/* Weight Photo - Only show for CLOSED status - Spans last column and 2 rows */}
+                  {selectedBucket.status === 'CLOSED' && (
+                    <Box sx={{
+                      gridRow: 'span 2',
+                      overflow: 'hidden',
+                      borderRadius: 1,
+                      bgcolor: 'grey.100'
+                    }}>
+                      {selectedBucket.bucket_id && API_BASE_URL ? (
+                        <Box
+                          key={`weight-photo-${photoTimestamp}`}
+                          component="img"
+                          src={(() => {
+                            const url = `${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}/weight-photo?t=${photoTimestamp}`;
+                            return url;
+                          })()}
+                          alt="Bucket weight"
+                          sx={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => {
+                            const imageUrl = `${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}/weight-photo?t=${photoTimestamp}`;
+                            handleOpenImagePreview(imageUrl);
+                          }}
+                          onError={(e) => {
+                            e.target.onerror = null; // Prevent infinite loop
+                            e.target.src = 'https://via.placeholder.com/150?text=No+Photo';
+                          }}
+                        />
+                      ) : (
+                        <Box
+                          component="img"
+                          src="https://via.placeholder.com/150?text=No+Photo"
+                          alt="No photo"
+                          sx={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover'
+                          }}
+                        />
+                      )}
+                    </Box>
+                  )}
+
+                  {/* Row 2, Col 1 */}
                   <Box>
                     <Typography variant="caption" color="textSecondary" display="block">
                       Total Weight
@@ -1331,6 +1490,7 @@ const Scrap = () => {
                     </Typography>
                   </Box>
 
+                  {/* Row 2, Col 2 */}
                   <Box>
                     <Typography variant="caption" color="textSecondary" display="block">
                       Calculated Purity
@@ -1340,6 +1500,7 @@ const Scrap = () => {
                     </Typography>
                   </Box>
 
+                  {/* Row 2, Col 3 */}
                   <Box>
                     <Typography variant="caption" color="textSecondary" display="block">
                       Estimated Melt Value
@@ -1349,28 +1510,6 @@ const Scrap = () => {
                     </Typography>
                   </Box>
                 </Box>
-
-                {/* Weight Photo Display */}
-                {selectedBucket.bucket_id && (
-                  <Box sx={{ mt: 2, textAlign: 'center' }}>
-                    <Typography variant="caption" color="textSecondary" display="block" sx={{ mb: 1 }}>
-                      Weight Photo
-                    </Typography>
-                    <img
-                      src={`${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}/weight-photo`}
-                      alt="Bucket weight"
-                      style={{
-                        maxWidth: '100%',
-                        maxHeight: '200px',
-                        borderRadius: '4px',
-                        border: '1px solid #ddd'
-                      }}
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                      }}
-                    />
-                  </Box>
-                )}
               </Box>
 
               {/* Metal Type Summary and Items Table */}
@@ -1749,72 +1888,151 @@ const Scrap = () => {
             Upload a photo showing the total weight for <strong>{selectedBucket?.bucket_name}</strong>
           </Typography>
 
-          <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-            {/* Camera Capture */}
-            <input
-              accept="image/*"
-              capture="environment"
-              style={{ display: 'none' }}
-              id="weight-photo-camera"
-              type="file"
-              onChange={handleWeightPhotoFileSelect}
-            />
-            <label htmlFor="weight-photo-camera" style={{ flex: 1 }}>
+          {!weightPhotoDialog.cameraMode && !weightPhotoDialog.preview && (
+            <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+              {/* Camera Capture */}
               <Button
                 variant="outlined"
-                component="span"
                 startIcon={<PhotoCameraIcon />}
                 fullWidth
+                onClick={handleOpenCamera}
               >
                 Take Photo
               </Button>
-            </label>
 
-            {/* File Upload */}
-            <input
-              accept="image/*"
-              style={{ display: 'none' }}
-              id="weight-photo-upload"
-              type="file"
-              onChange={handleWeightPhotoFileSelect}
-            />
-            <label htmlFor="weight-photo-upload" style={{ flex: 1 }}>
-              <Button
-                variant="outlined"
-                component="span"
-                startIcon={<AddIcon />}
-                fullWidth
-              >
-                Select Photo
-              </Button>
-            </label>
-          </Box>
+              {/* File Upload */}
+              <input
+                accept="image/*"
+                style={{ display: 'none' }}
+                id="weight-photo-upload"
+                type="file"
+                onChange={handleWeightPhotoFileSelect}
+              />
+              <label htmlFor="weight-photo-upload" style={{ flex: 1 }}>
+                <Button
+                  variant="outlined"
+                  component="span"
+                  startIcon={<AddIcon />}
+                  fullWidth
+                >
+                  Select Photo
+                </Button>
+              </label>
+            </Box>
+          )}
 
-          {weightPhotoDialog.preview && (
-            <Box sx={{ mt: 2, textAlign: 'center' }}>
+          {/* Camera View */}
+          {weightPhotoDialog.cameraMode && (
+            <Box sx={{ textAlign: 'center' }}>
+              <video
+                id="camera-video"
+                autoPlay
+                playsInline
+                style={{
+                  width: '100%',
+                  maxHeight: '400px',
+                  borderRadius: '4px',
+                  backgroundColor: '#000'
+                }}
+              />
+              <Box sx={{ mt: 2, display: 'flex', gap: 1, justifyContent: 'center' }}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={<PhotoCameraIcon />}
+                  onClick={handleCapturePhoto}
+                >
+                  Capture
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={handleCloseWeightPhotoDialog}
+                >
+                  Cancel
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {/* Preview */}
+          {weightPhotoDialog.preview && !weightPhotoDialog.cameraMode && (
+            <Box sx={{ textAlign: 'center' }}>
               <Typography variant="body2" sx={{ mb: 1 }}>Preview:</Typography>
               <img
                 src={weightPhotoDialog.preview}
                 alt="Weight preview"
                 style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '4px' }}
               />
+              <Box sx={{ mt: 2 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={handleRetakePhoto}
+                >
+                  Retake
+                </Button>
+              </Box>
             </Box>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseWeightPhotoDialog} color="inherit">
-            Cancel
-          </Button>
-          <Button
-            onClick={handleUploadWeightPhoto}
-            variant="contained"
-            color="primary"
-            disabled={!weightPhotoDialog.selectedFile || weightPhotoDialog.uploading}
-            startIcon={weightPhotoDialog.uploading ? <CircularProgress size={20} /> : null}
-          >
-            {weightPhotoDialog.uploading ? 'Uploading...' : 'Upload'}
-          </Button>
+          {!weightPhotoDialog.cameraMode && (
+            <>
+              <Button onClick={handleCloseWeightPhotoDialog} color="inherit">
+                Cancel
+              </Button>
+              {weightPhotoDialog.preview && (
+                <Button
+                  onClick={handleUploadWeightPhoto}
+                  variant="contained"
+                  color="primary"
+                  disabled={!weightPhotoDialog.selectedFile || weightPhotoDialog.uploading}
+                  startIcon={weightPhotoDialog.uploading ? <CircularProgress size={20} /> : null}
+                >
+                  {weightPhotoDialog.uploading ? 'Uploading...' : 'Upload'}
+                </Button>
+              )}
+            </>
+          )}
         </DialogActions>
+      </Dialog>
+
+      {/* Image Preview Dialog */}
+      <Dialog
+        open={imagePreviewDialog.open}
+        onClose={handleCloseImagePreview}
+        maxWidth="sm"
+      >
+        <DialogTitle sx={{ py: 1, px: 2 }}>
+          Weight Photo
+          <IconButton
+            aria-label="close"
+            onClick={handleCloseImagePreview}
+            sx={{
+              position: 'absolute',
+              right: 4,
+              top: 4,
+              color: (theme) => theme.palette.grey[500],
+            }}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ p: 1 }}>
+          {imagePreviewDialog.imageUrl && (
+            <Box
+              component="img"
+              src={imagePreviewDialog.imageUrl}
+              alt="Weight photo preview"
+              sx={{
+                width: '100%',
+                height: 'auto',
+                maxHeight: '50vh',
+                objectFit: 'contain'
+              }}
+            />
+          )}
+        </DialogContent>
       </Dialog>
     </Container>
   );
