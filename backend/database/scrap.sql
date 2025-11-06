@@ -1,7 +1,4 @@
--- Drop existing tables if they exist
-DROP TABLE IF EXISTS scrap_bucket_items;
-DROP TABLE IF EXISTS scrap_buckets;
-DROP TABLE IF EXISTS scrap;
+
 
 -- Create scrap table with bucket information and jewelry items array
 CREATE TABLE IF NOT EXISTS scrap (
@@ -13,7 +10,19 @@ CREATE TABLE IF NOT EXISTS scrap (
     created_by INTEGER,
     updated_by INTEGER,
     notes TEXT,
-    status VARCHAR(20) DEFAULT 'ACTIVE'
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    weight_photo BYTEA,
+    refiner_customer_id INTEGER,
+    shipper VARCHAR(100),
+    tracking_number VARCHAR(100),
+    date_received DATE,
+    weight_received DECIMAL(10,2),
+    locked_spot_price DECIMAL(10,2),
+    payment_advance DECIMAL(10,2),
+    final_weight DECIMAL(10,2),
+    assay DECIMAL(5,2),
+    total_settlement_amount DECIMAL(10,2),
+    final_payment_amount DECIMAL(10,2)
 );
 
 -- Create index on bucket_name for faster lookups
@@ -93,8 +102,8 @@ BEGIN
      WHERE s.bucket_id = v_bucket_id;
 
     -- Update the item status in jewelry (do not delete)
-    UPDATE jewelry 
-       SET status = 'SCRAP',
+    UPDATE jewelry
+       SET status = 'SCRAP PROCESS',
            updated_at = CURRENT_TIMESTAMP,
            moved_to_scrap_at = CURRENT_TIMESTAMP,
            moved_by = p_moved_by
@@ -116,7 +125,7 @@ BEGIN
         jsonb_build_object(
             'status', jsonb_build_object(
                 'from', v_old_status,
-                'to', 'SCRAP'
+                'to', 'SCRAP PROCESS'
             )
         ),
         'Item moved to scrap and added to bucket '
@@ -125,3 +134,127 @@ BEGIN
 
 END;
 $$ LANGUAGE plpgsql;
+
+-- Add weight_photo column if it doesn't exist (for existing tables)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'weight_photo'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN weight_photo BYTEA;
+    END IF;
+END $$;
+
+-- Add shipping-related columns if they don't exist (for existing tables)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'refiner_customer_id'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN refiner_customer_id INTEGER;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'shipper'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN shipper VARCHAR(100);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'tracking_number'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN tracking_number VARCHAR(100);
+    END IF;
+END $$;
+
+-- Add processing-related columns if they don't exist (for existing tables)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'date_received'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN date_received DATE;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'weight_received'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN weight_received DECIMAL(10,2);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'locked_spot_price'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN locked_spot_price DECIMAL(10,2);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'payment_advance'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN payment_advance DECIMAL(10,2);
+    END IF;
+END $$;
+
+-- Add completed-related columns if they don't exist (for existing tables)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'final_weight'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN final_weight DECIMAL(10,2);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'assay'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN assay DECIMAL(5,2);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'total_settlement_amount'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN total_settlement_amount DECIMAL(10,2);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'final_payment_amount'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN final_payment_amount DECIMAL(10,2);
+    END IF;
+END $$;

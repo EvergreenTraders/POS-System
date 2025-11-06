@@ -1977,13 +1977,15 @@ function JewelryEdit() {
     switch (status) {
       case 'SOLD':
         return 'success.main';
+      case 'SOLD TO REFINER':
+        return 'success.dark';
       case 'IN_PROCESS':
         return 'info.main';
       case 'HOLD':
         return 'warning.main';
       case 'RESERVED':
         return 'primary.main';
-      case 'SCRAP':
+      case 'SCRAP PROCESS':
         return 'error.main';
       default:
         return 'text.secondary';

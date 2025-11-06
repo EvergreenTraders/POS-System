@@ -56,6 +56,17 @@ if (!fs.existsSync(jewelryUploadDir)) {
   fs.mkdirSync(jewelryUploadDir, { recursive: true });
 }
 
+const scrapUploadDir = 'uploads/scrap/';
+if (!fs.existsSync(scrapUploadDir)) {
+  fs.mkdirSync(scrapUploadDir, { recursive: true });
+}
+
+// Configure multer for scrap weight photo uploads
+const uploadScrapPhoto = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10 MB limit per file
+}).single('weight_photo');
+
 // Function to update quote days remaining
 const updateQuoteDaysRemaining = async () => {
   try {
@@ -1165,7 +1176,7 @@ app.delete('/api/quotes/:id', async (req, res) => {
 });
 
 // Jewelry update endpoint for quote conversion
-app.put('/api/jewelry/:quoteId', async (req, res) => {
+app.put('/api/jewelry/quote/:quoteId/convert', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1285,7 +1296,7 @@ app.post('/api/jewelry/:id/move-to-scrap', async (req, res) => {
     const changedFields = {
       status: {
         old: oldStatus,
-        new: 'SCRAP'
+        new: 'SCRAP PROCESS'
       }
     };
     // Get the next version number
@@ -1298,18 +1309,18 @@ app.post('/api/jewelry/:id/move-to-scrap', async (req, res) => {
     // Insert the history record
     await client.query(
       `INSERT INTO jewelry_item_history (
-        item_id, 
+        item_id,
         version_number,
-        changed_by, 
-        action_type, 
-        changed_fields, 
+        changed_by,
+        action_type,
+        changed_fields,
         change_notes
-      ) VALUES ($1, $2, $3, 'STATUS_CHANGE', $4, 'Moved to SCRAP')`,
+      ) VALUES ($1, $2, $3, 'STATUS_CHANGE', $4, 'Moved to SCRAP PROCESS')`,
       [id, version_number, moved_by, changedFields]
     );
-    // 1. Update the jewelry item status to SCRAP
+    // 1. Update the jewelry item status to SCRAP PROCESS
     const updateJewelryQuery = await client.query(
-      `UPDATE jewelry SET status = 'SCRAP', updated_at = CURRENT_TIMESTAMP WHERE item_id = $1 RETURNING *`,
+      `UPDATE jewelry SET status = 'SCRAP PROCESS', updated_at = CURRENT_TIMESTAMP WHERE item_id = $1 RETURNING *`,
       [id]
     );
     // 2. Add item_id to the selected bucket's item_id array
@@ -1341,6 +1352,83 @@ app.post('/api/jewelry/:id/move-to-scrap', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to move item to scrap',
       details: err.message 
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Update jewelry item (general update endpoint)
+app.put('/api/jewelry/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    await client.query('BEGIN');
+
+    // Check if item exists
+    const checkQuery = 'SELECT * FROM jewelry WHERE item_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+
+    if (checkResult.rows.length === 0) {
+      console.log('Item not found:', id);
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+
+    // Build dynamic update query
+    const fields = [];
+    const values = [];
+    let paramCount = 1;
+
+    // List of allowed fields to update
+    const allowedFields = [
+      'status', 'category', 'short_desc', 'long_desc',
+      'precious_metal_type', 'metal_purity', 'metal_weight',
+      'primary_gem_type', 'primary_gem_category', 'primary_gem_size',
+      'primary_gem_quantity', 'primary_gem_shape', 'primary_gem_color',
+      'primary_gem_quality', 'primary_gem_weight', 'secondary_gem_type',
+      'secondary_gem_category', 'secondary_gem_size', 'secondary_gem_quantity',
+      'secondary_gem_shape', 'secondary_gem_color', 'secondary_gem_quality',
+      'secondary_gem_weight', 'metal_spot_price', 'notes', 'price',
+      'melt_value', 'weight_grams', 'metal_category'
+    ];
+
+    for (const field of allowedFields) {
+      if (updates.hasOwnProperty(field)) {
+        fields.push(`${field} = $${paramCount}`);
+        values.push(updates[field]);
+        paramCount++;
+      }
+    }
+
+    if (fields.length === 0) {
+      console.log('No valid fields to update');
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(id);
+
+    const updateQuery = `
+      UPDATE jewelry
+      SET ${fields.join(', ')}
+      WHERE item_id = $${paramCount}
+      RETURNING *
+    `;
+
+    const result = await client.query(updateQuery, values);
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating jewelry item:', err);
+    res.status(500).json({
+      error: 'Failed to update jewelry item',
+      details: err.message
     });
   } finally {
     client.release();
@@ -4015,7 +4103,7 @@ app.post('/api/jewelry_secondary_gems', authenticateToken, async (req, res) => {
 app.get('/api/scrap/buckets', async (req, res) => {
   try {
     const query = `
-      SELECT 
+      SELECT
         bucket_id,
         bucket_name,
         item_id,
@@ -4023,7 +4111,18 @@ app.get('/api/scrap/buckets', async (req, res) => {
         created_at,
         updated_at,
         notes,
-        status
+        status,
+        refiner_customer_id,
+        shipper,
+        tracking_number,
+        date_received,
+        weight_received,
+        locked_spot_price,
+        payment_advance,
+        final_weight,
+        assay,
+        total_settlement_amount,
+        final_payment_amount
       FROM scrap
       ORDER BY created_at DESC
     `;
@@ -4124,55 +4223,336 @@ app.put('/api/scrap/buckets/:id', async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { bucket_name, notes, status } = req.body;
-    
-    if (!bucket_name) {
-      return res.status(400).json({ error: 'Bucket name is required' });
-    }
-    
+    const { bucket_name, notes, status, item_id, updated_by, refiner_customer_id, shipper, tracking_number, date_received, weight_received, locked_spot_price, payment_advance, final_weight, assay, total_settlement_amount, final_payment_amount } = req.body;
+
     await client.query('BEGIN');
-    
+
     // First check if the bucket exists
-    const checkQuery = 'SELECT 1 FROM scrap WHERE bucket_id = $1';
+    const checkQuery = 'SELECT * FROM scrap WHERE bucket_id = $1';
     const checkResult = await client.query(checkQuery, [id]);
-    
+
     if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Scrap bucket not found' });
     }
-    
-    // Update the bucket
+
+    const existingBucket = checkResult.rows[0];
+
+    // If status is being changed to COMPLETE, update all items in the bucket to 'SOLD TO REFINER'
+    if (status === 'COMPLETE' && existingBucket.status !== 'COMPLETE') {
+      const itemIds = existingBucket.item_id;
+
+      if (itemIds && itemIds.length > 0) {
+        // Get employee ID from request body or use a default value (1 for system)
+        const employeeId = updated_by || 1;
+
+        // Update each item's status to 'SOLD TO REFINER'
+        for (const itemId of itemIds) {
+          // Get current item details
+          const itemResult = await client.query(
+            'SELECT status FROM jewelry WHERE item_id = $1',
+            [itemId]
+          );
+
+          if (itemResult.rows.length > 0) {
+            const oldStatus = itemResult.rows[0].status;
+
+            // Update jewelry item status to 'SOLD TO REFINER'
+            await client.query(
+              `UPDATE jewelry SET status = 'SOLD TO REFINER', updated_at = CURRENT_TIMESTAMP WHERE item_id = $1`,
+              [itemId]
+            );
+
+            // Get the next version number for history
+            const versionResult = await client.query(
+              'SELECT COALESCE(MAX(version_number), 0) + 1 as next_version FROM jewelry_item_history WHERE item_id = $1',
+              [itemId]
+            );
+            const version_number = versionResult.rows[0].next_version;
+
+            // Log the status change in jewelry_item_history
+            const changedFields = {
+              status: { old: oldStatus, new: 'SOLD TO REFINER' }
+            };
+
+            await client.query(
+              `INSERT INTO jewelry_item_history (
+                item_id, version_number, changed_by, action_type, changed_fields, change_notes
+              ) VALUES ($1, $2, $3, 'STATUS_CHANGE', $4, 'Item sold to refiner from bucket: ' || $5)`,
+              [itemId, version_number, employeeId, changedFields, existingBucket.bucket_name]
+            );
+          }
+        }
+      }
+    }
+
+    // Build update query dynamically based on provided fields
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (bucket_name !== undefined) {
+      updates.push(`bucket_name = $${paramCount}`);
+      values.push(bucket_name);
+      paramCount++;
+    }
+
+    if (notes !== undefined) {
+      updates.push(`notes = $${paramCount}`);
+      values.push(notes || null);
+      paramCount++;
+    }
+
+    if (status !== undefined) {
+      updates.push(`status = $${paramCount}`);
+      values.push(status);
+      paramCount++;
+    }
+
+    if (item_id !== undefined) {
+      updates.push(`item_id = $${paramCount}`);
+      values.push(JSON.stringify(item_id));
+      paramCount++;
+    }
+
+    if (refiner_customer_id !== undefined) {
+      updates.push(`refiner_customer_id = $${paramCount}`);
+      values.push(refiner_customer_id || null);
+      paramCount++;
+    }
+
+    if (shipper !== undefined) {
+      updates.push(`shipper = $${paramCount}`);
+      values.push(shipper || null);
+      paramCount++;
+    }
+
+    if (tracking_number !== undefined) {
+      updates.push(`tracking_number = $${paramCount}`);
+      values.push(tracking_number || null);
+      paramCount++;
+    }
+
+    if (date_received !== undefined) {
+      updates.push(`date_received = $${paramCount}`);
+      values.push(date_received || null);
+      paramCount++;
+    }
+
+    if (weight_received !== undefined) {
+      updates.push(`weight_received = $${paramCount}`);
+      values.push(weight_received || null);
+      paramCount++;
+    }
+
+    if (locked_spot_price !== undefined) {
+      updates.push(`locked_spot_price = $${paramCount}`);
+      values.push(locked_spot_price || null);
+      paramCount++;
+    }
+
+    if (payment_advance !== undefined) {
+      updates.push(`payment_advance = $${paramCount}`);
+      values.push(payment_advance || null);
+      paramCount++;
+    }
+
+    if (final_weight !== undefined) {
+      updates.push(`final_weight = $${paramCount}`);
+      values.push(final_weight || null);
+      paramCount++;
+    }
+
+    if (assay !== undefined) {
+      updates.push(`assay = $${paramCount}`);
+      values.push(assay || null);
+      paramCount++;
+    }
+
+    if (total_settlement_amount !== undefined) {
+      updates.push(`total_settlement_amount = $${paramCount}`);
+      values.push(total_settlement_amount || null);
+      paramCount++;
+    }
+
+    if (final_payment_amount !== undefined) {
+      updates.push(`final_payment_amount = $${paramCount}`);
+      values.push(final_payment_amount || null);
+      paramCount++;
+    }
+
+    if (updated_by !== undefined) {
+      updates.push(`updated_by = $${paramCount}`);
+      values.push(updated_by || null);
+      paramCount++;
+    }
+
+    if (updates.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(id);
+
     const updateQuery = `
       UPDATE scrap
-      SET 
-        bucket_name = $1,
-        notes = $2,
-        status = $3,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE bucket_id = $4
+      SET ${updates.join(', ')}
+      WHERE bucket_id = $${paramCount}
       RETURNING *
     `;
-    
-    const result = await client.query(updateQuery, [
-      bucket_name,
-      notes || null,
-      status || 'ACTIVE',
-      id
-    ]);
-    
+
+    const result = await client.query(updateQuery, values);
+
     await client.query('COMMIT');
     res.json(result.rows[0]);
-    
+
   } catch (err) {
     await client.query('ROLLBACK');
-    
+
     if (err.code === '23505') { // Unique violation
       return res.status(409).json({ error: 'A bucket with this name already exists' });
     }
-    
+
     console.error('Error updating scrap bucket:', err);
     res.status(500).json({ error: 'Failed to update scrap bucket' });
   } finally {
     client.release();
+  }
+});
+
+// DELETE a scrap bucket
+app.delete('/api/scrap/buckets/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+
+    await client.query('BEGIN');
+
+    // Check if bucket exists
+    const checkQuery = 'SELECT * FROM scrap WHERE bucket_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Scrap bucket not found' });
+    }
+
+    const bucket = checkResult.rows[0];
+
+    // Check if bucket has items
+    if (bucket.item_id && bucket.item_id.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Cannot delete bucket with items. Please remove all items first.' });
+    }
+
+    // Delete the bucket
+    const deleteQuery = 'DELETE FROM scrap WHERE bucket_id = $1 RETURNING *';
+    const result = await client.query(deleteQuery, [id]);
+
+    await client.query('COMMIT');
+    res.json({ message: 'Bucket deleted successfully', bucket: result.rows[0] });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting scrap bucket:', err);
+    res.status(500).json({ error: 'Failed to delete scrap bucket' });
+  } finally {
+    client.release();
+  }
+});
+
+// Upload weight photo for scrap bucket
+app.post('/api/scrap/buckets/:id/weight-photo', uploadScrapPhoto, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No photo file provided' });
+    }
+
+    // Store image as binary data (BYTEA) in database
+    const imageBuffer = req.file.buffer;
+
+    // Update database with weight photo binary data
+    const updateQuery = `
+      UPDATE scrap
+      SET weight_photo = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE bucket_id = $2
+      RETURNING bucket_id, bucket_name, status, created_at, updated_at, notes
+    `;
+    const result = await pool.query(updateQuery, [imageBuffer, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Scrap bucket not found' });
+    }
+
+    res.json({
+      message: 'Weight photo uploaded successfully',
+      bucket: result.rows[0]
+    });
+
+  } catch (err) {
+    console.error('Error uploading weight photo:', err);
+    res.status(500).json({ error: 'Failed to upload weight photo' });
+  }
+});
+
+// Get weight photo for scrap bucket
+app.get('/api/scrap/buckets/:id/weight-photo', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const query = 'SELECT weight_photo FROM scrap WHERE bucket_id = $1';
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0 || !result.rows[0].weight_photo) {
+      return res.status(404).json({ error: 'Weight photo not found' });
+    }
+
+    const imageBuffer = result.rows[0].weight_photo;
+
+    // Set appropriate content type
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Content-Length', imageBuffer.length);
+    res.send(imageBuffer);
+
+  } catch (err) {
+    console.error('Error retrieving weight photo:', err);
+    res.status(500).json({ error: 'Failed to retrieve weight photo' });
+  }
+});
+
+// GET endpoint to fetch scrap bucket history
+app.get('/api/scrap/buckets/:id/history', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const query = `
+      SELECT
+        h.history_id,
+        h.bucket_id,
+        h.action_type,
+        h.action_date,
+        h.performed_by,
+        h.old_value,
+        h.new_value,
+        h.notes,
+        e.first_name,
+        e.last_name,
+        e.username
+      FROM scrap_bucket_history h
+      LEFT JOIN employees e ON h.performed_by = e.employee_id
+      WHERE h.bucket_id = $1
+      ORDER BY h.action_date ASC
+    `;
+
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+
+  } catch (err) {
+    console.error('Error retrieving bucket history:', err);
+    res.status(500).json({ error: 'Failed to retrieve bucket history' });
   }
 });
 

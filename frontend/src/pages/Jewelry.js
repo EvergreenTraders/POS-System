@@ -60,7 +60,6 @@ function Jewelry() {
       if (historyResponse.data) {
         generateHistoryPDF(historyResponse.data.history, itemId, itemResponse.data);
       } else {
-        console.log('No history data found');
         enqueueSnackbar('No history found for this item', { variant: 'info' });
       }
     } catch (error) {
@@ -263,9 +262,11 @@ function Jewelry() {
     try {
       setLoadingBuckets(true);
       const response = await axios.get(`${API_BASE_URL}/scrap/buckets`);
-      setScrapBuckets(response.data);
-      if (response.data.length > 0) {
-        setSelectedBucket(response.data[0].bucket_id);
+      // Filter to show only ACTIVE buckets
+      const activeBuckets = response.data.filter(bucket => bucket.status === 'ACTIVE');
+      setScrapBuckets(activeBuckets);
+      if (activeBuckets.length > 0) {
+        setSelectedBucket(activeBuckets[0].bucket_id);
       }
     } catch (error) {
       console.error('Error fetching scrap buckets:', error);
@@ -350,8 +351,10 @@ function Jewelry() {
     try {
       setLoading(true);
       const response = await axios.get(`${API_BASE_URL}/jewelry`);
-      // Filter out items with status 'SCRAP'
-      const nonScrapItems = response.data.filter(item => item.status !== 'SCRAP');
+      // Filter out items with status 'SCRAP PROCESS' and 'SOLD TO REFINER'
+      const nonScrapItems = response.data.filter(item =>
+        item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER'
+      );
 
       // Fetch history for all items and apply latest changes
       const itemsWithHistory = await Promise.all(
@@ -480,7 +483,6 @@ function Jewelry() {
         try {
           images = JSON.parse(images);
         } catch (e) {
-          console.log('Failed to parse images string:', e);
           return placeholderImage;
         }
       }
@@ -654,9 +656,9 @@ function Jewelry() {
                           >
                             Edit
                           </Button>
-                          {item.status !== 'SCRAP' && (
-                            <Button 
-                              variant="outlined" 
+                          {item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER' && (
+                            <Button
+                              variant="outlined"
                               color="error"
                               size="small"
                               onClick={(e) => {
@@ -819,7 +821,6 @@ function Jewelry() {
         <DialogContent>
           <DialogContentText id="scrap-dialog-description" sx={{ mb: 2 }}>
             Are you sure you want to move item <strong>{itemToScrap?.item_id}</strong> to scrap?
-            This action cannot be undone.
           </DialogContentText>
           
           {loadingBuckets ? (
