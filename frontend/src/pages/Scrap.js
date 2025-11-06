@@ -1621,9 +1621,9 @@ const Scrap = () => {
                   </Box>
                 </Box>
 
-                {/* Print Packing List Button - Below header */}
-                {selectedBucket.status === 'CLOSED' && (
-                  <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                {/* Action Buttons Row - Below header */}
+                {selectedBucket.status !== 'ACTIVE' && (
+                  <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
                     <Button
                       variant="outlined"
                       color="primary"
@@ -1633,85 +1633,54 @@ const Scrap = () => {
                     >
                       Print Packing List
                     </Button>
+
+                    {selectedBucket.status === 'SHIPPED' && (
+                      <Button
+                        variant="outlined"
+                        color="primary"
+                        size="small"
+                        onClick={handleOpenShippingDialog}
+                      >
+                        Enter Shipping Info
+                      </Button>
+                    )}
+
+                    {selectedBucket.status === 'PROCESSING' && (
+                      <Button
+                        variant="outlined"
+                        color="primary"
+                        size="small"
+                        onClick={handleOpenProcessingDialog}
+                      >
+                        Enter Processing Info
+                      </Button>
+                    )}
+
+                    {selectedBucket.status === 'COMPLETE' && (
+                      <Button
+                        variant="outlined"
+                        color="primary"
+                        size="small"
+                        onClick={handleOpenCompletedDialog}
+                      >
+                        Enter Completion Info
+                      </Button>
+                    )}
                   </Box>
                 )}
 
-                {/* Shipping Info Button - Below header */}
-                {selectedBucket.status === 'SHIPPED' && (
-                  <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button
-                      variant="outlined"
-                      color="primary"
-                      size="small"
-                      onClick={handleOpenShippingDialog}
-                    >
-                      Enter Shipping Info
-                    </Button>
-                  </Box>
-                )}
-
-                {/* Processing Info Button - Below header */}
-                {selectedBucket.status === 'PROCESSING' && (
-                  <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button
-                      variant="outlined"
-                      color="primary"
-                      size="small"
-                      onClick={handleOpenProcessingDialog}
-                    >
-                      Enter Processing Info
-                    </Button>
-                  </Box>
-                )}
-
-                {/* Completed Info Button - Below header */}
-                {selectedBucket.status === 'COMPLETE' && (
-                  <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button
-                      variant="outlined"
-                      color="primary"
-                      size="small"
-                      onClick={handleOpenCompletedDialog}
-                    >
-                      Enter Completion Info
-                    </Button>
-                  </Box>
-                )}
-
-                {/* Bucket Details Grid */}
+                {/* Bucket Details - Single Row */}
                 <Box sx={{
-                  display: 'grid',
-                  gridTemplateColumns: selectedBucket.status === 'CLOSED' ? 'repeat(3, 1fr) 120px' : 'repeat(3, 1fr)',
-                  gridTemplateRows: '35px 35px',
-                  gap: 1,
-                  p: 1,
+                  display: 'flex',
+                  gap: 2,
+                  p: 1.5,
                   bgcolor: 'background.default',
                   borderRadius: 1,
                   border: '1px solid',
-                  borderColor: 'divider'
+                  borderColor: 'divider',
+                  alignItems: 'center'
                 }}>
-                  {/* Row 1, Col 1 */}
-                  <Box>
-                    <Typography variant="caption" color="textSecondary" display="block">
-                      Date Created
-                    </Typography>
-                    <Typography variant="body2" fontWeight="medium">
-                      {formatDate(selectedBucket.created_at)}
-                    </Typography>
-                  </Box>
-
-                  {/* Row 1, Col 2 */}
-                  <Box>
-                    <Typography variant="caption" color="textSecondary" display="block">
-                      Status Date
-                    </Typography>
-                    <Typography variant="body2" fontWeight="medium">
-                      {formatDate(selectedBucket.updated_at)}
-                    </Typography>
-                  </Box>
-
-                  {/* Row 1, Col 3 */}
-                  <Box>
+                  <Box sx={{ flex: 1 }}>
                     <Typography variant="caption" color="textSecondary" display="block">
                       Total Items
                     </Typography>
@@ -1720,13 +1689,42 @@ const Scrap = () => {
                     </Typography>
                   </Box>
 
-                  {/* Weight Photo - Only show for CLOSED status - Spans last column and 2 rows */}
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Total Weight
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      {calculateTotalWeight().toFixed(2)} g
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Purity
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      {(calculateAveragePurity() * 100).toFixed(2)}%
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Melt Value
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium" color="primary">
+                      {formatCurrency(calculateMeltValue())}
+                    </Typography>
+                  </Box>
+
+                  {/* Weight Photo - Only show for CLOSED status */}
                   {selectedBucket.status === 'CLOSED' && (
                     <Box sx={{
-                      gridRow: 'span 2',
+                      width: 80,
+                      height: 60,
                       overflow: 'hidden',
                       borderRadius: 1,
-                      bgcolor: 'grey.100'
+                      bgcolor: 'grey.100',
+                      flexShrink: 0
                     }}>
                       {selectedBucket.bucket_id && API_BASE_URL ? (
                         <Box
@@ -1748,7 +1746,7 @@ const Scrap = () => {
                             handleOpenImagePreview(imageUrl);
                           }}
                           onError={(e) => {
-                            e.target.onerror = null; // Prevent infinite loop
+                            e.target.onerror = null;
                             e.target.src = 'https://via.placeholder.com/150?text=No+Photo';
                           }}
                         />
@@ -1766,36 +1764,6 @@ const Scrap = () => {
                       )}
                     </Box>
                   )}
-
-                  {/* Row 2, Col 1 */}
-                  <Box>
-                    <Typography variant="caption" color="textSecondary" display="block">
-                      Total Weight
-                    </Typography>
-                    <Typography variant="body2" fontWeight="medium">
-                      {calculateTotalWeight().toFixed(2)} g
-                    </Typography>
-                  </Box>
-
-                  {/* Row 2, Col 2 */}
-                  <Box>
-                    <Typography variant="caption" color="textSecondary" display="block">
-                      Calculated Purity
-                    </Typography>
-                    <Typography variant="body2" fontWeight="medium">
-                      {(calculateAveragePurity() * 100).toFixed(2)}%
-                    </Typography>
-                  </Box>
-
-                  {/* Row 2, Col 3 */}
-                  <Box>
-                    <Typography variant="caption" color="textSecondary" display="block">
-                      Estimated Melt Value
-                    </Typography>
-                    <Typography variant="body2" fontWeight="medium" color="primary">
-                      {formatCurrency(calculateMeltValue())}
-                    </Typography>
-                  </Box>
                 </Box>
               </Box>
 
