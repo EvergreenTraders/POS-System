@@ -44,6 +44,7 @@ import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import ImageIcon from '@mui/icons-material/Image';
 import PrintIcon from '@mui/icons-material/Print';
 import CloseIcon from '@mui/icons-material/Close';
 import HistoryIcon from '@mui/icons-material/History';
@@ -1693,7 +1694,7 @@ const Scrap = () => {
                   </Box>
                 )}
 
-                {/* Bucket Details - Single Row */}
+                {/* Bucket Details - Header Information */}
                 <Box sx={{
                   display: 'flex',
                   gap: 2,
@@ -1704,6 +1705,24 @@ const Scrap = () => {
                   borderColor: 'divider',
                   alignItems: 'center'
                 }}>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Date Created
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      {formatDate(selectedBucket.created_at)}
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      Status Date
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      {formatDate(selectedBucket.updated_at)}
+                    </Typography>
+                  </Box>
+
                   <Box sx={{ flex: 1 }}>
                     <Typography variant="caption" color="textSecondary" display="block">
                       Total Items
@@ -1724,7 +1743,7 @@ const Scrap = () => {
 
                   <Box sx={{ flex: 1 }}>
                     <Typography variant="caption" color="textSecondary" display="block">
-                      Purity
+                      Calc. Purity
                     </Typography>
                     <Typography variant="body2" fontWeight="medium">
                       {(calculateAveragePurity() * 100).toFixed(2)}%
@@ -1733,7 +1752,7 @@ const Scrap = () => {
 
                   <Box sx={{ flex: 1 }}>
                     <Typography variant="caption" color="textSecondary" display="block">
-                      Melt Value
+                      Est. Melt Value
                     </Typography>
                     <Typography variant="body2" fontWeight="medium" color="primary">
                       {formatCurrency(calculateMeltValue())}
@@ -2301,16 +2320,19 @@ const Scrap = () => {
           </Typography>
 
           {!weightPhotoDialog.cameraMode && !weightPhotoDialog.preview && (
-            <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+            <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
               {/* Camera Capture */}
-              <Button
-                variant="outlined"
-                startIcon={<PhotoCameraIcon />}
-                fullWidth
-                onClick={handleOpenCamera}
-              >
-                Take Photo
-              </Button>
+              <Box sx={{ flex: 1 }}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={<PhotoCameraIcon />}
+                  fullWidth
+                  onClick={handleOpenCamera}
+                >
+                  Take Photo
+                </Button>
+              </Box>
 
               {/* File Upload */}
               <input
@@ -2320,16 +2342,19 @@ const Scrap = () => {
                 type="file"
                 onChange={handleWeightPhotoFileSelect}
               />
-              <label htmlFor="weight-photo-upload" style={{ flex: 1 }}>
-                <Button
-                  variant="outlined"
-                  component="span"
-                  startIcon={<AddIcon />}
-                  fullWidth
-                >
-                  Select Photo
-                </Button>
-              </label>
+              <Box sx={{ flex: 1 }}>
+                <label htmlFor="weight-photo-upload" style={{ width: '100%', display: 'block' }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    component="span"
+                    startIcon={<ImageIcon />}
+                    fullWidth
+                  >
+                    Select Photo
+                  </Button>
+                </label>
+              </Box>
             </Box>
           )}
 
