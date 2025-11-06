@@ -4517,6 +4517,39 @@ app.get('/api/scrap/buckets/:id/weight-photo', async (req, res) => {
   }
 });
 
+// GET endpoint to fetch scrap bucket history
+app.get('/api/scrap/buckets/:id/history', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const query = `
+      SELECT
+        h.history_id,
+        h.bucket_id,
+        h.action_type,
+        h.action_date,
+        h.performed_by,
+        h.old_value,
+        h.new_value,
+        h.notes,
+        e.first_name,
+        e.last_name,
+        e.username
+      FROM scrap_bucket_history h
+      LEFT JOIN employees e ON h.performed_by = e.employee_id
+      WHERE h.bucket_id = $1
+      ORDER BY h.action_date ASC
+    `;
+
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+
+  } catch (err) {
+    console.error('Error retrieving bucket history:', err);
+    res.status(500).json({ error: 'Failed to retrieve bucket history' });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);

@@ -46,6 +46,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import PrintIcon from '@mui/icons-material/Print';
 import CloseIcon from '@mui/icons-material/Close';
+import HistoryIcon from '@mui/icons-material/History';
 import axios from 'axios';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
@@ -146,6 +147,10 @@ const Scrap = () => {
 
   const [customers, setCustomers] = useState([]);
 
+  const [bucketHistory, setBucketHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+
   // Fetch scrap buckets from API
   const fetchScrapBuckets = async () => {
     try {
@@ -240,10 +245,26 @@ const Scrap = () => {
     }
   };
 
+  // Fetch bucket history
+  const fetchBucketHistory = async (bucketId) => {
+    try {
+      setHistoryLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/scrap/buckets/${bucketId}/history`);
+      setBucketHistory(response.data);
+    } catch (err) {
+      console.error('Error fetching bucket history:', err);
+      setBucketHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   // Handle bucket selection
   const handleBucketSelect = (bucket) => {
     setSelectedBucket(bucket);
     fetchBucketItems(bucket);
+    // Clear history when switching buckets
+    setBucketHistory([]);
   };
 
   // Fetch buckets on component mount
@@ -1765,6 +1786,139 @@ const Scrap = () => {
                     </Box>
                   )}
                 </Box>
+              </Box>
+
+              {/* History Log Section */}
+              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<HistoryIcon />}
+                  onClick={async () => {
+                    // Fetch history if not already loaded
+                    let historyData = bucketHistory;
+                    if (bucketHistory.length === 0) {
+                      try {
+                        const response = await axios.get(`${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}/history`);
+                        historyData = response.data;
+                      } catch (err) {
+                        console.error('Error fetching history:', err);
+                        setError('Failed to load bucket history');
+                        return;
+                      }
+                    }
+
+                    // Create HTML content for the new tab
+                    const historyHTML = `
+                      <!DOCTYPE html>
+                      <html>
+                        <head>
+                          <title>Bucket History - ${selectedBucket.bucket_name}</title>
+                          <style>
+                            body {
+                              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+                              padding: 40px;
+                              background: #f5f5f5;
+                              margin: 0;
+                            }
+                            .container {
+                              max-width: 800px;
+                              margin: 0 auto;
+                              background: white;
+                              padding: 30px;
+                              border-radius: 8px;
+                              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                            }
+                            h1 {
+                              color: #1976d2;
+                              margin-top: 0;
+                              border-bottom: 2px solid #1976d2;
+                              padding-bottom: 10px;
+                            }
+                            .timeline {
+                              position: relative;
+                              padding-left: 40px;
+                              margin-top: 30px;
+                            }
+                            .timeline::before {
+                              content: '';
+                              position: absolute;
+                              left: 12px;
+                              top: 0;
+                              bottom: 0;
+                              width: 2px;
+                              background: rgba(25, 118, 210, 0.3);
+                            }
+                            .timeline-entry {
+                              position: relative;
+                              padding-bottom: 30px;
+                            }
+                            .timeline-entry:last-child {
+                              padding-bottom: 0;
+                            }
+                            .timeline-dot {
+                              position: absolute;
+                              left: -34px;
+                              top: 4px;
+                              width: 12px;
+                              height: 12px;
+                              border-radius: 50%;
+                              background: #1976d2;
+                              border: 3px solid white;
+                              box-shadow: 0 0 0 2px #1976d2;
+                            }
+                            .timeline-date {
+                              color: #666;
+                              font-size: 12px;
+                              margin-bottom: 4px;
+                            }
+                            .timeline-content {
+                              font-size: 14px;
+                              font-weight: 500;
+                              margin-bottom: 4px;
+                            }
+                            .timeline-user {
+                              color: #999;
+                              font-size: 12px;
+                            }
+                            .no-history {
+                              text-align: center;
+                              color: #999;
+                              padding: 40px;
+                            }
+                          </style>
+                        </head>
+                        <body>
+                          <div class="container">
+                            <h1>History Log: ${selectedBucket.bucket_name}</h1>
+                            ${historyData.length === 0 ?
+                              '<div class="no-history">No history available</div>' :
+                              `<div class="timeline">
+                                ${historyData.map(entry => `
+                                  <div class="timeline-entry">
+                                    <div class="timeline-dot"></div>
+                                    <div class="timeline-date">${new Date(entry.action_date).toLocaleString()}</div>
+                                    <div class="timeline-content">${entry.notes}</div>
+                                    ${entry.first_name && entry.last_name ?
+                                      `<div class="timeline-user">by ${entry.first_name} ${entry.last_name}</div>` :
+                                      ''}
+                                  </div>
+                                `).join('')}
+                              </div>`
+                            }
+                          </div>
+                        </body>
+                      </html>
+                    `;
+
+                    // Open in new tab
+                    const newTab = window.open('', '_blank');
+                    newTab.document.write(historyHTML);
+                    newTab.document.close();
+                  }}
+                >
+                  Show History
+                </Button>
               </Box>
 
               {/* Metal Type Summary and Items Table */}
