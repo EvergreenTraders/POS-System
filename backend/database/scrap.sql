@@ -18,7 +18,11 @@ CREATE TABLE IF NOT EXISTS scrap (
     date_received DATE,
     weight_received DECIMAL(10,2),
     locked_spot_price DECIMAL(10,2),
-    payment_advance DECIMAL(10,2)
+    payment_advance DECIMAL(10,2),
+    final_weight DECIMAL(10,2),
+    assay DECIMAL(5,2),
+    total_settlement_amount DECIMAL(10,2),
+    final_payment_amount DECIMAL(10,2)
 );
 
 -- Create index on bucket_name for faster lookups
@@ -212,5 +216,45 @@ BEGIN
         AND column_name = 'payment_advance'
     ) THEN
         ALTER TABLE scrap ADD COLUMN payment_advance DECIMAL(10,2);
+    END IF;
+END $$;
+
+-- Add completed-related columns if they don't exist (for existing tables)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'final_weight'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN final_weight DECIMAL(10,2);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'assay'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN assay DECIMAL(5,2);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'total_settlement_amount'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN total_settlement_amount DECIMAL(10,2);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'final_payment_amount'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN final_payment_amount DECIMAL(10,2);
     END IF;
 END $$;

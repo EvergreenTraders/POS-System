@@ -135,6 +135,15 @@ const Scrap = () => {
     loading: false
   });
 
+  const [completedDialog, setCompletedDialog] = useState({
+    open: false,
+    final_weight: '',
+    assay: '',
+    total_settlement_amount: '',
+    final_payment_amount: '',
+    loading: false
+  });
+
   const [customers, setCustomers] = useState([]);
 
   // Fetch scrap buckets from API
@@ -1197,6 +1206,70 @@ const Scrap = () => {
     }
   };
 
+  // Handle opening completed dialog
+  const handleOpenCompletedDialog = () => {
+    setCompletedDialog({
+      open: true,
+      final_weight: selectedBucket?.final_weight || '',
+      assay: selectedBucket?.assay || '',
+      total_settlement_amount: selectedBucket?.total_settlement_amount || '',
+      final_payment_amount: selectedBucket?.final_payment_amount || '',
+      loading: false
+    });
+  };
+
+  // Handle closing completed dialog
+  const handleCloseCompletedDialog = () => {
+    setCompletedDialog({
+      open: false,
+      final_weight: '',
+      assay: '',
+      total_settlement_amount: '',
+      final_payment_amount: '',
+      loading: false
+    });
+  };
+
+  // Handle saving completed information
+  const handleSaveCompletedInfo = async () => {
+    if (!selectedBucket) return;
+
+    if (!completedDialog.final_weight || !completedDialog.assay || !completedDialog.total_settlement_amount || !completedDialog.final_payment_amount) {
+      setError('Please fill in all completion fields');
+      return;
+    }
+
+    try {
+      setCompletedDialog(prev => ({ ...prev, loading: true }));
+
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}`,
+        {
+          final_weight: parseFloat(completedDialog.final_weight),
+          assay: parseFloat(completedDialog.assay),
+          total_settlement_amount: parseFloat(completedDialog.total_settlement_amount),
+          final_payment_amount: parseFloat(completedDialog.final_payment_amount)
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Refresh buckets
+      const updatedBuckets = await fetchScrapBuckets();
+      const refreshedBucket = updatedBuckets.find(b => b.bucket_id === selectedBucket.bucket_id);
+      if (refreshedBucket) {
+        handleBucketSelect(refreshedBucket);
+      }
+
+      handleCloseCompletedDialog();
+      setError(null);
+    } catch (err) {
+      console.error('Error saving completed info:', err);
+      setError(err.response?.data?.error || 'Failed to save completion information');
+      setCompletedDialog(prev => ({ ...prev, loading: false }));
+    }
+  };
+
   // Handle weight photo upload
   const handleUploadWeightPhoto = async () => {
     if (!weightPhotoDialog.selectedFile || !selectedBucket) {
@@ -1587,6 +1660,20 @@ const Scrap = () => {
                       onClick={handleOpenProcessingDialog}
                     >
                       Enter Processing Info
+                    </Button>
+                  </Box>
+                )}
+
+                {/* Completed Info Button - Below header */}
+                {selectedBucket.status === 'COMPLETE' && (
+                  <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      size="small"
+                      onClick={handleOpenCompletedDialog}
+                    >
+                      Enter Completion Info
                     </Button>
                   </Box>
                 )}
@@ -2369,6 +2456,76 @@ const Scrap = () => {
             disabled={processingDialog.loading}
           >
             {processingDialog.loading ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Completion Information Dialog */}
+      <Dialog
+        open={completedDialog.open}
+        onClose={handleCloseCompletedDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Enter Completion Information</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+            {/* Final Weight */}
+            <TextField
+              label="Final Weight (grams)"
+              type="number"
+              value={completedDialog.final_weight}
+              onChange={(e) => setCompletedDialog(prev => ({ ...prev, final_weight: e.target.value }))}
+              fullWidth
+              inputProps={{ step: "0.01", min: "0" }}
+              required
+            />
+
+            {/* Assay */}
+            <TextField
+              label="Assay (%)"
+              type="number"
+              value={completedDialog.assay}
+              onChange={(e) => setCompletedDialog(prev => ({ ...prev, assay: e.target.value }))}
+              fullWidth
+              inputProps={{ step: "0.01", min: "0", max: "100" }}
+              required
+            />
+
+            {/* Total Settlement Amount */}
+            <TextField
+              label="Total Settlement Amount ($)"
+              type="number"
+              value={completedDialog.total_settlement_amount}
+              onChange={(e) => setCompletedDialog(prev => ({ ...prev, total_settlement_amount: e.target.value }))}
+              fullWidth
+              inputProps={{ step: "0.01", min: "0" }}
+              required
+            />
+
+            {/* Final Payment Amount */}
+            <TextField
+              label="Final Payment Amount ($)"
+              type="number"
+              value={completedDialog.final_payment_amount}
+              onChange={(e) => setCompletedDialog(prev => ({ ...prev, final_payment_amount: e.target.value }))}
+              fullWidth
+              inputProps={{ step: "0.01", min: "0" }}
+              required
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseCompletedDialog} disabled={completedDialog.loading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveCompletedInfo}
+            variant="contained"
+            color="primary"
+            disabled={completedDialog.loading}
+          >
+            {completedDialog.loading ? 'Saving...' : 'Save'}
           </Button>
         </DialogActions>
       </Dialog>
