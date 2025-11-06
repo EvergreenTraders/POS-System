@@ -1132,7 +1132,8 @@ const Scrap = () => {
         {
           refiner_customer_id: shippingDialog.refiner_customer_id,
           shipper: shippingDialog.shipper,
-          tracking_number: shippingDialog.tracking_number
+          tracking_number: shippingDialog.tracking_number,
+          updated_by: currentUser?.employee_id
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -1206,7 +1207,8 @@ const Scrap = () => {
           date_received: processingDialog.date_received,
           weight_received: parseFloat(processingDialog.weight_received),
           locked_spot_price: parseFloat(processingDialog.locked_spot_price),
-          payment_advance: processingDialog.payment_advance ? parseFloat(processingDialog.payment_advance) : null
+          payment_advance: processingDialog.payment_advance ? parseFloat(processingDialog.payment_advance) : null,
+          updated_by: currentUser?.employee_id
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -1270,7 +1272,8 @@ const Scrap = () => {
           final_weight: parseFloat(completedDialog.final_weight),
           assay: parseFloat(completedDialog.assay),
           total_settlement_amount: parseFloat(completedDialog.total_settlement_amount),
-          final_payment_amount: parseFloat(completedDialog.final_payment_amount)
+          final_payment_amount: parseFloat(completedDialog.final_payment_amount),
+          updated_by: currentUser?.employee_id
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );

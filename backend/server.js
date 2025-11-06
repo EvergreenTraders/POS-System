@@ -4381,6 +4381,12 @@ app.put('/api/scrap/buckets/:id', async (req, res) => {
       paramCount++;
     }
 
+    if (updated_by !== undefined) {
+      updates.push(`updated_by = $${paramCount}`);
+      values.push(updated_by || null);
+      paramCount++;
+    }
+
     if (updates.length === 0) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'No fields to update' });
