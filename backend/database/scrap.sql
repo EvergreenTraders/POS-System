@@ -14,7 +14,11 @@ CREATE TABLE IF NOT EXISTS scrap (
     weight_photo BYTEA,
     refiner_customer_id INTEGER,
     shipper VARCHAR(100),
-    tracking_number VARCHAR(100)
+    tracking_number VARCHAR(100),
+    date_received DATE,
+    weight_received DECIMAL(10,2),
+    locked_spot_price DECIMAL(10,2),
+    payment_advance DECIMAL(10,2)
 );
 
 -- Create index on bucket_name for faster lookups
@@ -168,5 +172,45 @@ BEGIN
         AND column_name = 'tracking_number'
     ) THEN
         ALTER TABLE scrap ADD COLUMN tracking_number VARCHAR(100);
+    END IF;
+END $$;
+
+-- Add processing-related columns if they don't exist (for existing tables)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'date_received'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN date_received DATE;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'weight_received'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN weight_received DECIMAL(10,2);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'locked_spot_price'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN locked_spot_price DECIMAL(10,2);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'payment_advance'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN payment_advance DECIMAL(10,2);
     END IF;
 END $$;

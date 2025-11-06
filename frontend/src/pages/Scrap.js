@@ -126,6 +126,15 @@ const Scrap = () => {
     loading: false
   });
 
+  const [processingDialog, setProcessingDialog] = useState({
+    open: false,
+    date_received: '',
+    weight_received: '',
+    locked_spot_price: '',
+    payment_advance: '',
+    loading: false
+  });
+
   const [customers, setCustomers] = useState([]);
 
   // Fetch scrap buckets from API
@@ -1114,6 +1123,80 @@ const Scrap = () => {
     }
   };
 
+  // Handle opening processing dialog
+  const handleOpenProcessingDialog = () => {
+    // Get today's date in YYYY-MM-DD format
+    const today = new Date().toISOString().split('T')[0];
+
+    // Convert database date to YYYY-MM-DD format if it exists
+    let dateReceived = today;
+    if (selectedBucket?.date_received) {
+      const dbDate = new Date(selectedBucket.date_received);
+      dateReceived = dbDate.toISOString().split('T')[0];
+    }
+
+    setProcessingDialog({
+      open: true,
+      date_received: dateReceived,
+      weight_received: selectedBucket?.weight_received || '',
+      locked_spot_price: selectedBucket?.locked_spot_price || '',
+      payment_advance: selectedBucket?.payment_advance || '',
+      loading: false
+    });
+  };
+
+  // Handle closing processing dialog
+  const handleCloseProcessingDialog = () => {
+    setProcessingDialog({
+      open: false,
+      date_received: '',
+      weight_received: '',
+      locked_spot_price: '',
+      payment_advance: '',
+      loading: false
+    });
+  };
+
+  // Handle saving processing information
+  const handleSaveProcessingInfo = async () => {
+    if (!selectedBucket) return;
+
+    if (!processingDialog.date_received || !processingDialog.weight_received || !processingDialog.locked_spot_price) {
+      setError('Please fill in Date Received, Weight Received, and Locked Spot Price');
+      return;
+    }
+
+    try {
+      setProcessingDialog(prev => ({ ...prev, loading: true }));
+
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}`,
+        {
+          date_received: processingDialog.date_received,
+          weight_received: parseFloat(processingDialog.weight_received),
+          locked_spot_price: parseFloat(processingDialog.locked_spot_price),
+          payment_advance: processingDialog.payment_advance ? parseFloat(processingDialog.payment_advance) : null
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Refresh buckets
+      const updatedBuckets = await fetchScrapBuckets();
+      const refreshedBucket = updatedBuckets.find(b => b.bucket_id === selectedBucket.bucket_id);
+      if (refreshedBucket) {
+        handleBucketSelect(refreshedBucket);
+      }
+
+      handleCloseProcessingDialog();
+      setError(null);
+    } catch (err) {
+      console.error('Error saving processing info:', err);
+      setError(err.response?.data?.error || 'Failed to save processing information');
+      setProcessingDialog(prev => ({ ...prev, loading: false }));
+    }
+  };
+
   // Handle weight photo upload
   const handleUploadWeightPhoto = async () => {
     if (!weightPhotoDialog.selectedFile || !selectedBucket) {
@@ -1490,6 +1573,20 @@ const Scrap = () => {
                       onClick={handleOpenShippingDialog}
                     >
                       Enter Shipping Info
+                    </Button>
+                  </Box>
+                )}
+
+                {/* Processing Info Button - Below header */}
+                {selectedBucket.status === 'PROCESSING' && (
+                  <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      size="small"
+                      onClick={handleOpenProcessingDialog}
+                    >
+                      Enter Processing Info
                     </Button>
                   </Box>
                 )}
@@ -2203,6 +2300,75 @@ const Scrap = () => {
             disabled={shippingDialog.loading}
           >
             {shippingDialog.loading ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Processing Information Dialog */}
+      <Dialog
+        open={processingDialog.open}
+        onClose={handleCloseProcessingDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Enter Processing Information</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+            {/* Date Received */}
+            <TextField
+              label="Date Received"
+              type="date"
+              value={processingDialog.date_received}
+              onChange={(e) => setProcessingDialog(prev => ({ ...prev, date_received: e.target.value }))}
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              required
+            />
+
+            {/* Weight Received */}
+            <TextField
+              label="Weight Received (grams)"
+              type="number"
+              value={processingDialog.weight_received}
+              onChange={(e) => setProcessingDialog(prev => ({ ...prev, weight_received: e.target.value }))}
+              fullWidth
+              inputProps={{ step: "0.01", min: "0" }}
+              required
+            />
+
+            {/* Locked Spot Price */}
+            <TextField
+              label="Locked Spot Price"
+              type="number"
+              value={processingDialog.locked_spot_price}
+              onChange={(e) => setProcessingDialog(prev => ({ ...prev, locked_spot_price: e.target.value }))}
+              fullWidth
+              inputProps={{ step: "0.01", min: "0" }}
+              required
+            />
+
+            {/* Payment Advance */}
+            <TextField
+              label="Payment Advance (Optional)"
+              type="number"
+              value={processingDialog.payment_advance}
+              onChange={(e) => setProcessingDialog(prev => ({ ...prev, payment_advance: e.target.value }))}
+              fullWidth
+              inputProps={{ step: "0.01", min: "0" }}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseProcessingDialog} disabled={processingDialog.loading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveProcessingInfo}
+            variant="contained"
+            color="primary"
+            disabled={processingDialog.loading}
+          >
+            {processingDialog.loading ? 'Saving...' : 'Save'}
           </Button>
         </DialogActions>
       </Dialog>

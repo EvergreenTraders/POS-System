@@ -4114,7 +4114,11 @@ app.get('/api/scrap/buckets', async (req, res) => {
         status,
         refiner_customer_id,
         shipper,
-        tracking_number
+        tracking_number,
+        date_received,
+        weight_received,
+        locked_spot_price,
+        payment_advance
       FROM scrap
       ORDER BY created_at DESC
     `;
@@ -4215,7 +4219,7 @@ app.put('/api/scrap/buckets/:id', async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { bucket_name, notes, status, item_id, updated_by, refiner_customer_id, shipper, tracking_number } = req.body;
+    const { bucket_name, notes, status, item_id, updated_by, refiner_customer_id, shipper, tracking_number, date_received, weight_received, locked_spot_price, payment_advance } = req.body;
 
     await client.query('BEGIN');
 
@@ -4322,6 +4326,30 @@ app.put('/api/scrap/buckets/:id', async (req, res) => {
     if (tracking_number !== undefined) {
       updates.push(`tracking_number = $${paramCount}`);
       values.push(tracking_number || null);
+      paramCount++;
+    }
+
+    if (date_received !== undefined) {
+      updates.push(`date_received = $${paramCount}`);
+      values.push(date_received || null);
+      paramCount++;
+    }
+
+    if (weight_received !== undefined) {
+      updates.push(`weight_received = $${paramCount}`);
+      values.push(weight_received || null);
+      paramCount++;
+    }
+
+    if (locked_spot_price !== undefined) {
+      updates.push(`locked_spot_price = $${paramCount}`);
+      values.push(locked_spot_price || null);
+      paramCount++;
+    }
+
+    if (payment_advance !== undefined) {
+      updates.push(`payment_advance = $${paramCount}`);
+      values.push(payment_advance || null);
       paramCount++;
     }
 
