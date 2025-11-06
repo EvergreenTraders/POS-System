@@ -4103,7 +4103,7 @@ app.post('/api/jewelry_secondary_gems', authenticateToken, async (req, res) => {
 app.get('/api/scrap/buckets', async (req, res) => {
   try {
     const query = `
-      SELECT 
+      SELECT
         bucket_id,
         bucket_name,
         item_id,
@@ -4111,7 +4111,10 @@ app.get('/api/scrap/buckets', async (req, res) => {
         created_at,
         updated_at,
         notes,
-        status
+        status,
+        refiner_customer_id,
+        shipper,
+        tracking_number
       FROM scrap
       ORDER BY created_at DESC
     `;
@@ -4212,7 +4215,7 @@ app.put('/api/scrap/buckets/:id', async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { bucket_name, notes, status, item_id, updated_by } = req.body;
+    const { bucket_name, notes, status, item_id, updated_by, refiner_customer_id, shipper, tracking_number } = req.body;
 
     await client.query('BEGIN');
 
@@ -4301,6 +4304,24 @@ app.put('/api/scrap/buckets/:id', async (req, res) => {
     if (item_id !== undefined) {
       updates.push(`item_id = $${paramCount}`);
       values.push(JSON.stringify(item_id));
+      paramCount++;
+    }
+
+    if (refiner_customer_id !== undefined) {
+      updates.push(`refiner_customer_id = $${paramCount}`);
+      values.push(refiner_customer_id || null);
+      paramCount++;
+    }
+
+    if (shipper !== undefined) {
+      updates.push(`shipper = $${paramCount}`);
+      values.push(shipper || null);
+      paramCount++;
+    }
+
+    if (tracking_number !== undefined) {
+      updates.push(`tracking_number = $${paramCount}`);
+      values.push(tracking_number || null);
       paramCount++;
     }
 

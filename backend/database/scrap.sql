@@ -11,7 +11,10 @@ CREATE TABLE IF NOT EXISTS scrap (
     updated_by INTEGER,
     notes TEXT,
     status VARCHAR(20) DEFAULT 'ACTIVE',
-    weight_photo BYTEA
+    weight_photo BYTEA,
+    refiner_customer_id INTEGER,
+    shipper VARCHAR(100),
+    tracking_number VARCHAR(100)
 );
 
 -- Create index on bucket_name for faster lookups
@@ -134,5 +137,36 @@ BEGIN
         AND column_name = 'weight_photo'
     ) THEN
         ALTER TABLE scrap ADD COLUMN weight_photo BYTEA;
+    END IF;
+END $$;
+
+-- Add shipping-related columns if they don't exist (for existing tables)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'refiner_customer_id'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN refiner_customer_id INTEGER;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'shipper'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN shipper VARCHAR(100);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'scrap'
+        AND column_name = 'tracking_number'
+    ) THEN
+        ALTER TABLE scrap ADD COLUMN tracking_number VARCHAR(100);
     END IF;
 END $$;

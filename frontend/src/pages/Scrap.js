@@ -118,6 +118,16 @@ const Scrap = () => {
     imageUrl: null
   });
 
+  const [shippingDialog, setShippingDialog] = useState({
+    open: false,
+    refiner_customer_id: '',
+    shipper: '',
+    tracking_number: '',
+    loading: false
+  });
+
+  const [customers, setCustomers] = useState([]);
+
   // Fetch scrap buckets from API
   const fetchScrapBuckets = async () => {
     try {
@@ -1025,6 +1035,85 @@ const Scrap = () => {
     });
   };
 
+  // Fetch customers for refiner selection
+  const fetchCustomers = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/customers`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      // Handle different response formats
+      const customersData = Array.isArray(response.data) ? response.data : (response.data.customers || []);
+      setCustomers(customersData);
+    } catch (err) {
+      console.error('Error fetching customers:', err);
+      setCustomers([]); // Set empty array on error
+      setError('Failed to load customers');
+    }
+  };
+
+  // Handle opening shipping dialog
+  const handleOpenShippingDialog = async () => {
+    await fetchCustomers();
+    setShippingDialog({
+      open: true,
+      refiner_customer_id: selectedBucket?.refiner_customer_id || '',
+      shipper: selectedBucket?.shipper || '',
+      tracking_number: selectedBucket?.tracking_number || '',
+      loading: false
+    });
+  };
+
+  // Handle closing shipping dialog
+  const handleCloseShippingDialog = () => {
+    setShippingDialog({
+      open: false,
+      refiner_customer_id: '',
+      shipper: '',
+      tracking_number: '',
+      loading: false
+    });
+  };
+
+  // Handle saving shipping information
+  const handleSaveShippingInfo = async () => {
+    if (!selectedBucket) return;
+
+    if (!shippingDialog.refiner_customer_id || !shippingDialog.shipper || !shippingDialog.tracking_number) {
+      setError('Please fill in all shipping fields');
+      return;
+    }
+
+    try {
+      setShippingDialog(prev => ({ ...prev, loading: true }));
+
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `${API_BASE_URL}/scrap/buckets/${selectedBucket.bucket_id}`,
+        {
+          refiner_customer_id: shippingDialog.refiner_customer_id,
+          shipper: shippingDialog.shipper,
+          tracking_number: shippingDialog.tracking_number
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Refresh buckets
+      const updatedBuckets = await fetchScrapBuckets();
+      const refreshedBucket = updatedBuckets.find(b => b.bucket_id === selectedBucket.bucket_id);
+      if (refreshedBucket) {
+        handleBucketSelect(refreshedBucket);
+      }
+
+      handleCloseShippingDialog();
+      setError(null);
+    } catch (err) {
+      console.error('Error saving shipping info:', err);
+      setError(err.response?.data?.error || 'Failed to save shipping information');
+      setShippingDialog(prev => ({ ...prev, loading: false }));
+    }
+  };
+
   // Handle weight photo upload
   const handleUploadWeightPhoto = async () => {
     if (!weightPhotoDialog.selectedFile || !selectedBucket) {
@@ -1387,6 +1476,20 @@ const Scrap = () => {
                       onClick={handlePrintPackingList}
                     >
                       Print Packing List
+                    </Button>
+                  </Box>
+                )}
+
+                {/* Shipping Info Button - Below header */}
+                {selectedBucket.status === 'SHIPPED' && (
+                  <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      size="small"
+                      onClick={handleOpenShippingDialog}
+                    >
+                      Enter Shipping Info
                     </Button>
                   </Box>
                 )}
@@ -2033,6 +2136,75 @@ const Scrap = () => {
             />
           )}
         </DialogContent>
+      </Dialog>
+
+      {/* Shipping Information Dialog */}
+      <Dialog
+        open={shippingDialog.open}
+        onClose={handleCloseShippingDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Enter Shipping Information</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+            {/* Refiner Customer Selection */}
+            <FormControl fullWidth>
+              <InputLabel>Refiner Customer</InputLabel>
+              <Select
+                value={shippingDialog.refiner_customer_id}
+                label="Refiner Customer"
+                onChange={(e) => setShippingDialog(prev => ({ ...prev, refiner_customer_id: e.target.value }))}
+              >
+                <MenuItem value="">
+                  <em>Select a refiner</em>
+                </MenuItem>
+                {Array.isArray(customers) && customers.length > 0 ? (
+                  customers.map((customer) => (
+                    <MenuItem key={customer.id} value={customer.id}>
+                      {customer.first_name} {customer.last_name}
+                    </MenuItem>
+                  ))
+                ) : (
+                  <MenuItem disabled>
+                    <em>No customers available</em>
+                  </MenuItem>
+                )}
+              </Select>
+            </FormControl>
+
+            {/* Shipper Input */}
+            <TextField
+              label="Shipper"
+              value={shippingDialog.shipper}
+              onChange={(e) => setShippingDialog(prev => ({ ...prev, shipper: e.target.value }))}
+              fullWidth
+              placeholder="e.g., FedEx, UPS, USPS"
+            />
+
+            {/* Tracking Number Input */}
+            <TextField
+              label="Tracking Number"
+              value={shippingDialog.tracking_number}
+              onChange={(e) => setShippingDialog(prev => ({ ...prev, tracking_number: e.target.value }))}
+              fullWidth
+              placeholder="Enter tracking number"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseShippingDialog} disabled={shippingDialog.loading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveShippingInfo}
+            variant="contained"
+            color="primary"
+            disabled={shippingDialog.loading}
+          >
+            {shippingDialog.loading ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogActions>
       </Dialog>
     </Container>
   );
