@@ -24,7 +24,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon, Warning as WarningIcon } from '@mui/icons-material';
+import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon, Warning as WarningIcon, Print as PrintIcon } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -108,7 +108,239 @@ function Transactions() {
     setPaymentDetails({ payments: [], total_paid: 0 });
     // Don't clear transaction items to keep them in memory
   };
-  
+
+  const handlePrintTransaction = async () => {
+    if (!selectedTransaction) return;
+
+    // Fetch business info
+    let businessName = 'POS Pro System';
+    let businessLogo = '';
+    let businessLogoMimetype = '';
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/business-info`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data) {
+        businessName = response.data.business_name || 'POS Pro System';
+        if (response.data.logo && response.data.logo_mimetype) {
+          businessLogo = response.data.logo;
+          businessLogoMimetype = response.data.logo_mimetype;
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching business info:', error);
+    }
+
+    // Create HTML content for the transaction receipt
+    const receiptHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Transaction #${selectedTransaction.transaction_id || selectedTransaction.id}</title>
+        <style>
+          body {
+            font-family: 'Courier New', monospace;
+            max-width: 400px;
+            margin: 10px auto;
+            padding: 15px;
+            font-size: 12px;
+          }
+          .header {
+            position: relative;
+            margin-bottom: 15px;
+            border-bottom: 2px dashed #333;
+            padding-bottom: 15px;
+            min-height: 75px;
+          }
+          .header-content {
+            padding-right: 80px;
+          }
+          .header h1 {
+            margin: 0 0 5px 0;
+            color: #333;
+            font-size: 18px;
+            font-weight: bold;
+          }
+          .header p {
+            margin: 3px 0;
+            font-size: 11px;
+          }
+          .header img {
+            position: absolute;
+            top: 0;
+            right: 0;
+            max-width: 70px;
+            max-height: 70px;
+            object-fit: contain;
+          }
+          .transaction-info {
+            margin-bottom: 15px;
+          }
+          .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 11px;
+          }
+          .info-label {
+            font-weight: bold;
+          }
+          .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            font-size: 11px;
+          }
+          .items-table th {
+            padding: 6px 4px;
+            text-align: left;
+            border-bottom: 1px dashed #333;
+            font-weight: bold;
+          }
+          .items-table td {
+            padding: 6px 4px;
+            border-bottom: 1px dotted #ccc;
+          }
+          .items-table tr:last-child td {
+            border-bottom: none;
+          }
+          .total-row {
+            font-weight: bold;
+            border-top: 2px dashed #333;
+            border-bottom: 2px dashed #333;
+          }
+          .payment-section {
+            border-top: 1px dashed #333;
+            padding-top: 10px;
+            margin-top: 10px;
+            font-size: 11px;
+          }
+          .payment-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+          }
+          .footer {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 10px;
+            border-top: 1px dashed #333;
+            padding-top: 10px;
+          }
+          @media print {
+            body { margin: 0; padding: 10px; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Business Logo" />` : ''}
+          <div class="header-content">
+            <h1>${businessName}</h1>
+            <p>Transaction Receipt</p>
+          </div>
+        </div>
+
+        <div class="transaction-info">
+          <div class="info-row">
+            <span class="info-label">Transaction #:</span>
+            <span>${selectedTransaction.transaction_id || selectedTransaction.id}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Date & Time:</span>
+            <span>${formatTransactionTime(selectedTransaction.created_at)}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Customer:</span>
+            <span>${selectedTransaction.customer_name || 'N/A'}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Employee:</span>
+            <span>${selectedTransaction.employee_name || 'N/A'}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Status:</span>
+            <span style="color: ${selectedTransaction.status === 'voided' ? 'red' : 'inherit'}; text-transform: capitalize;">
+              ${selectedTransaction.status || 'completed'}
+            </span>
+          </div>
+        </div>
+
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th>Type</th>
+              <th style="text-align: right;">Price</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${transactionItems.map((item, index) => `
+              <tr>
+                <td>
+                  ${item.item_details?.description || `Item ${index + 1}`}
+                  ${item.description ? `<br><small style="color: #666;">${item.description}</small>` : ''}
+                </td>
+                <td>${item.transaction_type}</td>
+                <td style="text-align: right;">
+                  $${parseFloat(item.item_price || 0).toFixed(2)}
+                  ${item.quantity > 1 ? `<br><small style="color: #666;">${item.quantity} @ $${(parseFloat(item.item_price || 0) / item.quantity).toFixed(2)} each</small>` : ''}
+                </td>
+              </tr>
+            `).join('')}
+            <tr class="total-row">
+              <td colspan="2" style="text-align: right;">Subtotal:</td>
+              <td style="text-align: right;">
+                $${transactionItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0) * (item.quantity || 1)), 0).toFixed(2)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        ${paymentDetails.payments.length > 0 ? `
+          <div class="payment-section">
+            <h3 style="margin-top: 0;">Payment Methods:</h3>
+            ${paymentDetails.payments.map(payment => `
+              <div class="payment-row">
+                <span>${payment.payment_method.replace(/_/g, ' ').toUpperCase()}:</span>
+                <span>$${parseFloat(payment.amount).toFixed(2)}</span>
+              </div>
+            `).join('')}
+            ${paymentDetails.change_given > 0 ? `
+              <div class="payment-row" style="border-top: 1px solid #ddd; margin-top: 10px; padding-top: 10px;">
+                <span>Change Given:</span>
+                <span>$${parseFloat(paymentDetails.change_given).toFixed(2)}</span>
+              </div>
+            ` : ''}
+            <div class="payment-row" style="font-weight: bold; border-top: 2px solid #333; margin-top: 10px; padding-top: 10px; font-size: 1.1em;">
+              <span>Total Paid:</span>
+              <span>$${parseFloat(paymentDetails.total_paid).toFixed(2)}</span>
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="footer">
+          <p>Thank you for your business!</p>
+          <p>POS Pro System - Transaction Receipt</p>
+        </div>
+
+        <div class="no-print" style="text-align: center; margin-top: 30px;">
+          <button onclick="window.print()" style="padding: 10px 30px; font-size: 16px; cursor: pointer;">Print</button>
+          <button onclick="window.close()" style="padding: 10px 30px; font-size: 16px; margin-left: 10px; cursor: pointer;">Close</button>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Open in new tab
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(receiptHTML);
+    printWindow.document.close();
+  };
 
   // Fetch transactions, their items, and filter options
   useEffect(() => {
@@ -576,6 +808,14 @@ function Transactions() {
           )}
         </DialogContent>
         <DialogActions>
+          <Button
+            onClick={handlePrintTransaction}
+            color="primary"
+            variant="contained"
+            startIcon={<PrintIcon />}
+          >
+            Print Transaction
+          </Button>
           <Button onClick={handleCloseDialog} color="primary">
             Close
           </Button>
