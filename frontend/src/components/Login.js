@@ -13,6 +13,7 @@ import {
     InputAdornment,
     Alert,
     styled,
+    Avatar,
 } from '@mui/material';
 import {
     Person as PersonIcon,
@@ -70,8 +71,22 @@ const Login = () => {
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [isFullScreen, setIsFullScreen] = React.useState(false);
+    const [isLocked, setIsLocked] = useState(false);
+    const [lockedUser, setLockedUser] = useState(null);
     const navigate = useNavigate();
     const { setUser } = useAuth();
+
+    // Check if this is a locked session on component mount
+    useEffect(() => {
+        const lockedSession = localStorage.getItem('lockedSession');
+        const storedUser = localStorage.getItem('user');
+        if (lockedSession === 'true' && storedUser) {
+            const user = JSON.parse(storedUser);
+            setIsLocked(true);
+            setLockedUser(user);
+            setIdentifier(user.username || user.email);
+        }
+    }, []);
 
     const requestFullScreen = async (element) => {
         try {
@@ -121,10 +136,11 @@ const Login = () => {
                 identifier,
                 password
             });
-            
+
             if (response.data.token) {
                 localStorage.setItem('token', response.data.token);
                 localStorage.setItem('user', JSON.stringify(response.data.user));
+                localStorage.removeItem('lockedSession'); // Clear locked session flag
                 setUser(response.data.user);
 
                 // Check for redirect path
@@ -146,21 +162,55 @@ const Login = () => {
         setShowPassword(!showPassword);
     };
 
+    const handleSwitchUser = () => {
+        // Clear locked session and allow different user to login
+        localStorage.removeItem('lockedSession');
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
+        sessionStorage.removeItem('redirectAfterLogin');
+        setIsLocked(false);
+        setLockedUser(null);
+        setIdentifier('');
+        setPassword('');
+    };
+
     return (
         <LoginContainer>
             <LoginPaper elevation={3}>
                 <Box component="form" onSubmit={handleSubmit} sx={{ textAlign: 'center' }}>
-                    <Typography 
-                        variant="h4" 
-                        gutterBottom 
-                        sx={{ 
+                    <Typography
+                        variant="h4"
+                        gutterBottom
+                        sx={{
                             color: 'primary.main',
                             fontWeight: 600,
                             mb: 4
                         }}
                     >
-                        Welcome
+                        {isLocked ? 'Screen Locked' : 'Welcome'}
                     </Typography>
+
+                    {isLocked && lockedUser && (
+                        <Box sx={{ mb: 3, textAlign: 'center' }}>
+                            <Avatar
+                                sx={{
+                                    width: 80,
+                                    height: 80,
+                                    bgcolor: 'primary.main',
+                                    margin: '0 auto 16px',
+                                    fontSize: '2rem'
+                                }}
+                            >
+                                {lockedUser.username ? lockedUser.username[0].toUpperCase() : 'U'}
+                            </Avatar>
+                            <Typography variant="h6" sx={{ fontWeight: 500 }}>
+                                {lockedUser.firstName} {lockedUser.lastName}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                                {lockedUser.username}
+                            </Typography>
+                        </Box>
+                    )}
 
                     {error && (
                         <Alert 
@@ -172,19 +222,21 @@ const Login = () => {
                         </Alert>
                     )}
 
-                    <StyledTextField
-                        fullWidth
-                        label="Username or Email"
-                        value={identifier}
-                        onChange={(e) => setIdentifier(e.target.value)}
-                        InputProps={{
-                            startAdornment: (
-                                <InputAdornment position="start">
-                                    <PersonIcon color="primary" />
-                                </InputAdornment>
-                            ),
-                        }}
-                    />
+                    {!isLocked && (
+                        <StyledTextField
+                            fullWidth
+                            label="Username or Email"
+                            value={identifier}
+                            onChange={(e) => setIdentifier(e.target.value)}
+                            InputProps={{
+                                startAdornment: (
+                                    <InputAdornment position="start">
+                                        <PersonIcon color="primary" />
+                                    </InputAdornment>
+                                ),
+                            }}
+                        />
+                    )}
 
                     <StyledTextField
                         fullWidth
@@ -217,12 +269,23 @@ const Login = () => {
                         type="submit"
                         disableElevation
                     >
-                        Sign In
+                        {isLocked ? 'Unlock' : 'Sign In'}
                     </LoginButton>
 
-                    <Typography 
-                        variant="body2" 
-                        sx={{ 
+                    {isLocked && (
+                        <Button
+                            fullWidth
+                            variant="outlined"
+                            onClick={handleSwitchUser}
+                            sx={{ mt: 2 }}
+                        >
+                            Switch User
+                        </Button>
+                    )}
+
+                    <Typography
+                        variant="body2"
+                        sx={{
                             mt: 3,
                             color: 'text.secondary'
                         }}

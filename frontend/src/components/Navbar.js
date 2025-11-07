@@ -14,6 +14,8 @@ import {
 import {
   ShoppingCart as CartIcon,
   AccountCircle as AccountIcon,
+  LockOutlined as LockIcon,
+  Logout as LogoutIcon,
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -28,7 +30,7 @@ function Navbar() {
   const [cartOpen, setCartOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
   const { cartItems } = useCart();
-  const { user, logout } = useAuth();
+  const { user, logout, lockScreen } = useAuth();
   const navigate = useNavigate();
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
@@ -44,6 +46,11 @@ function Navbar() {
   const handleLogout = () => {
     handleClose();
     logout();
+  };
+
+  const handleLockScreen = () => {
+    handleClose();
+    lockScreen();
   };
 
   return (
@@ -108,7 +115,14 @@ function Navbar() {
                       Signed in as {user.username}
                     </Typography>
                   </MenuItem>
-                  <MenuItem onClick={handleLogout}>Logout</MenuItem>
+                  <MenuItem onClick={handleLockScreen}>
+                    <LockIcon sx={{ mr: 1, fontSize: 20 }} />
+                    Lock Screen
+                  </MenuItem>
+                  <MenuItem onClick={handleLogout}>
+                    <LogoutIcon sx={{ mr: 1, fontSize: 20 }} />
+                    Logout
+                  </MenuItem>
                 </Menu>
               </Box>
             </Box>

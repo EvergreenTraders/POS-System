@@ -216,12 +216,26 @@ const useMetalForm = ({
     const hasSpotPrice = form.spotPrice && parseFloat(form.spotPrice) > 0;
     const hasPurityValue = form.purity && form.purity.value && parseFloat(form.purity.value) > 0;
 
-    if (!isManualOverride && hasWeight && hasSpotPrice && hasPurityValue) {
+    // Check if this is a non-precious metal type
+    const isNonPreciousMetal = form.preciousMetalType === 'Non-Precious Metal Type';
+
+    if (!isManualOverride && hasWeight && hasSpotPrice) {
       const weight = parseFloat(form.weight);
       const spotPrice = parseFloat(form.spotPrice);
-      const purityValue = parseFloat(form.purity.value);
 
-      const newValue = spotPrice * purityValue * weight;
+      let newValue;
+
+      // For non-precious metals, don't consider purity in calculation
+      if (isNonPreciousMetal) {
+        newValue = spotPrice * weight;
+      } else if (hasPurityValue) {
+        // For precious metals, include purity in calculation
+        const purityValue = parseFloat(form.purity.value);
+        newValue = spotPrice * purityValue * weight;
+      } else {
+        // If precious metal but no purity value, don't calculate
+        return;
+      }
 
       setTotalValue(newValue);
       onMetalValueChange(newValue);
@@ -231,7 +245,7 @@ const useMetalForm = ({
         metalValue: newValue
       }));
     }
-  }, [form.weight, form.spotPrice, form.purity, onMetalValueChange, isManualOverride]);
+  }, [form.weight, form.spotPrice, form.purity, form.preciousMetalType, onMetalValueChange, isManualOverride]);
 
   useEffect(() => {
     calculateValue();
@@ -920,50 +934,58 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
         </Select>
       </FormControl>
 
-      <FormControl fullWidth sx={{ mb: 2 }}>
-        <InputLabel>Select Non-Precious Metal Type</InputLabel>
-        <Select
-          name="nonPreciousMetalType"
-          value={form.nonPreciousMetalType}
-          onChange={(e) => handleSelectChange(e, form.preciousMetalType === 'Gold' ? jewelryColorRef : purityRef, handleChange)}
-          inputRef={nonPreciousMetalTypeRef}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              const select = e.target.closest('.MuiSelect-select');
-              const expanded = select?.getAttribute('aria-expanded') === 'true';
-              if (!expanded) {
-                e.preventDefault();
-                e.stopPropagation();
-                if (form.preciousMetalType === 'Gold') {
-                  jewelryColorRef.current?.focus();
-                } else {
-                  purityRef.current?.focus();
+      {form.preciousMetalType === 'Non-Precious Metal Type' && (
+        <FormControl fullWidth sx={{ mb: 2 }}>
+          <InputLabel>Select Non-Precious Metal Type</InputLabel>
+          <Select
+            name="nonPreciousMetalType"
+            value={form.nonPreciousMetalType}
+            onChange={(e) => {
+              const selectedValue = e.target.value;
+              const shouldShowJewelryColor = selectedValue && selectedValue.toLowerCase().includes('gold');
+              handleSelectChange(e, shouldShowJewelryColor ? jewelryColorRef : purityRef, handleChange);
+            }}
+            inputRef={nonPreciousMetalTypeRef}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const select = e.target.closest('.MuiSelect-select');
+                const expanded = select?.getAttribute('aria-expanded') === 'true';
+                if (!expanded) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const shouldShowJewelryColor = form.nonPreciousMetalType && form.nonPreciousMetalType.toLowerCase().includes('gold');
+                  if (shouldShowJewelryColor) {
+                    jewelryColorRef.current?.focus();
+                  } else {
+                    purityRef.current?.focus();
+                  }
                 }
               }
-            }
-          }}
-          onClose={() => {
-            if (form.nonPreciousMetalType === '') {
-              setTimeout(() => {
-                if (form.preciousMetalType === 'Gold') {
-                  jewelryColorRef.current?.focus();
-                } else {
-                  purityRef.current?.focus();
-                }
-              }, 0);
-            }
-          }}
-        >
-          <MenuItem value="">
-            <em>None</em>
-          </MenuItem>
-          {nonPreciousMetalTypes.map(type => (
-            <MenuItem key={type.id} value={type.type}>{type.type}</MenuItem>
-          ))}
-        </Select>
-      </FormControl>
+            }}
+            onClose={() => {
+              if (form.nonPreciousMetalType !== '') {
+                setTimeout(() => {
+                  const shouldShowJewelryColor = form.nonPreciousMetalType && form.nonPreciousMetalType.toLowerCase().includes('gold');
+                  if (shouldShowJewelryColor) {
+                    jewelryColorRef.current?.focus();
+                  } else {
+                    purityRef.current?.focus();
+                  }
+                }, 0);
+              }
+            }}
+          >
+            <MenuItem value="">
+              <em>None</em>
+            </MenuItem>
+            {nonPreciousMetalTypes.map(type => (
+              <MenuItem key={type.id} value={type.type}>{type.type}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      )}
 
-      {form.preciousMetalType === 'Gold' && (
+      {(form.preciousMetalType === 'Gold' || (form.preciousMetalType === 'Non-Precious Metal Type' && form.nonPreciousMetalType && form.nonPreciousMetalType.toLowerCase().includes('gold'))) && (
         <FormControl fullWidth sx={{ mb: 2 }}>
           <InputLabel>Select Jewelry Color *</InputLabel>
           <Select
@@ -997,16 +1019,17 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
           </Select>
         </FormControl>
       )}
-      <Grid container spacing={2}>
-        <Grid item xs={12} sm={form.preciousMetalType === 'Platinum' || form.preciousMetalType === 'Palladium' ? 12 : 6}>
-          <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>Purity *</InputLabel>
-            <Select
-              name="purity"
-              value={form.purity?.id || ''}
-              onChange={(e) => {
-                // Don't do anything for custom values in dropdown
-                if (e.target.value === 'custom') return;
+      {form.preciousMetalType !== 'Non-Precious Metal Type' && (
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={form.preciousMetalType === 'Platinum' || form.preciousMetalType === 'Palladium' ? 12 : 6}>
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel>Purity *</InputLabel>
+              <Select
+                name="purity"
+                value={form.purity?.id || ''}
+                onChange={(e) => {
+                  // Don't do anything for custom values in dropdown
+                  if (e.target.value === 'custom') return;
                 
                 // Find the selected purity object
                 const selectedPurityObj = metalPurities.find(p => String(p.id) === String(e.target.value));
@@ -1111,6 +1134,7 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
           )}
         </Grid>
       </Grid>
+      )}
 
       <FormControl fullWidth sx={{ mb: 2 }}>
         <InputLabel>Select Metal Category *</InputLabel>
@@ -1171,7 +1195,7 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
         fullWidth
         sx={{ mt: 2 }}
         ref={addButtonRef}
-        disabled={!form.preciousMetalType || !form.purity || !form.metalCategory || !form.weight || (form.preciousMetalType === 'Gold' && !form.jewelryColor)}
+        disabled={!form.preciousMetalType || !form.purity || !form.metalCategory || !form.weight || ((form.preciousMetalType === 'Gold' || (form.preciousMetalType === 'Non-Precious Metal Type' && form.nonPreciousMetalType && form.nonPreciousMetalType.toLowerCase().includes('gold'))) && !form.jewelryColor)}
       >
         {buttonText}
       </Button>
