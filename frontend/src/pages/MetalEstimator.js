@@ -940,7 +940,11 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
           <Select
             name="nonPreciousMetalType"
             value={form.nonPreciousMetalType}
-            onChange={(e) => handleSelectChange(e, form.preciousMetalType === 'Gold' ? jewelryColorRef : purityRef, handleChange)}
+            onChange={(e) => {
+              const selectedValue = e.target.value;
+              const shouldShowJewelryColor = selectedValue && selectedValue.toLowerCase().includes('gold');
+              handleSelectChange(e, shouldShowJewelryColor ? jewelryColorRef : purityRef, handleChange);
+            }}
             inputRef={nonPreciousMetalTypeRef}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -949,7 +953,8 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
                 if (!expanded) {
                   e.preventDefault();
                   e.stopPropagation();
-                  if (form.preciousMetalType === 'Gold') {
+                  const shouldShowJewelryColor = form.nonPreciousMetalType && form.nonPreciousMetalType.toLowerCase().includes('gold');
+                  if (shouldShowJewelryColor) {
                     jewelryColorRef.current?.focus();
                   } else {
                     purityRef.current?.focus();
@@ -958,9 +963,10 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
               }
             }}
             onClose={() => {
-              if (form.nonPreciousMetalType === '') {
+              if (form.nonPreciousMetalType !== '') {
                 setTimeout(() => {
-                  if (form.preciousMetalType === 'Gold') {
+                  const shouldShowJewelryColor = form.nonPreciousMetalType && form.nonPreciousMetalType.toLowerCase().includes('gold');
+                  if (shouldShowJewelryColor) {
                     jewelryColorRef.current?.focus();
                   } else {
                     purityRef.current?.focus();
@@ -979,7 +985,7 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
         </FormControl>
       )}
 
-      {form.preciousMetalType === 'Gold' && (
+      {(form.preciousMetalType === 'Gold' || (form.preciousMetalType === 'Non-Precious Metal Type' && form.nonPreciousMetalType && form.nonPreciousMetalType.toLowerCase().includes('gold'))) && (
         <FormControl fullWidth sx={{ mb: 2 }}>
           <InputLabel>Select Jewelry Color *</InputLabel>
           <Select
@@ -1189,7 +1195,7 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
         fullWidth
         sx={{ mt: 2 }}
         ref={addButtonRef}
-        disabled={!form.preciousMetalType || !form.purity || !form.metalCategory || !form.weight || (form.preciousMetalType === 'Gold' && !form.jewelryColor)}
+        disabled={!form.preciousMetalType || !form.purity || !form.metalCategory || !form.weight || ((form.preciousMetalType === 'Gold' || (form.preciousMetalType === 'Non-Precious Metal Type' && form.nonPreciousMetalType && form.nonPreciousMetalType.toLowerCase().includes('gold'))) && !form.jewelryColor)}
       >
         {buttonText}
       </Button>
