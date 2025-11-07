@@ -15,6 +15,7 @@ import {
   ShoppingCart as CartIcon,
   AccountCircle as AccountIcon,
   LockOutlined as LockIcon,
+  Logout as LogoutIcon,
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -118,7 +119,10 @@ function Navbar() {
                     <LockIcon sx={{ mr: 1, fontSize: 20 }} />
                     Lock Screen
                   </MenuItem>
-                  <MenuItem onClick={handleLogout}>Logout</MenuItem>
+                  <MenuItem onClick={handleLogout}>
+                    <LogoutIcon sx={{ mr: 1, fontSize: 20 }} />
+                    Logout
+                  </MenuItem>
                 </Menu>
               </Box>
             </Box>
