@@ -25,8 +25,11 @@ import {
   Select,
   MenuItem,
   FormControl,
-  InputLabel
+  InputLabel,
+  IconButton,
+  Avatar
 } from '@mui/material';
+import { CloudUpload as UploadIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
 import config from '../config';
@@ -98,8 +101,14 @@ function SystemConfig() {
     phone: '',
     email: '',
     currency: 'USD',
-    timezone: 'UTC'
+    timezone: 'UTC',
+    logo: null,
+    logoFilename: null,
+    logoMimetype: null
   });
+
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState(null);
 
   const [securitySettings, setSecuritySettings] = useState({
     requirePasswordChange: true,
@@ -393,6 +402,141 @@ function SystemConfig() {
       ...prev,
       [name]: value
     }));
+  };
+
+  const handleLogoUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setSnackbar({
+          open: true,
+          message: 'Please upload an image file',
+          severity: 'error'
+        });
+        return;
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setSnackbar({
+          open: true,
+          message: 'Image size should be less than 5MB',
+          severity: 'error'
+        });
+        return;
+      }
+
+      setLogoFile(file);
+
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setLogoPreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`${API_BASE_URL}/business-info/logo`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      setLogoFile(null);
+      setLogoPreview(null);
+      setGeneralSettings(prev => ({
+        ...prev,
+        logo: null,
+        logoFilename: null,
+        logoMimetype: null
+      }));
+
+      setSnackbar({
+        open: true,
+        message: 'Logo removed successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error removing logo:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to remove logo',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleSaveBusinessInfo = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const formData = new FormData();
+
+      formData.append('business_name', generalSettings.businessName);
+      formData.append('email', generalSettings.email);
+      formData.append('phone', generalSettings.phone);
+      formData.append('address', generalSettings.address);
+      formData.append('currency', generalSettings.currency);
+      formData.append('timezone', generalSettings.timezone);
+
+      if (logoFile) {
+        formData.append('logo', logoFile);
+      }
+
+      await axios.put(`${API_BASE_URL}/business-info`, formData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      setSnackbar({
+        open: true,
+        message: 'Business information saved successfully',
+        severity: 'success'
+      });
+
+      // Clear logo file after successful save
+      setLogoFile(null);
+    } catch (error) {
+      console.error('Error saving business info:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save business information',
+        severity: 'error'
+      });
+    }
+  };
+
+  const loadBusinessInfo = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/business-info`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const data = response.data;
+      setGeneralSettings({
+        businessName: data.business_name || 'Evergreen POS',
+        email: data.email || '',
+        phone: data.phone || '',
+        address: data.address || '',
+        currency: data.currency || 'USD',
+        timezone: data.timezone || 'UTC',
+        logo: data.logo,
+        logoFilename: data.logo_filename,
+        logoMimetype: data.logo_mimetype
+      });
+
+      // Set logo preview if exists
+      if (data.logo && data.logo_mimetype) {
+        setLogoPreview(`data:${data.logo_mimetype};base64,${data.logo}`);
+      }
+    } catch (error) {
+      console.error('Error loading business info:', error);
+    }
   };
 
   const handleSecuritySettingsChange = (event) => {
@@ -867,6 +1011,11 @@ function SystemConfig() {
     }
   };
 
+  // Load business info on mount
+  useEffect(() => {
+    loadBusinessInfo();
+  }, []);
+
   return (
     <Container>
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
@@ -885,8 +1034,9 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Business Information
             </Typography>
-            <Grid container spacing={3}>
-              <Grid item xs={12} sm={6}>
+            <Grid container spacing={1}>
+              {/* Row 1: Business Name, Email, Logo */}
+              <Grid item xs={12} sm={3}>
                 <TextField
                   fullWidth
                   label="Business Name"
@@ -895,7 +1045,7 @@ function SystemConfig() {
                   onChange={handleGeneralSettingsChange}
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={3}>
                 <TextField
                   fullWidth
                   label="Email"
@@ -905,7 +1055,49 @@ function SystemConfig() {
                   onChange={handleGeneralSettingsChange}
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={6} sx={{ display: 'flex', alignItems: 'flex-start', rowSpan: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, width: '100%' }}>
+                  {logoPreview && (
+                    <Avatar
+                      src={logoPreview}
+                      alt="Business Logo"
+                      variant="rounded"
+                      sx={{ width: 100, height: 100, objectFit: 'contain' }}
+                    />
+                  )}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Button
+                      variant="contained"
+                      component="label"
+                      startIcon={<UploadIcon />}
+                    >
+                      Upload Logo
+                      <input
+                        type="file"
+                        hidden
+                        accept="image/*"
+                        onChange={handleLogoUpload}
+                      />
+                    </Button>
+                    {logoPreview && (
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        onClick={handleRemoveLogo}
+                        startIcon={<DeleteIcon />}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                    <Typography variant="caption" color="textSecondary">
+                      PNG or JPG, max 5MB
+                    </Typography>
+                  </Box>
+                </Box>
+              </Grid>
+
+              {/* Row 2: Phone, Currency */}
+              <Grid item xs={12} sm={3}>
                 <TextField
                   fullWidth
                   label="Phone"
@@ -914,7 +1106,7 @@ function SystemConfig() {
                   onChange={handleGeneralSettingsChange}
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={3}>
                 <TextField
                   fullWidth
                   label="Currency"
@@ -923,6 +1115,8 @@ function SystemConfig() {
                   onChange={handleGeneralSettingsChange}
                 />
               </Grid>
+
+              {/* Row 3: Address (spans full width) */}
               <Grid item xs={12}>
                 <TextField
                   fullWidth
@@ -935,6 +1129,15 @@ function SystemConfig() {
                 />
               </Grid>
             </Grid>
+            <Box sx={{ mt: 3 }}>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleSaveBusinessInfo}
+              >
+                Save Business Information
+              </Button>
+            </Box>
           </ConfigSection>
 
           <ConfigSection>

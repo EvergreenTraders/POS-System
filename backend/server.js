@@ -45,6 +45,12 @@ const uploadJewelryImages = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10 MB limit per file
 }).array('images', 10); // Allow up to 10 images
 
+// Configure multer for single file uploads (business logo, etc.)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 } // 5 MB limit
+});
+
 // Ensure upload directories exist
 const uploadDir = 'uploads/customers/';
 if (!fs.existsSync(uploadDir)) {
@@ -4670,6 +4676,141 @@ app.put('/api/jewelry/history/:history_id', async (req, res) => {
     res.status(500).json({ error: 'Failed to update history entry' });
   } finally {
     client.release();
+  }
+});
+
+// Business Info Endpoints
+// GET business info
+app.get('/api/business-info', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM business_info ORDER BY id LIMIT 1');
+    if (result.rows.length === 0) {
+      // Return default values if no record exists
+      return res.json({
+        id: null,
+        business_name: 'Evergreen POS',
+        email: '',
+        phone: '',
+        address: '',
+        currency: 'USD',
+        timezone: 'UTC',
+        logo: null,
+        logo_filename: null,
+        logo_mimetype: null
+      });
+    }
+
+    // Convert logo bytea to base64 if it exists
+    const businessInfo = result.rows[0];
+    if (businessInfo.logo) {
+      businessInfo.logo = businessInfo.logo.toString('base64');
+    }
+
+    res.json(businessInfo);
+  } catch (error) {
+    console.error('Error fetching business info:', error);
+    res.status(500).json({ error: 'Failed to fetch business info' });
+  }
+});
+
+// UPDATE business info
+app.put('/api/business-info', upload.single('logo'), async (req, res) => {
+  const { business_name, email, phone, address, currency, timezone } = req.body;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Check if a record exists
+    const checkResult = await client.query('SELECT id FROM business_info LIMIT 1');
+
+    let query;
+    let values;
+
+    if (req.file) {
+      // Update with logo
+      const logoBuffer = req.file.buffer;
+      const logoFilename = req.file.originalname;
+      const logoMimetype = req.file.mimetype;
+
+      if (checkResult.rows.length === 0) {
+        // Insert new record
+        query = `
+          INSERT INTO business_info
+          (business_name, email, phone, address, currency, timezone, logo, logo_filename, logo_mimetype)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          RETURNING *
+        `;
+        values = [business_name, email, phone, address, currency, timezone, logoBuffer, logoFilename, logoMimetype];
+      } else {
+        // Update existing record
+        query = `
+          UPDATE business_info
+          SET business_name = $1, email = $2, phone = $3, address = $4,
+              currency = $5, timezone = $6, logo = $7, logo_filename = $8, logo_mimetype = $9
+          WHERE id = $10
+          RETURNING *
+        `;
+        values = [business_name, email, phone, address, currency, timezone, logoBuffer, logoFilename, logoMimetype, checkResult.rows[0].id];
+      }
+    } else {
+      // Update without logo
+      if (checkResult.rows.length === 0) {
+        // Insert new record
+        query = `
+          INSERT INTO business_info
+          (business_name, email, phone, address, currency, timezone)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING *
+        `;
+        values = [business_name, email, phone, address, currency, timezone];
+      } else {
+        // Update existing record
+        query = `
+          UPDATE business_info
+          SET business_name = $1, email = $2, phone = $3, address = $4,
+              currency = $5, timezone = $6
+          WHERE id = $7
+          RETURNING *
+        `;
+        values = [business_name, email, phone, address, currency, timezone, checkResult.rows[0].id];
+      }
+    }
+
+    const result = await client.query(query, values);
+    await client.query('COMMIT');
+
+    // Convert logo bytea to base64 if it exists
+    const businessInfo = result.rows[0];
+    if (businessInfo.logo) {
+      businessInfo.logo = businessInfo.logo.toString('base64');
+    }
+
+    res.json(businessInfo);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating business info:', error);
+    res.status(500).json({ error: 'Failed to update business info' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE business logo
+app.delete('/api/business-info/logo', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'UPDATE business_info SET logo = NULL, logo_filename = NULL, logo_mimetype = NULL WHERE id = (SELECT id FROM business_info LIMIT 1) RETURNING *'
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Business info not found' });
+    }
+
+    res.json({ message: 'Logo deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting logo:', error);
+    res.status(500).json({ error: 'Failed to delete logo' });
   }
 });
 
