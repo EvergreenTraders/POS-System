@@ -3,10 +3,13 @@ DO $$
 BEGIN
     ALTER TABLE IF EXISTS payments
         ADD COLUMN IF NOT EXISTS action VARCHAR(10) NOT NULL DEFAULT 'in' CHECK (action IN ('in', 'out', 'transfer'));
-    
+
     -- Add comment to explain the column
     COMMENT ON COLUMN payments.action IS 'Type of payment flow: in (receiving money), out (paying money), or transfer (moving money between accounts)';
 END $$;
+
+-- Drop the old payment_method constraint if it exists
+ALTER TABLE IF EXISTS payments DROP CONSTRAINT IF EXISTS chk_payment_method;
 
 -- Create payment_methods table
 CREATE TABLE IF NOT EXISTS payment_methods (
@@ -78,7 +81,6 @@ CREATE TABLE IF NOT EXISTS payments (
     payment_method VARCHAR(50) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_payment_method CHECK (payment_method IN ('CASH', 'CREDIT_CARD', 'DEBIT_CARD', 'BANK_TRANSFER', 'CHECK')),
     FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)
 );
 

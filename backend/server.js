@@ -3170,6 +3170,60 @@ app.get('/api/transactions/:transaction_id/payments', async (req, res) => {
   }
 });
 
+// Update payment methods for a transaction
+app.put('/api/transactions/:transaction_id/payments', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { transaction_id } = req.params;
+    const { payments } = req.body;
+
+    // Validate input
+    if (!payments || !Array.isArray(payments)) {
+      return res.status(400).json({ error: 'Invalid payments data' });
+    }
+
+    // Verify the transaction exists
+    const transactionCheck = await client.query(
+      'SELECT transaction_id FROM transactions WHERE transaction_id = $1',
+      [transaction_id]
+    );
+
+    if (transactionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    await client.query('BEGIN');
+
+    // Delete existing payments for this transaction
+    await client.query(
+      'DELETE FROM payments WHERE transaction_id = $1',
+      [transaction_id]
+    );
+
+    // Insert new payments
+    for (const payment of payments) {
+      await client.query(
+        'INSERT INTO payments (transaction_id, amount, payment_method) VALUES ($1, $2, $3)',
+        [transaction_id, payment.amount, payment.payment_method]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: 'Payment methods updated successfully'
+    });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating transaction payments:', err);
+    res.status(500).json({ error: 'Failed to update payment methods' });
+  } finally {
+    client.release();
+  }
+});
+
 // Transaction routes
 app.get('/api/transactions', async (req, res) => {
   try {
