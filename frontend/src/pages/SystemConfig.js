@@ -162,6 +162,14 @@ function SystemConfig() {
   });
   const [selectedProvince, setSelectedProvince] = useState('ON');
 
+  // Linked Account Authorization Template state
+  const [authorizationTemplate, setAuthorizationTemplate] = useState({
+    id: null,
+    form_title: 'Account Linking Authorization',
+    form_content: '',
+    consent_text: 'I authorize this account linkage and understand the terms.'
+  });
+
   const fetchCustomerHeaderPreferences = async () => {
     try {
       setLoading(true);
@@ -379,6 +387,17 @@ function SystemConfig() {
       }
     };
 
+    const fetchAuthorizationTemplate = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/linked-account-authorization-template`);
+        if (response.data) {
+          setAuthorizationTemplate(response.data);
+        }
+      } catch (error) {
+        console.error('Error fetching authorization template:', error);
+      }
+    };
+
     // Fetch data on component mount
     fetchCustomerHeaderPreferences();
     fetchPreciousMetalNames();
@@ -390,6 +409,7 @@ function SystemConfig() {
     fetchCaratConversion();
     fetchInventoryHoldPeriod();
     fetchTaxConfig();
+    fetchAuthorizationTemplate();
   }, []);
   
   const handleTabChange = (event, newValue) => {
@@ -816,6 +836,46 @@ function SystemConfig() {
     setSnackbar({ ...snackbar, open: false });
   };
 
+  const handleSaveAuthorizationTemplate = async () => {
+    try {
+      if (!authorizationTemplate.id) {
+        setSnackbar({
+          open: true,
+          message: 'No template found to update',
+          severity: 'error'
+        });
+        return;
+      }
+
+      await axios.put(`${API_BASE_URL}/linked-account-authorization-template/${authorizationTemplate.id}`, {
+        form_title: authorizationTemplate.form_title,
+        form_content: authorizationTemplate.form_content,
+        consent_text: authorizationTemplate.consent_text
+      });
+
+      setSnackbar({
+        open: true,
+        message: 'Authorization template saved successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving authorization template:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save authorization template',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleAuthorizationTemplateChange = (event) => {
+    const { name, value } = event.target;
+    setAuthorizationTemplate(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
   const handleSaveTaxConfig = async () => {
     try {
       const taxRatesArray = Object.entries(provinceTaxRates).map(([code, rates]) => ({
@@ -1025,6 +1085,7 @@ function SystemConfig() {
           <Tab label="Notifications" />
           <Tab label="Tax Configuration" />
           <Tab label="Pricing Calculator" />
+          <Tab label="Account Authorization" />
         </Tabs>
       </Box>
 
@@ -1891,6 +1952,74 @@ function SystemConfig() {
               </ConfigSection>
             </Grid>
           </Grid>
+        </StyledPaper>
+      </TabPanel>
+
+      {/* Account Authorization Tab */}
+      <TabPanel value={activeTab} index={5}>
+        <StyledPaper elevation={2}>
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Linked Account Authorization Form
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              Configure the authorization form that customers must sign when linking their accounts.
+              Available placeholders: {'{'}{'{'} CUSTOMER_NAME {'}'}{'}'},  {'{'}{'{'} PRIMARY_CUSTOMER_NAME {'}'}{'}'}
+            </Typography>
+
+            <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Form Title"
+                  name="form_title"
+                  value={authorizationTemplate.form_title}
+                  onChange={handleAuthorizationTemplateChange}
+                  helperText="The title displayed at the top of the authorization form"
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={8}
+                  label="Form Content"
+                  name="form_content"
+                  value={authorizationTemplate.form_content}
+                  onChange={handleAuthorizationTemplateChange}
+                  helperText="The main authorization text. Use {{CUSTOMER_NAME}} and {{PRIMARY_CUSTOMER_NAME}} as placeholders."
+                  placeholder="I, {{CUSTOMER_NAME}}, authorize {{PRIMARY_CUSTOMER_NAME}} to access my account information..."
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={3}
+                  label="Consent Text"
+                  name="consent_text"
+                  value={authorizationTemplate.consent_text}
+                  onChange={handleAuthorizationTemplateChange}
+                  helperText="The consent checkbox text that customers must agree to"
+                  placeholder="I have read and agree to the terms above"
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleSaveAuthorizationTemplate}
+                  >
+                    Save Authorization Template
+                  </Button>
+                </Box>
+              </Grid>
+            </Grid>
+          </ConfigSection>
         </StyledPaper>
       </TabPanel>
 

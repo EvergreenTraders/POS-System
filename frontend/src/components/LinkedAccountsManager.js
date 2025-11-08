@@ -33,6 +33,7 @@ import {
 } from '@mui/icons-material';
 import config from '../config';
 import axios from 'axios';
+import AuthorizationFormDialog from './AuthorizationFormDialog';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -41,6 +42,7 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [openLinkDialog, setOpenLinkDialog] = useState(false);
+  const [openAuthorizationDialog, setOpenAuthorizationDialog] = useState(false);
   const [allCustomers, setAllCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [linkType, setLinkType] = useState('full_access');
@@ -115,22 +117,40 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
     setError(null);
   };
 
-  const handleCreateLink = async () => {
+  const handleProceedToAuthorization = () => {
     if (!selectedCustomer) {
       setError('Please select a customer to link');
       return;
     }
+    // Open authorization dialog
+    setOpenAuthorizationDialog(true);
+  };
 
+  const handleAuthorizationComplete = async (authorizationData) => {
     setLoading(true);
     setError(null);
     try {
-      await axios.post(`${API_BASE_URL}/customers/${customerId}/link-account`, {
+      // Create the account link
+      const linkResponse = await axios.post(`${API_BASE_URL}/customers/${customerId}/link-account`, {
         linked_customer_id: selectedCustomer.id,
         link_type: linkType,
         notes: notes
       });
 
+      const linkId = linkResponse.data.id;
+
+      // Save the authorization
+      await axios.post(`${API_BASE_URL}/linked-account-authorization`, {
+        link_id: linkId,
+        customer_id: selectedCustomer.id,
+        authorized_by_name: authorizationData.authorized_by_name,
+        signature_data: authorizationData.signature_data,
+        ip_address: null, // You can add IP tracking if needed
+        user_agent: navigator.userAgent
+      });
+
       await fetchLinkedAccounts();
+      setOpenAuthorizationDialog(false);
       handleCloseLinkDialog();
     } catch (err) {
       console.error('Error creating link:', err);
@@ -364,13 +384,22 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
           </Button>
           <Button
             variant="contained"
-            onClick={handleCreateLink}
+            onClick={handleProceedToAuthorization}
             disabled={loading || !selectedCustomer}
           >
-            {loading ? <CircularProgress size={20} /> : 'Link Account'}
+            {loading ? <CircularProgress size={20} /> : 'Proceed to Authorization'}
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Authorization Dialog */}
+      <AuthorizationFormDialog
+        open={openAuthorizationDialog}
+        onClose={() => setOpenAuthorizationDialog(false)}
+        onAuthorized={handleAuthorizationComplete}
+        primaryCustomerName={customerName}
+        linkedCustomer={selectedCustomer}
+      />
     </>
   );
 };

@@ -3674,6 +3674,77 @@ app.delete('/api/customers/account-links/:linkId', async (req, res) => {
   }
 });
 
+// Get linked account authorization template
+app.get('/api/linked-account-authorization-template', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM linked_account_authorization_template ORDER BY id DESC LIMIT 1';
+    const result = await pool.query(query);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Authorization template not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching authorization template:', err);
+    res.status(500).json({ error: 'Failed to fetch authorization template' });
+  }
+});
+
+// Update linked account authorization template
+app.put('/api/linked-account-authorization-template/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { form_title, form_content, consent_text } = req.body;
+
+    const updateQuery = `
+      UPDATE linked_account_authorization_template
+      SET form_title = $1, form_content = $2, consent_text = $3, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $4
+      RETURNING *
+    `;
+
+    const result = await pool.query(updateQuery, [form_title, form_content, consent_text, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Authorization template not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating authorization template:', err);
+    res.status(500).json({ error: 'Failed to update authorization template' });
+  }
+});
+
+// Save authorization for linked account
+app.post('/api/linked-account-authorization', async (req, res) => {
+  try {
+    const { link_id, customer_id, authorized_by_name, signature_data, ip_address, user_agent } = req.body;
+
+    const insertQuery = `
+      INSERT INTO linked_account_authorizations
+      (link_id, customer_id, authorized_by_name, signature_data, ip_address, user_agent)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `;
+
+    const result = await pool.query(insertQuery, [
+      link_id,
+      customer_id,
+      authorized_by_name,
+      signature_data,
+      ip_address,
+      user_agent
+    ]);
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error saving authorization:', err);
+    res.status(500).json({ error: 'Failed to save authorization' });
+  }
+});
+
 // Get all transactions accessible by a customer (including linked accounts)
 app.get('/api/customers/:id/all-accessible-transactions', async (req, res) => {
   try {
