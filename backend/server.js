@@ -1446,19 +1446,25 @@ app.get('/api/jewelry/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const query = `
-      SELECT 
+      SELECT
         j.*,
         TO_CHAR(j.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
-        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at
+        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at,
+        tt.type as source,
+        CONCAT(c.first_name, ' ', c.last_name) as bought_from
       FROM jewelry j
+      LEFT JOIN transaction_items ti ON j.item_id = ti.item_id
+      LEFT JOIN transactions t ON ti.transaction_id = t.transaction_id
+      LEFT JOIN transaction_type tt ON ti.transaction_type_id = tt.id
+      LEFT JOIN customers c ON t.customer_id = c.id
       WHERE j.item_id = $1`;
-    
+
     const result = await pool.query(query, [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Jewelry item not found' });
     }
-    
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching jewelry item:', err);
