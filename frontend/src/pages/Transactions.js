@@ -24,7 +24,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon, Warning as WarningIcon } from '@mui/icons-material';
+import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon, Warning as WarningIcon, Print as PrintIcon } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -45,6 +45,8 @@ function Transactions() {
   const [loadingItems, setLoadingItems] = useState(false);
   const [paymentDetails, setPaymentDetails] = useState({ payments: [], total_paid: 0 });
   const [loadingPayments, setLoadingPayments] = useState(false);
+  const [isEditingPayments, setIsEditingPayments] = useState(false);
+  const [editedPayments, setEditedPayments] = useState([]);
   const API_BASE_URL = config.apiUrl;
   
   const [transactions, setTransactions] = useState([]);
@@ -54,7 +56,8 @@ function Transactions() {
   const [stores, setStores] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [transactionTypes, setTransactionTypes] = useState([]);
-  
+  const [paymentMethods, setPaymentMethods] = useState([]);
+
   // Fetch transaction types from API
   useEffect(() => {
     const fetchTransactionTypes = async () => {
@@ -72,6 +75,20 @@ function Transactions() {
     };
 
     fetchTransactionTypes();
+  }, []);
+
+  // Fetch payment methods from API
+  useEffect(() => {
+    const fetchPaymentMethods = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/payment-methods`);
+        setPaymentMethods(response.data);
+      } catch (error) {
+        console.error('Error fetching payment methods:', error);
+      }
+    };
+
+    fetchPaymentMethods();
   }, []);
   
   const handleViewTransaction = async (transaction) => {
@@ -108,7 +125,290 @@ function Transactions() {
     setPaymentDetails({ payments: [], total_paid: 0 });
     // Don't clear transaction items to keep them in memory
   };
-  
+
+  const handlePrintTransaction = async () => {
+    if (!selectedTransaction) return;
+
+    // Fetch business info
+    let businessName = 'POS Pro System';
+    let businessLogo = '';
+    let businessLogoMimetype = '';
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/business-info`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data) {
+        businessName = response.data.business_name || 'POS Pro System';
+        if (response.data.logo && response.data.logo_mimetype) {
+          businessLogo = response.data.logo;
+          businessLogoMimetype = response.data.logo_mimetype;
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching business info:', error);
+    }
+
+    // Create HTML content for the transaction receipt
+    const receiptHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Transaction #${selectedTransaction.transaction_id || selectedTransaction.id}</title>
+        <style>
+          body {
+            font-family: 'Courier New', monospace;
+            max-width: 400px;
+            margin: 10px auto;
+            padding: 15px;
+            font-size: 12px;
+          }
+          .header {
+            position: relative;
+            margin-bottom: 15px;
+            border-bottom: 2px dashed #333;
+            padding-bottom: 15px;
+            min-height: 75px;
+          }
+          .header-content {
+            padding-right: 80px;
+          }
+          .header h1 {
+            margin: 0 0 5px 0;
+            color: #333;
+            font-size: 18px;
+            font-weight: bold;
+          }
+          .header p {
+            margin: 3px 0;
+            font-size: 11px;
+          }
+          .header img {
+            position: absolute;
+            top: 0;
+            right: 0;
+            max-width: 70px;
+            max-height: 70px;
+            object-fit: contain;
+          }
+          .transaction-info {
+            margin-bottom: 15px;
+          }
+          .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 11px;
+          }
+          .info-label {
+            font-weight: bold;
+          }
+          .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            font-size: 11px;
+          }
+          .items-table th {
+            padding: 6px 4px;
+            text-align: left;
+            border-bottom: 1px dashed #333;
+            font-weight: bold;
+          }
+          .items-table td {
+            padding: 6px 4px;
+            border-bottom: 1px dotted #ccc;
+          }
+          .items-table tr:last-child td {
+            border-bottom: none;
+          }
+          .total-row {
+            font-weight: bold;
+            border-top: 2px dashed #333;
+            border-bottom: 2px dashed #333;
+          }
+          .payment-section {
+            border-top: 1px dashed #333;
+            padding-top: 10px;
+            margin-top: 10px;
+            font-size: 11px;
+          }
+          .payment-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+          }
+          .footer {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 10px;
+            border-top: 1px dashed #333;
+            padding-top: 10px;
+          }
+          @media print {
+            body { margin: 0; padding: 10px; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Business Logo" />` : ''}
+          <div class="header-content">
+            <h1>${businessName}</h1>
+            <p>Transaction Receipt</p>
+          </div>
+        </div>
+
+        <div class="transaction-info">
+          <div class="info-row">
+            <span class="info-label">Transaction #:</span>
+            <span>${selectedTransaction.transaction_id || selectedTransaction.id}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Date & Time:</span>
+            <span>${formatTransactionTime(selectedTransaction.created_at)}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Customer:</span>
+            <span>${selectedTransaction.customer_name || 'N/A'}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Employee:</span>
+            <span>${selectedTransaction.employee_name || 'N/A'}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Status:</span>
+            <span style="color: ${selectedTransaction.status === 'voided' ? 'red' : 'inherit'}; text-transform: capitalize;">
+              ${selectedTransaction.status || 'completed'}
+            </span>
+          </div>
+        </div>
+
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th>Type</th>
+              <th style="text-align: right;">Price</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${transactionItems.map((item, index) => `
+              <tr>
+                <td>
+                  ${item.item_details?.description || `Item ${index + 1}`}
+                  ${item.description ? `<br><small style="color: #666;">${item.description}</small>` : ''}
+                </td>
+                <td>${item.transaction_type}</td>
+                <td style="text-align: right;">
+                  $${parseFloat(item.item_price || 0).toFixed(2)}
+                  ${item.quantity > 1 ? `<br><small style="color: #666;">${item.quantity} @ $${(parseFloat(item.item_price || 0) / item.quantity).toFixed(2)} each</small>` : ''}
+                </td>
+              </tr>
+            `).join('')}
+            <tr class="total-row">
+              <td colspan="2" style="text-align: right;">Subtotal:</td>
+              <td style="text-align: right;">
+                $${transactionItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0) * (item.quantity || 1)), 0).toFixed(2)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        ${paymentDetails.payments.length > 0 ? `
+          <div class="payment-section">
+            <h3 style="margin-top: 0;">Payment Methods:</h3>
+            ${paymentDetails.payments.map(payment => `
+              <div class="payment-row">
+                <span>${payment.payment_method.replace(/_/g, ' ').toUpperCase()}:</span>
+                <span>$${Math.abs(parseFloat(payment.amount)).toFixed(2)}</span>
+              </div>
+            `).join('')}
+            ${paymentDetails.change_given > 0 ? `
+              <div class="payment-row" style="border-top: 1px solid #ddd; margin-top: 10px; padding-top: 10px;">
+                <span>Change Given:</span>
+                <span>$${parseFloat(paymentDetails.change_given).toFixed(2)}</span>
+              </div>
+            ` : ''}
+            <div class="payment-row" style="font-weight: bold; border-top: 2px solid #333; margin-top: 10px; padding-top: 10px; font-size: 1.1em;">
+              <span>Total Paid:</span>
+              <span>$${parseFloat(paymentDetails.total_paid).toFixed(2)}</span>
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="footer">
+          <p>Thank you for your business!</p>
+          <p>POS Pro System - Transaction Receipt</p>
+        </div>
+
+        <div class="no-print" style="text-align: center; margin-top: 30px;">
+          <button onclick="window.print()" style="padding: 10px 30px; font-size: 16px; cursor: pointer;">Print</button>
+          <button onclick="window.close()" style="padding: 10px 30px; font-size: 16px; margin-left: 10px; cursor: pointer;">Close</button>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Open in new tab
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(receiptHTML);
+    printWindow.document.close();
+  };
+
+  const handleEditPayments = () => {
+    setEditedPayments(paymentDetails.payments.map(p => ({ ...p })));
+    setIsEditingPayments(true);
+  };
+
+  const handlePaymentChange = (index, field, value) => {
+    const updated = [...editedPayments];
+    updated[index][field] = value;
+    setEditedPayments(updated);
+  };
+
+  const handleAddPayment = () => {
+    setEditedPayments([...editedPayments, { payment_method: 'cash', amount: 0 }]);
+  };
+
+  const handleRemovePayment = (index) => {
+    const updated = editedPayments.filter((_, i) => i !== index);
+    setEditedPayments(updated);
+  };
+
+  const handleSavePayments = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `${API_BASE_URL}/transactions/${selectedTransaction.transaction_id}/payments`,
+        { payments: editedPayments },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Refresh payment details
+      const response = await axios.get(
+        `${API_BASE_URL}/transactions/${selectedTransaction.transaction_id}/payments`
+      );
+      setPaymentDetails({
+        payments: response.data.payments || [],
+        total_paid: response.data.total_paid || 0
+      });
+
+      setIsEditingPayments(false);
+      alert('Payment methods updated successfully');
+    } catch (error) {
+      console.error('Error updating payments:', error);
+      alert('Failed to update payment methods');
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditingPayments(false);
+    setEditedPayments([]);
+  };
 
   // Fetch transactions, their items, and filter options
   useEffect(() => {
@@ -454,7 +754,7 @@ function Transactions() {
                     </TableRow>
                     <TableRow>
                       <TableCell variant="head">Amount</TableCell>
-                      <TableCell>${parseFloat(selectedTransaction.total_amount || 0).toFixed(2)}</TableCell>
+                      <TableCell>${(Math.abs(parseFloat(selectedTransaction.total_amount || 0))).toFixed(2)}</TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell variant="head">Status</TableCell>
@@ -538,15 +838,69 @@ function Transactions() {
                         <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f5f9ff' }}>
                           <TableCell colSpan={4} sx={{ pt: 1, pb: 1 }}>
                             <Box sx={{ textAlign: 'right' }}>
-                              <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Payment Methods:</Typography>
+                              <Box display="flex" justifyContent="flex-end" alignItems="center" mb={1} gap={1}>
+                                <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>Payment Methods:</Typography>
+                                {isEditingPayments && (
+                                  <IconButton
+                                    size="small"
+                                    color="primary"
+                                    onClick={handleAddPayment}
+                                  >
+                                    <Typography sx={{ fontSize: 20, fontWeight: 'bold' }}>+</Typography>
+                                  </IconButton>
+                                )}
+                              </Box>
                             {loadingPayments ? (
                               <Typography>Loading payment details...</Typography>
+                            ) : isEditingPayments ? (
+                              <Box>
+                                {editedPayments.map((payment, index) => (
+                                  <Box key={index} display="flex" justifyContent="flex-end" gap={1} mb={1} alignItems="center">
+                                    <FormControl size="small" sx={{ minWidth: 150 }}>
+                                      <Select
+                                        value={payment.payment_method}
+                                        onChange={(e) => handlePaymentChange(index, 'payment_method', e.target.value)}
+                                      >
+                                        {paymentMethods.map((method) => (
+                                          <MenuItem key={method.id} value={method.method_value}>
+                                            {method.method_name}
+                                          </MenuItem>
+                                        ))}
+                                      </Select>
+                                    </FormControl>
+                                    <TextField
+                                      size="small"
+                                      type="number"
+                                      value={Math.abs(parseFloat(payment.amount))}
+                                      onChange={(e) => handlePaymentChange(index, 'amount', e.target.value)}
+                                      sx={{ width: 120 }}
+                                      InputProps={{
+                                        startAdornment: <Typography sx={{ mr: 0.5 }}>$</Typography>,
+                                      }}
+                                    />
+                                    {editedPayments.length > 1 && (
+                                      <IconButton
+                                        size="small"
+                                        color="error"
+                                        onClick={() => handleRemovePayment(index)}
+                                      >
+                                        <Typography sx={{ fontSize: 18 }}>×</Typography>
+                                      </IconButton>
+                                    )}
+                                  </Box>
+                                ))}
+                                <Divider sx={{ my: 1 }} />
+                                <Box display="flex" justifyContent="flex-end" gap={2} fontWeight="bold">
+                                  <span>Total:</span>
+                                  <span>${editedPayments.reduce((sum, p) => sum + Math.abs(parseFloat(p.amount || 0)), 0).toFixed(2)}</span>
+                                </Box>
+                              </Box>
                             ) : paymentDetails.payments.length > 0 ? (
                               <Box sx={{ textAlign: 'right' }}>
                                 {paymentDetails.payments.map((payment, index) => (
                                   <Box key={index} display="flex" justifyContent="flex-end" gap={2} mb={1}>
                                     <span>{payment.payment_method.replace(/_/g, ' ').toUpperCase()}:</span>
-                                    <span>${parseFloat(payment.amount).toFixed(2)}</span>
+                                    <span>${Math.abs(parseFloat(payment.amount)).toFixed(2)}</span>
                                   </Box>
                                 ))}
                                 <Divider sx={{ my: 1 }} />
@@ -576,12 +930,40 @@ function Transactions() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDialog} color="primary">
-            Close
-          </Button>
+          {isEditingPayments ? (
+            <>
+              <Button onClick={handleCancelEdit} color="error">
+                Cancel
+              </Button>
+              <Button onClick={handleSavePayments} variant="contained" color="primary">
+                Save Changes
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                onClick={handleEditPayments}
+                color="secondary"
+                variant="outlined"
+              >
+                Edit Transaction
+              </Button>
+              <Button
+                onClick={handlePrintTransaction}
+                color="primary"
+                variant="contained"
+                startIcon={<PrintIcon />}
+              >
+                Print Transaction
+              </Button>
+              <Button onClick={handleCloseDialog} color="primary">
+                Close
+              </Button>
+            </>
+          )}
         </DialogActions>
       </Dialog>
-      
+
       {/* Delete Confirmation Dialog */}
       <Dialog
         open={deleteDialogOpen}

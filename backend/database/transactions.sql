@@ -3,10 +3,33 @@ DO $$
 BEGIN
     ALTER TABLE IF EXISTS payments
         ADD COLUMN IF NOT EXISTS action VARCHAR(10) NOT NULL DEFAULT 'in' CHECK (action IN ('in', 'out', 'transfer'));
-    
+
     -- Add comment to explain the column
     COMMENT ON COLUMN payments.action IS 'Type of payment flow: in (receiving money), out (paying money), or transfer (moving money between accounts)';
 END $$;
+
+-- Drop the old payment_method constraint if it exists
+ALTER TABLE IF EXISTS payments DROP CONSTRAINT IF EXISTS chk_payment_method;
+
+-- Create payment_methods table
+CREATE TABLE IF NOT EXISTS payment_methods (
+    id SERIAL PRIMARY KEY,
+    method_name VARCHAR(50) NOT NULL UNIQUE,
+    method_value VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insert default payment methods
+INSERT INTO payment_methods (method_name, method_value) VALUES
+    ('Cash', 'cash'),
+    ('Credit Card', 'credit_card'),
+    ('Debit Card', 'debit_card'),
+    ('Check', 'check'),
+    ('Gift Card', 'gift_card'),
+    ('Store Credit', 'store_credit')
+ON CONFLICT (method_value) DO NOTHING;
 
 -- Create transaction_type table
 CREATE TABLE IF NOT EXISTS transaction_type (
@@ -58,7 +81,6 @@ CREATE TABLE IF NOT EXISTS payments (
     payment_method VARCHAR(50) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_payment_method CHECK (payment_method IN ('CASH', 'CREDIT_CARD', 'DEBIT_CARD', 'BANK_TRANSFER', 'CHECK')),
     FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)
 );
 
@@ -96,5 +118,10 @@ CREATE TRIGGER update_transaction_items_timestamp
 
 CREATE TRIGGER update_transaction_type_timestamp
     BEFORE UPDATE ON transaction_type
+    FOR EACH ROW
+    EXECUTE FUNCTION update_timestamp();
+
+CREATE TRIGGER update_payment_methods_timestamp
+    BEFORE UPDATE ON payment_methods
     FOR EACH ROW
     EXECUTE FUNCTION update_timestamp();

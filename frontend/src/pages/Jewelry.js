@@ -76,11 +76,15 @@ function Jewelry() {
   const generateHistoryPDF = async (historyData, itemId, itemData) => {
     const doc = new jsPDF();
     const title = `Item History - #${itemId}`;
-    const headers = [['Date', 'Changed By', 'Field', 'From', 'To', 'Source', 'Bought From', 'Notes']];
+    const headers = [['Date', 'Changed By', 'Field', 'From', 'To', 'Notes']];
     // Sort history by date (newest first)
     const sortedHistory = [...historyData].sort((a, b) =>
       new Date(b.changed_at) - new Date(a.changed_at)
     );
+
+    // Get source and bought_from from item details
+    const source = itemData?.source || 'N/A';
+    const boughtFrom = itemData?.bought_from || 'N/A';
 
     // Process history data into table rows
     const tableData = [];
@@ -90,17 +94,15 @@ function Jewelry() {
       const changedBy = entry.first_name && entry.last_name
         ? `${entry.first_name} ${entry.last_name}`
         : `User ID: ${entry.changed_by || 'System'}`;
-      const source = entry.source || '';
-      const boughtFrom = entry.bought_from || '';
 
       // Process each changed field
       const changes = entry.changed_fields;
-      
+
       // Handle nested changes (like in secondary_gem_*)
       const processChanges = (changes, prefix = '') => {
         return Object.entries(changes).flatMap(([field, value]) => {
           const fullFieldName = prefix ? `${prefix}.${field}` : field;
-          
+
           // If the value has 'from' and 'to' properties, it's a direct change
           if (value && typeof value === 'object' && 'from' in value && 'to' in value) {
             return [{
@@ -121,9 +123,9 @@ function Jewelry() {
           }];
         });
       };
-      
+
       const fieldChanges = processChanges(changes);
-      
+
       // Add a row for each changed field
       fieldChanges.forEach((change, index) => {
         tableData.push([
@@ -132,18 +134,16 @@ function Jewelry() {
           change.field,
           change.from,
           change.to,
-          index === 0 ? source : '',
-          index === 0 ? boughtFrom : '',
           index === 0 ? (entry.change_notes || '') : ''
         ]);
       });
 
       // Add a separator row between different history entries
       if (fieldChanges.length > 0) {
-        tableData.push(Array(8).fill(''));
+        tableData.push(Array(6).fill(''));
       }
     });
-    
+
     // Remove the last separator row if it exists
     if (tableData.length > 0 && tableData[tableData.length - 1].every(cell => cell === '')) {
       tableData.pop();
@@ -194,35 +194,46 @@ function Jewelry() {
     doc.setTextColor(100);
     doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
 
+    // Add Source and Bought From information
+    doc.setFontSize(10);
+    doc.setTextColor(0, 0, 0);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Source: `, 14, 38);
+    doc.setFont(undefined, 'normal');
+    doc.text(source, 32, 38);
+
+    doc.setFont(undefined, 'bold');
+    doc.text(`Bought From: `, 80, 38);
+    doc.setFont(undefined, 'normal');
+    doc.text(boughtFrom, 110, 38);
+
     // Register autoTable plugin
     autoTable(doc, {
       head: headers,
       body: tableData,
-      startY: 40,
+      startY: 44,
       headStyles: {
         fillColor: [41, 128, 185],
         textColor: 255,
         fontStyle: 'bold',
-        fontSize: 7
+        fontSize: 8
       },
       bodyStyles: {
         fontSize: 7,
         cellPadding: 1.5
       },
       columnStyles: {
-        0: { cellWidth: 22, fontStyle: 'bold' }, // Date
-        1: { cellWidth: 20 }, // Changed By
-        2: { cellWidth: 28 }, // Field
-        3: { cellWidth: 22 }, // From
-        4: { cellWidth: 22 }, // To
-        5: { cellWidth: 20 }, // Source
-        6: { cellWidth: 22 }, // Bought From
-        7: { cellWidth: 30 }  // Notes
+        0: { cellWidth: 28, fontStyle: 'bold' }, // Date
+        1: { cellWidth: 25 }, // Changed By
+        2: { cellWidth: 35 }, // Field
+        3: { cellWidth: 28 }, // From
+        4: { cellWidth: 28 }, // To
+        5: { cellWidth: 42 }  // Notes
       },
       alternateRowStyles: {
         fillColor: [245, 245, 245]
       },
-      margin: { top: 40 },
+      margin: { top: 44 },
       didParseCell: function(data) {
         // Make the first column (Date) and second column (Changed By) bold for the first row of each change set
         if (data.column.index <= 1 && data.row.index > 0 && tableData[data.row.index - 1][0] === '') {

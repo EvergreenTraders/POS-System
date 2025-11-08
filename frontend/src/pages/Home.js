@@ -404,11 +404,6 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
     navigate('/customer-ticket', { state: { customer } });
   };
 
-  const handleViewSalesHistory = (customer) => {
-    navigate(`/customers/${customer.id}/sales-history`);
-    handleCloseSearchDialog();
-  };
-
   const handleRegisterNew = () => {
     const newCustomer = { first_name: '', last_name: '', email: '', phone: '', status: 'active', created_at: new Date().toISOString(), image: '' };
     setCustomer(newCustomer);
@@ -847,16 +842,6 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                           sx={{ minWidth: 70 }}
                         >
                           Select
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          color="info"
-                          startIcon={<HistoryIcon />}
-                          onClick={e => { e.stopPropagation(); handleViewSalesHistory(searchResults[selectedSearchIdx]); }}
-                          sx={{ minWidth: 100 }}
-                        >
-                          Sales History
                         </Button>
                       </Box>
                       

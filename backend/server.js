@@ -45,6 +45,12 @@ const uploadJewelryImages = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10 MB limit per file
 }).array('images', 10); // Allow up to 10 images
 
+// Configure multer for single file uploads (business logo, etc.)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 } // 5 MB limit
+});
+
 // Ensure upload directories exist
 const uploadDir = 'uploads/customers/';
 if (!fs.existsSync(uploadDir)) {
@@ -1440,19 +1446,25 @@ app.get('/api/jewelry/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const query = `
-      SELECT 
+      SELECT
         j.*,
         TO_CHAR(j.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
-        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at
+        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at,
+        tt.type as source,
+        CONCAT(c.first_name, ' ', c.last_name) as bought_from
       FROM jewelry j
+      LEFT JOIN transaction_items ti ON j.item_id = ti.item_id
+      LEFT JOIN transactions t ON ti.transaction_id = t.transaction_id
+      LEFT JOIN transaction_type tt ON ti.transaction_type_id = tt.id
+      LEFT JOIN customers c ON t.customer_id = c.id
       WHERE j.item_id = $1`;
-    
+
     const result = await pool.query(query, [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Jewelry item not found' });
     }
-    
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching jewelry item:', err);
@@ -2306,6 +2318,8 @@ app.get('/api/customers', async (req, res) => {
     const {
       page = 1,
       limit = 10,
+      first_name,
+      last_name,
       status,
       risk_level,
       created_from,
@@ -2322,6 +2336,18 @@ app.get('/api/customers', async (req, res) => {
     const conditions = [];
     const params = [];
     let paramCount = 1;
+
+    if (first_name) {
+      conditions.push(`LOWER(first_name) LIKE $${paramCount}`);
+      params.push(`%${first_name.toLowerCase()}%`);
+      paramCount++;
+    }
+
+    if (last_name) {
+      conditions.push(`LOWER(last_name) LIKE $${paramCount}`);
+      params.push(`%${last_name.toLowerCase()}%`);
+      paramCount++;
+    }
 
     if (status) {
       conditions.push(`status = $${paramCount}`);
@@ -3164,6 +3190,60 @@ app.get('/api/transactions/:transaction_id/payments', async (req, res) => {
   }
 });
 
+// Update payment methods for a transaction
+app.put('/api/transactions/:transaction_id/payments', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { transaction_id } = req.params;
+    const { payments } = req.body;
+
+    // Validate input
+    if (!payments || !Array.isArray(payments)) {
+      return res.status(400).json({ error: 'Invalid payments data' });
+    }
+
+    // Verify the transaction exists
+    const transactionCheck = await client.query(
+      'SELECT transaction_id FROM transactions WHERE transaction_id = $1',
+      [transaction_id]
+    );
+
+    if (transactionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    await client.query('BEGIN');
+
+    // Delete existing payments for this transaction
+    await client.query(
+      'DELETE FROM payments WHERE transaction_id = $1',
+      [transaction_id]
+    );
+
+    // Insert new payments
+    for (const payment of payments) {
+      await client.query(
+        'INSERT INTO payments (transaction_id, amount, payment_method) VALUES ($1, $2, $3)',
+        [transaction_id, payment.amount, payment.payment_method]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: 'Payment methods updated successfully'
+    });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating transaction payments:', err);
+    res.status(500).json({ error: 'Failed to update payment methods' });
+  } finally {
+    client.release();
+  }
+});
+
 // Transaction routes
 app.get('/api/transactions', async (req, res) => {
   try {
@@ -3600,6 +3680,87 @@ app.delete('/api/customers/account-links/:linkId', async (req, res) => {
   }
 });
 
+// Get linked account authorization template(s)
+app.get('/api/linked-account-authorization-template', async (req, res) => {
+  try {
+    const { link_type } = req.query;
+
+    if (link_type) {
+      // Fetch specific template for a link type
+      const query = 'SELECT * FROM linked_account_authorization_template WHERE link_type = $1';
+      const result = await pool.query(query, [link_type]);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Authorization template not found for this link type' });
+      }
+
+      res.json(result.rows[0]);
+    } else {
+      // Fetch all templates (for SystemConfig)
+      const query = 'SELECT * FROM linked_account_authorization_template ORDER BY link_type';
+      const result = await pool.query(query);
+      res.json(result.rows);
+    }
+  } catch (err) {
+    console.error('Error fetching authorization template:', err);
+    res.status(500).json({ error: 'Failed to fetch authorization template' });
+  }
+});
+
+// Update linked account authorization template
+app.put('/api/linked-account-authorization-template/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { form_title, form_content, consent_text } = req.body;
+
+    const updateQuery = `
+      UPDATE linked_account_authorization_template
+      SET form_title = $1, form_content = $2, consent_text = $3, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $4
+      RETURNING *
+    `;
+
+    const result = await pool.query(updateQuery, [form_title, form_content, consent_text, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Authorization template not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating authorization template:', err);
+    res.status(500).json({ error: 'Failed to update authorization template' });
+  }
+});
+
+// Save authorization for linked account
+app.post('/api/linked-account-authorization', async (req, res) => {
+  try {
+    const { link_id, customer_id, authorized_by_name, signature_data, ip_address, user_agent } = req.body;
+
+    const insertQuery = `
+      INSERT INTO linked_account_authorizations
+      (link_id, customer_id, authorized_by_name, signature_data, ip_address, user_agent)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `;
+
+    const result = await pool.query(insertQuery, [
+      link_id,
+      customer_id,
+      authorized_by_name,
+      signature_data,
+      ip_address,
+      user_agent
+    ]);
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error saving authorization:', err);
+    res.status(500).json({ error: 'Failed to save authorization' });
+  }
+});
+
 // Get all transactions accessible by a customer (including linked accounts)
 app.get('/api/customers/:id/all-accessible-transactions', async (req, res) => {
   try {
@@ -3867,6 +4028,18 @@ app.get('/api/transaction-types', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching transaction types:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get all payment methods
+app.get('/api/payment-methods', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM payment_methods WHERE is_active = true ORDER BY id';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching payment methods:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -4670,6 +4843,141 @@ app.put('/api/jewelry/history/:history_id', async (req, res) => {
     res.status(500).json({ error: 'Failed to update history entry' });
   } finally {
     client.release();
+  }
+});
+
+// Business Info Endpoints
+// GET business info
+app.get('/api/business-info', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM business_info ORDER BY id LIMIT 1');
+    if (result.rows.length === 0) {
+      // Return default values if no record exists
+      return res.json({
+        id: null,
+        business_name: 'Evergreen POS',
+        email: '',
+        phone: '',
+        address: '',
+        currency: 'USD',
+        timezone: 'UTC',
+        logo: null,
+        logo_filename: null,
+        logo_mimetype: null
+      });
+    }
+
+    // Convert logo bytea to base64 if it exists
+    const businessInfo = result.rows[0];
+    if (businessInfo.logo) {
+      businessInfo.logo = businessInfo.logo.toString('base64');
+    }
+
+    res.json(businessInfo);
+  } catch (error) {
+    console.error('Error fetching business info:', error);
+    res.status(500).json({ error: 'Failed to fetch business info' });
+  }
+});
+
+// UPDATE business info
+app.put('/api/business-info', upload.single('logo'), async (req, res) => {
+  const { business_name, email, phone, address, currency, timezone } = req.body;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Check if a record exists
+    const checkResult = await client.query('SELECT id FROM business_info LIMIT 1');
+
+    let query;
+    let values;
+
+    if (req.file) {
+      // Update with logo
+      const logoBuffer = req.file.buffer;
+      const logoFilename = req.file.originalname;
+      const logoMimetype = req.file.mimetype;
+
+      if (checkResult.rows.length === 0) {
+        // Insert new record
+        query = `
+          INSERT INTO business_info
+          (business_name, email, phone, address, currency, timezone, logo, logo_filename, logo_mimetype)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          RETURNING *
+        `;
+        values = [business_name, email, phone, address, currency, timezone, logoBuffer, logoFilename, logoMimetype];
+      } else {
+        // Update existing record
+        query = `
+          UPDATE business_info
+          SET business_name = $1, email = $2, phone = $3, address = $4,
+              currency = $5, timezone = $6, logo = $7, logo_filename = $8, logo_mimetype = $9
+          WHERE id = $10
+          RETURNING *
+        `;
+        values = [business_name, email, phone, address, currency, timezone, logoBuffer, logoFilename, logoMimetype, checkResult.rows[0].id];
+      }
+    } else {
+      // Update without logo
+      if (checkResult.rows.length === 0) {
+        // Insert new record
+        query = `
+          INSERT INTO business_info
+          (business_name, email, phone, address, currency, timezone)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING *
+        `;
+        values = [business_name, email, phone, address, currency, timezone];
+      } else {
+        // Update existing record
+        query = `
+          UPDATE business_info
+          SET business_name = $1, email = $2, phone = $3, address = $4,
+              currency = $5, timezone = $6
+          WHERE id = $7
+          RETURNING *
+        `;
+        values = [business_name, email, phone, address, currency, timezone, checkResult.rows[0].id];
+      }
+    }
+
+    const result = await client.query(query, values);
+    await client.query('COMMIT');
+
+    // Convert logo bytea to base64 if it exists
+    const businessInfo = result.rows[0];
+    if (businessInfo.logo) {
+      businessInfo.logo = businessInfo.logo.toString('base64');
+    }
+
+    res.json(businessInfo);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating business info:', error);
+    res.status(500).json({ error: 'Failed to update business info' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE business logo
+app.delete('/api/business-info/logo', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'UPDATE business_info SET logo = NULL, logo_filename = NULL, logo_mimetype = NULL WHERE id = (SELECT id FROM business_info LIMIT 1) RETURNING *'
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Business info not found' });
+    }
+
+    res.json({ message: 'Logo deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting logo:', error);
+    res.status(500).json({ error: 'Failed to delete logo' });
   }
 });
 

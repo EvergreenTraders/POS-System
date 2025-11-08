@@ -25,8 +25,11 @@ import {
   Select,
   MenuItem,
   FormControl,
-  InputLabel
+  InputLabel,
+  IconButton,
+  Avatar
 } from '@mui/material';
+import { CloudUpload as UploadIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
 import config from '../config';
@@ -98,8 +101,14 @@ function SystemConfig() {
     phone: '',
     email: '',
     currency: 'USD',
-    timezone: 'UTC'
+    timezone: 'UTC',
+    logo: null,
+    logoFilename: null,
+    logoMimetype: null
   });
+
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState(null);
 
   const [securitySettings, setSecuritySettings] = useState({
     requirePasswordChange: true,
@@ -152,6 +161,14 @@ function SystemConfig() {
     'YT': { gst: 5, pst: 0, hst: 0 }   // Yukon
   });
   const [selectedProvince, setSelectedProvince] = useState('ON');
+
+  // Linked Account Authorization Template state (one for each link type)
+  const [authorizationTemplates, setAuthorizationTemplates] = useState({
+    full_access: { id: null, form_title: '', form_content: '', consent_text: '' },
+    view_only: { id: null, form_title: '', form_content: '', consent_text: '' },
+    limited: { id: null, form_title: '', form_content: '', consent_text: '' }
+  });
+  const [selectedLinkType, setSelectedLinkType] = useState('full_access');
 
   const fetchCustomerHeaderPreferences = async () => {
     try {
@@ -370,6 +387,22 @@ function SystemConfig() {
       }
     };
 
+    const fetchAuthorizationTemplate = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/linked-account-authorization-template`);
+        if (response.data && Array.isArray(response.data)) {
+          // Convert array to object keyed by link_type
+          const templatesObj = {};
+          response.data.forEach(template => {
+            templatesObj[template.link_type] = template;
+          });
+          setAuthorizationTemplates(templatesObj);
+        }
+      } catch (error) {
+        console.error('Error fetching authorization template:', error);
+      }
+    };
+
     // Fetch data on component mount
     fetchCustomerHeaderPreferences();
     fetchPreciousMetalNames();
@@ -381,6 +414,7 @@ function SystemConfig() {
     fetchCaratConversion();
     fetchInventoryHoldPeriod();
     fetchTaxConfig();
+    fetchAuthorizationTemplate();
   }, []);
   
   const handleTabChange = (event, newValue) => {
@@ -393,6 +427,141 @@ function SystemConfig() {
       ...prev,
       [name]: value
     }));
+  };
+
+  const handleLogoUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setSnackbar({
+          open: true,
+          message: 'Please upload an image file',
+          severity: 'error'
+        });
+        return;
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setSnackbar({
+          open: true,
+          message: 'Image size should be less than 5MB',
+          severity: 'error'
+        });
+        return;
+      }
+
+      setLogoFile(file);
+
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setLogoPreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`${API_BASE_URL}/business-info/logo`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      setLogoFile(null);
+      setLogoPreview(null);
+      setGeneralSettings(prev => ({
+        ...prev,
+        logo: null,
+        logoFilename: null,
+        logoMimetype: null
+      }));
+
+      setSnackbar({
+        open: true,
+        message: 'Logo removed successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error removing logo:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to remove logo',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleSaveBusinessInfo = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const formData = new FormData();
+
+      formData.append('business_name', generalSettings.businessName);
+      formData.append('email', generalSettings.email);
+      formData.append('phone', generalSettings.phone);
+      formData.append('address', generalSettings.address);
+      formData.append('currency', generalSettings.currency);
+      formData.append('timezone', generalSettings.timezone);
+
+      if (logoFile) {
+        formData.append('logo', logoFile);
+      }
+
+      await axios.put(`${API_BASE_URL}/business-info`, formData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      setSnackbar({
+        open: true,
+        message: 'Business information saved successfully',
+        severity: 'success'
+      });
+
+      // Clear logo file after successful save
+      setLogoFile(null);
+    } catch (error) {
+      console.error('Error saving business info:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save business information',
+        severity: 'error'
+      });
+    }
+  };
+
+  const loadBusinessInfo = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/business-info`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const data = response.data;
+      setGeneralSettings({
+        businessName: data.business_name || 'Evergreen POS',
+        email: data.email || '',
+        phone: data.phone || '',
+        address: data.address || '',
+        currency: data.currency || 'USD',
+        timezone: data.timezone || 'UTC',
+        logo: data.logo,
+        logoFilename: data.logo_filename,
+        logoMimetype: data.logo_mimetype
+      });
+
+      // Set logo preview if exists
+      if (data.logo && data.logo_mimetype) {
+        setLogoPreview(`data:${data.logo_mimetype};base64,${data.logo}`);
+      }
+    } catch (error) {
+      console.error('Error loading business info:', error);
+    }
   };
 
   const handleSecuritySettingsChange = (event) => {
@@ -672,6 +841,51 @@ function SystemConfig() {
     setSnackbar({ ...snackbar, open: false });
   };
 
+  const handleSaveAuthorizationTemplate = async () => {
+    try {
+      const template = authorizationTemplates[selectedLinkType];
+
+      if (!template || !template.id) {
+        setSnackbar({
+          open: true,
+          message: 'No template found to update',
+          severity: 'error'
+        });
+        return;
+      }
+
+      await axios.put(`${API_BASE_URL}/linked-account-authorization-template/${template.id}`, {
+        form_title: template.form_title,
+        form_content: template.form_content,
+        consent_text: template.consent_text
+      });
+
+      setSnackbar({
+        open: true,
+        message: `${selectedLinkType.replace('_', ' ')} authorization template saved successfully`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving authorization template:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save authorization template',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleAuthorizationTemplateChange = (event) => {
+    const { name, value } = event.target;
+    setAuthorizationTemplates(prev => ({
+      ...prev,
+      [selectedLinkType]: {
+        ...prev[selectedLinkType],
+        [name]: value
+      }
+    }));
+  };
+
   const handleSaveTaxConfig = async () => {
     try {
       const taxRatesArray = Object.entries(provinceTaxRates).map(([code, rates]) => ({
@@ -867,6 +1081,11 @@ function SystemConfig() {
     }
   };
 
+  // Load business info on mount
+  useEffect(() => {
+    loadBusinessInfo();
+  }, []);
+
   return (
     <Container>
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
@@ -876,6 +1095,7 @@ function SystemConfig() {
           <Tab label="Notifications" />
           <Tab label="Tax Configuration" />
           <Tab label="Pricing Calculator" />
+          <Tab label="Account Authorization" />
         </Tabs>
       </Box>
 
@@ -885,8 +1105,9 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Business Information
             </Typography>
-            <Grid container spacing={3}>
-              <Grid item xs={12} sm={6}>
+            <Grid container spacing={1}>
+              {/* Row 1: Business Name, Email, Logo */}
+              <Grid item xs={12} sm={3}>
                 <TextField
                   fullWidth
                   label="Business Name"
@@ -895,7 +1116,7 @@ function SystemConfig() {
                   onChange={handleGeneralSettingsChange}
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={3}>
                 <TextField
                   fullWidth
                   label="Email"
@@ -905,7 +1126,49 @@ function SystemConfig() {
                   onChange={handleGeneralSettingsChange}
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={6} sx={{ display: 'flex', alignItems: 'flex-start', rowSpan: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, width: '100%' }}>
+                  {logoPreview && (
+                    <Avatar
+                      src={logoPreview}
+                      alt="Business Logo"
+                      variant="rounded"
+                      sx={{ width: 100, height: 100, objectFit: 'contain' }}
+                    />
+                  )}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Button
+                      variant="contained"
+                      component="label"
+                      startIcon={<UploadIcon />}
+                    >
+                      Upload Logo
+                      <input
+                        type="file"
+                        hidden
+                        accept="image/*"
+                        onChange={handleLogoUpload}
+                      />
+                    </Button>
+                    {logoPreview && (
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        onClick={handleRemoveLogo}
+                        startIcon={<DeleteIcon />}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                    <Typography variant="caption" color="textSecondary">
+                      PNG or JPG, max 5MB
+                    </Typography>
+                  </Box>
+                </Box>
+              </Grid>
+
+              {/* Row 2: Phone, Currency */}
+              <Grid item xs={12} sm={3}>
                 <TextField
                   fullWidth
                   label="Phone"
@@ -914,7 +1177,7 @@ function SystemConfig() {
                   onChange={handleGeneralSettingsChange}
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={3}>
                 <TextField
                   fullWidth
                   label="Currency"
@@ -923,6 +1186,8 @@ function SystemConfig() {
                   onChange={handleGeneralSettingsChange}
                 />
               </Grid>
+
+              {/* Row 3: Address (spans full width) */}
               <Grid item xs={12}>
                 <TextField
                   fullWidth
@@ -935,6 +1200,15 @@ function SystemConfig() {
                 />
               </Grid>
             </Grid>
+            <Box sx={{ mt: 3 }}>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleSaveBusinessInfo}
+              >
+                Save Business Information
+              </Button>
+            </Box>
           </ConfigSection>
 
           <ConfigSection>
@@ -1688,6 +1962,88 @@ function SystemConfig() {
               </ConfigSection>
             </Grid>
           </Grid>
+        </StyledPaper>
+      </TabPanel>
+
+      {/* Account Authorization Tab */}
+      <TabPanel value={activeTab} index={5}>
+        <StyledPaper elevation={2}>
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Linked Account Authorization Forms
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              Configure the authorization forms that customers must sign when linking their accounts.
+              Each link type (Full Access, View Only, Limited) has its own authorization form.
+              Available placeholders: {'{'}{'{'} CUSTOMER_NAME {'}'}{'}'},  {'{'}{'{'} PRIMARY_CUSTOMER_NAME {'}'}{'}'}
+            </Typography>
+
+            {/* Link Type Selector */}
+            <Box sx={{ mb: 3 }}>
+              <Tabs
+                value={selectedLinkType}
+                onChange={(e, newValue) => setSelectedLinkType(newValue)}
+                variant="fullWidth"
+              >
+                <Tab label="Full Access" value="full_access" />
+                <Tab label="View Only" value="view_only" />
+                <Tab label="Limited" value="limited" />
+              </Tabs>
+            </Box>
+
+            <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Form Title"
+                  name="form_title"
+                  value={authorizationTemplates[selectedLinkType]?.form_title || ''}
+                  onChange={handleAuthorizationTemplateChange}
+                  helperText="The title displayed at the top of the authorization form"
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={10}
+                  label="Form Content"
+                  name="form_content"
+                  value={authorizationTemplates[selectedLinkType]?.form_content || ''}
+                  onChange={handleAuthorizationTemplateChange}
+                  helperText="The main authorization text. Use {{CUSTOMER_NAME}} and {{PRIMARY_CUSTOMER_NAME}} as placeholders."
+                  placeholder="I, {{CUSTOMER_NAME}}, authorize {{PRIMARY_CUSTOMER_NAME}} to access my account information..."
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={3}
+                  label="Consent Text"
+                  name="consent_text"
+                  value={authorizationTemplates[selectedLinkType]?.consent_text || ''}
+                  onChange={handleAuthorizationTemplateChange}
+                  helperText="The consent checkbox text that customers must agree to"
+                  placeholder="I have read and agree to the terms above"
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleSaveAuthorizationTemplate}
+                  >
+                    Save {selectedLinkType.replace('_', ' ').toUpperCase()} Template
+                  </Button>
+                </Box>
+              </Grid>
+            </Grid>
+          </ConfigSection>
         </StyledPaper>
       </TabPanel>
 
