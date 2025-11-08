@@ -19,7 +19,7 @@ import axios from 'axios';
 
 const API_BASE_URL = config.apiUrl;
 
-const AuthorizationFormDialog = ({ open, onClose, onAuthorized, primaryCustomerName, linkedCustomer }) => {
+const AuthorizationFormDialog = ({ open, onClose, onAuthorized, primaryCustomerName, linkedCustomer, linkType }) => {
   const [template, setTemplate] = useState(null);
   const [authorizedByName, setAuthorizedByName] = useState('');
   const [consentChecked, setConsentChecked] = useState(false);
@@ -28,17 +28,17 @@ const AuthorizationFormDialog = ({ open, onClose, onAuthorized, primaryCustomerN
   const signatureRef = useRef(null);
 
   useEffect(() => {
-    if (open) {
+    if (open && linkType) {
       fetchTemplate();
       if (linkedCustomer) {
         setAuthorizedByName(`${linkedCustomer.first_name} ${linkedCustomer.last_name}`);
       }
     }
-  }, [open, linkedCustomer]);
+  }, [open, linkedCustomer, linkType]);
 
   const fetchTemplate = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/linked-account-authorization-template`);
+      const response = await axios.get(`${API_BASE_URL}/linked-account-authorization-template?link_type=${linkType}`);
       setTemplate(response.data);
     } catch (err) {
       console.error('Error fetching authorization template:', err);

@@ -399,6 +399,7 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
         onAuthorized={handleAuthorizationComplete}
         primaryCustomerName={customerName}
         linkedCustomer={selectedCustomer}
+        linkType={linkType}
       />
     </>
   );

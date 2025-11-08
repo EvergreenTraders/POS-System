@@ -162,13 +162,13 @@ function SystemConfig() {
   });
   const [selectedProvince, setSelectedProvince] = useState('ON');
 
-  // Linked Account Authorization Template state
-  const [authorizationTemplate, setAuthorizationTemplate] = useState({
-    id: null,
-    form_title: 'Account Linking Authorization',
-    form_content: '',
-    consent_text: 'I authorize this account linkage and understand the terms.'
+  // Linked Account Authorization Template state (one for each link type)
+  const [authorizationTemplates, setAuthorizationTemplates] = useState({
+    full_access: { id: null, form_title: '', form_content: '', consent_text: '' },
+    view_only: { id: null, form_title: '', form_content: '', consent_text: '' },
+    limited: { id: null, form_title: '', form_content: '', consent_text: '' }
   });
+  const [selectedLinkType, setSelectedLinkType] = useState('full_access');
 
   const fetchCustomerHeaderPreferences = async () => {
     try {
@@ -390,8 +390,13 @@ function SystemConfig() {
     const fetchAuthorizationTemplate = async () => {
       try {
         const response = await axios.get(`${API_BASE_URL}/linked-account-authorization-template`);
-        if (response.data) {
-          setAuthorizationTemplate(response.data);
+        if (response.data && Array.isArray(response.data)) {
+          // Convert array to object keyed by link_type
+          const templatesObj = {};
+          response.data.forEach(template => {
+            templatesObj[template.link_type] = template;
+          });
+          setAuthorizationTemplates(templatesObj);
         }
       } catch (error) {
         console.error('Error fetching authorization template:', error);
@@ -838,7 +843,9 @@ function SystemConfig() {
 
   const handleSaveAuthorizationTemplate = async () => {
     try {
-      if (!authorizationTemplate.id) {
+      const template = authorizationTemplates[selectedLinkType];
+
+      if (!template || !template.id) {
         setSnackbar({
           open: true,
           message: 'No template found to update',
@@ -847,15 +854,15 @@ function SystemConfig() {
         return;
       }
 
-      await axios.put(`${API_BASE_URL}/linked-account-authorization-template/${authorizationTemplate.id}`, {
-        form_title: authorizationTemplate.form_title,
-        form_content: authorizationTemplate.form_content,
-        consent_text: authorizationTemplate.consent_text
+      await axios.put(`${API_BASE_URL}/linked-account-authorization-template/${template.id}`, {
+        form_title: template.form_title,
+        form_content: template.form_content,
+        consent_text: template.consent_text
       });
 
       setSnackbar({
         open: true,
-        message: 'Authorization template saved successfully',
+        message: `${selectedLinkType.replace('_', ' ')} authorization template saved successfully`,
         severity: 'success'
       });
     } catch (error) {
@@ -870,9 +877,12 @@ function SystemConfig() {
 
   const handleAuthorizationTemplateChange = (event) => {
     const { name, value } = event.target;
-    setAuthorizationTemplate(prev => ({
+    setAuthorizationTemplates(prev => ({
       ...prev,
-      [name]: value
+      [selectedLinkType]: {
+        ...prev[selectedLinkType],
+        [name]: value
+      }
     }));
   };
 
@@ -1960,12 +1970,26 @@ function SystemConfig() {
         <StyledPaper elevation={2}>
           <ConfigSection>
             <Typography variant="h6" gutterBottom>
-              Linked Account Authorization Form
+              Linked Account Authorization Forms
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Configure the authorization form that customers must sign when linking their accounts.
+              Configure the authorization forms that customers must sign when linking their accounts.
+              Each link type (Full Access, View Only, Limited) has its own authorization form.
               Available placeholders: {'{'}{'{'} CUSTOMER_NAME {'}'}{'}'},  {'{'}{'{'} PRIMARY_CUSTOMER_NAME {'}'}{'}'}
             </Typography>
+
+            {/* Link Type Selector */}
+            <Box sx={{ mb: 3 }}>
+              <Tabs
+                value={selectedLinkType}
+                onChange={(e, newValue) => setSelectedLinkType(newValue)}
+                variant="fullWidth"
+              >
+                <Tab label="Full Access" value="full_access" />
+                <Tab label="View Only" value="view_only" />
+                <Tab label="Limited" value="limited" />
+              </Tabs>
+            </Box>
 
             <Grid container spacing={3}>
               <Grid item xs={12}>
@@ -1973,7 +1997,7 @@ function SystemConfig() {
                   fullWidth
                   label="Form Title"
                   name="form_title"
-                  value={authorizationTemplate.form_title}
+                  value={authorizationTemplates[selectedLinkType]?.form_title || ''}
                   onChange={handleAuthorizationTemplateChange}
                   helperText="The title displayed at the top of the authorization form"
                 />
@@ -1983,10 +2007,10 @@ function SystemConfig() {
                 <TextField
                   fullWidth
                   multiline
-                  rows={8}
+                  rows={10}
                   label="Form Content"
                   name="form_content"
-                  value={authorizationTemplate.form_content}
+                  value={authorizationTemplates[selectedLinkType]?.form_content || ''}
                   onChange={handleAuthorizationTemplateChange}
                   helperText="The main authorization text. Use {{CUSTOMER_NAME}} and {{PRIMARY_CUSTOMER_NAME}} as placeholders."
                   placeholder="I, {{CUSTOMER_NAME}}, authorize {{PRIMARY_CUSTOMER_NAME}} to access my account information..."
@@ -2000,7 +2024,7 @@ function SystemConfig() {
                   rows={3}
                   label="Consent Text"
                   name="consent_text"
-                  value={authorizationTemplate.consent_text}
+                  value={authorizationTemplates[selectedLinkType]?.consent_text || ''}
                   onChange={handleAuthorizationTemplateChange}
                   helperText="The consent checkbox text that customers must agree to"
                   placeholder="I have read and agree to the terms above"
@@ -2014,7 +2038,7 @@ function SystemConfig() {
                     color="primary"
                     onClick={handleSaveAuthorizationTemplate}
                   >
-                    Save Authorization Template
+                    Save {selectedLinkType.replace('_', ' ').toUpperCase()} Template
                   </Button>
                 </Box>
               </Grid>

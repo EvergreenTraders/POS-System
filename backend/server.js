@@ -3674,17 +3674,27 @@ app.delete('/api/customers/account-links/:linkId', async (req, res) => {
   }
 });
 
-// Get linked account authorization template
+// Get linked account authorization template(s)
 app.get('/api/linked-account-authorization-template', async (req, res) => {
   try {
-    const query = 'SELECT * FROM linked_account_authorization_template ORDER BY id DESC LIMIT 1';
-    const result = await pool.query(query);
+    const { link_type } = req.query;
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Authorization template not found' });
+    if (link_type) {
+      // Fetch specific template for a link type
+      const query = 'SELECT * FROM linked_account_authorization_template WHERE link_type = $1';
+      const result = await pool.query(query, [link_type]);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Authorization template not found for this link type' });
+      }
+
+      res.json(result.rows[0]);
+    } else {
+      // Fetch all templates (for SystemConfig)
+      const query = 'SELECT * FROM linked_account_authorization_template ORDER BY link_type';
+      const result = await pool.query(query);
+      res.json(result.rows);
     }
-
-    res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching authorization template:', err);
     res.status(500).json({ error: 'Failed to fetch authorization template' });
