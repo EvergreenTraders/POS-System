@@ -2312,6 +2312,8 @@ app.get('/api/customers', async (req, res) => {
     const {
       page = 1,
       limit = 10,
+      first_name,
+      last_name,
       status,
       risk_level,
       created_from,
@@ -2328,6 +2330,18 @@ app.get('/api/customers', async (req, res) => {
     const conditions = [];
     const params = [];
     let paramCount = 1;
+
+    if (first_name) {
+      conditions.push(`LOWER(first_name) LIKE $${paramCount}`);
+      params.push(`%${first_name.toLowerCase()}%`);
+      paramCount++;
+    }
+
+    if (last_name) {
+      conditions.push(`LOWER(last_name) LIKE $${paramCount}`);
+      params.push(`%${last_name.toLowerCase()}%`);
+      paramCount++;
+    }
 
     if (status) {
       conditions.push(`status = $${paramCount}`);

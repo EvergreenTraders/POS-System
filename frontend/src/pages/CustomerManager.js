@@ -43,9 +43,12 @@ const CustomerManager = () => {
   const [filteredCustomers, setFilteredCustomers] = useState([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCustomers, setTotalCustomers] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10); // Showing 10 customers per page
   const [filterOpen, setFilterOpen] = useState(false);
   const [filters, setFilters] = useState({
+    first_name: '',
+    last_name: '',
     status: '',
     risk_level: '',
     date_created_from: '',
@@ -124,19 +127,12 @@ const CustomerManager = () => {
   // Fetch customers on component mount or when page/filters change
   useEffect(() => {
     fetchCustomers(filters);
-  }, [page, rowsPerPage]);
-  
+  }, [page, rowsPerPage, filters]);
+
   // Fetch column preferences on component mount
   useEffect(() => {
     fetchColumnPreferences();
   }, []);
-  
-  // Apply client-side filtering when filters change but not on initial load
-  useEffect(() => {
-    if (customers.length > 0) {
-      applyLocalFilters();
-    }
-  }, [filters, customers]);
 
   // Fetch column preferences from customer_headers_preferences table
   const fetchColumnPreferences = async () => {
@@ -267,8 +263,10 @@ const CustomerManager = () => {
       
       // Build query parameters from filters
       const params = new URLSearchParams();
-      
+
       // Add filter parameters if they have values
+      if (filterParams.first_name) params.append('first_name', filterParams.first_name);
+      if (filterParams.last_name) params.append('last_name', filterParams.last_name);
       if (filterParams.status) params.append('status', filterParams.status);
       if (filterParams.risk_level) params.append('risk_level', filterParams.risk_level);
       if (filterParams.date_created_from) params.append('created_from', filterParams.date_created_from);
@@ -296,89 +294,25 @@ const CustomerManager = () => {
         setCustomers(data.customers);
         setFilteredCustomers(data.customers);
         setTotalPages(data.pagination.total_pages);
+        setTotalCustomers(data.pagination.total_customers || 0);
       } else if (data.customers && data.total_pages) {
         // Backward compatibility
         setCustomers(data.customers);
         setFilteredCustomers(data.customers);
         setTotalPages(data.total_pages);
+        setTotalCustomers(data.customers.length);
       } else {
         // Handle response without pagination (for backward compatibility)
         setCustomers(data);
         setFilteredCustomers(data);
         setTotalPages(Math.ceil(data.length / rowsPerPage));
+        setTotalCustomers(data.length);
       }
     } catch (error) {
       setError('Failed to load customers. Please try again.');
       showSnackbar(error.message, 'error');
     } finally {
       setLoading(false);
-    }
-  };
-
-  // Apply client-side filtering if backend filtering is not available
-  const applyLocalFilters = () => {
-    let result = [...customers];
-    
-    // Apply status filter
-    if (filters.status) {
-      result = result.filter(customer => customer.status === filters.status);
-    }
-    
-    // Apply risk level filter
-    if (filters.risk_level) {
-      result = result.filter(customer => customer.risk_level === filters.risk_level);
-    }
-    
-    // Apply date range filters
-    if (filters.date_created_from) {
-      const fromDate = new Date(filters.date_created_from);
-      result = result.filter(customer => new Date(customer.created_at) >= fromDate);
-    }
-    
-    if (filters.date_created_to) {
-      const toDate = new Date(filters.date_created_to);
-      toDate.setHours(23, 59, 59, 999); // End of day
-      result = result.filter(customer => new Date(customer.created_at) <= toDate);
-    }
-    
-    // Apply ID type filter
-    if (filters.id_type) {
-      result = result.filter(customer => customer.id_type === filters.id_type);
-    }
-    
-    // Apply sorting
-    if (filters.sort_by) {
-      result.sort((a, b) => {
-        let aValue = a[filters.sort_by];
-        let bValue = b[filters.sort_by];
-        
-        // Handle dates
-        if (filters.sort_by === 'created_at' || filters.sort_by === 'updated_at') {
-          aValue = new Date(aValue || 0).getTime();
-          bValue = new Date(bValue || 0).getTime();
-        }
-        
-        // Handle strings
-        if (typeof aValue === 'string' && typeof bValue === 'string') {
-          return filters.sort_order === 'asc' 
-            ? aValue.localeCompare(bValue)
-            : bValue.localeCompare(aValue);
-        }
-        
-        // Handle numbers and dates
-        return filters.sort_order === 'asc' ? aValue - bValue : bValue - aValue;
-      });
-    }
-    
-    // Set filtered customers with all matching results
-    setFilteredCustomers(result);
-    
-    // Calculate total pages
-    setTotalPages(Math.ceil(result.length / rowsPerPage));
-    
-    // Reset to first page when filters change
-    if (page > 1 && Math.ceil(result.length / rowsPerPage) < page) {
-      setPage(1);
     }
   };
 
@@ -389,11 +323,15 @@ const CustomerManager = () => {
       ...prev,
       [name]: value
     }));
+    // Reset to first page when filters change
+    setPage(1);
   };
 
   // Clear all filters
   const clearFilters = () => {
     setFilters({
+      first_name: '',
+      last_name: '',
       status: '',
       risk_level: '',
       date_created_from: '',
@@ -402,6 +340,8 @@ const CustomerManager = () => {
       sort_by: 'created_at',
       sort_order: 'desc'
     });
+    // Reset to first page when clearing filters
+    setPage(1);
   };
 
   // Handle pagination change
@@ -415,17 +355,9 @@ const CustomerManager = () => {
     setPage(1); // Reset to first page when changing rows per page
   };
   
-  // Get current page of customers
+  // Get current page of customers (backend handles pagination, so just return filteredCustomers)
   const getCurrentPageCustomers = () => {
-    const startIndex = (page - 1) * rowsPerPage;
-    const endIndex = startIndex + rowsPerPage;
-    return filteredCustomers.slice(startIndex, endIndex);
-  };
-
-  // Apply filters - determine whether to use server-side or client-side filtering
-  const applyFilters = () => {
-    // Try to use server-side filtering first
-    fetchCustomers(filters);
+    return filteredCustomers;
   };
 
   const handleInputChange = (e) => {
@@ -445,11 +377,24 @@ const CustomerManager = () => {
 
     setLoading(true);
     try {
-      // If name is provided, send as 'name' param; backend should split for first/last
       // Only include non-empty fields in query params
       const params = {};
-      // Always trim and allow partial id_number search
-      if (searchForm.name && searchForm.name.trim()) params.name = searchForm.name.trim();
+
+      // If name is provided, search in both first_name and last_name fields
+      if (searchForm.name && searchForm.name.trim()) {
+        const nameParts = searchForm.name.trim().split(/\s+/);
+
+        if (nameParts.length === 1) {
+          // Single word - search in both first and last name
+          params.first_name = nameParts[0];
+          params.last_name = nameParts[0];
+        } else if (nameParts.length >= 2) {
+          // Multiple words - first word as first_name, rest as last_name
+          params.first_name = nameParts[0];
+          params.last_name = nameParts.slice(1).join(' ');
+        }
+      }
+
       if (searchForm.id_number && searchForm.id_number.trim()) params.id_number = searchForm.id_number.trim();
       if (searchForm.phone && searchForm.phone.trim()) params.phone = searchForm.phone.trim();
       const queryParams = new URLSearchParams(params).toString();
@@ -788,6 +733,30 @@ const CustomerManager = () => {
           <AccordionDetails>
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6} md={3}>
+                <TextField
+                  name="first_name"
+                  label="First Name"
+                  value={filters.first_name}
+                  onChange={handleFilterChange}
+                  fullWidth
+                  variant="outlined"
+                  size="small"
+                  placeholder="Search by first name"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <TextField
+                  name="last_name"
+                  label="Last Name"
+                  value={filters.last_name}
+                  onChange={handleFilterChange}
+                  fullWidth
+                  variant="outlined"
+                  size="small"
+                  placeholder="Search by last name"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
                 <FormControl fullWidth variant="outlined" size="small">
                   <InputLabel id="status-filter-label">Status</InputLabel>
                   <Select
@@ -817,24 +786,6 @@ const CustomerManager = () => {
                     <MenuItem value="low">Low</MenuItem>
                     <MenuItem value="normal">Normal</MenuItem>
                     <MenuItem value="high">High</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <FormControl fullWidth variant="outlined" size="small">
-                  <InputLabel id="id-type-filter-label">ID Type</InputLabel>
-                  <Select
-                    labelId="id-type-filter-label"
-                    name="id_type"
-                    value={filters.id_type}
-                    onChange={handleFilterChange}
-                    label="ID Type"
-                  >
-                    <MenuItem value="">All</MenuItem>
-                    <MenuItem value="Passport">Passport</MenuItem>
-                    <MenuItem value="Driver's License">Driver's License</MenuItem>
-                    <MenuItem value="National ID">National ID</MenuItem>
-                    <MenuItem value="Other">Other</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
@@ -902,16 +853,8 @@ const CustomerManager = () => {
                   variant="outlined"
                   startIcon={<ClearIcon />}
                   onClick={clearFilters}
-                  sx={{ mr: 1 }}
                 >
                   Clear Filters
-                </Button>
-                <Button
-                  variant="contained"
-                  startIcon={<FilterListIcon />}
-                  onClick={applyFilters}
-                >
-                  Apply Filters
                 </Button>
               </Grid>
             </Grid>
@@ -1075,8 +1018,8 @@ const CustomerManager = () => {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2, mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Typography variant="body2" color="text.secondary" sx={{ mr: 2 }}>
-            {filteredCustomers.length > 0 ? 
-              `Showing ${(page - 1) * rowsPerPage + 1}-${Math.min(page * rowsPerPage, filteredCustomers.length)} of ${filteredCustomers.length} customers` : 
+            {totalCustomers > 0 ?
+              `Showing ${(page - 1) * rowsPerPage + 1}-${Math.min(page * rowsPerPage, totalCustomers)} of ${totalCustomers} customers` :
               'No customers found'}
           </Typography>
           <FormControl variant="outlined" size="small" sx={{ minWidth: 120 }}>
