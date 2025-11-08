@@ -3877,6 +3877,18 @@ app.get('/api/transaction-types', async (req, res) => {
   }
 });
 
+// Get all payment methods
+app.get('/api/payment-methods', async (req, res) => {
+  try {
+    const query = 'SELECT * FROM payment_methods WHERE is_active = true ORDER BY id';
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching payment methods:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get jewelry items by prefix
 app.get('/api/jewelry/prefix/:prefix', async (req, res) => {
   try {

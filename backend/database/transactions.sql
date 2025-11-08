@@ -8,6 +8,26 @@ BEGIN
     COMMENT ON COLUMN payments.action IS 'Type of payment flow: in (receiving money), out (paying money), or transfer (moving money between accounts)';
 END $$;
 
+-- Create payment_methods table
+CREATE TABLE IF NOT EXISTS payment_methods (
+    id SERIAL PRIMARY KEY,
+    method_name VARCHAR(50) NOT NULL UNIQUE,
+    method_value VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insert default payment methods
+INSERT INTO payment_methods (method_name, method_value) VALUES
+    ('Cash', 'cash'),
+    ('Credit Card', 'credit_card'),
+    ('Debit Card', 'debit_card'),
+    ('Check', 'check'),
+    ('Gift Card', 'gift_card'),
+    ('Store Credit', 'store_credit')
+ON CONFLICT (method_value) DO NOTHING;
+
 -- Create transaction_type table
 CREATE TABLE IF NOT EXISTS transaction_type (
     id SERIAL PRIMARY KEY,
@@ -96,5 +116,10 @@ CREATE TRIGGER update_transaction_items_timestamp
 
 CREATE TRIGGER update_transaction_type_timestamp
     BEFORE UPDATE ON transaction_type
+    FOR EACH ROW
+    EXECUTE FUNCTION update_timestamp();
+
+CREATE TRIGGER update_payment_methods_timestamp
+    BEFORE UPDATE ON payment_methods
     FOR EACH ROW
     EXECUTE FUNCTION update_timestamp();

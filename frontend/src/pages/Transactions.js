@@ -45,6 +45,8 @@ function Transactions() {
   const [loadingItems, setLoadingItems] = useState(false);
   const [paymentDetails, setPaymentDetails] = useState({ payments: [], total_paid: 0 });
   const [loadingPayments, setLoadingPayments] = useState(false);
+  const [isEditingPayments, setIsEditingPayments] = useState(false);
+  const [editedPayments, setEditedPayments] = useState([]);
   const API_BASE_URL = config.apiUrl;
   
   const [transactions, setTransactions] = useState([]);
@@ -54,7 +56,8 @@ function Transactions() {
   const [stores, setStores] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [transactionTypes, setTransactionTypes] = useState([]);
-  
+  const [paymentMethods, setPaymentMethods] = useState([]);
+
   // Fetch transaction types from API
   useEffect(() => {
     const fetchTransactionTypes = async () => {
@@ -72,6 +75,20 @@ function Transactions() {
     };
 
     fetchTransactionTypes();
+  }, []);
+
+  // Fetch payment methods from API
+  useEffect(() => {
+    const fetchPaymentMethods = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/payment-methods`);
+        setPaymentMethods(response.data);
+      } catch (error) {
+        console.error('Error fetching payment methods:', error);
+      }
+    };
+
+    fetchPaymentMethods();
   }, []);
   
   const handleViewTransaction = async (transaction) => {
@@ -307,7 +324,7 @@ function Transactions() {
             ${paymentDetails.payments.map(payment => `
               <div class="payment-row">
                 <span>${payment.payment_method.replace(/_/g, ' ').toUpperCase()}:</span>
-                <span>$${parseFloat(payment.amount).toFixed(2)}</span>
+                <span>$${Math.abs(parseFloat(payment.amount)).toFixed(2)}</span>
               </div>
             `).join('')}
             ${paymentDetails.change_given > 0 ? `
@@ -340,6 +357,57 @@ function Transactions() {
     const printWindow = window.open('', '_blank');
     printWindow.document.write(receiptHTML);
     printWindow.document.close();
+  };
+
+  const handleEditPayments = () => {
+    setEditedPayments(paymentDetails.payments.map(p => ({ ...p })));
+    setIsEditingPayments(true);
+  };
+
+  const handlePaymentChange = (index, field, value) => {
+    const updated = [...editedPayments];
+    updated[index][field] = value;
+    setEditedPayments(updated);
+  };
+
+  const handleAddPayment = () => {
+    setEditedPayments([...editedPayments, { payment_method: 'cash', amount: 0 }]);
+  };
+
+  const handleRemovePayment = (index) => {
+    const updated = editedPayments.filter((_, i) => i !== index);
+    setEditedPayments(updated);
+  };
+
+  const handleSavePayments = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `${API_BASE_URL}/transactions/${selectedTransaction.transaction_id}/payments`,
+        { payments: editedPayments },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Refresh payment details
+      const response = await axios.get(
+        `${API_BASE_URL}/transactions/${selectedTransaction.transaction_id}/payments`
+      );
+      setPaymentDetails({
+        payments: response.data.payments || [],
+        total_paid: response.data.total_paid || 0
+      });
+
+      setIsEditingPayments(false);
+      alert('Payment methods updated successfully');
+    } catch (error) {
+      console.error('Error updating payments:', error);
+      alert('Failed to update payment methods');
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditingPayments(false);
+    setEditedPayments([]);
   };
 
   // Fetch transactions, their items, and filter options
@@ -686,7 +754,7 @@ function Transactions() {
                     </TableRow>
                     <TableRow>
                       <TableCell variant="head">Amount</TableCell>
-                      <TableCell>${parseFloat(selectedTransaction.total_amount || 0).toFixed(2)}</TableCell>
+                      <TableCell>${(Math.abs(parseFloat(selectedTransaction.total_amount || 0))).toFixed(2)}</TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell variant="head">Status</TableCell>
@@ -770,15 +838,69 @@ function Transactions() {
                         <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f5f9ff' }}>
                           <TableCell colSpan={4} sx={{ pt: 1, pb: 1 }}>
                             <Box sx={{ textAlign: 'right' }}>
-                              <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Payment Methods:</Typography>
+                              <Box display="flex" justifyContent="flex-end" alignItems="center" mb={1} gap={1}>
+                                <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>Payment Methods:</Typography>
+                                {isEditingPayments && (
+                                  <IconButton
+                                    size="small"
+                                    color="primary"
+                                    onClick={handleAddPayment}
+                                  >
+                                    <Typography sx={{ fontSize: 20, fontWeight: 'bold' }}>+</Typography>
+                                  </IconButton>
+                                )}
+                              </Box>
                             {loadingPayments ? (
                               <Typography>Loading payment details...</Typography>
+                            ) : isEditingPayments ? (
+                              <Box>
+                                {editedPayments.map((payment, index) => (
+                                  <Box key={index} display="flex" justifyContent="flex-end" gap={1} mb={1} alignItems="center">
+                                    <FormControl size="small" sx={{ minWidth: 150 }}>
+                                      <Select
+                                        value={payment.payment_method}
+                                        onChange={(e) => handlePaymentChange(index, 'payment_method', e.target.value)}
+                                      >
+                                        {paymentMethods.map((method) => (
+                                          <MenuItem key={method.id} value={method.method_value}>
+                                            {method.method_name}
+                                          </MenuItem>
+                                        ))}
+                                      </Select>
+                                    </FormControl>
+                                    <TextField
+                                      size="small"
+                                      type="number"
+                                      value={Math.abs(parseFloat(payment.amount))}
+                                      onChange={(e) => handlePaymentChange(index, 'amount', e.target.value)}
+                                      sx={{ width: 120 }}
+                                      InputProps={{
+                                        startAdornment: <Typography sx={{ mr: 0.5 }}>$</Typography>,
+                                      }}
+                                    />
+                                    {editedPayments.length > 1 && (
+                                      <IconButton
+                                        size="small"
+                                        color="error"
+                                        onClick={() => handleRemovePayment(index)}
+                                      >
+                                        <Typography sx={{ fontSize: 18 }}>×</Typography>
+                                      </IconButton>
+                                    )}
+                                  </Box>
+                                ))}
+                                <Divider sx={{ my: 1 }} />
+                                <Box display="flex" justifyContent="flex-end" gap={2} fontWeight="bold">
+                                  <span>Total:</span>
+                                  <span>${editedPayments.reduce((sum, p) => sum + Math.abs(parseFloat(p.amount || 0)), 0).toFixed(2)}</span>
+                                </Box>
+                              </Box>
                             ) : paymentDetails.payments.length > 0 ? (
                               <Box sx={{ textAlign: 'right' }}>
                                 {paymentDetails.payments.map((payment, index) => (
                                   <Box key={index} display="flex" justifyContent="flex-end" gap={2} mb={1}>
                                     <span>{payment.payment_method.replace(/_/g, ' ').toUpperCase()}:</span>
-                                    <span>${parseFloat(payment.amount).toFixed(2)}</span>
+                                    <span>${Math.abs(parseFloat(payment.amount)).toFixed(2)}</span>
                                   </Box>
                                 ))}
                                 <Divider sx={{ my: 1 }} />
@@ -808,20 +930,40 @@ function Transactions() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button
-            onClick={handlePrintTransaction}
-            color="primary"
-            variant="contained"
-            startIcon={<PrintIcon />}
-          >
-            Print Transaction
-          </Button>
-          <Button onClick={handleCloseDialog} color="primary">
-            Close
-          </Button>
+          {isEditingPayments ? (
+            <>
+              <Button onClick={handleCancelEdit} color="error">
+                Cancel
+              </Button>
+              <Button onClick={handleSavePayments} variant="contained" color="primary">
+                Save Changes
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                onClick={handleEditPayments}
+                color="secondary"
+                variant="outlined"
+              >
+                Edit Transaction
+              </Button>
+              <Button
+                onClick={handlePrintTransaction}
+                color="primary"
+                variant="contained"
+                startIcon={<PrintIcon />}
+              >
+                Print Transaction
+              </Button>
+              <Button onClick={handleCloseDialog} color="primary">
+                Close
+              </Button>
+            </>
+          )}
         </DialogActions>
       </Dialog>
-      
+
       {/* Delete Confirmation Dialog */}
       <Dialog
         open={deleteDialogOpen}
