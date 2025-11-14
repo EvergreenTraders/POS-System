@@ -92,8 +92,11 @@ function Navbar() {
                   onClick={handleMenu}
                   color="inherit"
                 >
-                  <Avatar sx={{ width: 32, height: 32, bgcolor: 'secondary.main' }}>
-                    {user.username ? user.username[0].toUpperCase() : <AccountIcon />}
+                  <Avatar
+                    sx={{ width: 40, height: 40, bgcolor: 'secondary.main' }}
+                    src={user.image ? `data:image/jpeg;base64,${user.image}` : undefined}
+                  >
+                    {!user.image && (user.username ? user.username[0].toUpperCase() : <AccountIcon />)}
                   </Avatar>
                 </IconButton>
                 <Menu

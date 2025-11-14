@@ -244,6 +244,9 @@ app.post('/api/auth/login', async (req, res) => {
 
       console.log('Login successful for user:', user.username);
 
+      // Convert image BYTEA to base64 if it exists
+      const imageBase64 = user.image ? user.image.toString('base64') : null;
+
       return res.json({
         token,
         user: {
@@ -252,7 +255,8 @@ app.post('/api/auth/login', async (req, res) => {
           email: user.email,
           role: user.role,
           firstName: user.first_name,
-          lastName: user.last_name
+          lastName: user.last_name,
+          image: imageBase64
         }
       });
     } else {
