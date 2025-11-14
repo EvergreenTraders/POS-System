@@ -4989,6 +4989,7 @@ app.get('/api/layaways', async (req, res) => {
     const { view } = req.query;
     let query;
 
+    // Note: All layaway views include customer_name via JOIN with customers table
     switch (view) {
       case 'overdue':
         query = 'SELECT * FROM layaway_overdue';
@@ -5009,7 +5010,13 @@ app.get('/api/layaways', async (req, res) => {
         query = 'SELECT * FROM layaway_locate';
         break;
       case 'reporting':
-        query = 'SELECT * FROM layaway';
+        query = `
+          SELECT
+            l.*,
+            CONCAT(c.first_name, ' ', c.last_name) AS customer_name
+          FROM layaway l
+          LEFT JOIN customers c ON l.customer_id = c.id
+        `;
         break;
       default:
         query = 'SELECT * FROM layaway_overdue';

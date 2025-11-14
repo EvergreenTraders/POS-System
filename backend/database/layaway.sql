@@ -144,6 +144,7 @@ CREATE OR REPLACE VIEW layaway_overdue AS
 SELECT
     l.layaway_id,
     l.customer_id,
+    CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
     l.item_id,
     l.total_price,
     l.balance_remaining,
@@ -153,6 +154,7 @@ SELECT
     l.days_since_contact,
     l.status
 FROM layaway l
+LEFT JOIN customers c ON l.customer_id = c.id
 WHERE l.status = 'OVERDUE'
 ORDER BY l.overdue_days DESC;
 
@@ -161,6 +163,7 @@ CREATE OR REPLACE VIEW layaway_past_due AS
 SELECT
     l.layaway_id,
     l.customer_id,
+    CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
     l.item_id,
     l.total_price,
     l.balance_remaining,
@@ -168,6 +171,7 @@ SELECT
     l.overdue_days,
     l.status
 FROM layaway l
+LEFT JOIN customers c ON l.customer_id = c.id
 WHERE l.next_payment_date < CURRENT_DATE
   AND l.status IN ('ACTIVE', 'OVERDUE')
 ORDER BY l.next_payment_date ASC;
@@ -177,6 +181,7 @@ CREATE OR REPLACE VIEW layaway_active AS
 SELECT
     l.layaway_id,
     l.customer_id,
+    CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
     l.item_id,
     l.total_price,
     l.amount_paid,
@@ -185,6 +190,7 @@ SELECT
     l.payment_frequency,
     l.status
 FROM layaway l
+LEFT JOIN customers c ON l.customer_id = c.id
 WHERE l.status = 'ACTIVE'
 ORDER BY l.next_payment_date ASC;
 
@@ -193,6 +199,7 @@ CREATE OR REPLACE VIEW layaway_no_activity AS
 SELECT
     l.layaway_id,
     l.customer_id,
+    CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
     l.item_id,
     l.total_price,
     l.balance_remaining,
@@ -201,6 +208,7 @@ SELECT
     l.last_payment_date,
     l.status
 FROM layaway l
+LEFT JOIN customers c ON l.customer_id = c.id
 WHERE l.last_contact_date IS NOT NULL
   AND l.last_payment_date IS NULL
   AND l.status IN ('ACTIVE', 'OVERDUE')
@@ -211,6 +219,7 @@ CREATE OR REPLACE VIEW layaway_no_payment_30_days AS
 SELECT
     l.layaway_id,
     l.customer_id,
+    CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
     l.item_id,
     l.total_price,
     l.balance_remaining,
@@ -218,6 +227,7 @@ SELECT
     CURRENT_DATE - l.last_payment_date::DATE AS days_since_payment,
     l.status
 FROM layaway l
+LEFT JOIN customers c ON l.customer_id = c.id
 WHERE (CURRENT_DATE - l.last_payment_date::DATE) >= 30
   AND l.status IN ('ACTIVE', 'OVERDUE')
 ORDER BY l.last_payment_date ASC;
@@ -227,6 +237,7 @@ CREATE OR REPLACE VIEW layaway_locate AS
 SELECT
     l.layaway_id,
     l.customer_id,
+    CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
     l.item_id,
     l.total_price,
     l.balance_remaining,
@@ -234,4 +245,5 @@ SELECT
     l.layaway_date,
     l.next_payment_date
 FROM layaway l
+LEFT JOIN customers c ON l.customer_id = c.id
 ORDER BY l.layaway_date DESC;

@@ -248,10 +248,8 @@ const Layaway = () => {
   const filteredLayaways = layaways.filter((layaway) => {
     const searchLower = searchTerm.toLowerCase();
     return (
-      layaway.first_name?.toLowerCase().includes(searchLower) ||
-      layaway.last_name?.toLowerCase().includes(searchLower) ||
+      layaway.customer_name?.toLowerCase().includes(searchLower) ||
       layaway.item_id?.toLowerCase().includes(searchLower) ||
-      layaway.phone_number?.includes(searchTerm) ||
       String(layaway.layaway_id).includes(searchTerm)
     );
   });
@@ -351,7 +349,6 @@ const Layaway = () => {
               <TableRow>
                 <TableCell>ID</TableCell>
                 <TableCell>Customer</TableCell>
-                <TableCell>Phone</TableCell>
                 <TableCell>Item ID</TableCell>
                 <TableCell>Total Price</TableCell>
                 <TableCell>Balance</TableCell>
@@ -368,10 +365,7 @@ const Layaway = () => {
                 filteredLayaways.map((layaway) => (
                   <TableRow key={layaway.layaway_id}>
                     <TableCell>{layaway.layaway_id}</TableCell>
-                    <TableCell>
-                      {layaway.first_name} {layaway.last_name}
-                    </TableCell>
-                    <TableCell>{layaway.phone_number}</TableCell>
+                    <TableCell>{layaway.customer_name}</TableCell>
                     <TableCell>{layaway.item_id}</TableCell>
                     <TableCell>{formatCurrency(layaway.total_price)}</TableCell>
                     <TableCell>{formatCurrency(layaway.balance_remaining)}</TableCell>
@@ -409,7 +403,7 @@ const Layaway = () => {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={11} align="center">
+                  <TableCell colSpan={10} align="center">
                     <Typography variant="body2" color="textSecondary" sx={{ py: 3 }}>
                       No layaways found
                     </Typography>
@@ -511,7 +505,7 @@ const Layaway = () => {
           {selectedLayaway && (
             <Box sx={{ mb: 2 }}>
               <Typography variant="body2" color="textSecondary">
-                Customer: {selectedLayaway.first_name} {selectedLayaway.last_name}
+                Customer: {selectedLayaway.customer_name}
               </Typography>
               <Typography variant="body2" color="textSecondary">
                 Balance: {formatCurrency(selectedLayaway.balance_remaining)}
