@@ -100,11 +100,9 @@ function Checkout() {
     phone: '',
     email: ''
   });
-  const [protectionPlanEnabled, setProtectionPlanEnabled] = useState(false);
   const [taxRate, setTaxRate] = useState(0.13); // Default 13% tax rate
   const [selectedProvince, setSelectedProvince] = useState('ON');
   const [provinceName, setProvinceName] = useState('Ontario');
-  const PROTECTION_PLAN_RATE = 0.15; // 15% protection plan
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
@@ -317,26 +315,6 @@ function Checkout() {
     }, 0);
   }, [checkoutItems, cartItems]);
 
-  const calculateProtectionPlan = useCallback(() => {
-    if (!protectionPlanEnabled) return 0;
-    // Protection plan only applies to sales (positive values)
-    // Calculate based only on items where money is coming in
-    const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
-    const salesSubtotal = itemsToCalculate.reduce((total, item) => {
-      const transactionType = item.transaction_type?.toLowerCase() || '';
-      // Only include sale/repair transactions
-      if (transactionType === 'sale' || transactionType === 'repair') {
-        let itemValue = 0;
-        if (item.price !== undefined) itemValue = parseFloat(item.price);
-        else if (item.value !== undefined) itemValue = parseFloat(item.value);
-        else if (item.fee !== undefined) itemValue = parseFloat(item.fee);
-        return total + Math.abs(itemValue);
-      }
-      return total;
-    }, 0);
-    return salesSubtotal * PROTECTION_PLAN_RATE;
-  }, [protectionPlanEnabled, checkoutItems, cartItems]);
-
   const calculateTax = useCallback(() => {
     // Check if customer is tax exempt
     if (selectedCustomer?.tax_exempt) {
@@ -356,15 +334,14 @@ function Checkout() {
       }
       return total;
     }, 0);
-    const subtotalWithProtection = salesSubtotal + calculateProtectionPlan();
-    return subtotalWithProtection * taxRate;
-  }, [selectedCustomer, taxRate, checkoutItems, cartItems, calculateProtectionPlan]);
+    return salesSubtotal * taxRate;
+  }, [selectedCustomer, taxRate, checkoutItems, cartItems]);
 
   const calculateTotal = useCallback(() => {
-    const total = calculateSubtotal() + calculateProtectionPlan() + calculateTax();
+    const total = calculateSubtotal() + calculateTax();
     // Round to 2 decimal places to avoid floating-point precision issues
     return parseFloat(total.toFixed(2));
-  }, [calculateSubtotal, calculateProtectionPlan, calculateTax]);
+  }, [calculateSubtotal, calculateTax]);
 
   const handlePaymentMethodChange = (event) => {
     setPaymentMethod(event.target.value);
@@ -1644,25 +1621,6 @@ function Checkout() {
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                   <Typography variant="body1">Subtotal:</Typography>
                   <Typography variant="body1">${calculateSubtotal().toFixed(2)}</Typography>
-                </Box>
-
-                {/* Protection Plan Toggle */}
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={protectionPlanEnabled}
-                          onChange={(e) => setProtectionPlanEnabled(e.target.checked)}
-                          color="primary"
-                        />
-                      }
-                      label={`Protection Plan (${(PROTECTION_PLAN_RATE * 100).toFixed(0)}%)`}
-                    />
-                  </Box>
-                  <Typography variant="body1" color={protectionPlanEnabled ? 'text.primary' : 'text.secondary'}>
-                    ${calculateProtectionPlan().toFixed(2)}
-                  </Typography>
                 </Box>
 
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
