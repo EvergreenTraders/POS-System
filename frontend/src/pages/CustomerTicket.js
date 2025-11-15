@@ -1381,11 +1381,25 @@ const CustomerTicket = () => {
         // Clear the preserved ID after using it
         setPreservedBuyTicketId(null);
       } else {
+        // Determine ticket prefix based on transaction type
+        let ticketPrefix;
+        switch(transaction_type) {
+          case 'pawn': ticketPrefix = 'PT'; break;
+          case 'buy': ticketPrefix = 'BT'; break;
+          case 'trade': ticketPrefix = 'TT'; break;
+          case 'sale': ticketPrefix = 'ST'; break;
+          case 'repair': ticketPrefix = 'RT'; break;
+          case 'payment': ticketPrefix = 'PMT'; break;
+          case 'refund': ticketPrefix = 'RFT'; break;
+          default: ticketPrefix = 'TKT';
+        }
+
         // Generate a unique ticket ID for this batch of items with sequential 8-digit number
-        let lastTicketNumber = parseInt(localStorage.getItem('lastBuyTicketNumber') || '0');
+        const storageKey = `last${ticketPrefix}TicketNumber`;
+        let lastTicketNumber = parseInt(localStorage.getItem(storageKey) || '0');
         lastTicketNumber += 1;
-        localStorage.setItem('lastBuyTicketNumber', lastTicketNumber.toString());
-        buyTicketId = `BT-${lastTicketNumber.toString().padStart(8, '0')}`;
+        localStorage.setItem(storageKey, lastTicketNumber.toString());
+        buyTicketId = `${ticketPrefix}-${lastTicketNumber.toString().padStart(8, '0')}`;
       }
 
       // Add item type, customer, and employee data to each item
