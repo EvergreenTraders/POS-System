@@ -1442,34 +1442,82 @@ const Scrap = () => {
         <Typography variant="h4" component="h1" gutterBottom>
           Scrap Buckets
         </Typography>
-        <Button
-          variant="contained"
-          color="primary"
-          startIcon={<AddIcon />}
-          onClick={handleNewScrap}
-        >
-          New Bucket
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <TextField
+            variant="outlined"
+            placeholder="Search buckets..."
+            value={searchTerm}
+            onChange={handleSearch}
+            size="small"
+            sx={{ width: 300 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon />
+                </InputAdornment>
+              ),
+            }}
+          />
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={handleNewScrap}
+          >
+            New Bucket
+          </Button>
+        </Box>
       </Box>
 
-      {/* Search */}
-      <Box sx={{ mb: 3 }}>
-        <TextField
-          fullWidth
-          variant="outlined"
-          placeholder="Search buckets..."
-          value={searchTerm}
-          onChange={handleSearch}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            ),
-          }}
-        />
+      {/* Dashboard Statistics */}
+      <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
+        <Paper sx={{ flex: 1, p: 2, bgcolor: 'primary.main', color: 'white' }}>
+          <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>
+            Total Scrap
+          </Typography>
+          <Typography variant="h5" fontWeight="bold">
+            {formatCurrency(
+              Object.values(bucketTotalCosts).reduce((sum, cost) => sum + cost, 0)
+            )}
+          </Typography>
+          <Typography variant="caption" sx={{ opacity: 0.8 }}>
+            All Buckets
+          </Typography>
+        </Paper>
+
+        <Paper sx={{ flex: 1, p: 2, bgcolor: 'warning.main', color: 'white' }}>
+          <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>
+            In Processing
+          </Typography>
+          <Typography variant="h5" fontWeight="bold">
+            {formatCurrency(
+              scrapBuckets
+                .filter(bucket => bucket.status === 'PROCESSING')
+                .reduce((sum, bucket) => sum + (bucketTotalCosts[bucket.bucket_id] || 0), 0)
+            )}
+          </Typography>
+          <Typography variant="caption" sx={{ opacity: 0.8 }}>
+            {scrapBuckets.filter(bucket => bucket.status === 'PROCESSING').length} Bucket(s)
+          </Typography>
+        </Paper>
+
+        <Paper sx={{ flex: 1, p: 2, bgcolor: 'info.main', color: 'white' }}>
+          <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>
+            In Transit / Awaiting Settlement
+          </Typography>
+          <Typography variant="h5" fontWeight="bold">
+            {formatCurrency(
+              scrapBuckets
+                .filter(bucket => bucket.status === 'SHIPPED')
+                .reduce((sum, bucket) => sum + (bucketTotalCosts[bucket.bucket_id] || 0), 0)
+            )}
+          </Typography>
+          <Typography variant="caption" sx={{ opacity: 0.8 }}>
+            {scrapBuckets.filter(bucket => bucket.status === 'SHIPPED').length} Bucket(s)
+          </Typography>
+        </Paper>
       </Box>
-      
+
       {loading ? (
         <Box display="flex" justifyContent="center" my={4}>
           <CircularProgress />
