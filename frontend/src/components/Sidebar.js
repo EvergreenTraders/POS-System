@@ -28,6 +28,7 @@ import {
   People as PeopleIcon,
   Assessment as AssessmentIcon,
   Schedule as LayawayIcon,
+  PointOfSale as TransactionsIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
@@ -138,21 +139,21 @@ function Sidebar() {
           </StyledListItem>
         </StyledLink>
 
-        <StyledLink to="/transactions">
-          <StyledListItem active={isActive('/transactions')}>
-            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
-              <Receipt />
-            </ListItemIcon>
-            {isOpen && <ListItemText primary="Transactions" />}
-          </StyledListItem>
-        </StyledLink>
-
         <StyledLink to="/quotes">
           <StyledListItem active={isActive('/quotes')}>
             <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
               <QuoteIcon />
             </ListItemIcon>
             {isOpen && <ListItemText primary="Quotes" />}
+          </StyledListItem>
+        </StyledLink>
+
+        <StyledLink to="/customer-ticket">
+          <StyledListItem active={isActive('/customer-ticket')}>
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+              <TransactionsIcon />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Transactions" />}
           </StyledListItem>
         </StyledLink>
 
@@ -274,6 +275,15 @@ function Sidebar() {
             </StyledLink>
           </List>
         </Collapse>
+
+        <StyledLink to="/transactions">
+          <StyledListItem active={isActive('/transactions')}>
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+              <Receipt />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Transaction Journals" />}
+          </StyledListItem>
+        </StyledLink>
 
         <ListItem button onClick={handleSystemConfigClick}>
           <ListItemIcon sx={{ color: 'white', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>

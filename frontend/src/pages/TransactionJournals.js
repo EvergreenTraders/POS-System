@@ -31,7 +31,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Avatar } from '@mui/material';
 import config from '../config';
 
-function Transactions() {
+function TransactionJournals() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [transactionToDelete, setTransactionToDelete] = useState(null);
   const [store, setStore] = useState('');
@@ -1004,4 +1004,4 @@ function Transactions() {
   );
 }
 
-export default Transactions;
+export default TransactionJournals;

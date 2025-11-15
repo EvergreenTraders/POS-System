@@ -591,13 +591,6 @@ function Jewelry() {
                 ),
               }}
             />
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={() => navigate('/jewel-estimator')}
-            >
-              Estimator 
-            </Button>
           </Box>
 
           <TableContainer component={Paper} sx={{ flex: 1, overflow: 'auto' }}>

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Box, Typography, Paper, Grid, Container, Card, CardContent, 
+  Box, Typography, Paper, Grid, Container, Card, CardContent,
   CardMedia, Divider, Chip, Button, Avatar, Stack, Tabs, Tab, TextField,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogActions, Snackbar, Alert, CircularProgress,
-  List, ListItem, ListItemText, ListItemAvatar, Menu, MenuItem
+  List, ListItem, ListItemText, ListItemAvatar, Menu, MenuItem, Checkbox
 } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import config from '../config';
@@ -261,7 +261,23 @@ const CustomerTicket = () => {
   const estimatedItems = location.state?.estimatedItems || [];
   const from = location.state?.from || '';
 
-  const [activeTab, setActiveTab] = React.useState(0);
+  // Restore active tab from sessionStorage if available
+  const [activeTab, setActiveTab] = React.useState(() => {
+    const savedTab = sessionStorage.getItem('activeTicketTab');
+    return savedTab !== null ? parseInt(savedTab, 10) : 0;
+  });
+
+  // Save active tab to sessionStorage whenever it changes
+  React.useEffect(() => {
+    sessionStorage.setItem('activeTicketTab', activeTab.toString());
+  }, [activeTab]);
+
+  // Automatically show customer lookup form if no customer is selected
+  React.useEffect(() => {
+    if (!customer) {
+      setShowLookupForm(true);
+    }
+  }, [customer]);
 
   // State for convert dropdown menu
   const [convertMenuAnchor, setConvertMenuAnchor] = React.useState(null);
@@ -1213,7 +1229,11 @@ const CustomerTicket = () => {
         setTotals({ ...totals, trade: total });
         break;
       case 3: // Sale
-        total = items.reduce((sum, item) => sum + (parseFloat(item.price) || 0), 0);
+        total = items.reduce((sum, item) => {
+          const itemPrice = parseFloat(item.price) || 0;
+          const protectionPlanAmount = item.protectionPlan ? itemPrice * 0.15 : 0;
+          return sum + itemPrice + protectionPlanAmount;
+        }, 0);
         setTotals({ ...totals, sale: total });
         break;
       case 4: // Repair
@@ -1377,11 +1397,25 @@ const CustomerTicket = () => {
         // Clear the preserved ID after using it
         setPreservedBuyTicketId(null);
       } else {
+        // Determine ticket prefix based on transaction type
+        let ticketPrefix;
+        switch(transaction_type) {
+          case 'pawn': ticketPrefix = 'PT'; break;
+          case 'buy': ticketPrefix = 'BT'; break;
+          case 'trade': ticketPrefix = 'TT'; break;
+          case 'sale': ticketPrefix = 'ST'; break;
+          case 'repair': ticketPrefix = 'RT'; break;
+          case 'payment': ticketPrefix = 'PMT'; break;
+          case 'refund': ticketPrefix = 'RFT'; break;
+          default: ticketPrefix = 'TKT';
+        }
+
         // Generate a unique ticket ID for this batch of items with sequential 8-digit number
-        let lastTicketNumber = parseInt(localStorage.getItem('lastBuyTicketNumber') || '0');
+        const storageKey = `last${ticketPrefix}TicketNumber`;
+        let lastTicketNumber = parseInt(localStorage.getItem(storageKey) || '0');
         lastTicketNumber += 1;
-        localStorage.setItem('lastBuyTicketNumber', lastTicketNumber.toString());
-        buyTicketId = `BT-${lastTicketNumber.toString().padStart(8, '0')}`;
+        localStorage.setItem(storageKey, lastTicketNumber.toString());
+        buyTicketId = `${ticketPrefix}-${lastTicketNumber.toString().padStart(8, '0')}`;
       }
 
       // Add item type, customer, and employee data to each item
@@ -2362,12 +2396,12 @@ return (
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="15%" align="center">Estimator</TableCell>
-                              <TableCell width="10%" align="center">Image</TableCell>
-                              <TableCell width="25%">Item Description</TableCell>
-                              <TableCell width="15%">Category</TableCell>
+                              <TableCell width="12%" align="center">Estimator</TableCell>
+                              <TableCell width="8%" align="center">Image</TableCell>
+                              <TableCell width="30%">Item Description</TableCell>
+                              <TableCell width="12%">Category</TableCell>
                               <TableCell width="10%">Sale Price</TableCell>
-                              <TableCell width="10%">Payment Method</TableCell>
+                              <TableCell width="8%" align="center">Protection (15%)</TableCell>
                               <TableCell width="20%" align="right" padding="none">
                                 <Tooltip title="Add Item">
                                   <IconButton size="small" color="primary" onClick={handleAddRow}>
@@ -2440,19 +2474,18 @@ return (
                                   />
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.price}
                                     onChange={(e) => handleItemChange(item.id, 'price', e.target.value)}
                                   />
                                 </TableCell>
-                                <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
-                                    value={item.paymentMethod}
-                                    onChange={(e) => handleItemChange(item.id, 'paymentMethod', e.target.value)}
+                                <TableCell align="center">
+                                  <Checkbox
+                                    checked={item.protectionPlan || false}
+                                    onChange={(e) => handleItemChange(item.id, 'protectionPlan', e.target.checked)}
+                                    size="small"
                                   />
                                 </TableCell>
                                 <TableCell align="right">
