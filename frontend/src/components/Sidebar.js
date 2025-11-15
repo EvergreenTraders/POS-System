@@ -138,15 +138,6 @@ function Sidebar() {
           </StyledListItem>
         </StyledLink>
 
-        <StyledLink to="/transactions">
-          <StyledListItem active={isActive('/transactions')}>
-            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
-              <Receipt />
-            </ListItemIcon>
-            {isOpen && <ListItemText primary="Transactions" />}
-          </StyledListItem>
-        </StyledLink>
-
         <StyledLink to="/quotes">
           <StyledListItem active={isActive('/quotes')}>
             <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
@@ -274,6 +265,15 @@ function Sidebar() {
             </StyledLink>
           </List>
         </Collapse>
+
+        <StyledLink to="/transactions">
+          <StyledListItem active={isActive('/transactions')}>
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+              <Receipt />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Transaction Journals" />}
+          </StyledListItem>
+        </StyledLink>
 
         <ListItem button onClick={handleSystemConfigClick}>
           <ListItemIcon sx={{ color: 'white', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
