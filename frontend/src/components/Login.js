@@ -200,8 +200,9 @@ const Login = () => {
                                     margin: '0 auto 16px',
                                     fontSize: '2rem'
                                 }}
+                                src={lockedUser.image ? `data:image/jpeg;base64,${lockedUser.image}` : undefined}
                             >
-                                {lockedUser.username ? lockedUser.username[0].toUpperCase() : 'U'}
+                                {!lockedUser.image && (lockedUser.username ? lockedUser.username[0].toUpperCase() : 'U')}
                             </Avatar>
                             <Typography variant="h6" sx={{ fontWeight: 500 }}>
                                 {lockedUser.firstName} {lockedUser.lastName}

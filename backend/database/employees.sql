@@ -11,9 +11,34 @@ CREATE TABLE employees (
     hire_date DATE NOT NULL,
     salary DECIMAL(10, 2) NOT NULL,
     status VARCHAR(20) DEFAULT 'Active',
+
+    -- Employee image (stored as binary data)
+    image BYTEA,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Insert sample employee data
+-- Add comments for documentation
+COMMENT ON TABLE employees IS 'Stores employee information including profile images';
+COMMENT ON COLUMN employees.image IS 'Employee profile photo stored as binary data';
+
+-- Create function to update timestamp
+CREATE OR REPLACE FUNCTION update_employee_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger for timestamp update
+DROP TRIGGER IF EXISTS update_employee_timestamp ON employees;
+CREATE TRIGGER update_employee_timestamp
+    BEFORE UPDATE ON employees
+    FOR EACH ROW
+    EXECUTE FUNCTION update_employee_timestamp();
 
 -- Insert sample employee data
 INSERT INTO employees (username, first_name, last_name, email, password, phone, role, hire_date, salary, status) VALUES
@@ -27,3 +52,6 @@ INSERT INTO employees (username, first_name, last_name, email, password, phone, 
 ('jwilson', 'Jennifer', 'Wilson', 'jennifer.wilson@evergreen.com', 'password123', '555-0108', 'Cashier', '2022-06-10', 37500.00, 'Active'),
 ('pguntupalli', 'Priya', 'Guntupalli', 'guntupallipriya1998@gmail.com', 'password123', '897-1932', 'Software Developer', '2024-11-14', 43000.00, 'Active'),
 ('ataylor', 'Amanda', 'Taylor', 'amanda.taylor@evergreen.com', 'password123', '555-0110', 'Sales Associate', '2022-04-20', 41500.00, 'Active');
+
+-- ALTER TABLE for existing databases (add image column if it doesn't exist)
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS image BYTEA;

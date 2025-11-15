@@ -244,6 +244,9 @@ app.post('/api/auth/login', async (req, res) => {
 
       console.log('Login successful for user:', user.username);
 
+      // Convert image BYTEA to base64 if it exists
+      const imageBase64 = user.image ? user.image.toString('base64') : null;
+
       return res.json({
         token,
         user: {
@@ -252,7 +255,8 @@ app.post('/api/auth/login', async (req, res) => {
           email: user.email,
           role: user.role,
           firstName: user.first_name,
-          lastName: user.last_name
+          lastName: user.last_name,
+          image: imageBase64
         }
       });
     } else {
@@ -4978,6 +4982,362 @@ app.delete('/api/business-info/logo', async (req, res) => {
   } catch (error) {
     console.error('Error deleting logo:', error);
     res.status(500).json({ error: 'Failed to delete logo' });
+  }
+});
+
+// ==================== LAYAWAY ENDPOINTS ====================
+
+// GET layaways by view
+app.get('/api/layaways', async (req, res) => {
+  try {
+    const { view } = req.query;
+    let query;
+
+    // Note: All layaway views include customer_name via JOIN with customers table
+    switch (view) {
+      case 'overdue':
+        query = 'SELECT * FROM layaway_overdue';
+        break;
+      case 'past-due':
+        query = 'SELECT * FROM layaway_past_due';
+        break;
+      case 'active':
+        query = 'SELECT * FROM layaway_active';
+        break;
+      case 'no-activity':
+        query = 'SELECT * FROM layaway_no_activity';
+        break;
+      case 'no-payment':
+        query = 'SELECT * FROM layaway_no_payment_30_days';
+        break;
+      case 'locate':
+        query = 'SELECT * FROM layaway_locate';
+        break;
+      case 'reporting':
+        query = `
+          SELECT
+            l.*,
+            CONCAT(c.first_name, ' ', c.last_name) AS customer_name
+          FROM layaway l
+          LEFT JOIN customers c ON l.customer_id = c.id
+        `;
+        break;
+      default:
+        query = 'SELECT * FROM layaway_overdue';
+    }
+
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching layaways:', err);
+    res.status(500).json({ error: 'Failed to fetch layaways' });
+  }
+});
+
+// GET single layaway by ID
+app.get('/api/layaways/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = 'SELECT * FROM layaway WHERE layaway_id = $1';
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Layaway not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching layaway:', err);
+    res.status(500).json({ error: 'Failed to fetch layaway' });
+  }
+});
+
+// POST create new layaway
+app.post('/api/layaways', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const {
+      customer_id,
+      item_id,
+      employee_id,
+      total_price,
+      down_payment,
+      payment_frequency,
+      payment_amount,
+      next_payment_date,
+      notes,
+      terms
+    } = req.body;
+
+    // Validate required fields
+    if (!customer_id || !item_id || !total_price) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    await client.query('BEGIN');
+
+    const amount_paid = parseFloat(down_payment) || 0;
+    const balance_remaining = parseFloat(total_price) - amount_paid;
+
+    // Create layaway
+    const insertQuery = `
+      INSERT INTO layaway (
+        customer_id, item_id, employee_id, total_price, down_payment,
+        amount_paid, balance_remaining, payment_frequency, payment_amount,
+        next_payment_date, notes, terms, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING *
+    `;
+
+    const result = await client.query(insertQuery, [
+      customer_id,
+      item_id,
+      employee_id,
+      total_price,
+      down_payment || 0,
+      amount_paid,
+      balance_remaining,
+      payment_frequency || 'WEEKLY',
+      payment_amount,
+      next_payment_date,
+      notes,
+      terms,
+      'ACTIVE'
+    ]);
+
+    const layaway_id = result.rows[0].layaway_id;
+
+    // Record down payment if provided
+    if (amount_paid > 0) {
+      await client.query(
+        `INSERT INTO layaway_payments (layaway_id, amount, payment_method, notes, received_by)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [layaway_id, amount_paid, 'DOWN_PAYMENT', 'Initial down payment', employee_id]
+      );
+
+      await client.query(
+        'UPDATE layaway SET last_payment_date = CURRENT_TIMESTAMP WHERE layaway_id = $1',
+        [layaway_id]
+      );
+    }
+
+    // Create history record
+    await client.query(
+      `INSERT INTO layaway_history (layaway_id, action_type, performed_by, notes)
+       VALUES ($1, $2, $3, $4)`,
+      [layaway_id, 'CREATED', employee_id, 'Layaway created']
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error creating layaway:', err);
+    res.status(500).json({ error: 'Failed to create layaway' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST make payment on layaway
+app.post('/api/layaways/:id/payment', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { amount, payment_method, notes, received_by } = req.body;
+
+    if (!amount || parseFloat(amount) <= 0) {
+      return res.status(400).json({ error: 'Invalid payment amount' });
+    }
+
+    await client.query('BEGIN');
+
+    // Get current layaway
+    const layawayResult = await client.query(
+      'SELECT * FROM layaway WHERE layaway_id = $1',
+      [id]
+    );
+
+    if (layawayResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Layaway not found' });
+    }
+
+    const layaway = layawayResult.rows[0];
+    const newAmountPaid = parseFloat(layaway.amount_paid) + parseFloat(amount);
+    const newBalance = parseFloat(layaway.total_price) - newAmountPaid;
+
+    // Record payment
+    await client.query(
+      `INSERT INTO layaway_payments (layaway_id, amount, payment_method, notes, received_by)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [id, amount, payment_method || 'CASH', notes, received_by]
+    );
+
+    // Update layaway
+    const updateQuery = `
+      UPDATE layaway
+      SET amount_paid = $1,
+          balance_remaining = $2,
+          last_payment_date = CURRENT_TIMESTAMP,
+          status = CASE
+            WHEN $2 <= 0 THEN 'COMPLETED'
+            ELSE status
+          END,
+          completion_date = CASE
+            WHEN $2 <= 0 THEN CURRENT_TIMESTAMP
+            ELSE completion_date
+          END
+      WHERE layaway_id = $3
+      RETURNING *
+    `;
+
+    const result = await client.query(updateQuery, [newAmountPaid, newBalance, id]);
+
+    // Create history record
+    await client.query(
+      `INSERT INTO layaway_history (layaway_id, action_type, performed_by, old_value, new_value, notes)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, 'PAYMENT_MADE', received_by, layaway.amount_paid, newAmountPaid, `Payment of $${amount}`]
+    );
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error processing payment:', err);
+    res.status(500).json({ error: 'Failed to process payment' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST update contact date
+app.post('/api/layaways/:id/contact', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { performed_by } = req.body;
+
+    await client.query('BEGIN');
+
+    // Update last contact date
+    const result = await client.query(
+      'UPDATE layaway SET last_contact_date = CURRENT_DATE WHERE layaway_id = $1 RETURNING *',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Layaway not found' });
+    }
+
+    // Create history record
+    await client.query(
+      `INSERT INTO layaway_history (layaway_id, action_type, performed_by, notes)
+       VALUES ($1, $2, $3, $4)`,
+      [id, 'CONTACTED', performed_by, 'Customer contacted']
+    );
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating contact:', err);
+    res.status(500).json({ error: 'Failed to update contact' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT update layaway
+app.put('/api/layaways/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { status, notes, payment_frequency, payment_amount, next_payment_date } = req.body;
+
+    await client.query('BEGIN');
+
+    const updateFields = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (status) {
+      updateFields.push(`status = $${paramCount}`);
+      values.push(status);
+      paramCount++;
+    }
+    if (notes !== undefined) {
+      updateFields.push(`notes = $${paramCount}`);
+      values.push(notes);
+      paramCount++;
+    }
+    if (payment_frequency) {
+      updateFields.push(`payment_frequency = $${paramCount}`);
+      values.push(payment_frequency);
+      paramCount++;
+    }
+    if (payment_amount) {
+      updateFields.push(`payment_amount = $${paramCount}`);
+      values.push(payment_amount);
+      paramCount++;
+    }
+    if (next_payment_date) {
+      updateFields.push(`next_payment_date = $${paramCount}`);
+      values.push(next_payment_date);
+      paramCount++;
+    }
+
+    if (updateFields.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    values.push(id);
+    const query = `UPDATE layaway SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE layaway_id = $${paramCount} RETURNING *`;
+
+    const result = await client.query(query, values);
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Layaway not found' });
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating layaway:', err);
+    res.status(500).json({ error: 'Failed to update layaway' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET layaway history
+app.get('/api/layaways/:id/history', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = 'SELECT * FROM layaway_history WHERE layaway_id = $1 ORDER BY action_date DESC';
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching layaway history:', err);
+    res.status(500).json({ error: 'Failed to fetch layaway history' });
+  }
+});
+
+// GET layaway payments
+app.get('/api/layaways/:id/payments', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = 'SELECT * FROM layaway_payments WHERE layaway_id = $1 ORDER BY payment_date DESC';
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching layaway payments:', err);
+    res.status(500).json({ error: 'Failed to fetch layaway payments' });
   }
 });
 

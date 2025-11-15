@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   AppBar,
   Toolbar,
@@ -16,6 +16,7 @@ import {
   AccountCircle as AccountIcon,
   LockOutlined as LockIcon,
   Logout as LogoutIcon,
+  AccessTime as ClockIcon,
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -26,14 +27,81 @@ const StyledAppBar = styled(AppBar)({
   zIndex: 1201, // Higher than drawer's z-index
 });
 
+// Map provinces to their timezones
+const provinceTimezones = {
+  'AB': 'America/Edmonton',        // Mountain Time
+  'BC': 'America/Vancouver',       // Pacific Time
+  'MB': 'America/Winnipeg',        // Central Time
+  'NB': 'America/Moncton',         // Atlantic Time
+  'NL': 'America/St_Johns',        // Newfoundland Time
+  'NT': 'America/Yellowknife',     // Mountain Time
+  'NS': 'America/Halifax',         // Atlantic Time
+  'NU': 'America/Iqaluit',         // Eastern Time
+  'ON': 'America/Toronto',         // Eastern Time
+  'PE': 'America/Halifax',         // Atlantic Time
+  'QC': 'America/Montreal',        // Eastern Time
+  'SK': 'America/Regina',          // Central Time (no DST)
+  'YT': 'America/Whitehorse'       // Pacific Time
+};
+
 function Navbar() {
   const [cartOpen, setCartOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
   const { cartItems } = useCart();
   const { user, logout, lockScreen } = useAuth();
   const navigate = useNavigate();
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
+
+  // Get timezone based on selected province
+  const selectedProvince = localStorage.getItem('selectedProvince') || 'ON';
+  const timezone = provinceTimezones[selectedProvince] || 'America/Toronto';
+
+  // Update time every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // Get time parts for the selected timezone
+  const getTimeParts = () => {
+    const timeString = currentTime.toLocaleString('en-US', {
+      timeZone: timezone,
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hour12: false
+    });
+
+    const [hours, minutes, seconds] = timeString.split(':').map(Number);
+
+    return {
+      hours: hours % 12 || 12, // Convert to 12-hour format
+      minutes,
+      seconds
+    };
+  };
+
+  // Format time for display
+  const formatTime = () => {
+    return currentTime.toLocaleTimeString('en-US', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
+  };
+
+  // Calculate clock hand angles
+  const { hours, minutes, seconds } = getTimeParts();
+  const secondAngle = seconds * 6; // 360 / 60 = 6 degrees per second
+  const minuteAngle = minutes * 6 + seconds * 0.1; // 6 degrees per minute + smooth movement
+  const hourAngle = (hours % 12) * 30 + minutes * 0.5; // 30 degrees per hour + smooth movement
 
   const handleMenu = (event) => {
     setAnchorEl(event.currentTarget);
@@ -57,16 +125,116 @@ function Navbar() {
     <>
       <StyledAppBar position="fixed">
         <Toolbar>
-          <Typography 
-            variant="h6" 
-            sx={{ 
-              flexGrow: 1, 
-              cursor: 'pointer' 
+          <Typography
+            variant="h6"
+            sx={{
+              cursor: 'pointer',
+              mr: 2
             }}
             onClick={() => navigate('/')}
           >
             POS System
           </Typography>
+
+          {/* Analog Clock Display */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.5,
+              mr: 2
+            }}
+          >
+            {/* Analog Clock */}
+            <Box
+              sx={{
+                position: 'relative',
+                width: 40,
+                height: 40,
+                borderRadius: '50%',
+                border: '2px solid white',
+                bgcolor: 'rgba(255, 255, 255, 0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              {/* Clock center dot */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  width: 4,
+                  height: 4,
+                  borderRadius: '50%',
+                  bgcolor: 'white',
+                  zIndex: 3
+                }}
+              />
+
+              {/* Hour hand */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  width: 2,
+                  height: 10,
+                  bgcolor: 'white',
+                  bottom: '50%',
+                  left: '50%',
+                  transformOrigin: 'bottom center',
+                  transform: `translateX(-50%) rotate(${hourAngle}deg)`,
+                  borderRadius: '2px 2px 0 0',
+                  zIndex: 2
+                }}
+              />
+
+              {/* Minute hand */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  width: 1.5,
+                  height: 14,
+                  bgcolor: 'white',
+                  bottom: '50%',
+                  left: '50%',
+                  transformOrigin: 'bottom center',
+                  transform: `translateX(-50%) rotate(${minuteAngle}deg)`,
+                  borderRadius: '2px 2px 0 0',
+                  zIndex: 1
+                }}
+              />
+
+              {/* Second hand */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  width: 1.5,
+                  height: 16,
+                  bgcolor: 'white',
+                  bottom: '50%',
+                  left: '50%',
+                  transformOrigin: 'bottom center',
+                  transform: `translateX(-50%) rotate(${secondAngle}deg)`,
+                  borderRadius: '2px 2px 0 0'
+                }}
+              />
+            </Box>
+
+            {/* Digital Time Display */}
+            <Typography
+              variant="body1"
+              sx={{
+                fontFamily: 'monospace',
+                fontWeight: 500,
+                letterSpacing: 0.5,
+                minWidth: 95
+              }}
+            >
+              {formatTime()}
+            </Typography>
+          </Box>
+
+          <Box sx={{ flexGrow: 1 }} />
+
           {user && (
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <IconButton
@@ -92,8 +260,11 @@ function Navbar() {
                   onClick={handleMenu}
                   color="inherit"
                 >
-                  <Avatar sx={{ width: 32, height: 32, bgcolor: 'secondary.main' }}>
-                    {user.username ? user.username[0].toUpperCase() : <AccountIcon />}
+                  <Avatar
+                    sx={{ width: 40, height: 40, bgcolor: 'secondary.main' }}
+                    src={user.image ? `data:image/jpeg;base64,${user.image}` : undefined}
+                  >
+                    {!user.image && (user.username ? user.username[0].toUpperCase() : <AccountIcon />)}
                   </Avatar>
                 </IconButton>
                 <Menu
