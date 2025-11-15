@@ -733,7 +733,7 @@ const Cart = () => {
                         <TableCell width="30%"><strong>Description</strong></TableCell>
                         <TableCell width="20%"><strong>Customer</strong></TableCell>
                         <TableCell width="20%"><strong>Employee</strong></TableCell>
-                        <TableCell align="right" width="10%"><strong>Price</strong></TableCell>
+                        <TableCell align="right" width="10%"><strong>Total</strong></TableCell>
                         <TableCell align="center" width="10%"><strong>Actions</strong></TableCell>
                       </TableRow>
                     </TableHead>
