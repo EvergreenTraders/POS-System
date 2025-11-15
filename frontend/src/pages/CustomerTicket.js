@@ -261,7 +261,23 @@ const CustomerTicket = () => {
   const estimatedItems = location.state?.estimatedItems || [];
   const from = location.state?.from || '';
 
-  const [activeTab, setActiveTab] = React.useState(0);
+  // Restore active tab from sessionStorage if available
+  const [activeTab, setActiveTab] = React.useState(() => {
+    const savedTab = sessionStorage.getItem('activeTicketTab');
+    return savedTab !== null ? parseInt(savedTab, 10) : 0;
+  });
+
+  // Save active tab to sessionStorage whenever it changes
+  React.useEffect(() => {
+    sessionStorage.setItem('activeTicketTab', activeTab.toString());
+  }, [activeTab]);
+
+  // Automatically show customer lookup form if no customer is selected
+  React.useEffect(() => {
+    if (!customer) {
+      setShowLookupForm(true);
+    }
+  }, [customer]);
 
   // State for convert dropdown menu
   const [convertMenuAnchor, setConvertMenuAnchor] = React.useState(null);
