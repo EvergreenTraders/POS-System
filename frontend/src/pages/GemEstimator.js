@@ -1954,6 +1954,47 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
 
       {/* Stone Type and Color */}
       <Grid container spacing={3} sx={{ mt: 0 }}>
+        {/* Stone Color Picker */}
+        <Grid item xs={12} md={4}>
+          <FormControl fullWidth>
+            <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
+            <Grid container sx={{ border: '1px solid black', boxSizing: 'border-box'}}>
+              {stoneColors.map((color, index) => (
+                <Grid item xs={6} key={color.id}>
+                  <Paper
+                    onClick={() => {
+                      setCurrentStoneForm(prev => {
+                        // If type is "Unknown", update the name to be "{Color} Stone"
+                        const stoneName = prev.type === 'Unknown' ? `${color.color} Stone` : prev.name;
+                        const newForm = {
+                          ...prev,
+                          color: color.color,
+                          color_id: color.id,
+                          name: stoneName
+                        };
+                        return newForm;
+                      });
+                    }}
+                    sx={{
+                      p: 1.5,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      textAlign: 'center',
+                      border: '1px solid black',
+                      borderRadius: 0,
+                      backgroundColor: getCurrentStoneForm().color === color.color ? 'mediumseagreen':'none'
+                    }}
+                  >
+                    {color.color}
+                  </Paper>
+                </Grid>
+              ))}
+            </Grid>
+          </FormControl>
+        </Grid>
+
         {/* Stone Type */}
         <Grid item xs={12} md={8}>
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Type *</Typography>
@@ -2024,46 +2065,6 @@ function GemEstimator({ onAddGem, onGemValueChange = () => {}, setGemFormState, 
           </Box>
         </Grid>
 
-        {/* Stone Color Picker */}
-        <Grid item xs={12} md={4}>
-          <FormControl fullWidth>
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
-            <Grid container sx={{ border: '1px solid black', boxSizing: 'border-box'}}>
-              {stoneColors.map((color, index) => (
-                <Grid item xs={6} key={color.id}>
-                  <Paper
-                    onClick={() => {
-                      setCurrentStoneForm(prev => {
-                        // If type is "Unknown", update the name to be "{Color} Stone"
-                        const stoneName = prev.type === 'Unknown' ? `${color.color} Stone` : prev.name;
-                        const newForm = {
-                          ...prev,
-                          color: color.color,
-                          color_id: color.id,
-                          name: stoneName
-                        };
-                        return newForm;
-                      });
-                    }}
-                    sx={{
-                      p: 1.5,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      textAlign: 'center',
-                      border: '1px solid black',
-                      borderRadius: 0,
-                      backgroundColor: getCurrentStoneForm().color === color.color ? 'mediumseagreen':'none'
-                    }}
-                  >
-                    {color.color}
-                  </Paper>
-                </Grid>
-              ))}
-            </Grid>
-          </FormControl>
-        </Grid>
       </Grid>
 
       {/* Stone Shape */}

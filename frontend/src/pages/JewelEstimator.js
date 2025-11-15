@@ -21,9 +21,7 @@ import {
   FormControlLabel,
   Checkbox,
   Slider,
-  Radio,
   RadioGroup,
-  Tab,
   InputAdornment,
   Dialog,
   DialogTitle,
@@ -41,11 +39,9 @@ import GemEstimator from './GemEstimator';
 import EditIcon from '@mui/icons-material/Edit';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import CloudUpload from '@mui/icons-material/CloudUpload';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import KeyboardBackspaceIcon from '@mui/icons-material/KeyboardBackspace';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { styled } from '@mui/material/styles';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 
@@ -61,7 +57,6 @@ function JewelEstimator() {
     const userId = user?.id || 'guest';
     return `${key}_user_${userId}`;
   };
-  const [metalFormState, setMetalFormState] = useState({});
   const [totalMetalValue, setTotalMetalValue] = useState(0);
   const [addMetal, setAddMetal] = useState(() => {
     // Skip localStorage restoration if in edit mode
@@ -87,7 +82,6 @@ function JewelEstimator() {
   });
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
-  const [from, setFrom] = useState(location.state?.from || '');
   const [editMode, setEditMode] = useState(location.state?.editMode || false);
   const [editingGemOnly, setEditingGemOnly] = useState(location.state?.editingGemOnly || false);
   const [returnToTicket, setReturnToTicket] = useState(location.state?.returnToTicket || false);
@@ -163,9 +157,6 @@ function JewelEstimator() {
     }
     return [];
   });
-  const [gemFormData, setGemFormData] = useState({});
-  const [totalGemValue, setTotalGemValue] = useState(0);
-  const [gemSummary, setGemSummary] = useState([]);
 
   // Images state with localStorage restoration
   const [images, setImages] = useState(() => {
@@ -193,10 +184,6 @@ function JewelEstimator() {
     return [];
   });
 
-  const handleMetalFormChange = (formState) => {
-      setMetalFormState(formState);
-  };
-
   const handleTotalMetalValueChange = (metalValue) => {
     setTotalMetalValue(metalValue);
     // Update the summary
@@ -204,20 +191,6 @@ function JewelEstimator() {
       ...estimatedValues,
       metal: metalValue
     });
-  };
-
-  const handleTotalGemValueChange = (gemValue) => {
-    setTotalGemValue(gemValue);
-    // Update the summary
-    updateEstimatedValues({
-      ...estimatedValues,
-      gems: gemValue
-    });
-  };
-  
-  const handleGemFormChange = (gemFormData) => {
-    // Handle gem form state changes
-    setGemFormData(gemFormData);
   };
 
   const handleAddGem = (gemData) => {
@@ -316,19 +289,6 @@ function JewelEstimator() {
         primary: null
       }));
     }
-  };
-  
-  // Handler for deleting gems from gemSummary
-  const handleDeleteFromGemSummary = (index) => {
-    setGemSummary(prev => {
-      const newSummary = [...prev];
-      newSummary.splice(index, 1);
-      return newSummary;
-    });
-  };
-  
-  const getInitials = (str) => {
-    return str.split(' ').map(word => word.charAt(0).toUpperCase()).join('');
   };
 
   // Update button text based on edit mode
@@ -508,7 +468,6 @@ function JewelEstimator() {
         setDiamondSummary([]);
         setStoneSummary([]);
         setFreeText('');
-        setMetalFormState({});
         setTotalMetalValue(0);
       }
       
@@ -668,10 +627,7 @@ function JewelEstimator() {
     secondaryGemstone: 0
   });
 
-  const [totalDiamondValue, setTotalDiamondValue] = useState(0);
   const [priceEstimatePercentages, setPriceEstimatePercentages] = useState({});
-
-  const [diamondValuationType, setDiamondValuationType] = useState('each');
 
   const [exactColor, setExactColor] = useState('D');
   const [metalTypes, setMetalTypes] = useState([]);
@@ -960,15 +916,8 @@ function JewelEstimator() {
       // Set form values based on the item being edited
       if (itemToEdit.metal_weight) {
         // This is likely a metal item with jewelry properties
-        // Pre-fill metal form with item data
-        setMetalFormState({
-          metalCategory: itemToEdit.category || '',
-          weight: itemToEdit.metal_weight || '',
-          preciousMetalType: itemToEdit.precious_metal_type || '',
-          purity: { value: itemToEdit.metal_purity || '' },
-          estimatedValue: itemToEdit.price || 0
-        });
-        
+        // Metal form will be pre-filled by MetalEstimator component
+
         // If there are price estimates, set them
         if (itemToEdit.price_estimates) {
           setPriceEstimates({
@@ -1268,20 +1217,6 @@ function JewelEstimator() {
     fetchDiamondEstimates();
   }, []);
 
-  useEffect(() => {
-    // Try to restore state from location or session storage
-    if (!estimatedItems.length) {
-      const savedState = sessionStorage.getItem('estimationState');
-      if (savedState) {
-        const parsedState = JSON.parse(savedState);
-        if (parsedState.items) {
-          // If we have items, restore them to the estimator
-          setEstimatedItems(parsedState.items);
-        }
-      }
-    }
-  }, [estimatedItems.length]);
-
   const fetchDiamondSizes = async (diamondShapeId) => {
     try {
       const response = await axios.get(`${API_BASE_URL}/diamond_size_weight/${diamondShapeId}`);
@@ -1304,10 +1239,6 @@ function JewelEstimator() {
     }
   };
 
-  const getCurrentStoneForm = () => {
-    return activeTab.startsWith('primary') ? primaryStoneForm : secondaryStoneForm;
-  };
-
   const setCurrentStoneForm = (newForm) => {
     if (activeTab.startsWith('primary')) {
       setPrimaryStoneForm(newForm);
@@ -1325,11 +1256,6 @@ function JewelEstimator() {
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [popupImageIndex, setPopupImageIndex] = useState(0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const sliderRef = React.useRef(null);
-  const colorSliderRef = React.useRef(null);
-  const cutRef = React.useRef(null);
-  const labGrownRef = React.useRef(null);
-  const addDiamondRef = React.useRef(null);
 
   const openPopup = (index) => {
     setPopupImageIndex(index);
@@ -1563,10 +1489,6 @@ function JewelEstimator() {
     }
   };
 
-  const removeImage = (index) => {
-    setImages(prev => prev.filter((_, i) => i !== index));
-  };
-
   const handleExactColorChange = (event, newValue) => {
     setExactColor(colorScale[newValue]);
     setCurrentForm(prev => ({
@@ -1673,517 +1595,7 @@ function JewelEstimator() {
       retail: Number((value * (retailPercent / 100)).toFixed(2))
     };
   };
-  
-  const addDiamond = () => {
-    const currentForm = getCurrentForm();
-    const isPrimary = activeTab.startsWith('primary');
-  
-    // Check if we can add this type of gem
-    const gemPosition = isPrimary ? 'primary' : 'secondary';
-    if (addedGemTypes[gemPosition] === 'stone') {
-      alert(`Please delete the existing ${gemPosition} stone before adding a diamond`);
-      return;
-    }
 
-    // For primary gems, check if there's already one in the array
-    if (isPrimary && (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary))) {
-      alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
-      return;
-    }
-
-    const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
-    const estimates = calculateGemPriceEstimates(diamondValue);
-    // Add new estimates to existing ones
-    setPriceEstimates(prev => ({
-      pawn: Number((prev.pawn + estimates.pawn).toFixed(2)),
-      buy: Number((prev.buy + estimates.buy).toFixed(2)),
-      melt: Number((prev.melt + estimates.melt).toFixed(2)),
-      retail: Number((prev.retail + estimates.retail).toFixed(2))
-    }));
-    
-    const newItem = {
-      shape: currentForm.shape,
-      clarity: currentForm.clarity,
-      color: currentForm.color,
-      exactColor: currentForm.exactColor,
-      cut: currentForm.cut,
-      size: currentForm.size,
-      weight: currentForm.weight,
-      quantity: currentForm.quantity,
-      labGrown: currentForm.labGrown,
-      isPrimary: isPrimary,
-      type: 'diamond',
-      priceEstimates: estimates
-    };
-
-    handleAddDiamond(newItem, isPrimary);
-    
-    // Reset the current form after adding
-    const resetForm = {
-      shape: 'Round',
-      clarity: 'Flawless',
-      color: 'Colorless',
-      quantity: 1,
-      weight: 0,
-      cut: '',
-      labGrown: false,
-      exactColor: 'D',
-      size: ''
-    };
-    setCurrentForm(resetForm);
-    setCurrentShapeIndex(0);
-    
-    // Reset exact color to default
-    setExactColor('D');
-    
-    // Reset valuation type to default
-    setDiamondValuationType('each');
-  };
-
-  const handleStoneChange = (event) => {
-    const { name, value } = event.target;
-    setCurrentStoneForm(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-
-  const handleStoneTypeChange = (event) => {
-    const selectedStoneType = event.target.value;
-    const selectedStone = colorSpecificStoneTypes.find(stone => stone.type === selectedStoneType);
-    setCurrentStoneForm(prev => ({
-      ...prev,
-      name: selectedStone ? selectedStone.type : '',
-      color: selectedStone ? selectedStone.color : prev.color
-    }));
-  };
-
-  const handleDiamondValuationTypeChange = (event) => {
-    setDiamondValuationType(event.target.value);
-  };
-
-  const addStone = () => {
-    const currentForm = getCurrentStoneForm();
-    const isPrimary = activeTab.startsWith('primary');
-
-    // Check if we can add this type of gem
-    const gemPosition = isPrimary ? 'primary' : 'secondary';
-    if (addedGemTypes[gemPosition] === 'diamond') {
-      alert(`Please delete the existing ${gemPosition} diamond before adding a stone`);
-      return;
-    }
-
-    // For primary gems, check if there's already one in the array
-    if (isPrimary && (diamondSummary.some(d => d.isPrimary) || stoneSummary.some(s => s.isPrimary))) {
-      alert('Only one primary gem (diamond or stone) is allowed. Please delete the existing primary gem first.');
-      return;
-    }
-
-    const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
-    const estimates = calculateGemPriceEstimates(stoneValue);
-    
-    // Add new estimates to existing ones
-    setPriceEstimates(prev => ({
-      pawn: Number((prev.pawn + estimates.pawn).toFixed(2)),
-      buy: Number((prev.buy + estimates.buy).toFixed(2)),
-      melt: Number((prev.melt + estimates.melt).toFixed(2)),
-      retail: Number((prev.retail + estimates.retail).toFixed(2))
-    }));
-
-    const newStone = {
-      name: currentForm.name,
-      shape: currentForm.shape,
-      weight: currentForm.weight,
-      color: currentForm.color,
-      quantity: currentForm.quantity,
-      authentic: currentForm.authentic,
-      isPrimary: isPrimary,
-      type: 'stone',
-      priceEstimates: estimates
-    };
-
-    handleAddStone(newStone, isPrimary);
-
-    // Reset the form after adding
-    if (activeTab.startsWith('primary')) {
-      setPrimaryStoneForm(initialStoneForm);
-    } else {
-      setSecondaryStoneForm(initialStoneForm);
-    }
-  };
-
-  const [currentStone, setCurrentStone] = useState({
-    type: '',
-    color: '',
-    weight: '',
-    isNatural: true,
-    isCertified: false
-  });
-
-  const [estimatedStones, setEstimatedStones] = useState([]);
-
-  const renderStoneEstimationTab = () => (
-    <Grid container spacing={2} sx={{ p: 2 }}>
-      {/* Quantity and Authentic */}
-      <Grid container spacing={2} alignItems="center">
-        <Grid item xs={6} sm={5}>
-          <TextField
-            fullWidth
-            label="Quantity"
-            type="number"
-            value={getCurrentStoneForm().quantity}
-            onChange={(e) => setCurrentStoneForm(prev => ({
-              ...prev, 
-              quantity: parseInt(e.target.value) || 1
-            }))}
-            InputProps={{
-              inputProps: { min: 1, max: 100 }
-            }}
-          />
-        </Grid>
-        <Grid item xs={6} sm={7}>
-          <Box sx={{ ml: 3 }}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={getCurrentStoneForm().authentic || false}
-                  onChange={(e) => setCurrentStoneForm(prev => ({
-                    ...prev,
-                    authentic: e.target.checked
-                  }))}
-                />
-              }
-              label="Authentic"
-            />
-          </Box>
-        </Grid>
-      </Grid>
-
-      {/* Stone Type and Color */}
-      <Grid container spacing={3} sx={{ mt: 0 }}>
-        {/* Stone Type */}
-        <Grid item xs={12} md={8}>
-          <Typography variant="subtitle1" sx={{ mb: 1 }}>Type *</Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-            {colorSpecificStoneTypes
-              .filter(stone => {
-                const currentForm = getCurrentStoneForm();
-                // Make sure we have a color_id on both sides to compare
-                return stone.color_id && currentForm && currentForm.color_id && 
-                       stone.color_id === currentForm.color_id;
-              })
-              .map((stone) => (
-                <Paper
-                  key={stone.type}
-                  elevation={getCurrentStoneForm().name === stone.type ? 8 : 1}
-                  sx={{
-                    p: 1,
-                    cursor: 'pointer',
-                    width: 80,
-                    height: 80,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                  onClick={() => handleStoneTypeChange({ target: { value: stone.type } })}
-                >
-                  <Box
-                    component="img"
-                    src={stone.image_path}
-                    alt={stone.type}
-                    sx={{ width: 40, height: 40 }}
-                  />
-                  <Typography variant="caption" align="center">
-                    {stone.type}
-                  </Typography>
-                </Paper>
-              ))}
-          </Box>
-        </Grid>
-
-        {/* Stone Color Picker */}
-        <Grid item xs={12} md={4}>
-          <FormControl fullWidth>
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>Color *</Typography>
-            <Grid container sx={{ border: '1px solid black', boxSizing: 'border-box'}}>
-              {stoneColors.map((color, index) => (
-                <Grid item xs={6} key={color.id}>
-                  <Paper
-                    onClick={() => {
-                      setCurrentStoneForm(prev => {
-                        const newForm = {
-                          ...prev,
-                          color: color.color,
-                          color_id: color.id
-                        };
-                        return newForm;
-                      });
-                    }}
-
-                    sx={{
-                      p: 1.5,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      textAlign: 'center',
-                      border: '1px solid black',
-                      borderRadius: 0,
-                      backgroundColor: getCurrentStoneForm().color === color.color ? 'mediumseagreen':'none'
-                    }}
-                  >
-                    {color.color}
-                  </Paper>
-                </Grid>
-              ))}
-            </Grid>
-          </FormControl>
-        </Grid>
-      </Grid>
-
-      {/* Stone Shape */}
-      <Box>
-        <Typography variant="subtitle1" sx={{ mb: 1 }}>Shape *</Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-          {stoneShapes.map((shape) => (
-            <Paper
-              key={shape.name}
-              elevation={getCurrentStoneForm().shape === shape.name ? 8 : 1}
-              sx={{
-                p: 1,
-                cursor: 'pointer',
-                width: 80,
-                height: 80,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-              onClick={() => setCurrentStoneForm(prev => ({
-                ...prev,
-                shape: shape.name
-              }))}
-            >
-              <Box
-                component="img"
-                src={shape.image}
-                alt={shape.name}
-                sx={{ width: 40, height: 40 }}
-              />
-              <Typography variant="caption" align="center">
-                {shape.name}
-              </Typography>
-            </Paper>
-          ))}
-        </Box>
-      </Box>
-
-      {/* Size Section */}
-      <Grid container spacing={1} sx={{ mt: 0 }}>
-        <Grid item>
-          <Typography variant="subtitle1" sx={{ mb: 0 }}>Size</Typography>
-        </Grid>
-        {getCurrentStoneForm().quantity > 1 && (
-          <Grid item xs>
-            <FormControl sx={{ minWidth: 120 }}>
-              <Select
-                value={getCurrentStoneForm().valuationType}
-                onChange={(e) => setCurrentStoneForm(prev => ({
-                  ...prev, 
-                  valuationType: e.target.value
-                }))}
-                displayEmpty
-                size="small"
-                sx={{
-                  '& .MuiOutlinedInput-notchedOutline': {
-                    border: 'none'
-                  },
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    border: 'none'
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    border: 'none'
-                  }
-                }}
-              >
-                <MenuItem value="each">Each</MenuItem>
-                <MenuItem value="total">Total</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-        )}
-      </Grid>
-
-      {/* Measurements Container */}
-      <Grid container spacing={2} sx={{ mt: -1 }}>
-        {/* Weight */}
-        <Grid item xs={12} md={4}>
-          <TextField
-            fullWidth
-            label="Weight (Carats) *"
-            type="number"
-            value={getCurrentStoneForm().weight}
-            onChange={(e) => setCurrentStoneForm(prev => ({
-              ...prev, 
-              weight: e.target.value
-            }))}
-            InputProps={{
-              inputProps: { min: 0, step: 0.01 }
-            }}
-          />
-        </Grid>
-
-        {/* Width */}
-        <Grid item xs={12} md={4}>
-          <TextField
-            fullWidth
-            label="Width (mm)"
-            type="number"
-            value={getCurrentStoneForm().width}
-            onChange={(e) => setCurrentStoneForm(prev => ({
-              ...prev, 
-              width: e.target.value
-            }))}
-            InputProps={{
-              inputProps: { min: 0, step: 0.1 }
-            }}
-          />
-        </Grid>
-
-        {/* Depth */}
-        <Grid item xs={12} md={4}>
-          <TextField
-            fullWidth
-            label="Depth (mm)"
-            type="number"
-            value={getCurrentStoneForm().depth}
-            onChange={(e) => setCurrentStoneForm(prev => ({
-              ...prev, 
-              depth: e.target.value
-            }))}
-            InputProps={{
-              inputProps: { min: 0, step: 0.1 }
-            }}
-          />
-        </Grid>
-      </Grid>
-
-      {/* Add Stone Button */}
-      <Grid item xs={12}>
-        <Button 
-          variant="contained" 
-          color="primary" 
-          fullWidth 
-          onClick={addStone}
-          disabled={
-            !getCurrentStoneForm().name || 
-            !getCurrentStoneForm().shape || 
-            !getCurrentStoneForm().color || 
-            !getCurrentStoneForm().weight 
-          }
-        >
-          Add Stone
-        </Button>
-      </Grid>
-
-      {/* Add button to switch between primary and secondary gems */}
-      <Grid item xs={12} sx={{ mt: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
-          Est. {activeTab.startsWith('primary') ? 'Primary' : 'Secondary'} {activeTab.includes('diamond') ? 'Diamond' : 'Stone'} Value $: 
-        </Typography>
-        <TextField
-          size="small"
-          type="number"
-          value={activeTab === 'primary_gem_diamond' ? estimatedValues.primaryDiamond.toFixed(1) : 
-            activeTab === 'primary_gem_stone' ? estimatedValues.primaryGemstone.toFixed(1) : 
-            activeTab === 'secondary_gem_diamond' ? estimatedValues.secondaryDiamond.toFixed(1) : 
-            estimatedValues.secondaryGemstone.toFixed(1)}
-          variant="standard"
-          onChange={(e) => {
-            const newValue = parseFloat(e.target.value);
-            if (!isNaN(newValue)) {
-              if (activeTab === 'primary_gem_diamond') {
-                setEstimatedValues(prev => ({ ...prev, primaryDiamond: newValue }));
-              } else if (activeTab === 'primary_gem_stone') {
-                setEstimatedValues(prev => ({ ...prev, primaryGemstone: newValue }));
-              } else if (activeTab === 'secondary_gem_diamond') {
-                setEstimatedValues(prev => ({ ...prev, secondaryDiamond: newValue }));
-              } else {
-                setEstimatedValues(prev => ({ ...prev, secondaryGemstone: newValue }));
-              }
-            }
-          }}
-          inputProps={{ 
-            min: 0,
-            style: { width: '50px' }
-          }}
-          sx={{ 
-            ml: 1,
-            '& .MuiInputBase-root': {
-              ml: 0,
-              pl: 0
-            }
-          }}
-        />
-        {/* Only show the tab switching button if not editing a gem only */}
-        {/* {!location.state?.editingGemOnly && (
-          <Button 
-            variant="contained" 
-            color="primary" 
-            onClick={() => {
-              if (activeTab.startsWith('primary')) {
-                setActiveTab('secondary_gem_stone');
-              } else {
-                setActiveTab('primary_gem_stone');
-              }
-            }}
-            sx={{ ml: 2 }} 
-          >
-            {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
-          </Button>
-        )} */}
-         <Button 
-          variant="contained" 
-          color="primary" 
-          onClick={() => {
-            if (activeTab.startsWith('primary')) {
-              setActiveTab('secondary_gem_stone');
-            } else {
-              setActiveTab('primary_gem_stone');
-            }
-          }}
-          sx={{ ml: 2 }} 
-        >
-           {activeTab.startsWith('primary') ? 'Secondary Gem' : 'Primary Gem'}
-        </Button>
-      </Grid>
-    </Grid>
-  );
-
-  // Rendering functions
-  const renderTabButtons = () => {
-    // Check if editingGemOnly flag is set in location.state
-    const editingGemOnly = location.state?.editingGemOnly || false;
-    
-    // When editing gem only, always render the primary gem tab
-    if (editingGemOnly) {
-      return (
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h6">
-            ESTIMATE GEM VALUE
-          </Typography>
-          {/* Removed radio buttons as they shouldn't appear here */}
-        </Box>
-      );
-    }
-  };
-
-  const handleNextTab = () => {
-    if (activeTab < 2) {
-      setActiveTab(prevTab => prevTab + 1);
-    }
-  };
 
   // Function to determine color category based on exact color
   const getColorCategory = (exactColor) => {
@@ -2194,19 +1606,6 @@ function JewelEstimator() {
     return category?.name || 'Colorless';
   };
 
-  const [itemTransactionTypes, setItemTransactionTypes] = useState({});
-
-  useEffect(() => {
-    // Initialize transaction types from existing items or session storage
-    setItemTransactionTypes(prev => {
-      const newTypes = { ...prev };
-      estimatedItems.forEach((item, index) => {
-        // Use the item's transaction type if it exists, otherwise use the previous value or default to 'pawn'
-        newTypes[index] = item.transactionType || prev[index] || 'pawn';
-      });
-      return newTypes;
-    });
-  }, [estimatedItems]);
 
   useEffect(() => {
     // Try to restore state from location or session storage
@@ -2231,8 +1630,6 @@ function JewelEstimator() {
       shapeRef.current.focus();
     }
   }, []);
-
-  const SliderStyled = styled(Slider)({});
 
   const handleTransactionTypeChange = (index, newType) => {
     setEstimatedItems(prevItems => {
@@ -2260,7 +1657,6 @@ function JewelEstimator() {
 
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedItemIndex, setSelectedItemIndex] = useState(null);
-  const [itemToEdit, setItemToEdit] = useState(null);
   const [itemDetails, setItemDetails] = useState({
     brand: '',
     additionalInfo: '',
@@ -2285,7 +1681,6 @@ function JewelEstimator() {
   const handleCloseDialog = () => {
     setOpenDialog(false);
     setSelectedItemIndex(null);
-    setItemToEdit(null); // Clear the item being edited
   };
 
   const handleDetailChange = (field, value) => {
@@ -2324,7 +1719,6 @@ function JewelEstimator() {
     });
     setOpenDialog(false);
     setSelectedItemIndex(null);
-    setItemToEdit(null); // Clear the item being edited
   };
 
   const calculateTotalGemWeight = () => {
@@ -2512,92 +1906,6 @@ function JewelEstimator() {
     }
   }, []);
 
-  const handleAddDiamond = (newDiamond, isPrimary = true) => {
-    // Calculate price estimates for the diamond
-    const diamondValue = isPrimary ? estimatedValues.primaryDiamond : estimatedValues.secondaryDiamond;
-
-    // Calculate the price estimates
-    const estimates = calculateGemPriceEstimates(diamondValue);
-
-    // Add the diamond with its value and price estimates
-    const diamondWithValue = {
-      ...newDiamond,
-      estimatedValue: diamondValue,
-      priceEstimates: estimates
-    };
-    setDiamondSummary(prev => [...prev, diamondWithValue]);
-
-    // Update the added gem types
-    setAddedGemTypes(prev => ({
-      ...prev,
-      [isPrimary ? 'primary' : 'secondary']: 'diamond'
-    }));
-
-    // If adding a secondary gem, immediately update localStorage to clear secondary form data
-    if (!isPrimary) {
-      // Get current saved state
-      const savedGemState = localStorage.getItem(getUserStorageKey('jewelEstimator_gemForm'));
-      if (savedGemState) {
-        try {
-          const parsedState = JSON.parse(savedGemState);
-          // Clear secondary forms but keep everything else
-          parsedState.secondaryDiamondForm = null;
-          parsedState.secondaryStoneForm = null;
-          parsedState.addedGemTypes = {
-            ...parsedState.addedGemTypes,
-            secondary: 'diamond'
-          };
-          localStorage.setItem(getUserStorageKey('jewelEstimator_gemForm'), JSON.stringify(parsedState));
-        } catch (error) {
-          console.error('[JewelEstimator] Error updating localStorage:', error);
-        }
-      }
-    }
-  };
-
-  const handleAddStone = (newStone, isPrimary = true) => {
-    // Calculate price estimates for the stone
-    const stoneValue = isPrimary ? estimatedValues.primaryGemstone : estimatedValues.secondaryGemstone;
-
-    // Calculate the price estimates
-    const estimates = calculateGemPriceEstimates(stoneValue);
-
-    // Add the stone with its value and price estimates
-    const stoneWithValue = {
-      ...newStone,
-      estimatedValue: stoneValue,
-      priceEstimates: estimates
-    };
-    setStoneSummary(prev => [...prev, stoneWithValue]);
-
-    // Update the added gem types
-    setAddedGemTypes(prev => ({
-      ...prev,
-      [isPrimary ? 'primary' : 'secondary']: 'stone'
-    }));
-
-    // If adding a secondary gem, immediately update localStorage to clear secondary form data
-    if (!isPrimary) {
-      // Get current saved state
-      const savedGemState = localStorage.getItem(getUserStorageKey('jewelEstimator_gemForm'));
-      if (savedGemState) {
-        try {
-          const parsedState = JSON.parse(savedGemState);
-          // Clear secondary forms but keep everything else
-          parsedState.secondaryDiamondForm = null;
-          parsedState.secondaryStoneForm = null;
-          parsedState.addedGemTypes = {
-            ...parsedState.addedGemTypes,
-            secondary: 'stone'
-          };
-          localStorage.setItem(getUserStorageKey('jewelEstimator_gemForm'), JSON.stringify(parsedState));
-        } catch (error) {
-          console.error('[JewelEstimator] Error updating localStorage:', error);
-        }
-      }
-    }
-  };
-
   return (
     <Container maxWidth="lg" sx={{ pt: 4 }}>
       {/* Back to Ticket Button */}
@@ -2616,10 +1924,9 @@ function JewelEstimator() {
         {/* Metal Estimation Section */}
         <Grid item xs={12} md={3}>
           <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
-            <MetalEstimator 
+            <MetalEstimator
               onMetalValueChange={handleTotalMetalValueChange}
               onAddMetal={handleAddMetal}
-              setMetalFormState={handleMetalFormChange}
               initialData={location.state?.itemToEdit} />
           </Paper>
         </Grid>
@@ -2627,11 +1934,9 @@ function JewelEstimator() {
         {/* Gem Estimation Section */}
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
-            <GemEstimator 
-              onGemValueChange={handleTotalGemValueChange}
+            <GemEstimator
               onAddGem={handleAddGem}
-              setGemFormState={handleGemFormChange}
-              initialData={location.state?.itemToEdit} 
+              initialData={location.state?.itemToEdit}
             />
           </Paper>
         </Grid>
@@ -2952,14 +2257,14 @@ function JewelEstimator() {
                   // Return false to filter out items that are being edited
                   if (isEditingThisItem) return false;
                 }
-                
+
                 // Check for items being edited via dialog
-                if (itemToEdit && selectedItemIndex !== null) {
+                if (selectedItemIndex !== null) {
                   // Check metal properties against the metal in the editing item
-                  const dialogEditItem = itemToEdit;
-                  if (dialogEditItem.precious_metal_type === metal.preciousMetalType &&
+                  const dialogEditItem = estimatedItems[selectedItemIndex];
+                  if (dialogEditItem && dialogEditItem.precious_metal_type === metal.preciousMetalType &&
                       dialogEditItem.metal_weight === metal.weight &&
-                      (dialogEditItem.metal_purity === metal.purity?.value || 
+                      (dialogEditItem.metal_purity === metal.purity?.value ||
                        dialogEditItem.metal_purity === metal.purity?.purity)) {
                     return false;
                   }
@@ -3001,19 +2306,20 @@ function JewelEstimator() {
                   // Filter out diamonds being edited
                   .filter(diamond => {
                     // If editing via dialog and this diamond is in the item being edited, filter it out
-                    if (itemToEdit && selectedItemIndex !== null) {
-                      if (itemToEdit.diamonds && itemToEdit.diamonds.some(d => 
-                        d.shape === diamond.shape && 
-                        d.weight === diamond.weight && 
+                    if (selectedItemIndex !== null) {
+                      const dialogEditItem = estimatedItems[selectedItemIndex];
+                      if (dialogEditItem && dialogEditItem.diamonds && dialogEditItem.diamonds.some(d =>
+                        d.shape === diamond.shape &&
+                        d.weight === diamond.weight &&
                         d.clarity === diamond.clarity
                       )) {
                         return false;
                       }
                     }
-                    
+
                     // If editing via navigation
                     if (location.state?.itemToEdit && location.state.itemToEdit.diamonds) {
-                      if (location.state.itemToEdit.diamonds.some(d => 
+                      if (location.state.itemToEdit.diamonds.some(d =>
                         d.shape === diamond.shape && 
                         d.weight === diamond.weight && 
                         d.clarity === diamond.clarity
@@ -3052,70 +2358,23 @@ function JewelEstimator() {
                     </Grid>
                 ))}
             </Grid>
-            
-            <Grid container spacing={2} sx={{ mt: 0.25 }}>
-                {gemSummary.map((gem, index) => (
-                  <Grid item xs={12} key={`gem-${index}`}>
-                    <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative'}}>
-                      <div>
-                        <Typography variant="subtitle2">{gem.isPrimary ? 'Primary' : 'Secondary'} {gem.type.charAt(0).toUpperCase() + gem.type.slice(1)}</Typography>
-                        {gem.type === 'diamond' && (
-                          <>
-                            <Typography variant="body2">Shape: {gem.shape}</Typography>
-                            <Typography variant="body2">Clarity: {gem.clarity}</Typography>
-                            <Typography variant="body2">Color: {gem.color}</Typography>
-                            <Typography variant="body2">Cut: {gem.cut}</Typography>
-                            <Typography variant="body2">Weight: {gem.weight}</Typography>
-                            <Typography variant="body2">Quantity: {gem.quantity}</Typography>
-                            <Typography variant="body2">Lab Grown: {gem.labGrown ? 'Yes' : 'No'}</Typography>
-                            <Typography variant="body2">Exact Color: {gem.exactColor}</Typography>
-                            <Typography variant="body2">Value: ${gem.value ? gem.value.toFixed(2) : '0.00'}</Typography>
-                          </>
-                        )}
-                        {gem.type === 'stone' && (
-                          <>
-                            <Typography variant="body2">Type: {gem.name}</Typography>
-                            <Typography variant="body2">Shape: {gem.shape}</Typography>
-                            <Typography variant="body2">Color: {gem.color}</Typography>
-                            <Typography variant="body2">Weight: {gem.weight}</Typography>
-                            <Typography variant="body2">Quantity: {gem.quantity}</Typography>
-                            <Typography variant="body2">Authentic: {gem.authentic ? 'Yes' : 'Unknown'}</Typography>
-                            <Typography variant="body2">Value: ${gem.value ? gem.value.toFixed(2) : '0.00'}</Typography>
-                          </>
-                        )}
-                      </div>
-                      <IconButton 
-                        variant="outlined" 
-                        onClick={() => handleDeleteFromGemSummary(index)}
-                        sx={{
-                          position: 'absolute',
-                          top: 8,
-                          right: 8,
-                          minWidth: 'auto'
-                        }}
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    </Paper>
-                  </Grid>
-                ))}
-            </Grid>
-            
+
             <Grid container spacing={2} sx={{ mt: 0.25 }}>
                 {stoneSummary
                   // Filter out stones being edited
                   .filter(stone => {
                     // If editing via dialog and this stone is in the item being edited, filter it out
-                    if (itemToEdit && selectedItemIndex !== null) {
-                      if (itemToEdit.stones && itemToEdit.stones.some(s => 
-                        s.name === stone.name && 
-                        s.weight === stone.weight && 
+                    if (selectedItemIndex !== null) {
+                      const dialogEditItem = estimatedItems[selectedItemIndex];
+                      if (dialogEditItem && dialogEditItem.stones && dialogEditItem.stones.some(s =>
+                        s.name === stone.name &&
+                        s.weight === stone.weight &&
                         s.shape === stone.shape
                       )) {
                         return false;
                       }
                     }
-                    
+
                     // If editing via navigation
                     if (location.state?.itemToEdit && location.state.itemToEdit.stones) {
                       if (location.state.itemToEdit.stones.some(s => 
@@ -3139,7 +2398,7 @@ function JewelEstimator() {
                             <Typography variant="body2">Color: {stone.color}</Typography>
                             <Typography variant="body2">Weight: {stone.weight}</Typography>
                             <Typography variant="body2">Quantity: {stone.quantity}</Typography>
-                            <Typography variant="body2">Authentic: {stone.authentic ? 'Yes' : 'Unknown'}</Typography>
+                            <Typography variant="body2">Genuine: {stone.authentic ? 'Yes' : 'Unknown'}</Typography>
                             </div>
                             <IconButton variant="outlined" onClick={() => handleDeleteGem(index, stone.type, stone.isPrimary)}
                                 sx={{
@@ -3202,12 +2461,12 @@ function JewelEstimator() {
                       }
 
                       // If no item is being edited, show all items
-                      if (!itemToEdit && !location.state?.itemToEdit) {
+                      if (selectedItemIndex === null && !location.state?.itemToEdit) {
                         return true;
                       }
                       
                       // If an item is currently being edited in the dialog, don't show the original
-                      if (itemToEdit && index === selectedItemIndex) {
+                      if (selectedItemIndex !== null && index === selectedItemIndex) {
                         return false;
                       }
                       
