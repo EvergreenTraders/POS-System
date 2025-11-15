@@ -80,8 +80,7 @@ function Checkout() {
 
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentDetails, setPaymentDetails] = useState({
-    cashAmount: '',
-    cardNumber: ''
+    cashAmount: ''
   });
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -150,8 +149,7 @@ function Checkout() {
       setPayments([]);
       setIsFullyPaid(false);
       setPaymentDetails({
-        cashAmount: '',
-        cardNumber: ''
+        cashAmount: ''
       });
 
       // Handle from generic estimator or specific estimators like coinsbullions
@@ -1035,11 +1033,9 @@ function Checkout() {
         });
       }
 
-      // Reset payment form but keep card number if using debit or credit card
+      // Reset payment form
       setPaymentDetails({
-        ...paymentDetails,
-        cashAmount: '',
-        cardNumber: (paymentMethod === 'debit' || paymentMethod === 'credit') ? paymentDetails.cardNumber : ''
+        cashAmount: ''
       });
     } catch (error) {
       if (error.message === 'Authentication token not found') {
@@ -1742,16 +1738,6 @@ function Checkout() {
                 </Select>
               </FormControl>
 
-              {/* Card number field for debit or credit card */}
-              {(paymentMethod === 'debit' || paymentMethod === 'credit') && (
-                <TextField
-                  fullWidth
-                  label="Card Number"
-                  value={paymentDetails.cardNumber}
-                  onChange={handleInputChange('cardNumber')}
-                  sx={{ mb: 2 }}
-                />
-              )}
               {/* Action Buttons */}
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
                 <Button
