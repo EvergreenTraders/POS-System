@@ -337,7 +337,11 @@ const Cart = () => {
     switch (type) {
       case 'pawn': return -parseFloat(item.value || 0); // Money going out (negative)
       case 'buy': return -parseFloat(item.price || 0); // Money going out (negative)
-      case 'sale': return parseFloat(item.price || 0); // Money coming in (positive)
+      case 'sale': {
+        const itemPrice = parseFloat(item.price || 0); // Money coming in (positive)
+        const protectionPlanAmount = item.protectionPlan ? itemPrice * 0.15 : 0;
+        return itemPrice + protectionPlanAmount;
+      }
       case 'trade': return parseFloat(item.priceDiff || 0);
       case 'repair': return parseFloat(item.fee || 0); // Money coming in (positive)
       case 'payment': return parseFloat(item.amount || 0);
