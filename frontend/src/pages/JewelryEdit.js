@@ -2242,21 +2242,23 @@ function JewelryEdit() {
                         }
                       }}
                     >
-                      {inventoryStatuses.map((status) => (
-                        <MenuItem key={status.status_code} value={status.status_code}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Box 
-                              sx={{
-                                width: 10,
-                                height: 10,
-                                borderRadius: '50%',
-                                bgcolor: getStatusColor(status.status_code)
-                              }}
-                            />
-                            {status.status_name}
-                          </Box>
-                        </MenuItem>
-                      ))}
+                      {inventoryStatuses
+                        .filter((status) => status.status_code !== 'SOLD')
+                        .map((status) => (
+                          <MenuItem key={status.status_code} value={status.status_code}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Box
+                                sx={{
+                                  width: 10,
+                                  height: 10,
+                                  borderRadius: '50%',
+                                  bgcolor: getStatusColor(status.status_code)
+                                }}
+                              />
+                              {status.status_name}
+                            </Box>
+                          </MenuItem>
+                        ))}
                     </Select>
                   </FormControl>
                   {item.certification && (
