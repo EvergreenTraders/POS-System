@@ -29,7 +29,8 @@ import {
   Link as LinkIcon,
   LinkOff as LinkOffIcon,
   Add as AddIcon,
-  Delete as DeleteIcon
+  Delete as DeleteIcon,
+  Print as PrintIcon
 } from '@mui/icons-material';
 import config from '../config';
 import axios from 'axios';
@@ -124,6 +125,317 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
     }
     // Open authorization dialog
     setOpenAuthorizationDialog(true);
+  };
+
+  const handlePrintAuthorizationForm = async () => {
+    if (!selectedCustomer) {
+      setError('Please select a customer to link');
+      return;
+    }
+
+    // Fetch business info for logo, name, and address
+    let businessName = 'Business Name';
+    let businessAddress = '';
+    let logoUrl = '';
+
+    try {
+      const response = await axios.get(`${API_BASE_URL}/business-info`);
+      if (response.data) {
+        businessName = response.data.business_name || 'Business Name';
+        businessAddress = response.data.address || '';
+        if (response.data.logo) {
+          logoUrl = `data:${response.data.logo_mimetype};base64,${response.data.logo}`;
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching business info:', error);
+    }
+
+    // Fetch primary customer details for email and phone
+    let primaryCustomerEmail = '';
+    let primaryCustomerPhone = '';
+
+    try {
+      const customerResponse = await axios.get(`${API_BASE_URL}/customers/${customerId}`);
+      if (customerResponse.data) {
+        primaryCustomerEmail = customerResponse.data.email || '';
+        primaryCustomerPhone = customerResponse.data.phone || '';
+      }
+    } catch (error) {
+      console.error('Error fetching customer details:', error);
+    }
+
+    // Create the printable form HTML
+    const printWindow = window.open('', '_blank');
+    const formHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Account Linking Authorization Form</title>
+        <style>
+          @page {
+            size: A4;
+            margin: 0.5in;
+          }
+          @media print {
+            body { margin: 0; padding: 0; }
+            .no-print { display: none; }
+            @page {
+              margin-top: 0.5in;
+              margin-bottom: 0.5in;
+            }
+          }
+          * {
+            box-sizing: border-box;
+          }
+          body {
+            font-family: Arial, sans-serif;
+            font-size: 11px;
+            line-height: 1.3;
+            padding: 15px;
+            max-width: 8.5in;
+            margin: 0 auto;
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 3px solid #333;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+          }
+          .logo-container {
+            max-width: 120px;
+          }
+          .logo {
+            max-width: 100%;
+            max-height: 60px;
+          }
+          .business-info {
+            text-align: center;
+            flex: 1;
+          }
+          .business-name {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 0 0 3px 0;
+          }
+          .business-address {
+            font-size: 9px;
+            color: #666;
+            margin: 0;
+          }
+          h1 {
+            text-align: center;
+            color: #333;
+            font-size: 16px;
+            margin: 10px 0;
+            text-transform: uppercase;
+          }
+          .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+          }
+          .section {
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 4px;
+          }
+          .section-title {
+            font-weight: bold;
+            font-size: 12px;
+            margin-bottom: 8px;
+            color: #333;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 4px;
+          }
+          .field {
+            margin: 5px 0;
+            display: flex;
+          }
+          .label {
+            font-weight: bold;
+            min-width: 90px;
+            font-size: 10px;
+          }
+          .value {
+            border-bottom: 1px dotted #666;
+            flex: 1;
+            padding: 2px 5px;
+            font-size: 10px;
+          }
+          .auth-section {
+            margin: 15px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+          }
+          .auth-text {
+            font-size: 10px;
+            line-height: 1.4;
+            margin: 8px 0;
+            text-align: justify;
+          }
+          .permissions-list {
+            font-size: 10px;
+            margin: 5px 0 5px 15px;
+            padding: 0;
+          }
+          .permissions-list li {
+            margin: 3px 0;
+          }
+          .signature-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 15px;
+          }
+          .signature-box {
+            border: 1px solid #333;
+            padding: 8px;
+            min-height: 70px;
+          }
+          .sig-label {
+            font-size: 10px;
+            font-weight: bold;
+            margin-bottom: 40px;
+          }
+          .signature-line {
+            border-top: 1px solid #333;
+            margin-top: 35px;
+            padding-top: 3px;
+            text-align: center;
+            font-size: 9px;
+          }
+          .button-container {
+            margin: 15px 0;
+            text-align: center;
+          }
+          button {
+            background-color: #1976d2;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            font-size: 13px;
+            cursor: pointer;
+            border-radius: 4px;
+            margin: 0 8px;
+          }
+          button:hover {
+            background-color: #1565c0;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          ${logoUrl ? `<div class="logo-container"><img src="${logoUrl}" alt="Logo" class="logo" /></div>` : '<div class="logo-container"></div>'}
+          <div class="business-info">
+            <h2 class="business-name">${businessName}</h2>
+            ${businessAddress ? `<p class="business-address">${businessAddress}</p>` : ''}
+          </div>
+          <div class="logo-container"></div>
+        </div>
+
+        <h1>Account Linking Authorization Form</h1>
+
+        <div class="info-grid">
+          <div class="section">
+            <div class="section-title">Primary Account Holder</div>
+            <div class="field">
+              <span class="label">Name:</span>
+              <span class="value">${customerName || ''}</span>
+            </div>
+            <div class="field">
+              <span class="label">Phone:</span>
+              <span class="value">${primaryCustomerPhone || ''}</span>
+            </div>
+            <div class="field">
+              <span class="label">Email:</span>
+              <span class="value">${primaryCustomerEmail || ''}</span>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Linked Account</div>
+            <div class="field">
+              <span class="label">Name:</span>
+              <span class="value">${selectedCustomer.first_name || ''} ${selectedCustomer.last_name || ''}</span>
+            </div>
+            <div class="field">
+              <span class="label">Phone:</span>
+              <span class="value">${selectedCustomer.phone || ''}</span>
+            </div>
+            <div class="field">
+              <span class="label">Email:</span>
+              <span class="value">${selectedCustomer.email || ''}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Authorization Details</div>
+          <div class="field">
+            <span class="label">Link Type:</span>
+            <span class="value">${linkType === 'full_access' ? 'Full Access' : linkType === 'view_only' ? 'View Only' : 'Payment Only'}</span>
+          </div>
+          <div class="field">
+            <span class="label">Date:</span>
+            <span class="value">${new Date().toLocaleDateString()}</span>
+          </div>
+          ${notes ? `<div class="field"><span class="label">Notes:</span><span class="value">${notes}</span></div>` : ''}
+        </div>
+
+        <div class="auth-section">
+          <p class="auth-text">I, <strong>${customerName || ''}</strong>, hereby authorize the linking of my account with the account of <strong>${selectedCustomer.first_name || ''} ${selectedCustomer.last_name || ''}</strong> with <strong>${linkType === 'full_access' ? 'Full Access' : linkType === 'view_only' ? 'View Only' : 'Payment Only'}</strong> permissions.</p>
+
+          <p class="auth-text">The linked account holder is authorized to:</p>
+          <ul class="permissions-list">
+            ${linkType === 'full_access' ? `
+              <li>View all account information and transaction history</li>
+              <li>Make payments and conduct transactions on my behalf</li>
+              <li>Update account information</li>
+            ` : linkType === 'view_only' ? `
+              <li>View account information and transaction history only</li>
+              <li>No transaction, payment, or modification capabilities</li>
+            ` : `
+              <li>Make payments on my behalf</li>
+              <li>Limited access to account information</li>
+            `}
+          </ul>
+
+          <p class="auth-text">I understand that I am responsible for all actions taken by the linked account holder and may revoke this authorization at any time.</p>
+        </div>
+
+        <div class="signature-row">
+          <div class="signature-box">
+            <div class="sig-label">Primary Account Holder Signature</div>
+            <div class="signature-line">${customerName || ''}</div>
+          </div>
+          <div class="signature-box">
+            <div class="sig-label">Date</div>
+            <div class="signature-line"></div>
+          </div>
+        </div>
+
+        <div class="button-container no-print">
+          <button onclick="window.print()">Print / Save as PDF</button>
+          <button onclick="window.close()">Close</button>
+        </div>
+
+        <script>
+          // Automatically focus the window for better print experience
+          window.onload = function() {
+            window.focus();
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(formHTML);
+    printWindow.document.close();
   };
 
   const handleAuthorizationComplete = async (authorizationData) => {
@@ -379,8 +691,13 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseLinkDialog} disabled={loading}>
-            Cancel
+          <Button
+            variant="outlined"
+            startIcon={<PrintIcon />}
+            onClick={handlePrintAuthorizationForm}
+            disabled={loading || !selectedCustomer}
+          >
+            Print Authorization Form
           </Button>
           <Button
             variant="contained"
@@ -388,6 +705,9 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
             disabled={loading || !selectedCustomer}
           >
             {loading ? <CircularProgress size={20} /> : 'Proceed to Authorization'}
+          </Button>
+           <Button onClick={handleCloseLinkDialog} disabled={loading}>
+            Cancel
           </Button>
         </DialogActions>
       </Dialog>
