@@ -39,6 +39,8 @@ function TransactionJournals() {
   const [employee, setEmployee] = useState('');
   const [businessDate, setBusinessDate] = useState(null);
   const [transactionNumber, setTransactionNumber] = useState('');
+  const [ticketId, setTicketId] = useState('');
+  const [amountFilter, setAmountFilter] = useState('');
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [transactionItems, setTransactionItems] = useState([]);
@@ -52,6 +54,7 @@ function TransactionJournals() {
   
   const [transactions, setTransactions] = useState([]);
   const [transactionItemsMap, setTransactionItemsMap] = useState({});
+  const [buyTicketsMap, setBuyTicketsMap] = useState({}); // Map of transaction_id to buy_tickets
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stores, setStores] = useState([]);
@@ -712,14 +715,35 @@ function TransactionJournals() {
           itemsMap[transactionId] = items;
         });
         setTransactionItemsMap(itemsMap);
-        
+
+        // Fetch all buy tickets in parallel
+        const buyTicketsPromises = transactionsData.map(tx =>
+          axios.get(`${API_BASE_URL}/buy-ticket?transaction_id=${tx.transaction_id}`)
+            .then(res => ({
+              transactionId: tx.transaction_id,
+              buyTickets: res.data || []
+            }))
+            .catch(() => ({
+              transactionId: tx.transaction_id,
+              buyTickets: []
+            }))
+        );
+
+        // Process all buy tickets responses
+        const buyTicketsResponses = await Promise.all(buyTicketsPromises);
+        const ticketsMap = {};
+        buyTicketsResponses.forEach(({ transactionId, buyTickets }) => {
+          ticketsMap[transactionId] = buyTickets;
+        });
+        setBuyTicketsMap(ticketsMap);
+
         // Transform employees data for the dropdown
         const employeeOptions = employeesRes.data.map(emp => ({
           id: emp.employee_id,
           name: `${emp.first_name} ${emp.last_name}`,
           ...emp
         }));
-        
+
         setEmployees(employeeOptions);
         
       } catch (err) {
@@ -791,26 +815,26 @@ function TransactionJournals() {
   // Filter transactions based on search criteria
   const filteredTransactions = transactions.filter(tx => {
     const matchesStore = !store || tx.store_id === store;
-    
+
     // Check employee match if employee is selected
     let matchesEmployee = true;
     if (employee) {
       matchesEmployee = tx.employee_id?.toString() === employee.toString();
     }
-    
-    const matchesTransactionNumber = !transactionNumber || 
+
+    const matchesTransactionNumber = !transactionNumber ||
       tx.transaction_id?.toLowerCase().includes(transactionNumber.toLowerCase());
-    
+
     // Check transaction type match
     let matchesTransactionType = !transactionType;
     if (transactionType) {
       const items = transactionItemsMap[tx.transaction_id] || [];
       // Match if transaction type matches any item's type or the transaction's main type
-      matchesTransactionType = items.some(item => 
+      matchesTransactionType = items.some(item =>
         item.transaction_type?.toLowerCase() === transactionType.toLowerCase()
       ) || tx.transaction_type_name?.toLowerCase() === transactionType.toLowerCase();
     }
-      
+
     // Check date match if businessDate is set
     let matchesDate = true;
     if (businessDate) {
@@ -818,9 +842,29 @@ function TransactionJournals() {
       const selectedDate = new Date(businessDate).toDateString();
       matchesDate = txDate === selectedDate;
     }
-    
-    return matchesStore && matchesEmployee && matchesTransactionNumber && 
-           matchesDate && matchesTransactionType;
+
+    // Check ticket ID match - search through buy_tickets for this transaction
+    let matchesTicketId = true;
+    if (ticketId) {
+      const txBuyTickets = buyTicketsMap[tx.transaction_id] || [];
+      // Match if any buy ticket ID contains the search string
+      matchesTicketId = txBuyTickets.some(ticket =>
+        ticket.buy_ticket_id?.toLowerCase().includes(ticketId.toLowerCase())
+      );
+    }
+
+    // Check amount match
+    let matchesAmount = true;
+    if (amountFilter) {
+      const filterAmount = parseFloat(amountFilter);
+      if (!isNaN(filterAmount)) {
+        const txAmount = parseFloat(tx.total_amount || 0);
+        matchesAmount = Math.abs(txAmount - filterAmount) < 0.01; // Match with small tolerance for floating point
+      }
+    }
+
+    return matchesStore && matchesEmployee && matchesTransactionNumber &&
+           matchesDate && matchesTransactionType && matchesTicketId && matchesAmount;
   });
 
   return (
@@ -877,7 +921,6 @@ function TransactionJournals() {
               value={employee}
               onChange={(e) => setEmployee(e.target.value)}
               label="Employee"
-              displayEmpty
             >
               <MenuItem value="">
                 <em>All Employees</em>
@@ -912,6 +955,27 @@ function TransactionJournals() {
             value={transactionNumber}
             onChange={(e) => setTransactionNumber(e.target.value)}
             sx={{ minWidth: 200, flex: 1 }}
+          />
+
+          <TextField
+            label="Ticket ID"
+            variant="outlined"
+            size="small"
+            value={ticketId}
+            onChange={(e) => setTicketId(e.target.value)}
+            sx={{ minWidth: 150, flex: 1 }}
+            placeholder="Search by ticket ID"
+          />
+
+          <TextField
+            label="Amount"
+            variant="outlined"
+            size="small"
+            type="number"
+            value={amountFilter}
+            onChange={(e) => setAmountFilter(e.target.value)}
+            sx={{ minWidth: 150, flex: 1 }}
+            placeholder="Filter by amount"
           />
         </Box>
       </Paper>
