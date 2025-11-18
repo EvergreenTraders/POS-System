@@ -3341,7 +3341,6 @@ app.get('/api/transactions', async (req, res) => {
         e.first_name || ' ' || e.last_name as employee_name,
         e.employee_id,
         t.total_amount,
-        t.transaction_status,
         t.created_at,
         t.updated_at,
         TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as formatted_created_at,
@@ -3353,7 +3352,7 @@ app.get('/api/transactions', async (req, res) => {
       GROUP BY
         t.transaction_id, t.customer_id, c.first_name, c.last_name, c.phone,
         c.address_line1, c.address_line2, c.city, c.state, c.postal_code,
-        e.first_name, e.last_name, e.employee_id, t.total_amount, t.transaction_status,
+        e.first_name, e.last_name, e.employee_id, t.total_amount,
         t.created_at, t.updated_at, tic.item_count
       ORDER BY t.created_at DESC`;
     
@@ -3412,7 +3411,6 @@ app.post('/api/transactions', async (req, res) => {
             employee_id,
             total_amount,
             cartItems,
-            transaction_status = 'PENDING',
             transaction_date = new Date().toISOString().split('T')[0]
         } = req.body;
 
@@ -3422,7 +3420,7 @@ app.post('/api/transactions', async (req, res) => {
         }
 
         await client.query('BEGIN');
-        
+
         // Generate unique transaction ID
         const transactionId = await generateTransactionId();
 
@@ -3430,9 +3428,9 @@ app.post('/api/transactions', async (req, res) => {
         const transactionQuery = `
             INSERT INTO transactions (
                 transaction_id, customer_id, employee_id,
-                total_amount, transaction_status, transaction_date
+                total_amount, transaction_date
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING *
         `;
 
@@ -3441,7 +3439,6 @@ app.post('/api/transactions', async (req, res) => {
             customer_id,
             employee_id,
             total_amount,
-            transaction_status,
             transaction_date
         ]);
 
@@ -3510,41 +3507,6 @@ app.delete('/api/transactions/:transaction_id', async (req, res) => {
   }
 });
 
-app.put('/api/transactions/:transaction_id', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { transaction_id } = req.params;
-    const { transaction_status } = req.body;
-
-    await client.query('BEGIN');
-
-    // Update transaction status
-    const updateQuery = `
-      UPDATE transactions
-      SET 
-        transaction_status = $1,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE transaction_id = $2
-      RETURNING *
-    `;
-    const result = await client.query(updateQuery, [transaction_status, transaction_id]);
-
-    if (result.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-    await client.query('COMMIT');
-    res.json({ message: 'Transaction updated successfully', transaction: result.rows[0] });
-
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error updating transaction:', err);
-    res.status(500).json({ error: 'Failed to update transaction', details: err.message });
-  } finally {
-    client.release();
-  }
-});
-
 // Get customer sales history
 app.get('/api/customers/:customer_id/sales-history', async (req, res) => {
   try {
@@ -3572,7 +3534,6 @@ app.get('/api/customers/:customer_id/sales-history', async (req, res) => {
       SELECT
         t.transaction_id,
         t.total_amount,
-        t.transaction_status,
         t.transaction_date,
         t.created_at,
         t.updated_at,
@@ -3602,9 +3563,7 @@ app.get('/api/customers/:customer_id/sales-history', async (req, res) => {
       total_transactions: result.rows.length,
       total_spent: result.rows.reduce((sum, row) => sum + parseFloat(row.total_amount), 0),
       total_paid: result.rows.reduce((sum, row) => sum + parseFloat(row.total_paid), 0),
-      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0),
-      completed_transactions: result.rows.filter(row => row.transaction_status === 'COMPLETED').length,
-      pending_transactions: result.rows.filter(row => row.transaction_status === 'PENDING').length
+      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0)
     };
 
     res.json({
@@ -3876,7 +3835,6 @@ app.get('/api/customers/:id/all-accessible-transactions', async (req, res) => {
         t.transaction_id,
         t.customer_id,
         t.total_amount,
-        t.transaction_status,
         t.transaction_date,
         t.created_at,
         t.updated_at,
@@ -3909,9 +3867,7 @@ app.get('/api/customers/:id/all-accessible-transactions', async (req, res) => {
       linked_transactions: result.rows.filter(row => row.is_linked_account).length,
       total_spent: result.rows.reduce((sum, row) => sum + parseFloat(row.total_amount), 0),
       total_paid: result.rows.reduce((sum, row) => sum + parseFloat(row.total_paid), 0),
-      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0),
-      completed_transactions: result.rows.filter(row => row.transaction_status === 'COMPLETED').length,
-      pending_transactions: result.rows.filter(row => row.transaction_status === 'PENDING').length
+      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0)
     };
 
     res.json({
@@ -4016,7 +3972,6 @@ app.get('/api/customer-dashboard', async (req, res) => {
         COUNT(*) as total_transactions,
         COALESCE(SUM(total_amount), 0) as total_revenue
       FROM transactions
-      WHERE transaction_status = 'COMPLETED'
     `;
     const transactionsResult = await pool.query(transactionsQuery);
     const totalTransactions = parseInt(transactionsResult.rows[0].total_transactions);
@@ -4032,7 +3987,7 @@ app.get('/api/customer-dashboard', async (req, res) => {
         COUNT(t.transaction_id) as transaction_count,
         COALESCE(SUM(t.total_amount), 0) as total_spent
       FROM customers c
-      LEFT JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      LEFT JOIN transactions t ON c.id = t.customer_id
       GROUP BY c.id, c.first_name, c.last_name, c.tax_exempt
       HAVING COUNT(t.transaction_id) > 0
       ORDER BY total_spent DESC
@@ -4051,12 +4006,11 @@ app.get('/api/customer-dashboard', async (req, res) => {
           SELECT total_amount
           FROM transactions
           WHERE customer_id = c.id
-          AND transaction_status = 'COMPLETED'
           ORDER BY transaction_date DESC
           LIMIT 1
         ) as last_transaction_amount
       FROM customers c
-      INNER JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      INNER JOIN transactions t ON c.id = t.customer_id
       GROUP BY c.id, c.first_name, c.last_name, c.email
       ORDER BY last_transaction_date DESC
       LIMIT 10
@@ -4074,7 +4028,7 @@ app.get('/api/customer-dashboard', async (req, res) => {
         CURRENT_DATE - MAX(t.transaction_date)::date as days_inactive,
         COALESCE(SUM(t.total_amount), 0) as total_spent
       FROM customers c
-      LEFT JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      LEFT JOIN transactions t ON c.id = t.customer_id
       GROUP BY c.id, c.first_name, c.last_name, c.phone, c.email
       HAVING MAX(t.transaction_date) IS NOT NULL
         AND (CURRENT_DATE - MAX(t.transaction_date)::date) >= 90
@@ -5482,15 +5436,7 @@ app.post('/api/payments', async (req, res) => {
       ) VALUES ($1, $2, $3) RETURNING *`,
       [transaction_id, amount, payment_method]
     );
-    
-    // Update transaction status if fully paid
-    if (Math.abs(newTotalPaid - transaction.total_amount) < 0.01) {
-      await client.query(
-        'UPDATE transactions SET transaction_status = $1 WHERE transaction_id = $2',
-        ['COMPLETED', transaction_id]
-      );
-    }
-    
+
     await client.query('COMMIT');
     res.status(201).json(paymentResult.rows[0]);
   } catch (error) {

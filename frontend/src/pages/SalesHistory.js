@@ -73,18 +73,6 @@ const SalesHistory = () => {
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'COMPLETED':
-        return 'success';
-      case 'PENDING':
-        return 'warning';
-      case 'CANCELLED':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
 
   const formatCurrency = (amount) => {
     return `$${parseFloat(amount).toFixed(2)}`;
@@ -240,18 +228,6 @@ const SalesHistory = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography color="text.secondary" gutterBottom>
-                Outstanding Balance
-              </Typography>
-              <Typography variant="h5" color={salesData?.summary?.outstanding_balance > 0 ? 'error.main' : 'success.main'}>
-                {formatCurrency(salesData?.summary?.outstanding_balance || 0)}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
       </Grid>
 
       {/* Transactions Table */}
@@ -267,9 +243,7 @@ const SalesHistory = () => {
                 <TableCell align="right"><strong>Items</strong></TableCell>
                 <TableCell align="right"><strong>Total Amount</strong></TableCell>
                 <TableCell align="right"><strong>Paid</strong></TableCell>
-                <TableCell align="right"><strong>Balance</strong></TableCell>
                 <TableCell><strong>Payment Method(s)</strong></TableCell>
-                <TableCell><strong>Status</strong></TableCell>
                 <TableCell><strong>Employee</strong></TableCell>
                 <TableCell align="center"><strong>Actions</strong></TableCell>
               </TableRow>
@@ -305,17 +279,7 @@ const SalesHistory = () => {
                     <TableCell align="right">{transaction.item_count}</TableCell>
                     <TableCell align="right">{formatCurrency(transaction.total_amount)}</TableCell>
                     <TableCell align="right">{formatCurrency(transaction.total_paid)}</TableCell>
-                    <TableCell align="right" sx={{ color: transaction.balance_due > 0 ? 'error.main' : 'text.primary' }}>
-                      {formatCurrency(transaction.balance_due)}
-                    </TableCell>
                     <TableCell>{transaction.payment_methods}</TableCell>
-                    <TableCell>
-                      <Chip
-                        label={transaction.transaction_status}
-                        color={getStatusColor(transaction.transaction_status)}
-                        size="small"
-                      />
-                    </TableCell>
                     <TableCell>{transaction.employee_name}</TableCell>
                     <TableCell align="center">
                       <Button
@@ -341,22 +305,6 @@ const SalesHistory = () => {
           </Table>
         </TableContainer>
       </Paper>
-
-      {/* Additional Statistics */}
-      {salesData?.summary && (
-        <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
-          <Chip
-            label={`${salesData.summary.completed_transactions} Completed`}
-            color="success"
-            variant="outlined"
-          />
-          <Chip
-            label={`${salesData.summary.pending_transactions} Pending`}
-            color="warning"
-            variant="outlined"
-          />
-        </Box>
-      )}
 
       {/* Transaction Details Dialog */}
       <Dialog
@@ -386,20 +334,6 @@ const SalesHistory = () => {
               <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
                 <Grid container spacing={2}>
                   <Grid item xs={6} sm={4}>
-                    <Typography variant="body2" color="text.secondary">Date</Typography>
-                    <Typography variant="body1">
-                      {selectedTransaction && new Date(selectedTransaction.created_at).toLocaleString()}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={6} sm={4}>
-                    <Typography variant="body2" color="text.secondary">Status</Typography>
-                    <Chip
-                      label={selectedTransaction?.transaction_status}
-                      color={getStatusColor(selectedTransaction?.transaction_status)}
-                      size="small"
-                    />
-                  </Grid>
-                  <Grid item xs={6} sm={4}>
                     <Typography variant="body2" color="text.secondary">Employee</Typography>
                     <Typography variant="body1">{selectedTransaction?.employee_name}</Typography>
                   </Grid>
@@ -411,16 +345,6 @@ const SalesHistory = () => {
                     <Typography variant="body2" color="text.secondary">Total Amount</Typography>
                     <Typography variant="body1" fontWeight="bold">
                       {formatCurrency(selectedTransaction?.total_amount || 0)}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={6} sm={4}>
-                    <Typography variant="body2" color="text.secondary">Balance Due</Typography>
-                    <Typography
-                      variant="body1"
-                      fontWeight="bold"
-                      color={selectedTransaction?.balance_due > 0 ? 'error.main' : 'success.main'}
-                    >
-                      {formatCurrency(selectedTransaction?.balance_due || 0)}
                     </Typography>
                   </Grid>
                 </Grid>

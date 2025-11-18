@@ -860,7 +860,6 @@ function Checkout() {
             customer_id: selectedCustomer.id,
             employee_id: employeeId,
             total_amount: parseFloat(calculateTotal().toFixed(2)), // Round to 2 decimal places
-            transaction_status: 'PENDING',
             transaction_date: new Date().toISOString().split('T')[0]
           };
 
@@ -958,21 +957,7 @@ function Checkout() {
             );
           }
 
-          // Step 4: Update transaction status to COMPLETED after all payments succeed
-          try {
-            await axios.put(
-              `${config.apiUrl}/transactions/${realTransactionId}`,
-              { transaction_status: 'COMPLETED' },
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-          } catch (statusUpdateError) {
-            console.error('Error updating transaction status:', statusUpdateError);
-            console.error('Error details:', statusUpdateError.response?.data);
-            // Continue with cart removal even if status update fails
-            // The transaction and payments are already recorded
-          }
-
-          // Step 5: Display success message and navigate to home
+          // Step 4: Display success message and navigate to home
           setLoading(false);
           setSnackbar({
             open: true,
