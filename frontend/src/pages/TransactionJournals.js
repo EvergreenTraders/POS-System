@@ -51,7 +51,7 @@ function TransactionJournals() {
   const [editedPayments, setEditedPayments] = useState([]);
   const [buyTickets, setBuyTickets] = useState([]);
   const API_BASE_URL = config.apiUrl;
-  
+
   const [transactions, setTransactions] = useState([]);
   const [transactionItemsMap, setTransactionItemsMap] = useState({});
   const [buyTicketsMap, setBuyTicketsMap] = useState({}); // Map of transaction_id to buy_tickets
@@ -61,6 +61,29 @@ function TransactionJournals() {
   const [employees, setEmployees] = useState([]);
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [paymentMethods, setPaymentMethods] = useState([]);
+  const [receiptConfig, setReceiptConfig] = useState({
+    transaction_receipt: 'Thank you for shopping with us',
+    buy_receipt: 'Thank you for shopping with us'
+  });
+
+  // Fetch receipt config from API
+  useEffect(() => {
+    const fetchReceiptConfig = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/receipt-config`);
+        if (response.data) {
+          setReceiptConfig({
+            transaction_receipt: response.data.transaction_receipt || 'Thank you for shopping with us',
+            buy_receipt: response.data.buy_receipt || 'Thank you for shopping with us'
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching receipt config:', error);
+      }
+    };
+
+    fetchReceiptConfig();
+  }, [API_BASE_URL]);
 
   // Fetch transaction types from API
   useEffect(() => {
@@ -342,18 +365,9 @@ function TransactionJournals() {
                 <span class="bold">$${totalAmount.toFixed(2)}</span>
               </div>
 
-            <!-- Terms and Conditions -->
+            <!-- Footer Text -->
             <div class="terms">
-              <p>CHARGES ON THIS ACCOUNT ARE DUE ON OR BEFORE:</p>
-              <p style="margin-top: 10px;">
-                I have been informed that the seller nor their employer nor any person employed is involved after
-                below (redemption date).
-              </p>
-              <p style="margin-top: 10px;">
-                Seller is hereby certified that the above inherent owner may re-purchase by notifying either
-                seller if that the above item is sold to this store after redemption date even that they have full
-                understanding of redemption date below (redemption date)
-              </p>
+              <p style="white-space: pre-wrap;">${receiptConfig.buy_receipt}</p>
             </div>
 
             <!-- Signature Lines -->
@@ -612,7 +626,7 @@ function TransactionJournals() {
         ` : ''}
 
         <div class="footer">
-          <p>Thank you for your business!</p>
+          <p style="white-space: pre-wrap;">${receiptConfig.transaction_receipt}</p>
         </div>
 
         <div class="no-print" style="text-align: center; margin-top: 30px;">

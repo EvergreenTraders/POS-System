@@ -2269,6 +2269,62 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
   }
 });
 
+// GET route for fetching receipt config
+app.get('/api/receipt-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM receipt_config ORDER BY created_at DESC LIMIT 1');
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No receipt configuration found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching receipt config:', err);
+    res.status(500).json({ error: 'Failed to fetch receipt configuration' });
+  }
+});
+
+// PUT route for updating receipt config
+app.put('/api/receipt-config', async (req, res) => {
+  try {
+    const {
+      transaction_receipt,
+      buy_receipt,
+      pawn_receipt,
+      layaway_receipt,
+      return_receipt,
+      refund_receipt
+    } = req.body;
+
+    // Check if a record already exists
+    const checkResult = await pool.query('SELECT * FROM receipt_config');
+
+    let result;
+    if (checkResult.rows.length === 0) {
+      // Insert new record
+      result = await pool.query(
+        `INSERT INTO receipt_config (transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt]
+      );
+    } else {
+      // Update existing record
+      result = await pool.query(
+        `UPDATE receipt_config
+         SET transaction_receipt = $1, buy_receipt = $2, pawn_receipt = $3,
+             layaway_receipt = $4, return_receipt = $5, refund_receipt = $6,
+             updated_at = CURRENT_TIMESTAMP
+         RETURNING *`,
+        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt]
+      );
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating receipt config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // Customer Preferences Configuration API Endpoints
 app.get('/api/customer-preferences/config', async (req, res) => {
   try {
