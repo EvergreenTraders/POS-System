@@ -375,7 +375,9 @@ function TransactionJournals() {
     if (!selectedTransaction) return;
 
     // Fetch business info
-    let businessName = 'POS Pro System';
+    let businessName = '';
+    let businessAddress = '';
+    let businessPhone = '';
     let businessLogo = '';
     let businessLogoMimetype = '';
 
@@ -387,6 +389,8 @@ function TransactionJournals() {
 
       if (response.data) {
         businessName = response.data.business_name || 'POS Pro System';
+        businessAddress = response.data.address || '';
+        businessPhone = response.data.phone || '';
         if (response.data.logo && response.data.logo_mimetype) {
           businessLogo = response.data.logo;
           businessLogoMimetype = response.data.logo_mimetype;
@@ -395,6 +399,22 @@ function TransactionJournals() {
     } catch (error) {
       console.error('Error fetching business info:', error);
     }
+
+    // Get customer address and phone from transaction data (already fetched from backend)
+    const customerAddress = selectedTransaction?.customer_address || '';
+    const customerPhone = selectedTransaction?.customer_phone || '';
+
+    // Group items by ticket ID
+    const allTicketGroups = {};
+    transactionItems.forEach(item => {
+      const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
+      const ticketId = buyTicket?.buy_ticket_id || 'no-ticket';
+
+      if (!allTicketGroups[ticketId]) {
+        allTicketGroups[ticketId] = [];
+      }
+      allTicketGroups[ticketId].push(item);
+    });
 
     // Create HTML content for the transaction receipt
     const receiptHTML = `
@@ -503,7 +523,8 @@ function TransactionJournals() {
           ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Business Logo" />` : ''}
           <div class="header-content">
             <h1>${businessName}</h1>
-            <p>Transaction Receipt</p>
+            ${businessAddress ? `<p>${businessAddress}</p>` : ''}
+            ${businessPhone ? `<p>${businessPhone}</p>` : ''}
           </div>
         </div>
 
@@ -520,48 +541,50 @@ function TransactionJournals() {
             <span class="info-label">Customer:</span>
             <span>${selectedTransaction.customer_name || 'N/A'}</span>
           </div>
+          ${customerPhone ? `
+          <div class="info-row">
+            <span class="info-label">Phone:</span>
+            <span>${customerPhone}</span>
+          </div>
+          ` : ''}
+          ${customerAddress ? `
+          <div class="info-row">
+            <span class="info-label">Address:</span>
+            <span>${customerAddress}</span>
+          </div>
+          ` : ''}
           <div class="info-row">
             <span class="info-label">Employee:</span>
             <span>${selectedTransaction.employee_name || 'N/A'}</span>
           </div>
-          <div class="info-row">
-            <span class="info-label">Status:</span>
-            <span style="color: ${selectedTransaction.status === 'voided' ? 'red' : 'inherit'}; text-transform: capitalize;">
-              ${selectedTransaction.status || 'completed'}
-            </span>
-          </div>
         </div>
 
-        <table class="items-table">
-          <thead>
-            <tr>
-              <th>Description</th>
-              <th>Type</th>
-              <th style="text-align: right;">Price</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${transactionItems.map((item, index) => `
-              <tr>
-                <td>
-                  ${item.item_details?.description || `Item ${index + 1}`}
-                  ${item.description ? `<br><small style="color: #666;">${item.description}</small>` : ''}
-                </td>
-                <td>${item.transaction_type}</td>
-                <td style="text-align: right;">
-                  $${parseFloat(item.item_price || 0).toFixed(2)}
-                  ${item.quantity > 1 ? `<br><small style="color: #666;">${item.quantity} @ $${(parseFloat(item.item_price || 0) / item.quantity).toFixed(2)} each</small>` : ''}
-                </td>
-              </tr>
-            `).join('')}
-            <tr class="total-row">
-              <td colspan="2" style="text-align: right;">Subtotal:</td>
-              <td style="text-align: right;">
-                $${transactionItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0) * (item.quantity || 1)), 0).toFixed(2)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        ${Object.entries(allTicketGroups).map(([ticketId, items]) => `
+          ${ticketId !== 'no-ticket' ? `
+            <div style="margin-top: 15px; padding: 5px; background-color: #e3f2fd; font-weight: bold; font-size: 11px;">
+             ${ticketId}
+            </div>
+          ` : ''}
+          <table class="items-table">
+            <tbody>
+              ${items.map((item, index) => {
+                const price = parseFloat(item.item_price || 0);
+                return `
+                  <tr>
+                    <td>
+                      ${item.item_details?.description || `Item ${index + 1}`}
+                      ${item.description ? `<br><small style="color: #666;">${item.description}</small>` : ''}
+                    </td>
+                    <td style="text-align: right;">
+                      $${price.toFixed(2)}
+                      ${item.quantity > 1 ? `<br><small style="color: #666;">${item.quantity} @ $${(price / item.quantity).toFixed(2)} each</small>` : ''}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        `).join('')}
 
         ${paymentDetails.payments.length > 0 ? `
           <div class="payment-section">
@@ -587,7 +610,6 @@ function TransactionJournals() {
 
         <div class="footer">
           <p>Thank you for your business!</p>
-          <p>POS Pro System - Transaction Receipt</p>
         </div>
 
         <div class="no-print" style="text-align: center; margin-top: 30px;">
@@ -904,7 +926,6 @@ function TransactionJournals() {
               <TableCell>Customer</TableCell>
               <TableCell>Employee</TableCell>
               <TableCell>Amount</TableCell>
-              <TableCell>Status</TableCell>
               <TableCell>Void</TableCell>
             </TableRow>
           </TableHead>
@@ -947,14 +968,6 @@ function TransactionJournals() {
                   <TableCell>{txn.customer_name || 'N/A'}</TableCell>
                   <TableCell>{txn.employee_name || 'N/A'}</TableCell>
                   <TableCell>${parseFloat(txn.total_amount || 0).toFixed(2)}</TableCell>
-                  <TableCell>
-                    <span style={{
-                      color: txn.status === 'voided' ? 'red' : 'inherit',
-                      textTransform: 'capitalize'
-                    }}>
-                      {txn.status || 'completed'}
-                    </span>
-                  </TableCell>
                   <TableCell>
                     <Box display="flex" alignItems="center">
                       {txn.status !== 'voided' && (
@@ -1002,15 +1015,6 @@ function TransactionJournals() {
                       <TableCell>${(Math.abs(parseFloat(selectedTransaction.total_amount || 0))).toFixed(2)}</TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell variant="head">Status</TableCell>
-                      <TableCell>
-                        <span style={{
-                          color: selectedTransaction.status === 'voided' ? 'red' : 'inherit',
-                          textTransform: 'capitalize'
-                        }}>
-                          {selectedTransaction.status || 'completed'}
-                        </span>
-                      </TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell variant="head" colSpan={2} sx={{ fontWeight: 'bold', pt: 3 }}>
@@ -1221,7 +1225,7 @@ function TransactionJournals() {
                 variant="contained"
                 startIcon={<PrintIcon />}
               >
-                Print Transaction
+                Reprint
               </Button>
               <Button onClick={handleCloseDialog} color="primary">
                 Close

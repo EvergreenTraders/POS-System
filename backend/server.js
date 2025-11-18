@@ -3323,10 +3323,21 @@ app.get('/api/transactions', async (req, res) => {
         FROM transaction_items ti
         GROUP BY ti.transaction_id
       )
-      SELECT 
+      SELECT
         t.transaction_id as id,
         t.transaction_id,
+        t.customer_id,
         c.first_name || ' ' || c.last_name as customer_name,
+        c.phone as customer_phone,
+        TRIM(CONCAT_WS(', ',
+          NULLIF(c.address_line1, ''),
+          NULLIF(c.address_line2, ''),
+          NULLIF(CONCAT_WS(', ',
+            NULLIF(c.city, ''),
+            NULLIF(c.state, ''),
+            NULLIF(c.postal_code, '')
+          ), '')
+        )) as customer_address,
         e.first_name || ' ' || e.last_name as employee_name,
         e.employee_id,
         t.total_amount,
@@ -3339,10 +3350,11 @@ app.get('/api/transactions', async (req, res) => {
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN employees e ON t.employee_id = e.employee_id
       LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
-      GROUP BY 
-        t.transaction_id, c.first_name, c.last_name, e.first_name, e.last_name, 
-        e.employee_id, t.total_amount, t.transaction_status, t.created_at, 
-        t.updated_at, tic.item_count
+      GROUP BY
+        t.transaction_id, t.customer_id, c.first_name, c.last_name, c.phone,
+        c.address_line1, c.address_line2, c.city, c.state, c.postal_code,
+        e.first_name, e.last_name, e.employee_id, t.total_amount, t.transaction_status,
+        t.created_at, t.updated_at, tic.item_count
       ORDER BY t.created_at DESC`;
     
     const result = await pool.query(query);
