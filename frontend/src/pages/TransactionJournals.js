@@ -47,6 +47,7 @@ function TransactionJournals() {
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [isEditingPayments, setIsEditingPayments] = useState(false);
   const [editedPayments, setEditedPayments] = useState([]);
+  const [buyTickets, setBuyTickets] = useState([]);
   const API_BASE_URL = config.apiUrl;
   
   const [transactions, setTransactions] = useState([]);
@@ -96,22 +97,32 @@ function TransactionJournals() {
     setLoadingItems(true);
     setLoadingPayments(true);
     setViewDialogOpen(true);
-    
+
     try {
       // Get all transaction items from the pre-fetched map
       const items = transactionItemsMap[transaction.transaction_id] || [];
       setTransactionItems(items);
-      
+
       // Fetch payment details
       const response = await axios.get(`${API_BASE_URL}/transactions/${transaction.transaction_id}/payments`);
       setPaymentDetails({
         payments: response.data.payments || [],
         total_paid: response.data.total_paid || 0
       });
+
+      // Fetch buy_ticket data for this transaction
+      try {
+        const buyTicketResponse = await axios.get(`${API_BASE_URL}/buy-ticket?transaction_id=${transaction.transaction_id}`);
+        setBuyTickets(buyTicketResponse.data || []);
+      } catch (buyTicketError) {
+        console.error('Error fetching buy tickets:', buyTicketError);
+        setBuyTickets([]);
+      }
     } catch (error) {
       console.error('Error fetching transaction details:', error);
       // Initialize with empty data if there's an error
       setPaymentDetails({ payments: [], total_paid: 0 });
+      setBuyTickets([]);
     } finally {
       setLoadingItems(false);
       setLoadingPayments(false);
@@ -123,7 +134,241 @@ function TransactionJournals() {
     setSelectedTransaction(null);
     // Reset payment details when closing dialog
     setPaymentDetails({ payments: [], total_paid: 0 });
+    setBuyTickets([]);
     // Don't clear transaction items to keep them in memory
+  };
+
+  // Group transaction items by buy_ticket_id
+  const groupItemsByTicket = () => {
+    const grouped = {};
+
+    transactionItems.forEach((item, index) => {
+      // Find the buy_ticket record for this item
+      const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
+      const ticketId = buyTicket?.buy_ticket_id || 'no-ticket';
+
+      if (!grouped[ticketId]) {
+        grouped[ticketId] = [];
+      }
+      grouped[ticketId].push({ ...item, originalIndex: index });
+    });
+
+    return grouped;
+  };
+
+  // Handle double click on buy_ticket_id to show receipt in new tab
+  const handleBuyTicketClick = async (buyTicketId) => {
+    // Get items for this ticket
+    const ticketItems = transactionItems.filter(item => {
+      const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
+      return buyTicket?.buy_ticket_id === buyTicketId;
+    });
+
+    if (ticketItems.length === 0) {
+      alert('No items found for this ticket');
+      return;
+    }
+
+    // Fetch business info
+    let businessName = 'PAWNALL NEW MOBILE';
+    let businessAddress = '';
+    let businessLogo = '';
+    let businessLogoMimetype = '';
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/business-info`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      businessName = response.data.business_name || businessName;
+      businessAddress = response.data.address || '';
+      if (response.data.logo && response.data.logo_mimetype) {
+        businessLogo = response.data.logo;
+        businessLogoMimetype = response.data.logo_mimetype;
+      }
+    } catch (error) {
+      console.error('Error fetching business info:', error);
+    }
+
+    // Calculate total
+    const totalAmount = ticketItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0)), 0);
+    const transactionDate = selectedTransaction ? new Date(selectedTransaction.created_at) : new Date();
+    const formattedDate = transactionDate.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const formattedTime = transactionDate.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    // Open receipt in new tab
+    const receiptWindow = window.open('', '_blank');
+    receiptWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Ticket ${buyTicketId}</title>
+          <style>
+            @page { size: portrait; margin: 0.5in; }
+            body {
+              font-family: 'Courier New', monospace;
+              font-size: 9pt;
+              margin: 0;
+              padding: 20px;
+              line-height: 1.4;
+            }
+            .receipt-container {
+              border: 2px solid black;
+              padding: 20px;
+              max-width: 600px;
+              margin: 0 auto;
+            }
+            .header {
+              text-align: center;
+              border-bottom: 1px solid black;
+              padding-bottom: 10px;
+              margin-bottom: 15px;
+            }
+            .header h1 {
+              margin: 0;
+              font-size: 12pt;
+              font-weight: bold;
+            }
+            .header p {
+              margin: 3px 0;
+              font-size: 8pt;
+            }
+            .section {
+              margin-bottom: 15px;
+            }
+            .bordered-section {
+              border-top: 1px solid black;
+              border-bottom: 1px solid black;
+              padding: 10px 0;
+              margin: 15px 0;
+            }
+            .row {
+              display: flex;
+              justify-content: space-between;
+              margin: 5px 0;
+            }
+            .bold {
+              font-weight: bold;
+            }
+            .small {
+              font-size: 7pt;
+            }
+            .signature-line {
+              border-top: 1px solid black;
+              margin-top: 30px;
+              padding-top: 5px;
+              width: 45%;
+              display: inline-block;
+              text-align: center;
+              font-size: 8pt;
+            }
+            .terms {
+              font-size: 7pt;
+              border-top: 1px solid black;
+              padding-top: 10px;
+              margin-top: 15px;
+            }
+            @media print {
+              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <!-- Business Header with Logo -->
+            <div class="header" style="position: relative; min-height: 80px;">
+              ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Logo" style="position: absolute; top: 0; right: 0; max-width: 70px; max-height: 70px; object-fit: contain;" />` : ''}
+              <div style="padding-right: 80px;">
+                <h1>${businessName}</h1>
+                ${businessAddress ? `<p>${businessAddress}</p>` : ''}
+              </div>
+            </div>
+
+            <!-- Customer Info (Left) and Ticket ID (Right) -->
+            <div class="section" style="display: flex; justify-content: space-between; margin-top: 15px;">
+              <div style="flex: 1;">
+                <p style="margin: 2px 0;"><strong>Customer:</strong> ${selectedTransaction?.customer_name || 'N/A'}</p>
+                <p style="margin: 2px 0;"><strong>Employee:</strong> ${selectedTransaction?.employee_name || 'N/A'}</p>
+                <p style="margin: 2px 0;"><strong>Transaction:</strong> ${selectedTransaction?.transaction_id || 'N/A'}</p>
+                <p style="margin: 2px 0;"><strong>Date/Time:</strong> ${formattedDate} ${formattedTime}</p>
+              </div>
+              <div style="text-align: right;">
+                <p class="bold" style="font-size: 12pt; margin: 0;">${buyTicketId}</p>
+              </div>
+            </div>
+
+            <!-- Items Table -->
+            <div class="bordered-section">
+              <table style="width: 100%; border-collapse: collapse; font-family: 'Courier New', monospace;">
+                <thead>
+                  <tr style="border-bottom: 1px solid black;">
+                    <th style="text-align: left; padding: 5px 0; font-size: 8pt;">CATEGORY</th>
+                    <th style="text-align: left; padding: 5px 0; font-size: 8pt;">DESCRIPTION</th>
+                    <th style="text-align: right; padding: 5px 0; font-size: 8pt;">PRICE</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${ticketItems.map((item, idx) => `
+                    <tr>
+                      <td style="padding: 5px 5px 5px 0; font-size: 8pt; vertical-align: top;">
+                        ${item.item_details?.category || item.transaction_type || 'N/A'}
+                      </td>
+                      <td style="padding: 5px; font-size: 8pt; vertical-align: top;">
+                        ${item.item_details?.long_desc || item.item_details?.description || item.description || `Item ${idx + 1}`}
+                      </td>
+                      <td style="padding: 5px 0 5px 5px; font-size: 8pt; text-align: right; vertical-align: top;">
+                        $${parseFloat(item.item_price || 0).toFixed(2)}
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Payment Details -->
+              <div class="row">
+                <span class="bold">TOTAL</span>
+                <span class="bold">$${totalAmount.toFixed(2)}</span>
+              </div>
+
+            <!-- Terms and Conditions -->
+            <div class="terms">
+              <p>CHARGES ON THIS ACCOUNT ARE DUE ON OR BEFORE:</p>
+              <p style="margin-top: 10px;">
+                I have been informed that the seller nor their employer nor any person employed is involved after
+                below (redemption date).
+              </p>
+              <p style="margin-top: 10px;">
+                Seller is hereby certified that the above inherent owner may re-purchase by notifying either
+                seller if that the above item is sold to this store after redemption date even that they have full
+                understanding of redemption date below (redemption date)
+              </p>
+            </div>
+
+            <!-- Signature Lines -->
+            <div style="margin-top: 30px;">
+              <div class="signature-line" style="margin-right: 10%;">
+                Seller Signature
+              </div>
+            </div>
+          </div>
+
+          <div class="no-print" style="text-align: center; margin-top: 20px;">
+            <button onclick="window.print()" style="padding: 10px 20px; font-size: 12pt;">Print Receipt</button>
+            <button onclick="window.close()" style="padding: 10px 20px; font-size: 12pt; margin-left: 10px;">Close</button>
+          </div>
+        </body>
+      </html>
+    `);
+    receiptWindow.document.close();
   };
 
   const handlePrintTransaction = async () => {
@@ -786,26 +1031,46 @@ function TransactionJournals() {
                           <TableCell><strong>Transaction Type</strong></TableCell>
                           <TableCell align="right"><strong>Price</strong></TableCell>
                         </TableRow>
-                        {transactionItems.map((item, index) => (
-                          <TableRow key={index}>
+                        {Object.entries(groupItemsByTicket()).map(([ticketId, ticketItems]) => (
+                          <React.Fragment key={ticketId}>
+                            {ticketId !== 'no-ticket' && (
+                              <TableRow>
+                                <TableCell colSpan={4} sx={{ bgcolor: '#e3f2fd', py: 1 }}>
+                                  <Typography
+                                    variant="subtitle2"
+                                    sx={{
+                                      fontWeight: 'bold',
+                                      cursor: 'pointer',
+                                      '&:hover': { textDecoration: 'underline' }
+                                    }}
+                                    onClick={() => handleBuyTicketClick(ticketId)}
+                                    title="Click to view ticket receipt"
+                                  >
+                                    Ticket: {ticketId}
+                                  </Typography>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                            {ticketItems.map((item, index) => (
+                              <TableRow key={`${ticketId}-${index}`}>
                             <TableCell>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                                 {item.item_details?.images?.[0] ? (
-                                  <Avatar 
-                                    src={item.item_details.images[0].url} 
-                                    alt="Item" 
+                                  <Avatar
+                                    src={item.item_details.images[0].url}
+                                    alt="Item"
                                     variant="rounded"
                                     sx={{ width: 50, height: 50, objectFit: 'cover' }}
                                   />
                                 ) : (
-                                  <Avatar 
+                                  <Avatar
                                     variant="rounded"
                                     sx={{ width: 50, height: 50, bgcolor: 'grey.300' }}
                                   >
                                     <AttachMoneyIcon />
                                   </Avatar>
                                 )}
-                               
+
                               </Box>
                             </TableCell>
                             <TableCell>
@@ -824,6 +1089,8 @@ function TransactionJournals() {
                                   )}
                             </TableCell>
                           </TableRow>
+                            ))}
+                          </React.Fragment>
                         ))}
                         <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f9f9f9' }}>
                           <TableCell colSpan={3} align="right"><strong>Subtotal:</strong></TableCell>
@@ -833,7 +1100,7 @@ function TransactionJournals() {
                             </strong>
                           </TableCell>
                         </TableRow>
-                        
+
                         {/* Payment Methods Section */}
                         <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f5f9ff' }}>
                           <TableCell colSpan={4} sx={{ pt: 1, pb: 1 }}>
