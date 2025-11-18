@@ -2074,6 +2074,69 @@ app.delete('/api/inventory-status/:id', async (req, res) => {
   }
 });
 
+// Buy Ticket API Endpoints
+app.get('/api/buy-ticket', async (req, res) => {
+  try {
+    const { buy_ticket_id, transaction_id } = req.query;
+
+    let query = 'SELECT * FROM buy_ticket';
+    const params = [];
+
+    if (buy_ticket_id) {
+      query += ' WHERE buy_ticket_id = $1';
+      params.push(buy_ticket_id);
+    } else if (transaction_id) {
+      query += ' WHERE transaction_id = $1';
+      params.push(transaction_id);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching buy tickets:', error);
+    res.status(500).json({ error: 'Failed to fetch buy tickets' });
+  }
+});
+
+app.post('/api/buy-ticket', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { buy_ticket_id, transaction_id, item_id } = req.body;
+
+    // Validate required fields
+    if (!buy_ticket_id) {
+      return res.status(400).json({ error: 'buy_ticket_id is required' });
+    }
+
+    await client.query('BEGIN');
+
+    // Insert new buy_ticket record
+    const insertQuery = `
+      INSERT INTO buy_ticket (buy_ticket_id, transaction_id, item_id)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `;
+
+    const result = await client.query(insertQuery, [
+      buy_ticket_id,
+      transaction_id || null,
+      item_id || null
+    ]);
+
+    await client.query('COMMIT');
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating buy ticket:', error);
+    res.status(500).json({ error: 'Failed to create buy ticket' });
+  } finally {
+    client.release();
+  }
+});
+
 // Quote Expiration Configuration API Endpoints
 app.get('/api/quote-expiration/config', async (req, res) => {
   try {

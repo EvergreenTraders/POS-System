@@ -896,6 +896,53 @@ function Checkout() {
 
           realTransactionId = transactionResponse.data.transaction.transaction_id;
 
+          // Step 2.5: Post buy_ticket records for each unique buy_ticket_id
+          const buyTicketIds = new Set();
+          checkoutItems.forEach(item => {
+            if (item.buyTicketId) {
+              buyTicketIds.add(item.buyTicketId);
+            }
+          });
+
+          for (const buyTicketId of buyTicketIds) {
+            // Find all items with this buyTicketId
+            const itemsForTicket = checkoutItems
+              .map((item, index) => ({ ...item, index }))
+              .filter(item => item.buyTicketId === buyTicketId);
+
+            // Post a buy_ticket record for each item with this ticket
+            for (const item of itemsForTicket) {
+              try {
+                // Get item_id from createdJewelryItems if it's a jewelry item
+                let itemId = null;
+                if (createdJewelryItems && createdJewelryItems.length > 0 && createdJewelryItems[item.index]) {
+                  itemId = createdJewelryItems[item.index].item_id;
+                } else if (item.item_id) {
+                  // Use item_id from the item itself if available
+                  itemId = item.item_id;
+                }
+
+                await axios.post(
+                  `${config.apiUrl}/buy-ticket`,
+                  {
+                    buy_ticket_id: buyTicketId,
+                    transaction_id: realTransactionId,
+                    item_id: itemId
+                  },
+                  {
+                    headers: { Authorization: `Bearer ${token}` }
+                  }
+                );
+
+              } catch (buyTicketError) {
+                console.error('Error posting buy_ticket:', buyTicketError);
+                console.error('Error details:', buyTicketError.response?.data);
+                console.error('Error status:', buyTicketError.response?.status);
+                // Continue with checkout even if buy_ticket posting fails
+              }
+            }
+          }
+
           // Step 3: Process all collected payments against the real transaction ID
           for (const payment of updatedPayments) {
             const paymentResponse = await axios.post(
