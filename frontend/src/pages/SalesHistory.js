@@ -355,7 +355,7 @@ const SalesHistory = () => {
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell><strong>Item ID</strong></TableCell>
+                      <TableCell><strong>Description</strong></TableCell>
                       <TableCell><strong>Type</strong></TableCell>
                       <TableCell align="right"><strong>Price</strong></TableCell>
                     </TableRow>
@@ -364,7 +364,7 @@ const SalesHistory = () => {
                     {transactionDetails?.items && transactionDetails.items.length > 0 ? (
                       transactionDetails.items.map((item, index) => (
                         <TableRow key={index}>
-                          <TableCell>{item.item_id}</TableCell>
+                          <TableCell>{item.item_details?.description || item.item_id || 'N/A'}</TableCell>
                           <TableCell>{item.transaction_type}</TableCell>
                           <TableCell align="right">{formatCurrency(item.item_price)}</TableCell>
                         </TableRow>
