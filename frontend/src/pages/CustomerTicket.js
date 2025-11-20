@@ -51,6 +51,14 @@ const CustomerTicket = () => {
   const [openSearchDialog, setOpenSearchDialog] = useState(false);
   const [selectedSearchIdx, setSelectedSearchIdx] = useState(0);
   const [snackbarMessage, setSnackbarMessage] = useState({ open: false, message: '', severity: 'info' });
+
+  // Camera capture state
+  const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
+  const [currentCaptureItemId, setCurrentCaptureItemId] = useState(null);
+  const [currentCaptureItemType, setCurrentCaptureItemType] = useState(null); // 'pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund'
+  const [videoStream, setVideoStream] = useState(null);
+  const videoRef = React.useRef(null);
+  const canvasRef = React.useRef(null);
   
   // Handle input change for search form
   const handleLookupInputChange = (e) => {
@@ -230,6 +238,111 @@ const CustomerTicket = () => {
   const handleCancelLookup = () => {
     setShowLookupForm(false);
   };
+
+  // Camera capture functions
+  const handleOpenCamera = (itemId, itemType) => {
+    setCurrentCaptureItemId(itemId);
+    setCurrentCaptureItemType(itemType);
+    setCameraDialogOpen(true);
+  };
+
+  const handleCloseCamera = () => {
+    // Stop video stream
+    if (videoStream) {
+      videoStream.getTracks().forEach(track => track.stop());
+      setVideoStream(null);
+    }
+    setCameraDialogOpen(false);
+    setCurrentCaptureItemId(null);
+    setCurrentCaptureItemType(null);
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' } // Prefer back camera on mobile
+      });
+      setVideoStream(stream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (error) {
+      console.error('Error accessing camera:', error);
+      showSnackbar('Unable to access camera. Please check permissions.', 'error');
+    }
+  };
+
+  const captureImage = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Convert canvas to data URL
+    const imageDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+    // Update the appropriate item type with the captured image
+    const updateItemImages = (prevItems) =>
+      prevItems.map(item =>
+        item.id === currentCaptureItemId
+          ? {
+              ...item,
+              images: [{ url: imageDataUrl, isPrimary: true }]
+            }
+          : item
+      );
+
+    switch (currentCaptureItemType) {
+      case 'pawn':
+        setPawnItems(updateItemImages);
+        break;
+      case 'buy':
+        setBuyItems(updateItemImages);
+        break;
+      case 'trade':
+        setTradeItems(updateItemImages);
+        break;
+      case 'sale':
+        setSaleItems(updateItemImages);
+        break;
+      case 'repair':
+        setRepairItems(updateItemImages);
+        break;
+      case 'payment':
+        setPaymentItems(updateItemImages);
+        break;
+      case 'refund':
+        setRefundItems(updateItemImages);
+        break;
+      default:
+        break;
+    }
+
+    showSnackbar('Image captured successfully', 'success');
+    handleCloseCamera();
+  };
+
+  // Start camera when dialog opens
+  React.useEffect(() => {
+    if (cameraDialogOpen) {
+      startCamera();
+    }
+  }, [cameraDialogOpen]);
+
+  // Cleanup camera stream on unmount
+  React.useEffect(() => {
+    return () => {
+      if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [videoStream]);
+
   // Mocked portfolio KPI data (would be fetched from API in production)
   const portfolioData = {
     totalValue: Math.floor(Math.random() * 10000) + 500,
@@ -2046,28 +2159,38 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  {item.image ? (
-                                    <img 
-                                      src={item.image} 
-                                      alt="Item" 
-                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
-                                    />
-                                  ) : (
-                                    <Box 
-                                      sx={{ 
-                                        width: '50px', 
-                                        height: '50px', 
-                                        bgcolor: 'grey.200', 
-                                        display: 'flex', 
-                                        alignItems: 'center', 
-                                        justifyContent: 'center',
-                                        borderRadius: '4px',
-                                        margin: '0 auto'
+                                  <Tooltip title="Click to capture image">
+                                    <IconButton
+                                      onClick={() => handleOpenCamera(item.id, 'pawn')}
+                                      size="small"
+                                      sx={{
+                                        padding: 0,
+                                        '&:hover': { opacity: 0.7 }
                                       }}
                                     >
-                                      <PhotoCamera sx={{ color: 'grey.400' }} />
-                                    </Box>
-                                  )}
+                                      {(item.images && item.images.length > 0) || item.image ? (
+                                        <img
+                                          src={item.images?.[0]?.url || item.image}
+                                          alt="Item"
+                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                        />
+                                      ) : (
+                                        <Box
+                                          sx={{
+                                            width: '50px',
+                                            height: '50px',
+                                            bgcolor: 'grey.200',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: '4px'
+                                          }}
+                                        >
+                                          <PhotoCamera sx={{ color: 'grey.400' }} />
+                                        </Box>
+                                      )}
+                                    </IconButton>
+                                  </Tooltip>
                                 </TableCell>
                                 <TableCell>
                                   <TextField 
@@ -2172,28 +2295,38 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  {item.image ? (
-                                    <img 
-                                      src={item.image} 
-                                      alt="Item" 
-                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
-                                    />
-                                  ) : (
-                                    <Box 
-                                      sx={{ 
-                                        width: '50px', 
-                                        height: '50px', 
-                                        bgcolor: 'grey.200', 
-                                        display: 'flex', 
-                                        alignItems: 'center', 
-                                        justifyContent: 'center',
-                                        borderRadius: '4px',
-                                        margin: '0 auto'
+                                  <Tooltip title="Click to capture image">
+                                    <IconButton
+                                      onClick={() => handleOpenCamera(item.id, 'buy')}
+                                      size="small"
+                                      sx={{
+                                        padding: 0,
+                                        '&:hover': { opacity: 0.7 }
                                       }}
                                     >
-                                      <PhotoCamera sx={{ color: 'grey.400' }} />
-                                    </Box>
-                                  )}
+                                      {(item.images && item.images.length > 0) || item.image ? (
+                                        <img
+                                          src={item.images?.[0]?.url || item.image}
+                                          alt="Item"
+                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                        />
+                                      ) : (
+                                        <Box
+                                          sx={{
+                                            width: '50px',
+                                            height: '50px',
+                                            bgcolor: 'grey.200',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: '4px'
+                                          }}
+                                        >
+                                          <PhotoCamera sx={{ color: 'grey.400' }} />
+                                        </Box>
+                                      )}
+                                    </IconButton>
+                                  </Tooltip>
                                 </TableCell>
                                 <TableCell>
                                   <TextField 
@@ -2299,33 +2432,43 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  {item.images && item.images.length > 0 ? (
-                                    <img 
-                                      src={item.images[0].url} 
-                                      alt="Item" 
-                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
-                                    />
-                                  ) : (
-                                    <Box 
-                                      sx={{ 
-                                        width: '50px', 
-                                        height: '50px', 
-                                        bgcolor: 'grey.200', 
-                                        display: 'flex', 
-                                        alignItems: 'center', 
-                                        justifyContent: 'center',
-                                        borderRadius: '4px',
-                                        margin: '0 auto'
+                                  <Tooltip title="Click to capture image">
+                                    <IconButton
+                                      onClick={() => handleOpenCamera(item.id, 'trade')}
+                                      size="small"
+                                      sx={{
+                                        padding: 0,
+                                        '&:hover': { opacity: 0.7 }
                                       }}
                                     >
-                                      <PhotoCamera sx={{ color: 'grey.400' }} />
-                                    </Box>
-                                  )}
+                                      {(item.images && item.images.length > 0) || item.image ? (
+                                        <img
+                                          src={item.images?.[0]?.url || item.image}
+                                          alt="Item"
+                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                        />
+                                      ) : (
+                                        <Box
+                                          sx={{
+                                            width: '50px',
+                                            height: '50px',
+                                            bgcolor: 'grey.200',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: '4px'
+                                          }}
+                                        >
+                                          <PhotoCamera sx={{ color: 'grey.400' }} />
+                                        </Box>
+                                      )}
+                                    </IconButton>
+                                  </Tooltip>
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.tradeItem}
                                     onChange={(e) => handleItemChange(item.id, 'tradeItem', e.target.value)}
                                   />
@@ -2434,28 +2577,38 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  {item.images && item.images.length > 0 ? (
-                                    <img 
-                                      src={item.images[0].url} 
-                                      alt="Item" 
-                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
-                                    />
-                                  ) : (
-                                    <Box 
-                                      sx={{ 
-                                        width: '50px', 
-                                        height: '50px', 
-                                        bgcolor: 'grey.200', 
-                                        display: 'flex', 
-                                        alignItems: 'center', 
-                                        justifyContent: 'center',
-                                        borderRadius: '4px',
-                                        margin: '0 auto'
+                                  <Tooltip title="Click to capture image">
+                                    <IconButton
+                                      onClick={() => handleOpenCamera(item.id, 'sale')}
+                                      size="small"
+                                      sx={{
+                                        padding: 0,
+                                        '&:hover': { opacity: 0.7 }
                                       }}
                                     >
-                                      <PhotoCamera sx={{ color: 'grey.400' }} />
-                                    </Box>
-                                  )}
+                                      {item.images && item.images.length > 0 ? (
+                                        <img
+                                          src={item.images[0].url}
+                                          alt="Item"
+                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                        />
+                                      ) : (
+                                        <Box
+                                          sx={{
+                                            width: '50px',
+                                            height: '50px',
+                                            bgcolor: 'grey.200',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: '4px'
+                                          }}
+                                        >
+                                          <PhotoCamera sx={{ color: 'grey.400' }} />
+                                        </Box>
+                                      )}
+                                    </IconButton>
+                                  </Tooltip>
                                 </TableCell>
                                 <TableCell>
                                   <TextField 
@@ -2568,41 +2721,51 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  {item.images && item.images.length > 0 ? (
-                                    <img 
-                                      src={item.images[0].url} 
-                                      alt="Item" 
-                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
-                                    />
-                                  ) : (
-                                    <Box 
-                                      sx={{ 
-                                        width: '50px', 
-                                        height: '50px', 
-                                        bgcolor: 'grey.200', 
-                                        display: 'flex', 
-                                        alignItems: 'center', 
-                                        justifyContent: 'center',
-                                        borderRadius: '4px',
-                                        margin: '0 auto'
+                                  <Tooltip title="Click to capture image">
+                                    <IconButton
+                                      onClick={() => handleOpenCamera(item.id, 'repair')}
+                                      size="small"
+                                      sx={{
+                                        padding: 0,
+                                        '&:hover': { opacity: 0.7 }
                                       }}
                                     >
-                                      <PhotoCamera sx={{ color: 'grey.400' }} />
-                                    </Box>
-                                  )}
+                                      {(item.images && item.images.length > 0) || item.image ? (
+                                        <img
+                                          src={item.images?.[0]?.url || item.image}
+                                          alt="Item"
+                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                        />
+                                      ) : (
+                                        <Box
+                                          sx={{
+                                            width: '50px',
+                                            height: '50px',
+                                            bgcolor: 'grey.200',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: '4px'
+                                          }}
+                                        >
+                                          <PhotoCamera sx={{ color: 'grey.400' }} />
+                                        </Box>
+                                      )}
+                                    </IconButton>
+                                  </Tooltip>
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.issue}
                                     onChange={(e) => handleItemChange(item.id, 'issue', e.target.value)}
                                   />
@@ -2702,57 +2865,67 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  {item.images && item.images.length > 0 ? (
-                                    <img 
-                                      src={item.images[0].url} 
-                                      alt="Item" 
-                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
-                                    />
-                                  ) : (
-                                    <Box 
-                                      sx={{ 
-                                        width: '50px', 
-                                        height: '50px', 
-                                        bgcolor: 'grey.200', 
-                                        display: 'flex', 
-                                        alignItems: 'center', 
-                                        justifyContent: 'center',
-                                        borderRadius: '4px',
-                                        margin: '0 auto'
+                                  <Tooltip title="Click to capture image">
+                                    <IconButton
+                                      onClick={() => handleOpenCamera(item.id, 'payment')}
+                                      size="small"
+                                      sx={{
+                                        padding: 0,
+                                        '&:hover': { opacity: 0.7 }
                                       }}
                                     >
-                                      <PhotoCamera sx={{ color: 'grey.400' }} />
-                                    </Box>
-                                  )}
+                                      {(item.images && item.images.length > 0) || item.image ? (
+                                        <img
+                                          src={item.images?.[0]?.url || item.image}
+                                          alt="Item"
+                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                        />
+                                      ) : (
+                                        <Box
+                                          sx={{
+                                            width: '50px',
+                                            height: '50px',
+                                            bgcolor: 'grey.200',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: '4px'
+                                          }}
+                                        >
+                                          <PhotoCamera sx={{ color: 'grey.400' }} />
+                                        </Box>
+                                      )}
+                                    </IconButton>
+                                  </Tooltip>
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.amount}
                                     onChange={(e) => handleItemChange(item.id, 'amount', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.method}
                                     onChange={(e) => handleItemChange(item.id, 'method', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.reference}
                                     onChange={(e) => handleItemChange(item.id, 'reference', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.notes}
                                     onChange={(e) => handleItemChange(item.id, 'notes', e.target.value)}
                                   />
@@ -2837,57 +3010,67 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  {item.images && item.images.length > 0 ? (
-                                    <img 
-                                      src={item.images[0].url} 
-                                      alt="Item" 
-                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }} 
-                                    />
-                                  ) : (
-                                    <Box 
-                                      sx={{ 
-                                        width: '50px', 
-                                        height: '50px', 
-                                        bgcolor: 'grey.200', 
-                                        display: 'flex', 
-                                        alignItems: 'center', 
-                                        justifyContent: 'center',
-                                        borderRadius: '4px',
-                                        margin: '0 auto'
+                                  <Tooltip title="Click to capture image">
+                                    <IconButton
+                                      onClick={() => handleOpenCamera(item.id, 'refund')}
+                                      size="small"
+                                      sx={{
+                                        padding: 0,
+                                        '&:hover': { opacity: 0.7 }
                                       }}
                                     >
-                                      <PhotoCamera sx={{ color: 'grey.400' }} />
-                                    </Box>
-                                  )}
+                                      {(item.images && item.images.length > 0) || item.image ? (
+                                        <img
+                                          src={item.images?.[0]?.url || item.image}
+                                          alt="Item"
+                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                        />
+                                      ) : (
+                                        <Box
+                                          sx={{
+                                            width: '50px',
+                                            height: '50px',
+                                            bgcolor: 'grey.200',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: '4px'
+                                          }}
+                                        >
+                                          <PhotoCamera sx={{ color: 'grey.400' }} />
+                                        </Box>
+                                      )}
+                                    </IconButton>
+                                  </Tooltip>
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.amount}
                                     onChange={(e) => handleItemChange(item.id, 'amount', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.method}
                                     onChange={(e) => handleItemChange(item.id, 'method', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.reference}
                                     onChange={(e) => handleItemChange(item.id, 'reference', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.reason}
                                     onChange={(e) => handleItemChange(item.id, 'reason', e.target.value)}
                                   />
@@ -3122,6 +3305,45 @@ return (
           </MenuItem>
         ))}
       </Menu>
+
+      {/* Camera Capture Dialog */}
+      <Dialog
+        open={cameraDialogOpen}
+        onClose={handleCloseCamera}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          Capture Image
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, pt: 1 }}>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              style={{
+                width: '100%',
+                maxWidth: '500px',
+                borderRadius: '8px',
+                backgroundColor: '#000'
+              }}
+            />
+            <canvas
+              ref={canvasRef}
+              style={{ display: 'none' }}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseCamera} color="secondary">
+            Cancel
+          </Button>
+          <Button onClick={captureImage} variant="contained" color="primary">
+            Capture
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };
