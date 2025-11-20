@@ -39,6 +39,8 @@ function TransactionJournals() {
   const [employee, setEmployee] = useState('');
   const [businessDate, setBusinessDate] = useState(null);
   const [transactionNumber, setTransactionNumber] = useState('');
+  const [ticketId, setTicketId] = useState('');
+  const [amountFilter, setAmountFilter] = useState('');
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [transactionItems, setTransactionItems] = useState([]);
@@ -47,16 +49,41 @@ function TransactionJournals() {
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [isEditingPayments, setIsEditingPayments] = useState(false);
   const [editedPayments, setEditedPayments] = useState([]);
+  const [buyTickets, setBuyTickets] = useState([]);
   const API_BASE_URL = config.apiUrl;
-  
+
   const [transactions, setTransactions] = useState([]);
   const [transactionItemsMap, setTransactionItemsMap] = useState({});
+  const [buyTicketsMap, setBuyTicketsMap] = useState({}); // Map of transaction_id to buy_tickets
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stores, setStores] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [paymentMethods, setPaymentMethods] = useState([]);
+  const [receiptConfig, setReceiptConfig] = useState({
+    transaction_receipt: 'Thank you for shopping with us',
+    buy_receipt: 'Thank you for shopping with us'
+  });
+
+  // Fetch receipt config from API
+  useEffect(() => {
+    const fetchReceiptConfig = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/receipt-config`);
+        if (response.data) {
+          setReceiptConfig({
+            transaction_receipt: response.data.transaction_receipt || 'Thank you for shopping with us',
+            buy_receipt: response.data.buy_receipt || 'Thank you for shopping with us'
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching receipt config:', error);
+      }
+    };
+
+    fetchReceiptConfig();
+  }, [API_BASE_URL]);
 
   // Fetch transaction types from API
   useEffect(() => {
@@ -96,22 +123,32 @@ function TransactionJournals() {
     setLoadingItems(true);
     setLoadingPayments(true);
     setViewDialogOpen(true);
-    
+
     try {
       // Get all transaction items from the pre-fetched map
       const items = transactionItemsMap[transaction.transaction_id] || [];
       setTransactionItems(items);
-      
+
       // Fetch payment details
       const response = await axios.get(`${API_BASE_URL}/transactions/${transaction.transaction_id}/payments`);
       setPaymentDetails({
         payments: response.data.payments || [],
         total_paid: response.data.total_paid || 0
       });
+
+      // Fetch buy_ticket data for this transaction
+      try {
+        const buyTicketResponse = await axios.get(`${API_BASE_URL}/buy-ticket?transaction_id=${transaction.transaction_id}`);
+        setBuyTickets(buyTicketResponse.data || []);
+      } catch (buyTicketError) {
+        console.error('Error fetching buy tickets:', buyTicketError);
+        setBuyTickets([]);
+      }
     } catch (error) {
       console.error('Error fetching transaction details:', error);
       // Initialize with empty data if there's an error
       setPaymentDetails({ payments: [], total_paid: 0 });
+      setBuyTickets([]);
     } finally {
       setLoadingItems(false);
       setLoadingPayments(false);
@@ -123,14 +160,241 @@ function TransactionJournals() {
     setSelectedTransaction(null);
     // Reset payment details when closing dialog
     setPaymentDetails({ payments: [], total_paid: 0 });
+    setBuyTickets([]);
     // Don't clear transaction items to keep them in memory
+  };
+
+  // Group transaction items by buy_ticket_id
+  const groupItemsByTicket = () => {
+    const grouped = {};
+
+    transactionItems.forEach((item, index) => {
+      // Find the buy_ticket record for this item
+      const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
+      const ticketId = buyTicket?.buy_ticket_id || 'no-ticket';
+
+      if (!grouped[ticketId]) {
+        grouped[ticketId] = [];
+      }
+      grouped[ticketId].push({ ...item, originalIndex: index });
+    });
+
+    return grouped;
+  };
+
+  // Handle double click on buy_ticket_id to show receipt in new tab
+  const handleBuyTicketClick = async (buyTicketId) => {
+    // Get items for this ticket
+    const ticketItems = transactionItems.filter(item => {
+      const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
+      return buyTicket?.buy_ticket_id === buyTicketId;
+    });
+
+    if (ticketItems.length === 0) {
+      alert('No items found for this ticket');
+      return;
+    }
+
+    // Fetch business info
+    let businessName = 'PAWNALL NEW MOBILE';
+    let businessAddress = '';
+    let businessLogo = '';
+    let businessLogoMimetype = '';
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/business-info`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      businessName = response.data.business_name || businessName;
+      businessAddress = response.data.address || '';
+      if (response.data.logo && response.data.logo_mimetype) {
+        businessLogo = response.data.logo;
+        businessLogoMimetype = response.data.logo_mimetype;
+      }
+    } catch (error) {
+      console.error('Error fetching business info:', error);
+    }
+
+    // Calculate total
+    const totalAmount = ticketItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0)), 0);
+    const transactionDate = selectedTransaction ? new Date(selectedTransaction.created_at) : new Date();
+    const formattedDate = transactionDate.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const formattedTime = transactionDate.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    // Open receipt in new tab
+    const receiptWindow = window.open('', '_blank');
+    receiptWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Ticket ${buyTicketId}</title>
+          <style>
+            @page { size: portrait; margin: 0.5in; }
+            body {
+              font-family: 'Courier New', monospace;
+              font-size: 9pt;
+              margin: 0;
+              padding: 20px;
+              line-height: 1.4;
+            }
+            .receipt-container {
+              border: 2px solid black;
+              padding: 20px;
+              max-width: 600px;
+              margin: 0 auto;
+            }
+            .header {
+              text-align: center;
+              border-bottom: 1px solid black;
+              padding-bottom: 10px;
+              margin-bottom: 15px;
+            }
+            .header h1 {
+              margin: 0;
+              font-size: 12pt;
+              font-weight: bold;
+            }
+            .header p {
+              margin: 3px 0;
+              font-size: 8pt;
+            }
+            .section {
+              margin-bottom: 15px;
+            }
+            .bordered-section {
+              border-top: 1px solid black;
+              border-bottom: 1px solid black;
+              padding: 10px 0;
+              margin: 15px 0;
+            }
+            .row {
+              display: flex;
+              justify-content: space-between;
+              margin: 5px 0;
+            }
+            .bold {
+              font-weight: bold;
+            }
+            .small {
+              font-size: 7pt;
+            }
+            .signature-line {
+              border-top: 1px solid black;
+              margin-top: 30px;
+              padding-top: 5px;
+              width: 45%;
+              display: inline-block;
+              text-align: center;
+              font-size: 8pt;
+            }
+            .terms {
+              font-size: 7pt;
+              border-top: 1px solid black;
+              padding-top: 10px;
+              margin-top: 15px;
+            }
+            @media print {
+              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <!-- Business Header with Logo -->
+            <div class="header" style="position: relative; min-height: 80px;">
+              ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Logo" style="position: absolute; top: 0; right: 0; max-width: 70px; max-height: 70px; object-fit: contain;" />` : ''}
+              <div style="padding-right: 80px;">
+                <h1>${businessName}</h1>
+                ${businessAddress ? `<p>${businessAddress}</p>` : ''}
+              </div>
+            </div>
+
+            <!-- Customer Info (Left) and Ticket ID (Right) -->
+            <div class="section" style="display: flex; justify-content: space-between; margin-top: 15px;">
+              <div style="flex: 1;">
+                <p style="margin: 2px 0;"><strong>Customer:</strong> ${selectedTransaction?.customer_name || 'N/A'}</p>
+                <p style="margin: 2px 0;"><strong>Employee:</strong> ${selectedTransaction?.employee_name || 'N/A'}</p>
+                <p style="margin: 2px 0;"><strong>Transaction:</strong> ${selectedTransaction?.transaction_id || 'N/A'}</p>
+                <p style="margin: 2px 0;"><strong>Date/Time:</strong> ${formattedDate} ${formattedTime}</p>
+              </div>
+              <div style="text-align: right;">
+                <p class="bold" style="font-size: 12pt; margin: 0;">${buyTicketId}</p>
+              </div>
+            </div>
+
+            <!-- Items Table -->
+            <div class="bordered-section">
+              <table style="width: 100%; border-collapse: collapse; font-family: 'Courier New', monospace;">
+                <thead>
+                  <tr style="border-bottom: 1px solid black;">
+                    <th style="text-align: left; padding: 5px 0; font-size: 8pt;">CATEGORY</th>
+                    <th style="text-align: left; padding: 5px 0; font-size: 8pt;">DESCRIPTION</th>
+                    <th style="text-align: right; padding: 5px 0; font-size: 8pt;">PRICE</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${ticketItems.map((item, idx) => `
+                    <tr>
+                      <td style="padding: 5px 5px 5px 0; font-size: 8pt; vertical-align: top;">
+                        ${item.item_details?.category || item.transaction_type || 'N/A'}
+                      </td>
+                      <td style="padding: 5px; font-size: 8pt; vertical-align: top;">
+                        ${item.item_details?.long_desc || item.item_details?.description || item.description || `Item ${idx + 1}`}
+                      </td>
+                      <td style="padding: 5px 0 5px 5px; font-size: 8pt; text-align: right; vertical-align: top;">
+                        $${parseFloat(item.item_price || 0).toFixed(2)}
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Payment Details -->
+              <div class="row">
+                <span class="bold">TOTAL</span>
+                <span class="bold">$${totalAmount.toFixed(2)}</span>
+              </div>
+
+            <!-- Footer Text -->
+            <div class="terms">
+              <p style="white-space: pre-wrap;">${receiptConfig.buy_receipt}</p>
+            </div>
+
+            <!-- Signature Lines -->
+            <div style="margin-top: 30px;">
+              <div class="signature-line" style="margin-right: 10%;">
+                Seller Signature
+              </div>
+            </div>
+          </div>
+
+          <div class="no-print" style="text-align: center; margin-top: 20px;">
+            <button onclick="window.print()" style="padding: 10px 20px; font-size: 12pt;">Print Receipt</button>
+            <button onclick="window.close()" style="padding: 10px 20px; font-size: 12pt; margin-left: 10px;">Close</button>
+          </div>
+        </body>
+      </html>
+    `);
+    receiptWindow.document.close();
   };
 
   const handlePrintTransaction = async () => {
     if (!selectedTransaction) return;
 
     // Fetch business info
-    let businessName = 'POS Pro System';
+    let businessName = '';
+    let businessAddress = '';
+    let businessPhone = '';
     let businessLogo = '';
     let businessLogoMimetype = '';
 
@@ -142,6 +406,8 @@ function TransactionJournals() {
 
       if (response.data) {
         businessName = response.data.business_name || 'POS Pro System';
+        businessAddress = response.data.address || '';
+        businessPhone = response.data.phone || '';
         if (response.data.logo && response.data.logo_mimetype) {
           businessLogo = response.data.logo;
           businessLogoMimetype = response.data.logo_mimetype;
@@ -150,6 +416,22 @@ function TransactionJournals() {
     } catch (error) {
       console.error('Error fetching business info:', error);
     }
+
+    // Get customer address and phone from transaction data (already fetched from backend)
+    const customerAddress = selectedTransaction?.customer_address || '';
+    const customerPhone = selectedTransaction?.customer_phone || '';
+
+    // Group items by ticket ID
+    const allTicketGroups = {};
+    transactionItems.forEach(item => {
+      const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
+      const ticketId = buyTicket?.buy_ticket_id || 'no-ticket';
+
+      if (!allTicketGroups[ticketId]) {
+        allTicketGroups[ticketId] = [];
+      }
+      allTicketGroups[ticketId].push(item);
+    });
 
     // Create HTML content for the transaction receipt
     const receiptHTML = `
@@ -258,7 +540,8 @@ function TransactionJournals() {
           ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Business Logo" />` : ''}
           <div class="header-content">
             <h1>${businessName}</h1>
-            <p>Transaction Receipt</p>
+            ${businessAddress ? `<p>${businessAddress}</p>` : ''}
+            ${businessPhone ? `<p>${businessPhone}</p>` : ''}
           </div>
         </div>
 
@@ -275,48 +558,50 @@ function TransactionJournals() {
             <span class="info-label">Customer:</span>
             <span>${selectedTransaction.customer_name || 'N/A'}</span>
           </div>
+          ${customerPhone ? `
+          <div class="info-row">
+            <span class="info-label">Phone:</span>
+            <span>${customerPhone}</span>
+          </div>
+          ` : ''}
+          ${customerAddress ? `
+          <div class="info-row">
+            <span class="info-label">Address:</span>
+            <span>${customerAddress}</span>
+          </div>
+          ` : ''}
           <div class="info-row">
             <span class="info-label">Employee:</span>
             <span>${selectedTransaction.employee_name || 'N/A'}</span>
           </div>
-          <div class="info-row">
-            <span class="info-label">Status:</span>
-            <span style="color: ${selectedTransaction.status === 'voided' ? 'red' : 'inherit'}; text-transform: capitalize;">
-              ${selectedTransaction.status || 'completed'}
-            </span>
-          </div>
         </div>
 
-        <table class="items-table">
-          <thead>
-            <tr>
-              <th>Description</th>
-              <th>Type</th>
-              <th style="text-align: right;">Price</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${transactionItems.map((item, index) => `
-              <tr>
-                <td>
-                  ${item.item_details?.description || `Item ${index + 1}`}
-                  ${item.description ? `<br><small style="color: #666;">${item.description}</small>` : ''}
-                </td>
-                <td>${item.transaction_type}</td>
-                <td style="text-align: right;">
-                  $${parseFloat(item.item_price || 0).toFixed(2)}
-                  ${item.quantity > 1 ? `<br><small style="color: #666;">${item.quantity} @ $${(parseFloat(item.item_price || 0) / item.quantity).toFixed(2)} each</small>` : ''}
-                </td>
-              </tr>
-            `).join('')}
-            <tr class="total-row">
-              <td colspan="2" style="text-align: right;">Subtotal:</td>
-              <td style="text-align: right;">
-                $${transactionItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0) * (item.quantity || 1)), 0).toFixed(2)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        ${Object.entries(allTicketGroups).map(([ticketId, items]) => `
+          ${ticketId !== 'no-ticket' ? `
+            <div style="margin-top: 15px; padding: 5px; background-color: #e3f2fd; font-weight: bold; font-size: 11px;">
+             ${ticketId}
+            </div>
+          ` : ''}
+          <table class="items-table">
+            <tbody>
+              ${items.map((item, index) => {
+                const price = parseFloat(item.item_price || 0);
+                return `
+                  <tr>
+                    <td>
+                      ${item.item_details?.description || `Item ${index + 1}`}
+                      ${item.description ? `<br><small style="color: #666;">${item.description}</small>` : ''}
+                    </td>
+                    <td style="text-align: right;">
+                      $${price.toFixed(2)}
+                      ${item.quantity > 1 ? `<br><small style="color: #666;">${item.quantity} @ $${(price / item.quantity).toFixed(2)} each</small>` : ''}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        `).join('')}
 
         ${paymentDetails.payments.length > 0 ? `
           <div class="payment-section">
@@ -341,8 +626,7 @@ function TransactionJournals() {
         ` : ''}
 
         <div class="footer">
-          <p>Thank you for your business!</p>
-          <p>POS Pro System - Transaction Receipt</p>
+          <p style="white-space: pre-wrap;">${receiptConfig.transaction_receipt}</p>
         </div>
 
         <div class="no-print" style="text-align: center; margin-top: 30px;">
@@ -445,14 +729,35 @@ function TransactionJournals() {
           itemsMap[transactionId] = items;
         });
         setTransactionItemsMap(itemsMap);
-        
+
+        // Fetch all buy tickets in parallel
+        const buyTicketsPromises = transactionsData.map(tx =>
+          axios.get(`${API_BASE_URL}/buy-ticket?transaction_id=${tx.transaction_id}`)
+            .then(res => ({
+              transactionId: tx.transaction_id,
+              buyTickets: res.data || []
+            }))
+            .catch(() => ({
+              transactionId: tx.transaction_id,
+              buyTickets: []
+            }))
+        );
+
+        // Process all buy tickets responses
+        const buyTicketsResponses = await Promise.all(buyTicketsPromises);
+        const ticketsMap = {};
+        buyTicketsResponses.forEach(({ transactionId, buyTickets }) => {
+          ticketsMap[transactionId] = buyTickets;
+        });
+        setBuyTicketsMap(ticketsMap);
+
         // Transform employees data for the dropdown
         const employeeOptions = employeesRes.data.map(emp => ({
           id: emp.employee_id,
           name: `${emp.first_name} ${emp.last_name}`,
           ...emp
         }));
-        
+
         setEmployees(employeeOptions);
         
       } catch (err) {
@@ -524,26 +829,26 @@ function TransactionJournals() {
   // Filter transactions based on search criteria
   const filteredTransactions = transactions.filter(tx => {
     const matchesStore = !store || tx.store_id === store;
-    
+
     // Check employee match if employee is selected
     let matchesEmployee = true;
     if (employee) {
       matchesEmployee = tx.employee_id?.toString() === employee.toString();
     }
-    
-    const matchesTransactionNumber = !transactionNumber || 
+
+    const matchesTransactionNumber = !transactionNumber ||
       tx.transaction_id?.toLowerCase().includes(transactionNumber.toLowerCase());
-    
+
     // Check transaction type match
     let matchesTransactionType = !transactionType;
     if (transactionType) {
       const items = transactionItemsMap[tx.transaction_id] || [];
       // Match if transaction type matches any item's type or the transaction's main type
-      matchesTransactionType = items.some(item => 
+      matchesTransactionType = items.some(item =>
         item.transaction_type?.toLowerCase() === transactionType.toLowerCase()
       ) || tx.transaction_type_name?.toLowerCase() === transactionType.toLowerCase();
     }
-      
+
     // Check date match if businessDate is set
     let matchesDate = true;
     if (businessDate) {
@@ -551,9 +856,29 @@ function TransactionJournals() {
       const selectedDate = new Date(businessDate).toDateString();
       matchesDate = txDate === selectedDate;
     }
-    
-    return matchesStore && matchesEmployee && matchesTransactionNumber && 
-           matchesDate && matchesTransactionType;
+
+    // Check ticket ID match - search through buy_tickets for this transaction
+    let matchesTicketId = true;
+    if (ticketId) {
+      const txBuyTickets = buyTicketsMap[tx.transaction_id] || [];
+      // Match if any buy ticket ID contains the search string
+      matchesTicketId = txBuyTickets.some(ticket =>
+        ticket.buy_ticket_id?.toLowerCase().includes(ticketId.toLowerCase())
+      );
+    }
+
+    // Check amount match
+    let matchesAmount = true;
+    if (amountFilter) {
+      const filterAmount = parseFloat(amountFilter);
+      if (!isNaN(filterAmount)) {
+        const txAmount = parseFloat(tx.total_amount || 0);
+        matchesAmount = Math.abs(txAmount - filterAmount) < 0.01; // Match with small tolerance for floating point
+      }
+    }
+
+    return matchesStore && matchesEmployee && matchesTransactionNumber &&
+           matchesDate && matchesTransactionType && matchesTicketId && matchesAmount;
   });
 
   return (
@@ -610,7 +935,6 @@ function TransactionJournals() {
               value={employee}
               onChange={(e) => setEmployee(e.target.value)}
               label="Employee"
-              displayEmpty
             >
               <MenuItem value="">
                 <em>All Employees</em>
@@ -646,6 +970,27 @@ function TransactionJournals() {
             onChange={(e) => setTransactionNumber(e.target.value)}
             sx={{ minWidth: 200, flex: 1 }}
           />
+
+          <TextField
+            label="Ticket ID"
+            variant="outlined"
+            size="small"
+            value={ticketId}
+            onChange={(e) => setTicketId(e.target.value)}
+            sx={{ minWidth: 150, flex: 1 }}
+            placeholder="Search by ticket ID"
+          />
+
+          <TextField
+            label="Amount"
+            variant="outlined"
+            size="small"
+            type="number"
+            value={amountFilter}
+            onChange={(e) => setAmountFilter(e.target.value)}
+            sx={{ minWidth: 150, flex: 1 }}
+            placeholder="Filter by amount"
+          />
         </Box>
       </Paper>
 
@@ -659,7 +1004,6 @@ function TransactionJournals() {
               <TableCell>Customer</TableCell>
               <TableCell>Employee</TableCell>
               <TableCell>Amount</TableCell>
-              <TableCell>Status</TableCell>
               <TableCell>Void</TableCell>
             </TableRow>
           </TableHead>
@@ -702,14 +1046,6 @@ function TransactionJournals() {
                   <TableCell>{txn.customer_name || 'N/A'}</TableCell>
                   <TableCell>{txn.employee_name || 'N/A'}</TableCell>
                   <TableCell>${parseFloat(txn.total_amount || 0).toFixed(2)}</TableCell>
-                  <TableCell>
-                    <span style={{
-                      color: txn.status === 'voided' ? 'red' : 'inherit',
-                      textTransform: 'capitalize'
-                    }}>
-                      {txn.status || 'completed'}
-                    </span>
-                  </TableCell>
                   <TableCell>
                     <Box display="flex" alignItems="center">
                       {txn.status !== 'voided' && (
@@ -757,15 +1093,6 @@ function TransactionJournals() {
                       <TableCell>${(Math.abs(parseFloat(selectedTransaction.total_amount || 0))).toFixed(2)}</TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell variant="head">Status</TableCell>
-                      <TableCell>
-                        <span style={{
-                          color: selectedTransaction.status === 'voided' ? 'red' : 'inherit',
-                          textTransform: 'capitalize'
-                        }}>
-                          {selectedTransaction.status || 'completed'}
-                        </span>
-                      </TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell variant="head" colSpan={2} sx={{ fontWeight: 'bold', pt: 3 }}>
@@ -786,26 +1113,46 @@ function TransactionJournals() {
                           <TableCell><strong>Transaction Type</strong></TableCell>
                           <TableCell align="right"><strong>Price</strong></TableCell>
                         </TableRow>
-                        {transactionItems.map((item, index) => (
-                          <TableRow key={index}>
+                        {Object.entries(groupItemsByTicket()).map(([ticketId, ticketItems]) => (
+                          <React.Fragment key={ticketId}>
+                            {ticketId !== 'no-ticket' && (
+                              <TableRow>
+                                <TableCell colSpan={4} sx={{ bgcolor: '#e3f2fd', py: 1 }}>
+                                  <Typography
+                                    variant="subtitle2"
+                                    sx={{
+                                      fontWeight: 'bold',
+                                      cursor: 'pointer',
+                                      '&:hover': { textDecoration: 'underline' }
+                                    }}
+                                    onClick={() => handleBuyTicketClick(ticketId)}
+                                    title="Click to view ticket receipt"
+                                  >
+                                    Ticket: {ticketId}
+                                  </Typography>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                            {ticketItems.map((item, index) => (
+                              <TableRow key={`${ticketId}-${index}`}>
                             <TableCell>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                                 {item.item_details?.images?.[0] ? (
-                                  <Avatar 
-                                    src={item.item_details.images[0].url} 
-                                    alt="Item" 
+                                  <Avatar
+                                    src={item.item_details.images[0].url}
+                                    alt="Item"
                                     variant="rounded"
                                     sx={{ width: 50, height: 50, objectFit: 'cover' }}
                                   />
                                 ) : (
-                                  <Avatar 
+                                  <Avatar
                                     variant="rounded"
                                     sx={{ width: 50, height: 50, bgcolor: 'grey.300' }}
                                   >
                                     <AttachMoneyIcon />
                                   </Avatar>
                                 )}
-                               
+
                               </Box>
                             </TableCell>
                             <TableCell>
@@ -824,6 +1171,8 @@ function TransactionJournals() {
                                   )}
                             </TableCell>
                           </TableRow>
+                            ))}
+                          </React.Fragment>
                         ))}
                         <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f9f9f9' }}>
                           <TableCell colSpan={3} align="right"><strong>Subtotal:</strong></TableCell>
@@ -833,7 +1182,7 @@ function TransactionJournals() {
                             </strong>
                           </TableCell>
                         </TableRow>
-                        
+
                         {/* Payment Methods Section */}
                         <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f5f9ff' }}>
                           <TableCell colSpan={4} sx={{ pt: 1, pb: 1 }}>
@@ -954,7 +1303,7 @@ function TransactionJournals() {
                 variant="contained"
                 startIcon={<PrintIcon />}
               >
-                Print Transaction
+                Reprint
               </Button>
               <Button onClick={handleCloseDialog} color="primary">
                 Close

@@ -1,3 +1,19 @@
+-- Drop transaction_status column from transactions table if it exists
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'transactions'
+        AND column_name = 'transaction_status'
+    ) THEN
+        -- Drop the check constraint first
+        ALTER TABLE transactions DROP CONSTRAINT IF EXISTS chk_transaction_status;
+        -- Then drop the column
+        ALTER TABLE transactions DROP COLUMN transaction_status;
+    END IF;
+END $$;
+
 -- Add action column to payments table
 DO $$
 BEGIN
@@ -45,12 +61,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     customer_id INTEGER NOT NULL,
     employee_id INTEGER NOT NULL,
     total_amount DECIMAL(10,2) NOT NULL,
-    transaction_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     transaction_date DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT unique_transaction_id UNIQUE (transaction_id),
-    CONSTRAINT chk_transaction_status CHECK (transaction_status IN ('PENDING', 'COMPLETED', 'CANCELLED')),
     FOREIGN KEY (customer_id) REFERENCES customers(id),
     FOREIGN KEY (employee_id) REFERENCES employees(employee_id)
 );

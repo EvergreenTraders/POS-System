@@ -138,4 +138,25 @@ BEGIN
     -- Insert default configuration if table is empty
     INSERT INTO inventory_hold_period (days) VALUES (7);
 
+    -- Create receipt_config table for storing receipt footer text
+    CREATE TABLE IF NOT EXISTS receipt_config (
+        id SERIAL PRIMARY KEY,
+        transaction_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
+        buy_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
+        pawn_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
+        layaway_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
+        return_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
+        refund_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP
+    );
+
+    -- Add comment for documentation
+    COMMENT ON TABLE receipt_config IS 'Stores configurable footer text for different receipt types';
+
+    -- Insert default configuration if table is empty
+    INSERT INTO receipt_config (transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt)
+    VALUES ('Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us',
+            'Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us');
+
 END $$;

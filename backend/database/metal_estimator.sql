@@ -28,6 +28,22 @@ BEGIN
         ('Palladium');
     END IF;
 
+    -- Add type_code column to precious_metal_type if it doesn't exist
+    IF NOT EXISTS (
+        SELECT FROM information_schema.columns
+        WHERE table_name = 'precious_metal_type'
+        AND column_name = 'type_code'
+    ) THEN
+        ALTER TABLE precious_metal_type ADD COLUMN type_code VARCHAR(10);
+
+        -- Update existing rows with type codes
+        UPDATE precious_metal_type SET type_code = 'G' WHERE type = 'Gold';
+        UPDATE precious_metal_type SET type_code = 'P' WHERE type = 'Platinum';
+        UPDATE precious_metal_type SET type_code = 'S' WHERE type = 'Silver';
+        UPDATE precious_metal_type SET type_code = 'PD' WHERE type = 'Palladium';
+        UPDATE precious_metal_type SET type_code = 'N' WHERE type = 'Non-Precious Metal Type';
+    END IF;
+
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_category') THEN
         CREATE TABLE metal_category (
             id SERIAL PRIMARY KEY,
@@ -48,6 +64,29 @@ BEGIN
         ('Loose Diamonds and Stones');
     END IF;
 
+    -- Add category_code column if it doesn't exist
+    IF NOT EXISTS (
+        SELECT FROM information_schema.columns
+        WHERE table_name = 'metal_category'
+        AND column_name = 'category_code'
+    ) THEN
+        ALTER TABLE metal_category ADD COLUMN category_code VARCHAR(10);
+
+        -- Update existing rows with category codes
+        UPDATE metal_category SET category_code = 'R' WHERE category = 'Rings';
+        UPDATE metal_category SET category_code = 'N' WHERE category = 'Necklaces';
+        UPDATE metal_category SET category_code = 'B' WHERE category = 'Bracelets';
+        UPDATE metal_category SET category_code = 'E' WHERE category = 'Earrings';
+        UPDATE metal_category SET category_code = 'SE' WHERE category = 'Single Earring';
+        UPDATE metal_category SET category_code = 'P' WHERE category = 'Pendants';
+        UPDATE metal_category SET category_code = 'BR' WHERE category = 'Brooches';
+        UPDATE metal_category SET category_code = 'J' WHERE category = 'Jewelry Accessories';
+        UPDATE metal_category SET category_code = 'Misc' WHERE category = 'Miscellaneous Jewelry';
+        UPDATE metal_category SET category_code = 'CSM' WHERE category = 'Costume & Special Metals';
+        UPDATE metal_category SET category_code = 'S' WHERE category = 'Scrap';
+        UPDATE metal_category SET category_code = 'LDS' WHERE category = 'Loose Diamonds and Stones';
+    END IF;
+
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_color') THEN
         CREATE TABLE metal_color (
             id SERIAL PRIMARY KEY,
@@ -61,6 +100,22 @@ BEGIN
         (1, '2 Tone'),
         (1, 'Tri-color'),
         (1, 'Rose-Red');
+    END IF;
+
+    -- Add color_code column to metal_color if it doesn't exist
+    IF NOT EXISTS (
+        SELECT FROM information_schema.columns
+        WHERE table_name = 'metal_color'
+        AND column_name = 'color_code'
+    ) THEN
+        ALTER TABLE metal_color ADD COLUMN color_code VARCHAR(10);
+
+        -- Update existing rows with color codes
+        UPDATE metal_color SET color_code = 'Y' WHERE color = 'Yellow';
+        UPDATE metal_color SET color_code = 'W' WHERE color = 'White';
+        UPDATE metal_color SET color_code = 'TT' WHERE color = '2 Tone';
+        UPDATE metal_color SET color_code = 'T' WHERE color = 'Tri-color';
+        UPDATE metal_color SET color_code = 'R' WHERE color = 'Rose-Red';
     END IF;
 
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_purity') THEN
