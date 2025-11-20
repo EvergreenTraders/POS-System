@@ -948,7 +948,33 @@ const CustomerTicket = () => {
       window.history.replaceState({}, document.title);
     }
   }, [estimatedItems, from, location.state, customer]);
-  
+
+  // Recalculate totals whenever any item array changes
+  React.useEffect(() => {
+    // Calculate totals for all tabs
+    const pawnTotal = pawnItems.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
+    const buyTotal = buyItems.reduce((sum, item) => sum + (parseFloat(item.price) || 0), 0);
+    const tradeTotal = tradeItems.reduce((sum, item) => sum + (parseFloat(item.priceDiff) || 0), 0);
+    const saleTotal = saleItems.reduce((sum, item) => {
+      const itemPrice = parseFloat(item.price) || 0;
+      const protectionPlanAmount = item.protectionPlan ? itemPrice * 0.15 : 0;
+      return sum + itemPrice + protectionPlanAmount;
+    }, 0);
+    const repairTotal = repairItems.reduce((sum, item) => sum + (parseFloat(item.fee) || 0), 0);
+    const paymentTotal = paymentItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+    const refundTotal = refundItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+
+    setTotals({
+      pawn: pawnTotal,
+      buy: buyTotal,
+      trade: tradeTotal,
+      sale: saleTotal,
+      repair: repairTotal,
+      payment: paymentTotal,
+      refund: refundTotal
+    });
+  }, [pawnItems, buyItems, tradeItems, saleItems, repairItems, paymentItems, refundItems]);
+
   // Function to get current items based on active tab and type name
   const getCurrentItems = () => {
     let type = '';
@@ -1053,9 +1079,6 @@ const CustomerTicket = () => {
     }
     
     setItems([...items, newItem]);
-    
-    // Calculate totals when adding a new item
-    calculateTotal();
   };
   
   // Handle updating an item
@@ -1155,9 +1178,9 @@ const CustomerTicket = () => {
         emptyItem.reference = '';
         type === 'payment' ? emptyItem.notes = '' : emptyItem.reason = '';
       }
-      
+
       setItems([emptyItem]);
-    } 
+    }
     else {
       setItems(remainingItems);
     }
@@ -1278,7 +1301,7 @@ const CustomerTicket = () => {
     // Close the menu and switch to the target tab
     handleConvertClose();
     setActiveTab(targetTabIndex);
-    
+
     // Show a success message
     showSnackbar(`Item converted to ${getTabName(targetTabIndex)}`, 'success');
   };
@@ -1912,9 +1935,6 @@ const CustomerTicket = () => {
   };
   
   const handleCheckout = () => {
-    // Calculate totals before checkout
-    calculateTotal();
-    
     // Get all valid items from all tabs
     const allItems = [];
     
