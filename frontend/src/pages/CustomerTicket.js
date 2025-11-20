@@ -9,6 +9,8 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
+import MetalEstimator from './MetalEstimator';
+import GemEstimator from './GemEstimator';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import InventoryIcon from '@mui/icons-material/Inventory';
@@ -59,7 +61,24 @@ const CustomerTicket = () => {
   const [videoStream, setVideoStream] = useState(null);
   const videoRef = React.useRef(null);
   const canvasRef = React.useRef(null);
-  
+
+  // Combined estimator dialog state
+  const [combinedDialogOpen, setCombinedDialogOpen] = useState(false);
+  const [metalFormState, setMetalFormState] = useState(null);
+  const [gemFormState, setGemFormState] = useState({ diamonds: [], stones: [], secondaryGems: [] });
+  const [currentEditingItemId, setCurrentEditingItemId] = useState(null);
+  const [prefilledData, setPrefilledData] = useState(null);
+
+  // Metal categories from database
+  const [metalCategories, setMetalCategories] = useState([]);
+  const [categoryCodeMap, setCategoryCodeMap] = useState({});
+
+  // Metal colors and precious metal types from database
+  const [metalColors, setMetalColors] = useState([]);
+  const [colorCodeMap, setColorCodeMap] = useState({});
+  const [preciousMetalTypes, setPreciousMetalTypes] = useState([]);
+  const [metalTypeCodeMap, setMetalTypeCodeMap] = useState({});
+
   // Handle input change for search form
   const handleLookupInputChange = (e) => {
     const { name, value } = e.target;
@@ -342,6 +361,65 @@ const CustomerTicket = () => {
       }
     };
   }, [videoStream]);
+
+  // Fetch metal categories, colors, and types on component mount
+  React.useEffect(() => {
+    const fetchMetalData = async () => {
+      try {
+        // Fetch metal categories
+        const categoriesResponse = await fetch(`${config.apiUrl}/metal_category`);
+        if (categoriesResponse.ok) {
+          const categories = await categoriesResponse.json();
+          setMetalCategories(categories);
+
+          // Create a map of category_code to category name
+          const categoryMap = {};
+          categories.forEach(cat => {
+            if (cat.category_code) {
+              categoryMap[cat.category_code] = cat.category;
+            }
+          });
+          setCategoryCodeMap(categoryMap);
+        }
+
+        // Fetch metal colors
+        const colorsResponse = await fetch(`${config.apiUrl}/metal_color`);
+        if (colorsResponse.ok) {
+          const colors = await colorsResponse.json();
+          setMetalColors(colors);
+
+          // Create a map of color_code to color name
+          const colorMap = {};
+          colors.forEach(color => {
+            if (color.color_code) {
+              colorMap[color.color_code] = color.color;
+            }
+          });
+          setColorCodeMap(colorMap);
+        }
+
+        // Fetch precious metal types
+        const typesResponse = await fetch(`${config.apiUrl}/precious_metal_type`);
+        if (typesResponse.ok) {
+          const types = await typesResponse.json();
+          setPreciousMetalTypes(types);
+
+          // Create a map of type_code to type name
+          const typeMap = {};
+          types.forEach(type => {
+            if (type.type_code) {
+              typeMap[type.type_code] = type.type;
+            }
+          });
+          setMetalTypeCodeMap(typeMap);
+        }
+      } catch (error) {
+        console.error('Error fetching metal data:', error);
+      }
+    };
+
+    fetchMetalData();
+  }, []);
 
   // Mocked portfolio KPI data (would be fetched from API in production)
   const portfolioData = {
@@ -1235,7 +1313,188 @@ const CustomerTicket = () => {
   const handleJewelryEstimatorClick = () => {
     navigate('/jewel-estimator', { state: { customer } });
   };
-  
+
+  // Parse description format: JR 10k 2g YG
+  // J = Jewelry, R = Ring, 10k = purity, 2g = weight, Y = Yellow, G = Gold
+  const parseDescription = (description) => {
+    if (!description) return null;
+
+    const parts = description.trim().toUpperCase().split(/\s+/);
+    if (parts.length < 4) return null;
+
+    const parsed = {
+      type: null,
+      category: null,
+      purity: null,
+      weight: null,
+      color: null,
+      metal: null
+    };
+
+    // First part: Type + Category (e.g., "JR" = Jewelry Ring)
+    const typeCategory = parts[0];
+    if (typeCategory.length >= 2) {
+      const typeCode = typeCategory[0];
+      const categoryCode = typeCategory.substring(1);
+
+      // Map type codes
+      const typeMap = { 'J': 'Jewelry', 'B': 'Bullion', 'M': 'Misc' };
+      parsed.type = typeMap[typeCode] || null;
+
+      // Map category codes from database
+      parsed.category = categoryCodeMap[categoryCode] || categoryCode;
+    }
+
+    // Second part: Purity (e.g., "10K", "14K", "18K", "24K")
+    const purity = parts[1];
+    if (purity.match(/^\d+K?$/i)) {
+      parsed.purity = purity.replace(/K$/i, '') + 'k';
+    }
+
+    // Third part: Weight (e.g., "2G", "5.5G")
+    const weight = parts[2];
+    if (weight.match(/^[\d.]+G?$/i)) {
+      parsed.weight = parseFloat(weight.replace(/G$/i, ''));
+    }
+
+    // Fourth part: Color + Metal (e.g., "YG" = Yellow Gold, "WG" = White Gold, "S" = Silver)
+    const colorMetal = parts[3];
+
+    // Handle single-character codes (e.g., "S" for Silver without color)
+    if (colorMetal.length === 1) {
+      // Check if it's a metal type code
+      parsed.metal = metalTypeCodeMap[colorMetal] || null;
+      // No color specified
+      parsed.color = null;
+    } else if (colorMetal.length >= 2) {
+      // Multi-character codes: first char is color, rest is metal
+      const colorCode = colorMetal[0];
+      const metalCode = colorMetal.substring(1);
+
+      // Map color codes from database
+      parsed.color = colorCodeMap[colorCode] || null;
+
+      // Map metal codes from database
+      parsed.metal = metalTypeCodeMap[metalCode] || null;
+    }
+
+    return parsed;
+  };
+
+  // Handle Enter key in description field to auto-open estimators
+  const handleDescriptionKeyPress = (event, itemId) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+
+      const { items } = getCurrentItems();
+      const item = items.find(i => i.id === itemId);
+      if (!item || !item.description) return;
+
+      const parsed = parseDescription(item.description);
+      if (!parsed || !parsed.type) return;
+
+      // Map purity to purity_value (e.g., "10k" -> 0.417)
+      const purityValueMap = {
+        '24k': 0.999, '22k': 0.917, '21k': 0.875, '20k': 0.833,
+        '18k': 0.750, '14k': 0.585, '10k': 0.417, '9k': 0.375, '8k': 0.333
+      };
+
+      const purityValue = parsed.purity ? purityValueMap[parsed.purity.toLowerCase()] || null : null;
+
+      // Prepare pre-filled data for jewelry estimator
+      const preFilledData = {
+        metal_weight: parsed.weight || '',
+        weight: parsed.weight || '', // MetalEstimator uses 'weight'
+        metal_purity: parsed.purity || '',
+        purity_value: purityValue,
+        precious_metal_type: parsed.metal || '',
+        preciousMetalType: parsed.metal || '', // MetalEstimator uses 'preciousMetalType'
+        metal_category: parsed.category || '',
+        metalCategory: parsed.category || '', // MetalEstimator uses 'metalCategory'
+        category: parsed.category || '',
+        color: parsed.color || '',
+        jewelryColor: parsed.color || '', // MetalEstimator uses 'jewelryColor'
+        free_text: item.description
+      };
+
+      // Store the prefilled data and item ID
+      setPrefilledData(preFilledData);
+      setCurrentEditingItemId(itemId);
+
+      // Open the combined dialog
+      setCombinedDialogOpen(true);
+    }
+  };
+
+  // Handler for canceling the combined dialog
+  const handleCombinedCancel = () => {
+    setCombinedDialogOpen(false);
+    setMetalFormState(null);
+    setGemFormState({ diamonds: [], stones: [], secondaryGems: [] });
+    setCurrentEditingItemId(null);
+    setPrefilledData(null);
+  };
+
+  // Handler for saving data from the combined dialog
+  const handleCombinedSave = () => {
+    if (!currentEditingItemId) return;
+
+    const { items, setItems } = getCurrentItems();
+
+    // Create updated item with data from both estimators
+    const updatedItems = items.map(item => {
+      if (item.id !== currentEditingItemId) return item;
+
+      const updatedItem = { ...item };
+
+      // Update with metal data if available
+      if (metalFormState) {
+        updatedItem.precious_metal_type = metalFormState.preciousMetalType || '';
+        updatedItem.metal_weight = metalFormState.weight || 0;
+        updatedItem.non_precious_metal_type = metalFormState.nonPreciousMetalType || '';
+        updatedItem.metal_purity = metalFormState.purity?.purity || '';
+        updatedItem.purity_value = metalFormState.purity?.value || 0;
+        updatedItem.metal_spot_price = metalFormState.spotPrice || 0;
+        updatedItem.est_metal_value = metalFormState.metalValue || 0;
+        updatedItem.jewelry_color = metalFormState.jewelryColor || '';
+        updatedItem.category = metalFormState.metalCategory || '';
+
+        // Copy estimated metal value to the price column (rounded to 2 decimal places)
+        if (metalFormState.metalValue) {
+          updatedItem.price = Math.round(parseFloat(metalFormState.metalValue) * 100) / 100;
+        }
+      }
+
+      // Update with gem data if available
+      if (gemFormState) {
+        if (gemFormState.diamonds?.length > 0) {
+          updatedItem.diamonds = gemFormState.diamonds;
+          updatedItem.primary_gem_category = 'diamond';
+        }
+        if (gemFormState.stones?.length > 0) {
+          updatedItem.stones = gemFormState.stones;
+          updatedItem.primary_gem_category = 'stone';
+        }
+        if (gemFormState.secondaryGems?.length > 0) {
+          updatedItem.secondaryGems = gemFormState.secondaryGems;
+        }
+      }
+
+      // Mark that this item came from the jewelry estimator
+      updatedItem.sourceEstimator = 'jewelry';
+
+      return updatedItem;
+    });
+
+    setItems(updatedItems);
+
+    // Close dialog and reset state
+    handleCombinedCancel();
+
+    // Show success message
+    showSnackbar('Item updated successfully', 'success');
+  };
+
   // Handler for editing an item in the jewelry estimator
   const handleEditItem = (itemId) => {
     const { items } = getCurrentItems();
@@ -2124,8 +2383,7 @@ return (
                             <TableRow>
                               <TableCell width="15%" align="center">Estimator</TableCell>
                               <TableCell width="10%" align="center">Image</TableCell>
-                              <TableCell width="35%">Item Description</TableCell>
-                              <TableCell width="15%">Category</TableCell>
+                              <TableCell width="50%">Item Description</TableCell>
                               <TableCell width="10%">Est. Value</TableCell>
                               <TableCell width="20%" align="right" padding="none">
                                 <Tooltip title="Add Item">
@@ -2193,19 +2451,13 @@ return (
                                   </Tooltip>
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
-                                    value={item.category}
-                                    onChange={(e) => handleItemChange(item.id, 'category', e.target.value)}
+                                    onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
+                                    placeholder="e.g., JR 10k 2g YG"
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -2260,8 +2512,7 @@ return (
                             <TableRow>
                               <TableCell width="15%" align="center">Estimator</TableCell>
                               <TableCell width="10%" align="center">Image</TableCell>
-                              <TableCell width="35%">Item Description</TableCell>
-                              <TableCell width="15%">Category</TableCell>
+                              <TableCell width="50%">Item Description</TableCell>
                               <TableCell width="10%">Price</TableCell>
                               <TableCell width="15%" align="right" padding="none">
                                 <Tooltip title="Add Item">
@@ -2329,19 +2580,13 @@ return (
                                   </Tooltip>
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
-                                    value={item.category}
-                                    onChange={(e) => handleItemChange(item.id, 'category', e.target.value)}
+                                    onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
+                                    placeholder="e.g., JR 10k 2g YG"
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -2611,11 +2856,13 @@ return (
                                   </Tooltip>
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
+                                    onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
+                                    placeholder="e.g., JR 10k 2g YG"
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -2760,6 +3007,8 @@ return (
                                     fullWidth
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
+                                    onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
+                                    placeholder="e.g., JR 10k 2g YG"
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -3342,6 +3591,52 @@ return (
           <Button onClick={captureImage} variant="contained" color="primary">
             Capture
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Combined Jewelry Estimator Dialog */}
+      <Dialog
+        open={combinedDialogOpen}
+        onClose={handleCombinedCancel}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{ sx: { maxHeight: '90vh' } }}
+      >
+        <DialogTitle>Jewelry Estimator - Metal & Gem</DialogTitle>
+        <DialogContent dividers>
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={5} md={4}>
+              {combinedDialogOpen && (
+                <MetalEstimator
+                  key={`metal-${combinedDialogOpen}`}
+                  initialData={prefilledData || {}}
+                  hideButtons={true}
+                  setMetalFormState={setMetalFormState}
+                />
+              )}
+            </Grid>
+            <Grid item xs={12} sm={7} md={8}>
+              {combinedDialogOpen && (
+                <GemEstimator
+                  key={`gem-${combinedDialogOpen}`}
+                  initialData={{}}
+                  hideButtons={true}
+                  editMode={false}
+                  setGemFormState={setGemFormState}
+                  onSecondaryGemsChange={(secondaryGems) => {
+                    setGemFormState(prev => ({
+                      ...prev,
+                      secondaryGems
+                    }));
+                  }}
+                />
+              )}
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCombinedCancel} startIcon={<ClearIcon />}>Cancel</Button>
+          <Button onClick={handleCombinedSave} variant="contained" color="primary" startIcon={<AddIcon />}>Add to Ticket</Button>
         </DialogActions>
       </Dialog>
     </Container>

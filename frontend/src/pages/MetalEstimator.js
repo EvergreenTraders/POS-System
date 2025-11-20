@@ -1084,7 +1084,7 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
               
               {/* Standard options - filter out any duplicates that match the current custom value */}
               {metalPurities
-                .filter(purity => {
+                .filter((purity, index, self) => {
                   // Filter out duplicates if there's a custom purity selected
                   if (form.purity?.id === 'custom') {
                     // For Platinum/Palladium, compare by value
@@ -1094,7 +1094,13 @@ const MetalEstimator = ({ onMetalValueChange = () => {}, onAddMetal = () => {}, 
                     // For other metals, compare by purity text
                     return purity.purity !== form.purity.purity;
                   }
-                  return true; // Keep all purities if there's no custom purity
+
+                  // Remove duplicates based on purity text (e.g., multiple "10K" entries)
+                  if (form.preciousMetalType === 'Platinum' || form.preciousMetalType === 'Palladium') {
+                    return index === self.findIndex(p => p.value === purity.value);
+                  } else {
+                    return index === self.findIndex(p => p.purity === purity.purity);
+                  }
                 })
                 .map(purity => (
                   <MenuItem key={purity.id} value={purity.id}>
