@@ -1343,7 +1343,7 @@ const CustomerTicket = () => {
     if (!description) return null;
 
     const parts = description.trim().toUpperCase().split(/\s+/);
-    if (parts.length < 4) return null;
+    if (parts.length < 3) return null; // Minimum: purity, weight, metal (e.g., "10k 5.6g RG")
 
     const parsed = {
       type: null,
@@ -1354,58 +1354,93 @@ const CustomerTicket = () => {
       metal: null
     };
 
-    // First part: Type + Category (e.g., "JR" = Jewelry Ring)
-    const typeCategory = parts[0];
-    if (typeCategory.length >= 2) {
+    let partIndex = 0;
+
+    // Check if first part is Type + Category (e.g., "JR" = Jewelry Ring)
+    // Type+Category should have at least 2 chars and first char should be J, B, or M
+    const typeMap = { 'J': 'Jewelry', 'B': 'Bullion', 'M': 'Misc' };
+    const firstPart = parts[0];
+    const firstChar = firstPart[0];
+
+    // Determine if the first part is a type+category or just purity
+    let hasTypeCategory = false;
+    if (firstPart.length >= 2 && typeMap[firstChar]) {
+      // Check if second part looks like purity (to confirm first part is type+category)
+      if (parts.length >= 4) {
+        const secondPart = parts[1];
+        if (secondPart.match(/^\d+K?$/i) || secondPart.match(/^0?\.\d+$/) || secondPart.match(/^1\.0+$/)) {
+          hasTypeCategory = true;
+        }
+      }
+    }
+
+    if (hasTypeCategory) {
+      // Parse Type + Category
+      const typeCategory = parts[partIndex++];
       const typeCode = typeCategory[0];
       const categoryCode = typeCategory.substring(1);
 
-      // Map type codes
-      const typeMap = { 'J': 'Jewelry', 'B': 'Bullion', 'M': 'Misc' };
       parsed.type = typeMap[typeCode] || null;
-
-      // Map category codes from database
       parsed.category = categoryCodeMap[categoryCode] || categoryCode;
     }
 
-    // Second part: Purity (e.g., "10K", "14K", "18K", "24K")
-    const purity = parts[1];
-    if (purity.match(/^\d+K?$/i)) {
-      parsed.purity = purity.replace(/K$/i, '') + 'k';
+    // Parse Purity (e.g., "10K", "14K", "18K", "24K", "0.585", "0.999")
+    if (partIndex < parts.length) {
+      const purity = parts[partIndex];
+      if (purity.match(/^\d+K?$/i)) {
+        // Karat format (e.g., "10K", "14K")
+        parsed.purity = purity.replace(/K$/i, '') + 'K';
+        partIndex++;
+      } else if (purity.match(/^0?\.\d+$/) || purity.match(/^1\.0+$/)) {
+        // Decimal format for Platinum/Palladium (e.g., "0.585", "0.999", "1.0")
+        parsed.purity = parseFloat(purity);
+        partIndex++;
+      }
     }
 
-    // Third part: Weight (e.g., "2G", "5.5G")
-    const weight = parts[2];
-    if (weight.match(/^[\d.]+G?$/i)) {
-      parsed.weight = parseFloat(weight.replace(/G$/i, ''));
+    // Parse Weight (e.g., "2G", "5.5G")
+    if (partIndex < parts.length) {
+      const weight = parts[partIndex];
+      if (weight.match(/^[\d.]+G?$/i)) {
+        parsed.weight = parseFloat(weight.replace(/G$/i, ''));
+        partIndex++;
+      }
     }
 
-    // Fourth part: Color + Metal (e.g., "YG" = Yellow Gold, "WG" = White Gold, "S" = Silver)
-    const colorMetal = parts[3];
+    // Parse Color + Metal (e.g., "YG" = Yellow Gold, "WG" = White Gold, "S" = Silver, "PD" = Palladium)
+    if (partIndex < parts.length) {
+      const colorMetal = parts[partIndex];
 
-    // Handle single-character codes (e.g., "S" for Silver without color)
-    if (colorMetal.length === 1) {
-      // Check if it's a metal type code
-      parsed.metal = metalTypeCodeMap[colorMetal] || null;
-      // No color specified
-      parsed.color = null;
-    } else if (colorMetal.length >= 2) {
-      // Multi-character codes: first char is color, rest is metal
-      const colorCode = colorMetal[0];
-      const metalCode = colorMetal.substring(1);
+      // Handle single-character codes (e.g., "S" for Silver without color)
+      if (colorMetal.length === 1) {
+        // Check if it's a metal type code
+        parsed.metal = metalTypeCodeMap[colorMetal] || null;
+        // No color specified
+        parsed.color = null;
+      } else if (colorMetal.length >= 2) {
+        // First check if the entire string is a metal code (e.g., "PD" for Palladium)
+        if (metalTypeCodeMap[colorMetal]) {
+          parsed.metal = metalTypeCodeMap[colorMetal];
+          parsed.color = null;
+        } else {
+          // Multi-character codes: first char is color, rest is metal
+          const colorCode = colorMetal[0];
+          const metalCode = colorMetal.substring(1);
 
-      // Map color codes from database
-      parsed.color = colorCodeMap[colorCode] || null;
+          // Map color codes from database
+          parsed.color = colorCodeMap[colorCode] || null;
 
-      // Map metal codes from database
-      parsed.metal = metalTypeCodeMap[metalCode] || null;
+          // Map metal codes from database
+          parsed.metal = metalTypeCodeMap[metalCode] || null;
+        }
+      }
     }
 
     return parsed;
   };
 
   // Handle Enter key in description field to auto-open estimators
-  const handleDescriptionKeyPress = (event, itemId) => {
+  const handleDescriptionKeyPress = async (event, itemId) => {
     if (event.key === 'Enter') {
       event.preventDefault();
 
@@ -1416,20 +1451,56 @@ const CustomerTicket = () => {
       const parsed = parseDescription(item.description);
       if (!parsed || !parsed.type) return;
 
-      // Map purity to purity_value (e.g., "10k" -> 0.417)
-      const purityValueMap = {
-        '24k': 0.999, '22k': 0.917, '21k': 0.875, '20k': 0.833,
-        '18k': 0.750, '14k': 0.585, '10k': 0.417, '9k': 0.375, '8k': 0.333
-      };
+      // Fetch purity_value from database
+      let purityValue = null;
+      let purityText = null;
+      if (parsed.purity && parsed.metal) {
+        try {
+          // First, get the metal type ID
+          const metalTypesResponse = await fetch(`${config.API_BASE_URL}/precious_metal_type`);
+          const metalTypes = await metalTypesResponse.json();
+          const metalType = metalTypes.find(m =>
+            m.type && parsed.metal &&
+            m.type.toLowerCase() === parsed.metal.toLowerCase()
+          );
 
-      const purityValue = parsed.purity ? purityValueMap[parsed.purity.toLowerCase()] || null : null;
+          if (metalType && metalType.id) {
+            // Fetch purities for this metal type
+            const puritiesResponse = await fetch(`${config.API_BASE_URL}/metal_purity/${metalType.id}`);
+            const purities = await puritiesResponse.json();
+
+            // Find matching purity
+            let matchingPurity = null;
+
+            // Check if parsed.purity is a number (for Platinum/Palladium)
+            if (typeof parsed.purity === 'number') {
+              // Match by numeric value
+              matchingPurity = purities.find(p =>
+                p.value && Math.abs(parseFloat(p.value) - parsed.purity) < 0.001
+              );
+            } else if (typeof parsed.purity === 'string') {
+              // Match by text (for Gold/Silver)
+              matchingPurity = purities.find(p =>
+                p.purity && parsed.purity &&
+                p.purity.toLowerCase() === parsed.purity.toLowerCase()
+              );
+            }
+
+            if (matchingPurity) {
+              purityValue = matchingPurity.value;
+              purityText = matchingPurity.purity;
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching purity value:', error);
+        }
+      }
 
       // Prepare pre-filled data for jewelry estimator
+      // Only include purity data if we found a matching purity in the database
       const preFilledData = {
         metal_weight: parsed.weight || '',
         weight: parsed.weight || '', // MetalEstimator uses 'weight'
-        metal_purity: parsed.purity || '',
-        purity_value: purityValue,
         precious_metal_type: parsed.metal || '',
         preciousMetalType: parsed.metal || '', // MetalEstimator uses 'preciousMetalType'
         metal_category: parsed.category || '',
@@ -1439,6 +1510,15 @@ const CustomerTicket = () => {
         jewelryColor: parsed.color || '', // MetalEstimator uses 'jewelryColor'
         free_text: item.description
       };
+
+      // Only include purity data if we found a valid match for this metal type
+      if (purityValue !== null) {
+        preFilledData.purity_value = purityValue;
+        // purityText can be null for Platinum/Palladium
+        if (purityText !== null) {
+          preFilledData.metal_purity = purityText;
+        }
+      }
 
       // Store the prefilled data and item ID
       setPrefilledData(preFilledData);
@@ -1463,6 +1543,113 @@ const CustomerTicket = () => {
     if (!currentEditingItemId) return;
 
     const { items, setItems } = getCurrentItems();
+
+    // Get primary and secondary gems from gemFormState
+    const primaryDiamond = gemFormState?.diamonds?.find(d => d.isPrimary);
+    const primaryStone = gemFormState?.stones?.find(s => s.isPrimary);
+    const secondaryDiamonds = gemFormState?.diamonds?.filter(d => !d.isPrimary) || [];
+    const secondaryStones = gemFormState?.stones?.filter(s => !s.isPrimary) || [];
+
+    // Determine primary gem type
+    const primaryGemType = primaryDiamond ? 'diamond' : primaryStone ? 'stone' : null;
+
+    // Build description components
+    const gemDescription = primaryGemType === 'diamond' && primaryDiamond
+      ? ` ${primaryDiamond.shape}`
+      : primaryGemType === 'stone' && primaryStone
+        ? ` ${primaryStone.name}`
+        : '';
+
+    const secondaryGemsText = (secondaryDiamonds.length > 0 || secondaryStones.length > 0)
+      ? ` with ${secondaryDiamonds.length + secondaryStones.length} secondary gems`
+      : '';
+
+    // Create the complete jewelryItem object following JewelEstimator.js structure
+    const jewelryItem = {
+      // Basic metal details
+      metal_weight: metalFormState?.weight || 0,
+      precious_metal_type: metalFormState?.preciousMetalType || '',
+      non_precious_metal_type: metalFormState?.nonPreciousMetalType || null,
+      metal_purity: metalFormState?.purity?.purity || '',
+      metal_category: metalFormState?.metalCategory || '',
+      jewelry_color: metalFormState?.jewelryColor || '',
+      metal_spot_price: metalFormState?.spotPrice || 0,
+      est_metal_value: metalFormState?.metalValue?.toFixed(2) || '0.00',
+      purity_value: metalFormState?.purity?.value || 0,
+
+      // Primary gem details
+      primary_gem_category: primaryGemType,
+      ...(primaryGemType === 'diamond' && primaryDiamond ? {
+        primary_gem_shape: primaryDiamond.shape,
+        primary_gem_clarity: primaryDiamond.clarity,
+        primary_gem_color: primaryDiamond.color,
+        primary_gem_exact_color: primaryDiamond.exactColor,
+        primary_gem_cut: primaryDiamond.cut,
+        primary_gem_weight: primaryDiamond.weight,
+        primary_gem_size: primaryDiamond.size,
+        primary_gem_quantity: primaryDiamond.quantity,
+        primary_gem_lab_grown: primaryDiamond.labGrown,
+        primary_gem_value: primaryDiamond.estimatedValue
+      } : primaryGemType === 'stone' && primaryStone ? {
+        primary_gem_shape: primaryStone.shape || '',
+        primary_gem_quantity: primaryStone.quantity || 0,
+        primary_gem_authentic: primaryStone.authentic || false,
+        primary_gem_type: primaryStone.name || '',
+        primary_gem_color: primaryStone.color || '',
+        primary_gem_weight: primaryStone.weight || 0,
+        primary_gem_value: primaryStone.estimatedValue || 0
+      } : {}),
+
+      // Secondary gem details - store in arrays
+      secondary_gems: [
+        // Process secondary diamonds
+        ...secondaryDiamonds.map(diamond => ({
+          secondary_gem_category: 'diamond',
+          secondary_gem_shape: diamond.shape || '',
+          secondary_gem_clarity: diamond.clarity || '',
+          secondary_gem_color: diamond.color || '',
+          secondary_gem_exact_color: diamond.exactColor || '',
+          secondary_gem_cut: diamond.cut || '',
+          secondary_gem_weight: diamond.weight || 0,
+          secondary_gem_size: diamond.size || '',
+          secondary_gem_quantity: diamond.quantity || 0,
+          secondary_gem_lab_grown: diamond.labGrown || false,
+          secondary_gem_value: diamond.estimatedValue || 0
+        })),
+        // Process secondary stones
+        ...secondaryStones.map(stone => ({
+          secondary_gem_category: 'stone',
+          secondary_gem_shape: stone.shape || '',
+          secondary_gem_quantity: stone.quantity || 0,
+          secondary_gem_authentic: stone.authentic || false,
+          secondary_gem_type: stone.name || '',
+          secondary_gem_color: stone.color || '',
+          secondary_gem_weight: stone.weight || 0,
+          secondary_gem_value: stone.estimatedValue || 0
+        }))
+      ],
+
+      // Price estimates - determine based on active tab
+      transaction_type: activeTab === 0 ? 'pawn' : activeTab === 1 ? 'buy' : activeTab === 3 ? 'sale' : 'buy',
+      buy_price: metalFormState?.metalValue || 0,
+      pawn_price: metalFormState?.metalValue ? metalFormState.metalValue * 0.5 : 0,
+      melt_value: metalFormState?.metalValue || 0,
+      retail_price: metalFormState?.metalValue ? metalFormState.metalValue * 2 : 0,
+
+      // Free text description
+      notes: '',
+
+      // Descriptions
+      long_desc: metalFormState?.weight
+        ? `${metalFormState.weight}g ${metalFormState.purity?.purity || ''} ${metalFormState.preciousMetalType} ${metalFormState.metalCategory}${gemDescription}${secondaryGemsText}`
+        : '',
+      short_desc: metalFormState?.weight
+        ? `${metalFormState.weight}g ${metalFormState.purity?.purity || ''} ${metalFormState.preciousMetalType} ${metalFormState.metalCategory}`
+        : ''
+    };
+
+    // Log the jewelryItem to console
+    console.log("jewelryItem", jewelryItem);
 
     // Create updated item with data from both estimators
     const updatedItems = items.map(item => {
@@ -1502,6 +1689,16 @@ const CustomerTicket = () => {
           updatedItem.secondaryGems = gemFormState.secondaryGems;
         }
       }
+
+      // Store the complete jewelryItem data in originalData for future reference
+      updatedItem.originalData = jewelryItem;
+
+      // Update description with long_desc or short_desc
+      updatedItem.description = jewelryItem.long_desc || jewelryItem.short_desc || updatedItem.description;
+
+      // Store both descriptions
+      updatedItem.short_desc = jewelryItem.short_desc;
+      updatedItem.long_desc = jewelryItem.long_desc;
 
       // Mark that this item came from the jewelry estimator
       updatedItem.sourceEstimator = 'jewelry';
@@ -1838,9 +2035,16 @@ const CustomerTicket = () => {
         
         // If the item came from the jewelry estimator, include all jewelry-specific fields
         if (item.sourceEstimator === 'jewelry') {
+          // Use long_desc or short_desc from originalData if available, otherwise use current description
+          const jewelryDescription = item.originalData?.long_desc ||
+                                     item.originalData?.short_desc ||
+                                     item.description;
+
           // Preserve all jewelry fields from the original data or directly from the item if available
           return {
             ...baseItem,
+            // Update description with jewelry item short or long description
+            description: jewelryDescription,
             // Indicate this is a jewelry item for the cart and checkout
             sourceEstimator: 'jewelry',
             // Include all jewelry-specific fields that may be present
@@ -1852,6 +2056,9 @@ const CustomerTicket = () => {
             stones: item.stones || (item.originalData?.stones),
             free_text: item.free_text || (item.originalData?.free_text),
             price_estimates: item.price_estimates || (item.originalData?.price_estimates),
+            // Store both short and long descriptions for future reference
+            short_desc: item.originalData?.short_desc,
+            long_desc: item.originalData?.long_desc,
             // Pass along the complete original data from the estimator
          //   originalData: item.originalData || null,
             // Ensure images are properly passed
