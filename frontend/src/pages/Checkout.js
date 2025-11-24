@@ -152,14 +152,8 @@ function Checkout() {
 
       // Handle from generic estimator or specific estimators like coinsbullions
       if (fromSource === 'jewelry' || fromSource === 'coinsbullions') {
-        // Clear existing cart items before adding new ones from estimator
-        clearCart();
-
-        // Ensure each item is added individually to the cart
-        if (Array.isArray(itemsToCheckout)) {
-          itemsToCheckout.forEach(item => addToCart(item));
-        }
-        // Set checkoutItems for display
+        // Don't add items to cart - they should only be displayed in checkout, not in cart icon
+        // Just set checkoutItems for display
         setCheckoutItems(itemsToCheckout);
 
         // Set the customer if it exists
@@ -1271,12 +1265,12 @@ function Checkout() {
   // This useEffect is now redundant - all initialization logic is handled in the first useEffect (lines 108-210)
   // Keeping this comment for reference but the logic has been consolidated
 
-  // Only redirect if we have no data after initialization
+  // Only redirect if we have no items to checkout after initialization (customer is optional)
   useEffect(() => {
-    if (isInitialized && (!selectedCustomer?.name || cartItems.length === 0)) {
+    if (isInitialized && cartItems.length === 0 && checkoutItems.length === 0) {
       navigate('/quote-manager');
     }
-  }, [selectedCustomer, cartItems, navigate, isInitialized]);
+  }, [cartItems, checkoutItems, navigate, isInitialized]);
   
   // Handle customer selection from search results
   const handleSelectCustomer = (customerData) => {

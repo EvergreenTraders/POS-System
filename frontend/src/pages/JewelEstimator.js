@@ -1861,29 +1861,17 @@ function JewelEstimator() {
     // Clear estimated items from sessionStorage when proceeding to checkout
     sessionStorage.removeItem('jewelEstimatorItems');
 
-    // Add items to cart before navigation (cart is in-memory)
-    updatedItems.forEach(item => addToCart(item));
-
+    // Don't add items to cart - they will be displayed only in checkout, not in the cart icon
     const customerData = location.state?.customer;
 
-    if (customerData) {
-      // If customer exists, navigate to checkout page with customer and items
-      navigate('/checkout', {
-        state: {
-          customer: customerData,
-          items: updatedItems, // Pass items with File objects through navigation state
-          from: 'jewelry'
-        }
-      });
-    } else {
-      // Otherwise, navigate to customer manager to select or create a customer
-      navigate('/customer', {
-        state: {
-          items: updatedItems, // Pass items with File objects through navigation state
-          from: 'jewelry'
-        }
-      });
-    }
+    // Always navigate directly to checkout
+    navigate('/checkout', {
+      state: {
+        customer: customerData || null, // Pass customer if exists, otherwise null
+        items: updatedItems, // Pass items with File objects through navigation state
+        from: 'jewelry'
+      }
+    });
   };
 
   useEffect(() => {
