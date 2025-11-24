@@ -936,6 +936,84 @@ function Checkout() {
             }
           }
 
+          // Step 2.6: Post pawn_ticket records for each unique pawn_ticket_id
+          const pawnTicketIds = new Set();
+          checkoutItems.forEach(item => {
+            if (item.pawnTicketId) {
+              pawnTicketIds.add(item.pawnTicketId);
+            }
+          });
+
+          for (const pawnTicketId of pawnTicketIds) {
+            const itemsForTicket = checkoutItems
+              .map((item, index) => ({ ...item, index }))
+              .filter(item => item.pawnTicketId === pawnTicketId);
+
+            for (const item of itemsForTicket) {
+              try {
+                let itemId = null;
+                if (createdJewelryItems && createdJewelryItems.length > 0 && createdJewelryItems[item.index]) {
+                  itemId = createdJewelryItems[item.index].item_id;
+                } else if (item.item_id) {
+                  itemId = item.item_id;
+                }
+
+                await axios.post(
+                  `${config.apiUrl}/pawn-ticket`,
+                  {
+                    pawn_ticket_id: pawnTicketId,
+                    transaction_id: realTransactionId,
+                    item_id: itemId
+                  },
+                  {
+                    headers: { Authorization: `Bearer ${token}` }
+                  }
+                );
+              } catch (pawnTicketError) {
+                console.error('Error posting pawn_ticket:', pawnTicketError);
+              }
+            }
+          }
+
+          // Step 2.7: Post trade_ticket records for each unique trade_ticket_id
+          const tradeTicketIds = new Set();
+          checkoutItems.forEach(item => {
+            if (item.tradeTicketId) {
+              tradeTicketIds.add(item.tradeTicketId);
+            }
+          });
+
+          for (const tradeTicketId of tradeTicketIds) {
+            const itemsForTicket = checkoutItems
+              .map((item, index) => ({ ...item, index }))
+              .filter(item => item.tradeTicketId === tradeTicketId);
+
+            for (const item of itemsForTicket) {
+              try {
+                let itemId = null;
+                if (createdJewelryItems && createdJewelryItems.length > 0 && createdJewelryItems[item.index]) {
+                  itemId = createdJewelryItems[item.index].item_id;
+                } else if (item.item_id) {
+                  itemId = item.item_id;
+                }
+
+                await axios.post(
+                  `${config.apiUrl}/trade-ticket`,
+                  {
+                    trade_ticket_id: tradeTicketId,
+                    transaction_id: realTransactionId,
+                    item_id: itemId
+                  },
+                  {
+                    headers: { Authorization: `Bearer ${token}` }
+                  }
+                );
+              } catch (tradeTicketError) {
+                console.error('Error posting trade_ticket:', tradeTicketError);
+              }
+            }
+          }
+
           // Step 3: Process all collected payments against the real transaction ID
           for (const payment of updatedPayments) {
             const paymentResponse = await axios.post(
