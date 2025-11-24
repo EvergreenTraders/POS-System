@@ -170,6 +170,16 @@ function SystemConfig() {
   });
   const [selectedLinkType, setSelectedLinkType] = useState('full_access');
 
+  // Receipt configuration state
+  const [receiptConfig, setReceiptConfig] = useState({
+    transaction_receipt: 'Thank you for shopping with us',
+    buy_receipt: 'Thank you for shopping with us',
+    pawn_receipt: 'Thank you for shopping with us',
+    layaway_receipt: 'Thank you for shopping with us',
+    return_receipt: 'Thank you for shopping with us',
+    refund_receipt: 'Thank you for shopping with us'
+  });
+
   const fetchCustomerHeaderPreferences = async () => {
     try {
       setLoading(true);
@@ -403,6 +413,24 @@ function SystemConfig() {
       }
     };
 
+    const fetchReceiptConfig = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/receipt-config`);
+        if (response.data) {
+          setReceiptConfig({
+            transaction_receipt: response.data.transaction_receipt || 'Thank you for shopping with us',
+            buy_receipt: response.data.buy_receipt || 'Thank you for shopping with us',
+            pawn_receipt: response.data.pawn_receipt || 'Thank you for shopping with us',
+            layaway_receipt: response.data.layaway_receipt || 'Thank you for shopping with us',
+            return_receipt: response.data.return_receipt || 'Thank you for shopping with us',
+            refund_receipt: response.data.refund_receipt || 'Thank you for shopping with us'
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching receipt config:', error);
+      }
+    };
+
     // Fetch data on component mount
     fetchCustomerHeaderPreferences();
     fetchPreciousMetalNames();
@@ -415,6 +443,7 @@ function SystemConfig() {
     fetchInventoryHoldPeriod();
     fetchTaxConfig();
     fetchAuthorizationTemplate();
+    fetchReceiptConfig();
   }, []);
   
   const handleTabChange = (event, newValue) => {
@@ -910,6 +939,33 @@ function SystemConfig() {
       setSnackbar({
         open: true,
         message: 'Failed to save tax configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleReceiptConfigChange = (event) => {
+    const { name, value } = event.target;
+    setReceiptConfig(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleSaveReceiptConfig = async () => {
+    try {
+      await axios.put(`${API_BASE_URL}/receipt-config`, receiptConfig);
+
+      setSnackbar({
+        open: true,
+        message: 'Receipt configuration saved successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving receipt config:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save receipt configuration',
         severity: 'error'
       });
     }
@@ -1451,6 +1507,98 @@ function SystemConfig() {
                   ))
                 ))}
               </Grid>
+            </Box>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Receipt Footer Text
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Configure the footer text that appears on different types of receipts
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Transaction Receipt"
+                  name="transaction_receipt"
+                  value={receiptConfig.transaction_receipt}
+                  onChange={handleReceiptConfigChange}
+                  multiline
+                  rows={2}
+                  helperText="Footer text for general transaction receipts"
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Buy Receipt"
+                  name="buy_receipt"
+                  value={receiptConfig.buy_receipt}
+                  onChange={handleReceiptConfigChange}
+                  multiline
+                  rows={2}
+                  helperText="Footer text for buy transaction receipts"
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Pawn Receipt"
+                  name="pawn_receipt"
+                  value={receiptConfig.pawn_receipt}
+                  onChange={handleReceiptConfigChange}
+                  multiline
+                  rows={2}
+                  helperText="Footer text for pawn transaction receipts"
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Layaway Receipt"
+                  name="layaway_receipt"
+                  value={receiptConfig.layaway_receipt}
+                  onChange={handleReceiptConfigChange}
+                  multiline
+                  rows={2}
+                  helperText="Footer text for layaway transaction receipts"
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Return Receipt"
+                  name="return_receipt"
+                  value={receiptConfig.return_receipt}
+                  onChange={handleReceiptConfigChange}
+                  multiline
+                  rows={2}
+                  helperText="Footer text for return transaction receipts"
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Refund Receipt"
+                  name="refund_receipt"
+                  value={receiptConfig.refund_receipt}
+                  onChange={handleReceiptConfigChange}
+                  multiline
+                  rows={2}
+                  helperText="Footer text for refund transaction receipts"
+                />
+              </Grid>
+            </Grid>
+            <Box sx={{ mt: 3 }}>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleSaveReceiptConfig}
+              >
+                Save Receipt Configuration
+              </Button>
             </Box>
           </ConfigSection>
         </StyledPaper>

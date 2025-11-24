@@ -2074,6 +2074,69 @@ app.delete('/api/inventory-status/:id', async (req, res) => {
   }
 });
 
+// Buy Ticket API Endpoints
+app.get('/api/buy-ticket', async (req, res) => {
+  try {
+    const { buy_ticket_id, transaction_id } = req.query;
+
+    let query = 'SELECT * FROM buy_ticket';
+    const params = [];
+
+    if (buy_ticket_id) {
+      query += ' WHERE buy_ticket_id = $1';
+      params.push(buy_ticket_id);
+    } else if (transaction_id) {
+      query += ' WHERE transaction_id = $1';
+      params.push(transaction_id);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching buy tickets:', error);
+    res.status(500).json({ error: 'Failed to fetch buy tickets' });
+  }
+});
+
+app.post('/api/buy-ticket', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { buy_ticket_id, transaction_id, item_id } = req.body;
+
+    // Validate required fields
+    if (!buy_ticket_id) {
+      return res.status(400).json({ error: 'buy_ticket_id is required' });
+    }
+
+    await client.query('BEGIN');
+
+    // Insert new buy_ticket record
+    const insertQuery = `
+      INSERT INTO buy_ticket (buy_ticket_id, transaction_id, item_id)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `;
+
+    const result = await client.query(insertQuery, [
+      buy_ticket_id,
+      transaction_id || null,
+      item_id || null
+    ]);
+
+    await client.query('COMMIT');
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating buy ticket:', error);
+    res.status(500).json({ error: 'Failed to create buy ticket' });
+  } finally {
+    client.release();
+  }
+});
+
 // Quote Expiration Configuration API Endpoints
 app.get('/api/quote-expiration/config', async (req, res) => {
   try {
@@ -2202,6 +2265,62 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating inventory hold period config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET route for fetching receipt config
+app.get('/api/receipt-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM receipt_config ORDER BY created_at DESC LIMIT 1');
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No receipt configuration found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching receipt config:', err);
+    res.status(500).json({ error: 'Failed to fetch receipt configuration' });
+  }
+});
+
+// PUT route for updating receipt config
+app.put('/api/receipt-config', async (req, res) => {
+  try {
+    const {
+      transaction_receipt,
+      buy_receipt,
+      pawn_receipt,
+      layaway_receipt,
+      return_receipt,
+      refund_receipt
+    } = req.body;
+
+    // Check if a record already exists
+    const checkResult = await pool.query('SELECT * FROM receipt_config');
+
+    let result;
+    if (checkResult.rows.length === 0) {
+      // Insert new record
+      result = await pool.query(
+        `INSERT INTO receipt_config (transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt]
+      );
+    } else {
+      // Update existing record
+      result = await pool.query(
+        `UPDATE receipt_config
+         SET transaction_receipt = $1, buy_receipt = $2, pawn_receipt = $3,
+             layaway_receipt = $4, return_receipt = $5, refund_receipt = $6,
+             updated_at = CURRENT_TIMESTAMP
+         RETURNING *`,
+        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt]
+      );
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating receipt config:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -3260,14 +3379,24 @@ app.get('/api/transactions', async (req, res) => {
         FROM transaction_items ti
         GROUP BY ti.transaction_id
       )
-      SELECT 
+      SELECT
         t.transaction_id as id,
         t.transaction_id,
+        t.customer_id,
         c.first_name || ' ' || c.last_name as customer_name,
+        c.phone as customer_phone,
+        TRIM(CONCAT_WS(', ',
+          NULLIF(c.address_line1, ''),
+          NULLIF(c.address_line2, ''),
+          NULLIF(CONCAT_WS(', ',
+            NULLIF(c.city, ''),
+            NULLIF(c.state, ''),
+            NULLIF(c.postal_code, '')
+          ), '')
+        )) as customer_address,
         e.first_name || ' ' || e.last_name as employee_name,
         e.employee_id,
         t.total_amount,
-        t.transaction_status,
         t.created_at,
         t.updated_at,
         TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as formatted_created_at,
@@ -3276,10 +3405,11 @@ app.get('/api/transactions', async (req, res) => {
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN employees e ON t.employee_id = e.employee_id
       LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
-      GROUP BY 
-        t.transaction_id, c.first_name, c.last_name, e.first_name, e.last_name, 
-        e.employee_id, t.total_amount, t.transaction_status, t.created_at, 
-        t.updated_at, tic.item_count
+      GROUP BY
+        t.transaction_id, t.customer_id, c.first_name, c.last_name, c.phone,
+        c.address_line1, c.address_line2, c.city, c.state, c.postal_code,
+        e.first_name, e.last_name, e.employee_id, t.total_amount,
+        t.created_at, t.updated_at, tic.item_count
       ORDER BY t.created_at DESC`;
     
     const result = await pool.query(query);
@@ -3337,7 +3467,6 @@ app.post('/api/transactions', async (req, res) => {
             employee_id,
             total_amount,
             cartItems,
-            transaction_status = 'PENDING',
             transaction_date = new Date().toISOString().split('T')[0]
         } = req.body;
 
@@ -3347,7 +3476,7 @@ app.post('/api/transactions', async (req, res) => {
         }
 
         await client.query('BEGIN');
-        
+
         // Generate unique transaction ID
         const transactionId = await generateTransactionId();
 
@@ -3355,9 +3484,9 @@ app.post('/api/transactions', async (req, res) => {
         const transactionQuery = `
             INSERT INTO transactions (
                 transaction_id, customer_id, employee_id,
-                total_amount, transaction_status, transaction_date
+                total_amount, transaction_date
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING *
         `;
 
@@ -3366,7 +3495,6 @@ app.post('/api/transactions', async (req, res) => {
             customer_id,
             employee_id,
             total_amount,
-            transaction_status,
             transaction_date
         ]);
 
@@ -3435,41 +3563,6 @@ app.delete('/api/transactions/:transaction_id', async (req, res) => {
   }
 });
 
-app.put('/api/transactions/:transaction_id', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { transaction_id } = req.params;
-    const { transaction_status } = req.body;
-
-    await client.query('BEGIN');
-
-    // Update transaction status
-    const updateQuery = `
-      UPDATE transactions
-      SET 
-        transaction_status = $1,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE transaction_id = $2
-      RETURNING *
-    `;
-    const result = await client.query(updateQuery, [transaction_status, transaction_id]);
-
-    if (result.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
-    await client.query('COMMIT');
-    res.json({ message: 'Transaction updated successfully', transaction: result.rows[0] });
-
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error updating transaction:', err);
-    res.status(500).json({ error: 'Failed to update transaction', details: err.message });
-  } finally {
-    client.release();
-  }
-});
-
 // Get customer sales history
 app.get('/api/customers/:customer_id/sales-history', async (req, res) => {
   try {
@@ -3497,7 +3590,6 @@ app.get('/api/customers/:customer_id/sales-history', async (req, res) => {
       SELECT
         t.transaction_id,
         t.total_amount,
-        t.transaction_status,
         t.transaction_date,
         t.created_at,
         t.updated_at,
@@ -3527,9 +3619,7 @@ app.get('/api/customers/:customer_id/sales-history', async (req, res) => {
       total_transactions: result.rows.length,
       total_spent: result.rows.reduce((sum, row) => sum + parseFloat(row.total_amount), 0),
       total_paid: result.rows.reduce((sum, row) => sum + parseFloat(row.total_paid), 0),
-      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0),
-      completed_transactions: result.rows.filter(row => row.transaction_status === 'COMPLETED').length,
-      pending_transactions: result.rows.filter(row => row.transaction_status === 'PENDING').length
+      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0)
     };
 
     res.json({
@@ -3801,7 +3891,6 @@ app.get('/api/customers/:id/all-accessible-transactions', async (req, res) => {
         t.transaction_id,
         t.customer_id,
         t.total_amount,
-        t.transaction_status,
         t.transaction_date,
         t.created_at,
         t.updated_at,
@@ -3834,9 +3923,7 @@ app.get('/api/customers/:id/all-accessible-transactions', async (req, res) => {
       linked_transactions: result.rows.filter(row => row.is_linked_account).length,
       total_spent: result.rows.reduce((sum, row) => sum + parseFloat(row.total_amount), 0),
       total_paid: result.rows.reduce((sum, row) => sum + parseFloat(row.total_paid), 0),
-      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0),
-      completed_transactions: result.rows.filter(row => row.transaction_status === 'COMPLETED').length,
-      pending_transactions: result.rows.filter(row => row.transaction_status === 'PENDING').length
+      outstanding_balance: result.rows.reduce((sum, row) => sum + parseFloat(row.balance_due), 0)
     };
 
     res.json({
@@ -3941,7 +4028,6 @@ app.get('/api/customer-dashboard', async (req, res) => {
         COUNT(*) as total_transactions,
         COALESCE(SUM(total_amount), 0) as total_revenue
       FROM transactions
-      WHERE transaction_status = 'COMPLETED'
     `;
     const transactionsResult = await pool.query(transactionsQuery);
     const totalTransactions = parseInt(transactionsResult.rows[0].total_transactions);
@@ -3957,7 +4043,7 @@ app.get('/api/customer-dashboard', async (req, res) => {
         COUNT(t.transaction_id) as transaction_count,
         COALESCE(SUM(t.total_amount), 0) as total_spent
       FROM customers c
-      LEFT JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      LEFT JOIN transactions t ON c.id = t.customer_id
       GROUP BY c.id, c.first_name, c.last_name, c.tax_exempt
       HAVING COUNT(t.transaction_id) > 0
       ORDER BY total_spent DESC
@@ -3976,12 +4062,11 @@ app.get('/api/customer-dashboard', async (req, res) => {
           SELECT total_amount
           FROM transactions
           WHERE customer_id = c.id
-          AND transaction_status = 'COMPLETED'
           ORDER BY transaction_date DESC
           LIMIT 1
         ) as last_transaction_amount
       FROM customers c
-      INNER JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      INNER JOIN transactions t ON c.id = t.customer_id
       GROUP BY c.id, c.first_name, c.last_name, c.email
       ORDER BY last_transaction_date DESC
       LIMIT 10
@@ -3999,7 +4084,7 @@ app.get('/api/customer-dashboard', async (req, res) => {
         CURRENT_DATE - MAX(t.transaction_date)::date as days_inactive,
         COALESCE(SUM(t.total_amount), 0) as total_spent
       FROM customers c
-      LEFT JOIN transactions t ON c.id = t.customer_id AND t.transaction_status = 'COMPLETED'
+      LEFT JOIN transactions t ON c.id = t.customer_id
       GROUP BY c.id, c.first_name, c.last_name, c.phone, c.email
       HAVING MAX(t.transaction_date) IS NOT NULL
         AND (CURRENT_DATE - MAX(t.transaction_date)::date) >= 90
@@ -5407,15 +5492,7 @@ app.post('/api/payments', async (req, res) => {
       ) VALUES ($1, $2, $3) RETURNING *`,
       [transaction_id, amount, payment_method]
     );
-    
-    // Update transaction status if fully paid
-    if (Math.abs(newTotalPaid - transaction.total_amount) < 0.01) {
-      await client.query(
-        'UPDATE transactions SET transaction_status = $1 WHERE transaction_id = $2',
-        ['COMPLETED', transaction_id]
-      );
-    }
-    
+
     await client.query('COMMIT');
     res.status(201).json(paymentResult.rows[0]);
   } catch (error) {
