@@ -165,7 +165,7 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
     setSearchForm(prev => ({ ...prev, [name]: value }));
   };
   const handleSearch = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     setLoading(true);
     try {
       const params = {};
@@ -473,28 +473,38 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
       <Grid container spacing={3} alignItems="flex-start">
         {/* Left: Customer Lookup */}
         <Grid item xs={12} md={4} lg={3} xl={2}>
-          <Paper sx={{ p: 2, mb: 3, maxWidth: 400 }}>
+          <Paper sx={{ p: 2, mb: 3, width: '100%' }}>
             <Typography variant="h6" gutterBottom align="center">
               Customer Lookup
             </Typography>
-            <Grid container spacing={2} direction="column">
-              <Grid item xs={12}>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <TextField
-                    name="first_name"
-                    label="First Name"
-                    value={searchForm.first_name || ''}
-                    onChange={handleInputChange}
-                    fullWidth
-                  />
-                  <TextField
-                    name="last_name"
-                    label="Last Name"
-                    value={searchForm.last_name || ''}
-                    onChange={handleInputChange}
-                    fullWidth
-                  />
-                </Box>
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <TextField
+                  name="first_name"
+                  label="First Name"
+                  value={searchForm.first_name || ''}
+                  onChange={handleInputChange}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSearch();
+                    }
+                  }}
+                  fullWidth
+                />
+              </Grid>
+              <Grid item xs={6}>
+                <TextField
+                  name="last_name"
+                  label="Last Name"
+                  value={searchForm.last_name || ''}
+                  onChange={handleInputChange}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSearch();
+                    }
+                  }}
+                  fullWidth
+                />
               </Grid>
               <Grid item xs={12}>
                 <TextField
@@ -502,6 +512,11 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                   label="ID Number"
                   value={searchForm.id_number}
                   onChange={handleInputChange}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSearch();
+                    }
+                  }}
                   fullWidth
                 />
               </Grid>
@@ -511,6 +526,11 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                   label="Phone Number"
                   value={searchForm.phone}
                   onChange={handleInputChange}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSearch();
+                    }
+                  }}
                   fullWidth
                 />
               </Grid>

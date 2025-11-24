@@ -1825,11 +1825,42 @@ function JewelEstimator() {
   };
 
   const handleCheckout = () => {
-    // Prepare items with current pricing
+    // Generate ticket ID based on transaction type (same pattern as CustomerTicket.js)
+    const generateTicketId = (transactionType) => {
+      // Determine ticket prefix based on transaction type
+      let ticketPrefix;
+      switch(transactionType) {
+        case 'pawn': ticketPrefix = 'PT'; break;
+        case 'buy': ticketPrefix = 'BT'; break;
+        case 'trade': ticketPrefix = 'TT'; break;
+        case 'sale': ticketPrefix = 'ST'; break;
+        case 'repair': ticketPrefix = 'RT'; break;
+        case 'payment': ticketPrefix = 'PMT'; break;
+        case 'refund': ticketPrefix = 'RFT'; break;
+        default: ticketPrefix = 'TKT';
+      }
+
+      // Generate a unique ticket ID with sequential 8-digit number
+      const storageKey = `last${ticketPrefix}TicketNumber`;
+      let lastTicketNumber = parseInt(localStorage.getItem(storageKey) || '0');
+      lastTicketNumber += 1;
+      localStorage.setItem(storageKey, lastTicketNumber.toString());
+      return `${ticketPrefix}-${lastTicketNumber.toString().padStart(8, '0')}`;
+    };
+
+    // Get the transaction type from the first item or use default
+    const itemTransactionType = estimatedItems[0]?.transaction_type || transactionType;
+    const ticketId = generateTicketId(itemTransactionType);
+
+    // Prepare items with current pricing and attach ticket ID
     const updatedItems = estimatedItems.map((item) => ({
       ...item,
       price: item.price_estimates[item.transaction_type],
-      notes: item.notes
+      notes: item.notes,
+      // Attach appropriate ticket ID based on transaction type
+      buyTicketId: item.transaction_type === 'buy' ? ticketId : undefined,
+      pawnTicketId: item.transaction_type === 'pawn' ? ticketId : undefined,
+      tradeTicketId: item.transaction_type === 'trade' ? ticketId : undefined
     }));
 
     // Check if any items have File objects (can't be stored in sessionStorage)
@@ -1861,29 +1892,17 @@ function JewelEstimator() {
     // Clear estimated items from sessionStorage when proceeding to checkout
     sessionStorage.removeItem('jewelEstimatorItems');
 
-    // Add items to cart before navigation (cart is in-memory)
-    updatedItems.forEach(item => addToCart(item));
-
+    // Don't add items to cart - they will be displayed only in checkout, not in the cart icon
     const customerData = location.state?.customer;
 
-    if (customerData) {
-      // If customer exists, navigate to checkout page with customer and items
-      navigate('/checkout', {
-        state: {
-          customer: customerData,
-          items: updatedItems, // Pass items with File objects through navigation state
-          from: 'jewelry'
-        }
-      });
-    } else {
-      // Otherwise, navigate to customer manager to select or create a customer
-      navigate('/customer', {
-        state: {
-          items: updatedItems, // Pass items with File objects through navigation state
-          from: 'jewelry'
-        }
-      });
-    }
+    // Always navigate directly to checkout
+    navigate('/checkout', {
+      state: {
+        customer: customerData || null, // Pass customer if exists, otherwise null
+        items: updatedItems, // Pass items with File objects through navigation state
+        from: 'jewelry'
+      }
+    });
   };
 
   useEffect(() => {

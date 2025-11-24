@@ -152,14 +152,8 @@ function Checkout() {
 
       // Handle from generic estimator or specific estimators like coinsbullions
       if (fromSource === 'jewelry' || fromSource === 'coinsbullions') {
-        // Clear existing cart items before adding new ones from estimator
-        clearCart();
-
-        // Ensure each item is added individually to the cart
-        if (Array.isArray(itemsToCheckout)) {
-          itemsToCheckout.forEach(item => addToCart(item));
-        }
-        // Set checkoutItems for display
+        // Don't add items to cart - they should only be displayed in checkout, not in cart icon
+        // Just set checkoutItems for display
         setCheckoutItems(itemsToCheckout);
 
         // Set the customer if it exists
@@ -942,6 +936,84 @@ function Checkout() {
             }
           }
 
+          // Step 2.6: Post pawn_ticket records for each unique pawn_ticket_id
+          const pawnTicketIds = new Set();
+          checkoutItems.forEach(item => {
+            if (item.pawnTicketId) {
+              pawnTicketIds.add(item.pawnTicketId);
+            }
+          });
+
+          for (const pawnTicketId of pawnTicketIds) {
+            const itemsForTicket = checkoutItems
+              .map((item, index) => ({ ...item, index }))
+              .filter(item => item.pawnTicketId === pawnTicketId);
+
+            for (const item of itemsForTicket) {
+              try {
+                let itemId = null;
+                if (createdJewelryItems && createdJewelryItems.length > 0 && createdJewelryItems[item.index]) {
+                  itemId = createdJewelryItems[item.index].item_id;
+                } else if (item.item_id) {
+                  itemId = item.item_id;
+                }
+
+                await axios.post(
+                  `${config.apiUrl}/pawn-ticket`,
+                  {
+                    pawn_ticket_id: pawnTicketId,
+                    transaction_id: realTransactionId,
+                    item_id: itemId
+                  },
+                  {
+                    headers: { Authorization: `Bearer ${token}` }
+                  }
+                );
+              } catch (pawnTicketError) {
+                console.error('Error posting pawn_ticket:', pawnTicketError);
+              }
+            }
+          }
+
+          // Step 2.7: Post trade_ticket records for each unique trade_ticket_id
+          const tradeTicketIds = new Set();
+          checkoutItems.forEach(item => {
+            if (item.tradeTicketId) {
+              tradeTicketIds.add(item.tradeTicketId);
+            }
+          });
+
+          for (const tradeTicketId of tradeTicketIds) {
+            const itemsForTicket = checkoutItems
+              .map((item, index) => ({ ...item, index }))
+              .filter(item => item.tradeTicketId === tradeTicketId);
+
+            for (const item of itemsForTicket) {
+              try {
+                let itemId = null;
+                if (createdJewelryItems && createdJewelryItems.length > 0 && createdJewelryItems[item.index]) {
+                  itemId = createdJewelryItems[item.index].item_id;
+                } else if (item.item_id) {
+                  itemId = item.item_id;
+                }
+
+                await axios.post(
+                  `${config.apiUrl}/trade-ticket`,
+                  {
+                    trade_ticket_id: tradeTicketId,
+                    transaction_id: realTransactionId,
+                    item_id: itemId
+                  },
+                  {
+                    headers: { Authorization: `Bearer ${token}` }
+                  }
+                );
+              } catch (tradeTicketError) {
+                console.error('Error posting trade_ticket:', tradeTicketError);
+              }
+            }
+          }
+
           // Step 3: Process all collected payments against the real transaction ID
           for (const payment of updatedPayments) {
             const paymentResponse = await axios.post(
@@ -1271,12 +1343,12 @@ function Checkout() {
   // This useEffect is now redundant - all initialization logic is handled in the first useEffect (lines 108-210)
   // Keeping this comment for reference but the logic has been consolidated
 
-  // Only redirect if we have no data after initialization
+  // Only redirect if we have no items to checkout after initialization (customer is optional)
   useEffect(() => {
-    if (isInitialized && (!selectedCustomer?.name || cartItems.length === 0)) {
+    if (isInitialized && cartItems.length === 0 && checkoutItems.length === 0) {
       navigate('/quote-manager');
     }
-  }, [selectedCustomer, cartItems, navigate, isInitialized]);
+  }, [cartItems, checkoutItems, navigate, isInitialized]);
   
   // Handle customer selection from search results
   const handleSelectCustomer = (customerData) => {
