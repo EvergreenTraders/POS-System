@@ -1,0 +1,22 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Installing backend dependencies...
+      - cd backend
+      - npm install --production
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Creating deployment package...
+  post_build:
+    commands:
+      - echo Build completed on `date`
+
+artifacts:
+  files:
+    - backend/**/*
+    - .ebextensions/**/*
+    - .platform/**/*
+  discard-paths: no

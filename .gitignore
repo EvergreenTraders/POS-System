@@ -40,3 +40,27 @@ Thumbs.db
 scripts/generate_*.js
 scripts/demo_*.js
 scripts/test_*.js
+
+# Elastic Beanstalk
+.elasticbeanstalk/*
+!.elasticbeanstalk/*.cfg.yml
+!.elasticbeanstalk/*.global.yml
+*.zip
+deploy.zip
+
+# Uploads (local development)
+uploads/
+backend/uploads/
+
+# Database exports
+*.sql
+!deployment/init-db.sql
+
+# AWS
+.aws/
+
+# Misc
+nul
+.cache/
+temp/
+tmp/

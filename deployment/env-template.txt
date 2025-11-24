@@ -1,0 +1,14 @@
+# Environment Variables for Elastic Beanstalk
+# Copy these to Elastic Beanstalk Console > Configuration > Software > Environment Properties
+
+DB_USER=postgres
+DB_PASSWORD=YourSecurePassword123!
+DB_NAME=pos_system
+DB_HOST=pos-system-db.xxxxxxxxx.us-east-1.rds.amazonaws.com
+DB_PORT=5432
+JWT_SECRET=your-random-jwt-secret-min-32-chars
+AWS_REGION=us-east-1
+AWS_S3_BUCKET=pos-system-uploads
+NODE_ENV=production
+PORT=8080
+FRONTEND_URL=https://dxxxxxxxxx.cloudfront.net
