@@ -1368,7 +1368,8 @@ const CustomerTicket = () => {
       // Check if second part looks like purity (to confirm first part is type+category)
       if (parts.length >= 4) {
         const secondPart = parts[1];
-        if (secondPart.match(/^\d+K?$/i) || secondPart.match(/^0?\.\d+$/) || secondPart.match(/^1\.0+$/)) {
+        // Check for numeric purity (10K, 0.999) or text purity (pure, sterling)
+        if (secondPart.match(/^\d+K?$/i) || secondPart.match(/^0?\.\d+$/) || secondPart.match(/^1\.0+$/) || secondPart.match(/^[a-zA-Z]+$/)) {
           hasTypeCategory = true;
         }
       }
@@ -1384,16 +1385,21 @@ const CustomerTicket = () => {
       parsed.category = categoryCodeMap[categoryCode] || categoryCode;
     }
 
-    // Parse Purity (e.g., "10K", "14K", "18K", "24K", "0.585", "0.999")
+    // Parse Purity (e.g., "10K", "14K", "18K", "24K", "0.585", "0.999", "pure", "sterling")
     if (partIndex < parts.length) {
       const purity = parts[partIndex];
       if (purity.match(/^\d+K?$/i)) {
-        // Karat format (e.g., "10K", "14K")
+        // Karat format (e.g., "10K", "14K") - Keep uppercase K to match database
         parsed.purity = purity.replace(/K$/i, '') + 'K';
         partIndex++;
       } else if (purity.match(/^0?\.\d+$/) || purity.match(/^1\.0+$/)) {
         // Decimal format for Platinum/Palladium (e.g., "0.585", "0.999", "1.0")
         parsed.purity = parseFloat(purity);
+        partIndex++;
+      } else if (purity.match(/^[a-zA-Z]+$/)) {
+        // Text format (e.g., "pure", "sterling", "fine")
+        // Store as-is with proper capitalization (first letter uppercase, rest lowercase)
+        parsed.purity = purity.charAt(0).toUpperCase() + purity.slice(1).toLowerCase();
         partIndex++;
       }
     }
@@ -1449,7 +1455,10 @@ const CustomerTicket = () => {
       if (!item || !item.description) return;
 
       const parsed = parseDescription(item.description);
-      if (!parsed || !parsed.type) return;
+
+      if (!parsed) {
+        return;
+      }
 
       // Fetch purity_value from database
       let purityValue = null;
@@ -1457,8 +1466,9 @@ const CustomerTicket = () => {
       if (parsed.purity && parsed.metal) {
         try {
           // First, get the metal type ID
-          const metalTypesResponse = await fetch(`${config.API_BASE_URL}/precious_metal_type`);
+          const metalTypesResponse = await fetch(`${config.apiUrl}/precious_metal_type`);
           const metalTypes = await metalTypesResponse.json();
+
           const metalType = metalTypes.find(m =>
             m.type && parsed.metal &&
             m.type.toLowerCase() === parsed.metal.toLowerCase()
@@ -1466,7 +1476,7 @@ const CustomerTicket = () => {
 
           if (metalType && metalType.id) {
             // Fetch purities for this metal type
-            const puritiesResponse = await fetch(`${config.API_BASE_URL}/metal_purity/${metalType.id}`);
+            const puritiesResponse = await fetch(`${config.apiUrl}/metal_purity/${metalType.id}`);
             const purities = await puritiesResponse.json();
 
             // Find matching purity
@@ -1489,12 +1499,12 @@ const CustomerTicket = () => {
             if (matchingPurity) {
               purityValue = matchingPurity.value;
               purityText = matchingPurity.purity;
-            }
-          }
+            } 
+          } 
         } catch (error) {
-          console.error('Error fetching purity value:', error);
+          console.error('❌ [PURITY DEBUG] Error fetching purity value:', error);
         }
-      }
+      } 
 
       // Prepare pre-filled data for jewelry estimator
       // Only include purity data if we found a matching purity in the database
@@ -1518,7 +1528,7 @@ const CustomerTicket = () => {
         if (purityText !== null) {
           preFilledData.metal_purity = purityText;
         }
-      }
+      } 
 
       // Store the prefilled data and item ID
       setPrefilledData(preFilledData);
