@@ -676,26 +676,29 @@ function Jewelry() {
                       <TableCell>{new Date(item.created_at).toLocaleDateString()}</TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1 }}>
-                          <Button 
-                            variant="contained" 
-                            color="primary"
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditClick(item);
-                            }}
-                            sx={{
-                              minWidth: '60px',
-                              height: '28px',
-                              fontSize: '0.75rem',
-                              padding: '4px 8px',
-                              '& .MuiButton-label': {
-                                lineHeight: 1.2
-                              }
-                            }}
-                          >
-                            Edit
-                          </Button>
+                          {/* Only show Edit button for HOLD status items */}
+                          {(item.inventory_status === 'HOLD' || item.status === 'HOLD') && (
+                            <Button
+                              variant="contained"
+                              color="primary"
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditClick(item);
+                              }}
+                              sx={{
+                                minWidth: '60px',
+                                height: '28px',
+                                fontSize: '0.75rem',
+                                padding: '4px 8px',
+                                '& .MuiButton-label': {
+                                  lineHeight: 1.2
+                                }
+                              }}
+                            >
+                              Edit
+                            </Button>
+                          )}
                           {item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER' && (
                             <Button
                               variant="outlined"
