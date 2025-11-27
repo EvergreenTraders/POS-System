@@ -1334,7 +1334,7 @@ const CustomerTicket = () => {
   };
 
   const handleJewelryEstimatorClick = () => {
-    navigate('/jewel-estimator', { state: { customer } });
+    navigate('/inventory', { state: { customer } });
   };
 
   // Parse description format: JR 10k 2g YG
@@ -3021,7 +3021,7 @@ return (
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="12%" align="center">Estimator</TableCell>
+                              <TableCell width="12%" align="center">Inventory</TableCell>
                               <TableCell width="8%" align="center">Image</TableCell>
                               <TableCell width="30%">Item Description</TableCell>
                               <TableCell width="12%">Category</TableCell>
@@ -3041,7 +3041,7 @@ return (
                               <TableRow key={item.id}>
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
-                                    <Tooltip title="Jewelry Estimator">
+                                    <Tooltip title="Inventory">
                                       <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>

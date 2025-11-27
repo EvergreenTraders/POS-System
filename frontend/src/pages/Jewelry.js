@@ -24,15 +24,22 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  MenuItem
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Select,
+  Badge,
+  IconButton
 } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import HistoryIcon from '@mui/icons-material/History';
 import { useSnackbar } from 'notistack';
 import SearchIcon from '@mui/icons-material/Search';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import config from '../config';
 import axios from 'axios';
 
@@ -41,6 +48,7 @@ function Jewelry() {
   const location = useLocation();
   const { user: currentUser } = useAuth();
   const { enqueueSnackbar } = useSnackbar();
+  const { cartItems, addToCart } = useCart();
 
   const handleViewHistory = async (itemId) => {
     console.log('View History clicked for item:', itemId);
@@ -268,6 +276,8 @@ function Jewelry() {
   const [scrapBuckets, setScrapBuckets] = useState([]);
   const [selectedBucket, setSelectedBucket] = useState('');
   const [loadingBuckets, setLoadingBuckets] = useState(false);
+  const [inventoryStatuses, setInventoryStatuses] = useState([]);
+  const [selectedStatus, setSelectedStatus] = useState('ACTIVE');
 
   const fetchScrapBuckets = async () => {
     try {
@@ -354,9 +364,73 @@ function Jewelry() {
     }
   };
 
+  const handleAddToCart = (item) => {
+    // Check if item is ACTIVE
+    const currentStatus = item.inventory_status || item.status;
+    if (currentStatus !== 'ACTIVE') {
+      enqueueSnackbar('Only ACTIVE items can be added to cart', { variant: 'warning' });
+      return;
+    }
+
+    // Get or create sale ticket ID for inventory items
+    let saleTicketId = sessionStorage.getItem('inventorySaleTicketId');
+    if (!saleTicketId) {
+      // Generate a new sale ticket ID (format: ST-00000001)
+      const storageKey = 'lastSTTicketNumber';
+      let lastTicketNumber = parseInt(localStorage.getItem(storageKey) || '0');
+      lastTicketNumber += 1;
+      localStorage.setItem(storageKey, lastTicketNumber.toString());
+      saleTicketId = `ST-${lastTicketNumber.toString().padStart(8, '0')}`;
+      sessionStorage.setItem('inventorySaleTicketId', saleTicketId);
+    }
+
+    // Add item to cart with sale transaction type (for active inventory)
+    const cartItem = {
+      ...item,
+      id: item.item_id,
+      item_id: item.item_id,
+      description: item.short_desc || item.long_desc,
+      category: item.category,
+      price: item.retail_price || item.buy_price,
+      retail_price: item.retail_price,
+      buy_price: item.buy_price,
+      metal_weight: item.metal_weight,
+      quantity: 1,
+      transactionType: 'sale', // Always set to 'sale' for active inventory
+      transaction_type: 'sale', // Ensure both formats are set
+      fromInventory: true,
+      buyTicketId: saleTicketId, // Group all inventory items under same sale ticket
+      employee: {
+        id: currentUser.id,
+        name: `${currentUser.firstName} ${currentUser.lastName}`,
+        username: currentUser.username
+      }
+    };
+
+    addToCart(cartItem);
+    enqueueSnackbar('Item added to cart', { variant: 'success' });
+  };
+
+  // Get count of specific item in cart
+  const getItemCartCount = (itemId) => {
+    return cartItems.filter(item => item.item_id === itemId || item.id === itemId).length;
+  };
+
   useEffect(() => {
     fetchJewelryItems();
+    fetchInventoryStatuses();
   }, []);
+
+  const fetchInventoryStatuses = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/inventory-status`);
+      if (response.data && response.data.length > 0) {
+        setInventoryStatuses(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching inventory statuses:', error);
+    }
+  };
 
   const fetchJewelryItems = async () => {
     try {
@@ -536,15 +610,19 @@ function Jewelry() {
   const filteredItems = jewelryItems.filter(item => {
     // Exclude items with 'quoted' status
     const notQuoted = item.status?.toLowerCase() !== 'quoted';
-    
-    const matchesSearch = searchQuery === '' || 
+
+    const matchesSearch = searchQuery === '' ||
       item.short_desc?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.category?.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesSerial = serialQuery === '' || 
+
+    const matchesSerial = serialQuery === '' ||
       item.item_id?.toLowerCase().includes(serialQuery.toLowerCase());
 
-    return matchesSearch && matchesSerial && notQuoted;
+    // Filter by selected status (show all if 'ALL' is selected)
+    const matchesStatus = selectedStatus === 'ALL' ||
+      (item.inventory_status || item.status) === selectedStatus;
+
+    return matchesSearch && matchesSerial && notQuoted && matchesStatus;
   });
 
   return (
@@ -554,8 +632,8 @@ function Jewelry() {
         {/* Inventory Table Section */}
         <Grid item xs={9} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           {/* Search Section */}
-          <Box sx={{ 
-            display: 'flex', 
+          <Box sx={{
+            display: 'flex',
             gap: 2,
             p: 2,
             bgcolor: 'background.paper',
@@ -591,6 +669,21 @@ function Jewelry() {
                 ),
               }}
             />
+            <FormControl size="small" sx={{ minWidth: 180 }}>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                label="Status"
+              >
+                <MenuItem value="ALL">All Statuses</MenuItem>
+                {inventoryStatuses.map((status) => (
+                  <MenuItem key={status.status_code} value={status.status_code}>
+                    {status.status_name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Box>
 
           <TableContainer component={Paper} sx={{ flex: 1, overflow: 'auto' }}>
@@ -636,30 +729,70 @@ function Jewelry() {
                       <TableCell>{item.category}</TableCell>
                       <TableCell>${item.buy_price}</TableCell>
                       <TableCell>{item.metal_weight}g</TableCell>
-                      <TableCell>{item.status}</TableCell>
+                      <TableCell>{item.inventory_status || item.status}</TableCell>
                       <TableCell>{new Date(item.created_at).toLocaleDateString()}</TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1 }}>
-                          <Button 
-                            variant="contained" 
-                            color="primary"
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditClick(item);
-                            }}
-                            sx={{
-                              minWidth: '60px',
-                              height: '28px',
-                              fontSize: '0.75rem',
-                              padding: '4px 8px',
-                              '& .MuiButton-label': {
-                                lineHeight: 1.2
-                              }
-                            }}
-                          >
-                            Edit
-                          </Button>
+                          {/* Only show Edit button for HOLD status items */}
+                          {(item.inventory_status === 'HOLD' || item.status === 'HOLD') && (
+                            <Button
+                              variant="contained"
+                              color="primary"
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditClick(item);
+                              }}
+                              sx={{
+                                minWidth: '60px',
+                                height: '28px',
+                                fontSize: '0.75rem',
+                                padding: '4px 8px',
+                                '& .MuiButton-label': {
+                                  lineHeight: 1.2
+                                }
+                              }}
+                            >
+                              Edit
+                            </Button>
+                          )}
+                          {/* Only show Add to Cart button for ACTIVE status items */}
+                          {(item.inventory_status === 'ACTIVE' || item.status === 'ACTIVE') && (
+                            <Badge
+                              badgeContent={getItemCartCount(item.item_id)}
+                              color="error"
+                              sx={{
+                                '& .MuiBadge-badge': {
+                                  right: -3,
+                                  top: 3,
+                                  border: '2px solid white',
+                                  padding: '0 4px',
+                                }
+                              }}
+                            >
+                              <Button
+                                variant="contained"
+                                color="success"
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAddToCart(item);
+                                }}
+                                startIcon={<ShoppingCartIcon />}
+                                sx={{
+                                  minWidth: '100px',
+                                  height: '28px',
+                                  fontSize: '0.75rem',
+                                  padding: '4px 8px',
+                                  '& .MuiButton-label': {
+                                    lineHeight: 1.2
+                                  }
+                                }}
+                              >
+                                Add to Cart
+                              </Button>
+                            </Badge>
+                          )}
                           {item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER' && (
                             <Button
                               variant="outlined"
