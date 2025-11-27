@@ -314,11 +314,11 @@ const Cart = () => {
   const getItemDescription = (item, type) => {
     switch (type) {
       case 'pawn':
-        return `${item.description || 'No description'} (${item.category || 'No category'})`;
+        return `${item.description || 'No description'}`;
       case 'buy':
-        return `${item.description || 'No description'} (${item.category || 'No category'})`;
+        return `${item.description || 'No description'}`;
       case 'sale':
-        return `${item.description || 'No description'} (${item.category || 'No category'})`;
+        return `${item.description || 'No description'}`;
       case 'trade':
         return `Trading "${item.tradeItem || 'No item'}" for "${item.storeItem || 'No store item'}"`;
       case 'repair':

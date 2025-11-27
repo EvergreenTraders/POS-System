@@ -50,10 +50,20 @@ ON CONFLICT (method_value) DO NOTHING;
 -- Create transaction_type table
 CREATE TABLE IF NOT EXISTS transaction_type (
     id SERIAL PRIMARY KEY,
-    type VARCHAR(50) NOT NULL,
+    type VARCHAR(50) NOT NULL UNIQUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Insert transaction types
+INSERT INTO transaction_type (type) VALUES
+    ('pawn'),
+    ('buy'),
+    ('retail'),
+    ('sale'),
+    ('refund'),
+    ('return')
+ON CONFLICT (type) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,

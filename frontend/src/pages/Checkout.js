@@ -1699,9 +1699,6 @@ function Checkout() {
                           <TableCell>
                             <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                               <span>{displayDescription}</span>
-                              {item.description && (
-                                <span style={{ fontSize: '0.8em', color: '#666' }}>{item.description}</span>
-                              )}
                             </Box>
                           </TableCell>
                           <TableCell>{transactionType}</TableCell>
