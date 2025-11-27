@@ -2243,7 +2243,7 @@ function JewelryEdit() {
                       }}
                     >
                       {inventoryStatuses
-                        .filter((status) => status.status_code !== 'SOLD')
+                        .filter((status) => status.status_code !== 'SOLD' && status.status_code !== 'ACTIVE')
                         .map((status) => (
                           <MenuItem key={status.status_code} value={status.status_code}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

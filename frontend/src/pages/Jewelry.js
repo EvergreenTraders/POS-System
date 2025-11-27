@@ -24,7 +24,10 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  MenuItem
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Select
 } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -268,6 +271,8 @@ function Jewelry() {
   const [scrapBuckets, setScrapBuckets] = useState([]);
   const [selectedBucket, setSelectedBucket] = useState('');
   const [loadingBuckets, setLoadingBuckets] = useState(false);
+  const [inventoryStatuses, setInventoryStatuses] = useState([]);
+  const [selectedStatus, setSelectedStatus] = useState('ACTIVE');
 
   const fetchScrapBuckets = async () => {
     try {
@@ -356,7 +361,19 @@ function Jewelry() {
 
   useEffect(() => {
     fetchJewelryItems();
+    fetchInventoryStatuses();
   }, []);
+
+  const fetchInventoryStatuses = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/inventory-status`);
+      if (response.data && response.data.length > 0) {
+        setInventoryStatuses(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching inventory statuses:', error);
+    }
+  };
 
   const fetchJewelryItems = async () => {
     try {
@@ -536,15 +553,19 @@ function Jewelry() {
   const filteredItems = jewelryItems.filter(item => {
     // Exclude items with 'quoted' status
     const notQuoted = item.status?.toLowerCase() !== 'quoted';
-    
-    const matchesSearch = searchQuery === '' || 
+
+    const matchesSearch = searchQuery === '' ||
       item.short_desc?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.category?.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesSerial = serialQuery === '' || 
+
+    const matchesSerial = serialQuery === '' ||
       item.item_id?.toLowerCase().includes(serialQuery.toLowerCase());
 
-    return matchesSearch && matchesSerial && notQuoted;
+    // Filter by selected status (show all if 'ALL' is selected)
+    const matchesStatus = selectedStatus === 'ALL' ||
+      (item.inventory_status || item.status) === selectedStatus;
+
+    return matchesSearch && matchesSerial && notQuoted && matchesStatus;
   });
 
   return (
@@ -554,8 +575,8 @@ function Jewelry() {
         {/* Inventory Table Section */}
         <Grid item xs={9} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           {/* Search Section */}
-          <Box sx={{ 
-            display: 'flex', 
+          <Box sx={{
+            display: 'flex',
             gap: 2,
             p: 2,
             bgcolor: 'background.paper',
@@ -591,6 +612,21 @@ function Jewelry() {
                 ),
               }}
             />
+            <FormControl size="small" sx={{ minWidth: 180 }}>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                label="Status"
+              >
+                <MenuItem value="ALL">All Statuses</MenuItem>
+                {inventoryStatuses.map((status) => (
+                  <MenuItem key={status.status_code} value={status.status_code}>
+                    {status.status_name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Box>
 
           <TableContainer component={Paper} sx={{ flex: 1, overflow: 'auto' }}>
@@ -636,7 +672,7 @@ function Jewelry() {
                       <TableCell>{item.category}</TableCell>
                       <TableCell>${item.buy_price}</TableCell>
                       <TableCell>{item.metal_weight}g</TableCell>
-                      <TableCell>{item.status}</TableCell>
+                      <TableCell>{item.inventory_status || item.status}</TableCell>
                       <TableCell>{new Date(item.created_at).toLocaleDateString()}</TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1 }}>
