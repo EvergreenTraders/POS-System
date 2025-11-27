@@ -87,9 +87,10 @@ async function updateInventoryHoldStatus(holdPeriodDays) {
   const client = await pool.connect();
   try {
     // Update jewelry status for items that have exceeded their hold period
+    // Move items from HOLD to IN_PROCESS (not available for sale)
     const updateQuery = `
       UPDATE jewelry
-      SET status = 'in_stock'
+      SET status = 'IN_PROCESS'
       WHERE status = 'HOLD'
       AND updated_at < NOW() - INTERVAL '1 day' * $1
       RETURNING item_id`;
@@ -2252,11 +2253,11 @@ app.put('/api/inventory-hold-period/config', async (req, res) => {
       // Only update items if the feature is enabled
       if (isEnabled) {
         // Update items that have been in HOLD status for longer than the new days value
-        // This sets them to AVAILABLE status
+        // This sets them to IN_PROCESS status (not available for sale)
         await pool.query(`
           UPDATE jewelry
-          SET status = 'AVAILABLE' 
-          WHERE status = 'HOLD' 
+          SET status = 'IN_PROCESS'
+          WHERE status = 'HOLD'
           AND CURRENT_TIMESTAMP - updated_at > interval '${days} days'
         `);
       }
