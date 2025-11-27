@@ -42,7 +42,9 @@ import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart';
 import DiamondIcon from '@mui/icons-material/Diamond';
 import ColorLensIcon from '@mui/icons-material/ColorLens';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useAuth } from '../context/AuthContext';
+import { useSnackbar } from 'notistack';
 import config from '../config';
 import MetalEstimator from './MetalEstimator';
 import GemEstimator from './GemEstimator';
@@ -173,9 +175,10 @@ function JewelryEdit() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user: currentUser } = useAuth();
+  const { enqueueSnackbar } = useSnackbar();
   const API_BASE_URL = config.apiUrl;
 
-  
+
   // State variables
   const [item, setItem] = useState(null);
   const [baselineItem, setBaselineItem] = useState(null); // Stores the current state with all history applied (for comparison)
@@ -1770,6 +1773,41 @@ function JewelryEdit() {
     navigate('/inventory');
   };
 
+  const handleProcessItem = async () => {
+    try {
+      // Check if item is in IN_PROCESS status
+      const currentStatus = editedItem.inventory_status || item.inventory_status || item.status;
+      if (currentStatus !== 'IN_PROCESS') {
+        enqueueSnackbar('Item must be in IN_PROCESS status to activate', { variant: 'warning' });
+        return;
+      }
+
+      // Update status to ACTIVE
+      const response = await axios.put(`${API_BASE_URL}/jewelry/${item.item_id}`, {
+        status: 'ACTIVE'
+      });
+
+      if (response.status === 200) {
+        // Update local state
+        setEditedItem(prev => ({
+          ...prev,
+          inventory_status: 'ACTIVE',
+          status: 'ACTIVE'
+        }));
+        setItem(prev => ({
+          ...prev,
+          inventory_status: 'ACTIVE',
+          status: 'ACTIVE'
+        }));
+
+        enqueueSnackbar('Item successfully processed and activated', { variant: 'success' });
+      }
+    } catch (error) {
+      console.error('Error processing item:', error);
+      enqueueSnackbar('Failed to process item', { variant: 'error' });
+    }
+  };
+
   const handleEditToggle = () => {
     setIsEditing(!isEditing);
   };
@@ -2214,58 +2252,76 @@ function JewelryEdit() {
                     ID: {item.item_id}
                   </Typography>
                   
-                  {/* Inventory Status Dropdown */}
-                  <FormControl size="small" sx={{ minWidth: 150, mt: 0.5 }}>
-                    <Select
-                      value={editingField === 'inventory_status' ? (editedItem.inventory_status || 'HOLD') : (item.inventory_status || 'HOLD')}
-                      onChange={async (e) => {
-                        const newStatus = e.target.value;
-                        // Update local state immediately for better UX
-                        setEditedItem(prev => ({
-                          ...prev,
-                          inventory_status: newStatus
-                        }));
-                        // Update the server  
-                      //  await updateInventoryStatus(newStatus);
-                      }}
-                      onFocus={() => setEditingField('inventory_status')}
-                      onBlur={() => setEditingField(null)}
-                      displayEmpty
-                      inputProps={{ 'aria-label': 'Inventory Status' }}
-                      sx={{
-                        height: 32,
-                        '& .MuiSelect-select': {
-                          py: 0.5,
-                          fontSize: '0.8125rem',
-                          display: 'flex',
-                          alignItems: 'center'
-                        }
-                      }}
-                    >
-                      {inventoryStatuses
-                        .filter((status) => status.status_code !== 'SOLD' && status.status_code !== 'ACTIVE')
-                        .map((status) => (
-                          <MenuItem key={status.status_code} value={status.status_code}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Box
-                                sx={{
-                                  width: 10,
-                                  height: 10,
-                                  borderRadius: '50%',
-                                  bgcolor: getStatusColor(status.status_code)
-                                }}
-                              />
-                              {status.status_name}
-                            </Box>
-                          </MenuItem>
-                        ))}
-                    </Select>
-                  </FormControl>
+                  {/* Inventory Status Dropdown and Process Button */}
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5 }}>
+                    <FormControl size="small" sx={{ minWidth: 150 }}>
+                      <Select
+                        value={editingField === 'inventory_status' ? (editedItem.inventory_status || 'HOLD') : (item.inventory_status || 'HOLD')}
+                        onChange={async (e) => {
+                          const newStatus = e.target.value;
+                          // Update local state immediately for better UX
+                          setEditedItem(prev => ({
+                            ...prev,
+                            inventory_status: newStatus
+                          }));
+                          // Update the server
+                        //  await updateInventoryStatus(newStatus);
+                        }}
+                        onFocus={() => setEditingField('inventory_status')}
+                        onBlur={() => setEditingField(null)}
+                        displayEmpty
+                        inputProps={{ 'aria-label': 'Inventory Status' }}
+                        sx={{
+                          height: 32,
+                          '& .MuiSelect-select': {
+                            py: 0.5,
+                            fontSize: '0.8125rem',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }
+                        }}
+                      >
+                        {inventoryStatuses
+                          .filter((status) => status.status_code !== 'SOLD' && status.status_code !== 'ACTIVE')
+                          .map((status) => (
+                            <MenuItem key={status.status_code} value={status.status_code}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <Box
+                                  sx={{
+                                    width: 10,
+                                    height: 10,
+                                    borderRadius: '50%',
+                                    bgcolor: getStatusColor(status.status_code)
+                                  }}
+                                />
+                                {status.status_name}
+                              </Box>
+                            </MenuItem>
+                          ))}
+                      </Select>
+                    </FormControl>
+
+                    {/* Process Button - Only show if status is IN_PROCESS */}
+                    {((editedItem.inventory_status || item.inventory_status || item.status) === 'IN_PROCESS') && (
+                      <Button
+                        variant="contained"
+                        color="success"
+                        size="small"
+                        onClick={handleProcessItem}
+                        startIcon={<CheckCircleIcon />}
+                        sx={{ height: 32, fontSize: '0.8125rem' }}
+                      >
+                        Process
+                      </Button>
+                    )}
+                  </Box>
+
                   {item.certification && (
-                    <Chip 
+                    <Chip
                       label={`Certified: ${item.certification}`}
                       color="info"
                       size="small"
+                      sx={{ mt: 1 }}
                     />
                   )}
                   </Box>
