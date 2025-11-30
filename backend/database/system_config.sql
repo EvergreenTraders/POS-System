@@ -121,7 +121,7 @@ BEGIN
     COMMENT ON COLUMN quote_expiration.days IS 'Number of days to keep quotes before marking them as expired';
 
     -- Insert default configuration if table is empty
-    INSERT INTO quote_expiration (days) VALUES (30);
+  --  INSERT INTO quote_expiration (days) VALUES (30);
 
     -- Create inventory_hold_period table for storing hold duration configuration
     CREATE TABLE IF NOT EXISTS inventory_hold_period (
@@ -136,7 +136,7 @@ BEGIN
     COMMENT ON COLUMN inventory_hold_period.days IS 'Number of days to keep inventory items in HOLD status';
 
     -- Insert default configuration if table is empty
-    INSERT INTO inventory_hold_period (days) VALUES (7);
+   -- INSERT INTO inventory_hold_period (days) VALUES (7);
 
     -- Create receipt_config table for storing receipt footer text
     CREATE TABLE IF NOT EXISTS receipt_config (
@@ -158,5 +158,16 @@ BEGIN
     INSERT INTO receipt_config (transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt)
     VALUES ('Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us',
             'Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us');
+
+    -- Add sales_receipt column if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'receipt_config'
+        AND column_name = 'sales_receipt'
+    ) THEN
+        ALTER TABLE receipt_config
+        ADD COLUMN sales_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us';
+    END IF;
 
 END $$;

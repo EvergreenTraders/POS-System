@@ -63,7 +63,8 @@ function TransactionJournals() {
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [receiptConfig, setReceiptConfig] = useState({
     transaction_receipt: 'Thank you for shopping with us',
-    buy_receipt: 'Thank you for shopping with us'
+    buy_receipt: 'Thank you for shopping with us',
+    sales_receipt: 'Thank you for shopping with us'
   });
 
   // Fetch receipt config from API
@@ -74,7 +75,8 @@ function TransactionJournals() {
         if (response.data) {
           setReceiptConfig({
             transaction_receipt: response.data.transaction_receipt || 'Thank you for shopping with us',
-            buy_receipt: response.data.buy_receipt || 'Thank you for shopping with us'
+            buy_receipt: response.data.buy_receipt || 'Thank you for shopping with us',
+            sales_receipt: response.data.sales_receipt || 'Thank you for shopping with us'
           });
         }
       } catch (error) {
@@ -336,7 +338,6 @@ function TransactionJournals() {
               <table style="width: 100%; border-collapse: collapse; font-family: 'Courier New', monospace;">
                 <thead>
                   <tr style="border-bottom: 1px solid black;">
-                    <th style="text-align: left; padding: 5px 0; font-size: 8pt;">CATEGORY</th>
                     <th style="text-align: left; padding: 5px 0; font-size: 8pt;">DESCRIPTION</th>
                     <th style="text-align: right; padding: 5px 0; font-size: 8pt;">PRICE</th>
                   </tr>
@@ -344,9 +345,6 @@ function TransactionJournals() {
                 <tbody>
                   ${ticketItems.map((item, idx) => `
                     <tr>
-                      <td style="padding: 5px 5px 5px 0; font-size: 8pt; vertical-align: top;">
-                        ${item.item_details?.category || item.transaction_type || 'N/A'}
-                      </td>
                       <td style="padding: 5px; font-size: 8pt; vertical-align: top;">
                         ${item.item_details?.long_desc || item.item_details?.description || item.description || `Item ${idx + 1}`}
                       </td>
