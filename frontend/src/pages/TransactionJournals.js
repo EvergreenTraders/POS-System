@@ -197,6 +197,11 @@ function TransactionJournals() {
       return;
     }
 
+    // Determine if this is a sale transaction
+    const isSaleTransaction = ticketItems.some(item =>
+      item.transaction_type?.toLowerCase() === 'sale'
+    ) || selectedTransaction?.transaction_type_name?.toLowerCase() === 'sale';
+
     // Fetch business info
     let businessName = 'PAWNALL NEW MOBILE';
     let businessAddress = '';
@@ -365,7 +370,7 @@ function TransactionJournals() {
 
             <!-- Footer Text -->
             <div class="terms">
-              <p style="white-space: pre-wrap;">${receiptConfig.buy_receipt}</p>
+              <p style="white-space: pre-wrap;">${isSaleTransaction ? receiptConfig.sales_receipt : receiptConfig.buy_receipt}</p>
             </div>
 
             <!-- Signature Lines -->
