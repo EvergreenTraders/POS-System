@@ -3501,21 +3501,20 @@ app.post('/api/transactions', async (req, res) => {
 
         // Insert items into transaction_items
         for (const item of cartItems) {
-            const itemQuery = `
-                INSERT INTO transaction_items (
-                  transaction_id, item_id, transaction_type_id,
-                    item_price
-                )
-                VALUES ($1, $2, $3, $4)
-                RETURNING *
-            `;
+            // Handle both jewelry items (with item_id) and non-jewelry items (without item_id)
+            const itemQuery = item.item_id
+                ? `INSERT INTO transaction_items (
+                      transaction_id, item_id, transaction_type_id, item_price
+                  ) VALUES ($1, $2, $3, $4) RETURNING *`
+                : `INSERT INTO transaction_items (
+                      transaction_id, transaction_type_id, item_price, description
+                  ) VALUES ($1, $2, $3, $4) RETURNING *`;
 
-            await client.query(itemQuery, [
-                transactionId,
-                item.item_id,
-                item.transaction_type_id,
-                item.price
-            ]);
+            const params = item.item_id
+                ? [transactionId, item.item_id, item.transaction_type_id, item.price]
+                : [transactionId, item.transaction_type_id, item.price, item.description || 'Item'];
+
+            await client.query(itemQuery, params);
         }
 
         await client.query('COMMIT');

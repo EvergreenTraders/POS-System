@@ -544,11 +544,20 @@ function Checkout() {
       }
 
       // Add payment to list and update remaining amount
-      const newPayment = { 
+      // Map frontend payment method values to backend expected format
+      const paymentMethodMap = {
+        'cash': 'CASH',
+        'debit': 'DEBIT_CARD',
+        'credit': 'CREDIT_CARD',
+        'check': 'CHECK',
+        'bank_transfer': 'BANK_TRANSFER'
+      };
+
+      const newPayment = {
         transaction_id: transactionId,
-        method: paymentMethod, 
+        method: paymentMethod,
         amount: paymentAmount,
-        payment_method: paymentMethod.toUpperCase(),
+        payment_method: paymentMethodMap[paymentMethod] || paymentMethod.toUpperCase(),
         timestamp: new Date().toISOString()
       };
       const updatedPayments = [...payments, newPayment];
@@ -870,9 +879,21 @@ function Checkout() {
           } else {
             // For non-jewelry items from CustomerTicket, just send transaction type and price
             transactionPayload.cartItems = checkoutItems.map(item => {
-              const type = item.transaction_type.toLowerCase();
+              const type = item.transaction_type?.toLowerCase() || 'sale';
+              const transactionTypeId = transactionTypes[type];
+
+              if (!transactionTypeId) {
+                console.error(`Unable to find transaction type ID for type: ${type}. Using 'sale' as fallback.`);
+                // Fallback to 'sale' type if mapping fails
+                return {
+                  transaction_type_id: transactionTypes['sale'] || transactionTypes['retail'],
+                  price: item.price,
+                  description: item.description || 'Item'
+                };
+              }
+
               return {
-                transaction_type_id: transactionTypes[type],
+                transaction_type_id: transactionTypeId,
                 price: item.price,
                 description: item.description || 'Item'
               };
