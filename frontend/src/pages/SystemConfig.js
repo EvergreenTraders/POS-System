@@ -142,6 +142,10 @@ function SystemConfig() {
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
   const [loading, setLoading] = useState(false);
   const [customerColumns, setCustomerColumns] = useState([]);
+  const [itemAttributes, setItemAttributes] = useState([]);
+  const [newAttributeName, setNewAttributeName] = useState('');
+  const [newAttributeType, setNewAttributeType] = useState('dropdown');
+  const [newAttributeValue, setNewAttributeValue] = useState({});
   const [selectedCustomerColumns, setSelectedCustomerColumns] = useState({});
 
   // Tax configuration state
@@ -1140,7 +1144,17 @@ function SystemConfig() {
   // Load business info on mount
   useEffect(() => {
     loadBusinessInfo();
+    loadAttributeConfig();
   }, []);
+
+  const loadAttributeConfig = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/attribute-config`);
+      setItemAttributes(response.data);
+    } catch (error) {
+      console.error('Error loading attribute config:', error);
+    }
+  };
 
   return (
     <Container>
@@ -1152,6 +1166,7 @@ function SystemConfig() {
           <Tab label="Tax Configuration" />
           <Tab label="Pricing Calculator" />
           <Tab label="Account Authorization" />
+          <Tab label="Item Attributes" />
         </Tabs>
       </Box>
 
@@ -2190,6 +2205,213 @@ function SystemConfig() {
                   </Button>
                 </Box>
               </Grid>
+            </Grid>
+          </ConfigSection>
+        </StyledPaper>
+      </TabPanel>
+
+      {/* Item Attributes Tab */}
+      <TabPanel value={activeTab} index={6}>
+        <StyledPaper elevation={2}>
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Item Attributes Configuration
+            </Typography>
+            <Typography variant="body2" color="textSecondary" paragraph>
+              Add custom attributes for jewelry items (e.g., gender, size, style). Each attribute can have multiple options.
+            </Typography>
+
+            {/* Add New Attribute */}
+            <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.default' }}>
+              <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                Add New Attribute
+              </Typography>
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Attribute Name"
+                    placeholder="e.g., Gender, Size, Style"
+                    value={newAttributeName}
+                    onChange={(e) => setNewAttributeName(e.target.value)}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={3}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Type</InputLabel>
+                    <Select
+                      value={newAttributeType}
+                      onChange={(e) => setNewAttributeType(e.target.value)}
+                      label="Type"
+                    >
+                      <MenuItem value="dropdown">Dropdown</MenuItem>
+                      <MenuItem value="text">Text Field</MenuItem>
+                      <MenuItem value="number">Number</MenuItem>
+                      <MenuItem value="checkbox">Checkbox</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} sm={2}>
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    onClick={async () => {
+                      if (!newAttributeName.trim()) {
+                        setSnackbar({
+                          open: true,
+                          message: 'Please enter an attribute name',
+                          severity: 'error'
+                        });
+                        return;
+                      }
+
+                      try {
+                        await axios.post(`${API_BASE_URL}/attribute-config`, {
+                          attribute_name: newAttributeName.trim(),
+                          attribute_type: newAttributeType,
+                          attribute_options: [],
+                          inventory_type: null
+                        });
+                        setNewAttributeName('');
+                        setNewAttributeType('dropdown');
+                        await loadAttributeConfig();
+                        setSnackbar({
+                          open: true,
+                          message: 'Attribute added successfully!',
+                          severity: 'success'
+                        });
+                      } catch (error) {
+                        console.error('Error adding attribute:', error);
+                        setSnackbar({
+                          open: true,
+                          message: 'Failed to add attribute',
+                          severity: 'error'
+                        });
+                      }
+                    }}
+                  >
+                    Add Attribute
+                  </Button>
+                </Grid>
+              </Grid>
+            </Paper>
+
+            {/* Display Existing Attributes */}
+            <Grid container spacing={3}>
+              {itemAttributes.map((attr) => (
+                <Grid item xs={12} md={4} key={attr.id}>
+                  <Paper sx={{ p: 2, bgcolor: 'background.default', position: 'relative' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                      <Box>
+                        <Typography variant="subtitle1" fontWeight="bold">
+                          {attr.attribute_name}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Type: {attr.attribute_type || 'dropdown'}
+                        </Typography>
+                      </Box>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={async () => {
+                          if (window.confirm(`Delete attribute "${attr.attribute_name}"?`)) {
+                            try {
+                              await axios.delete(`${API_BASE_URL}/attribute-config/${attr.attribute_name}`);
+                              await loadAttributeConfig();
+                              setSnackbar({
+                                open: true,
+                                message: 'Attribute deleted successfully!',
+                                severity: 'success'
+                              });
+                            } catch (error) {
+                              console.error('Error deleting attribute:', error);
+                              setSnackbar({
+                                open: true,
+                                message: 'Failed to delete attribute',
+                                severity: 'error'
+                              });
+                            }
+                          }
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+
+                    {(attr.attribute_type === 'dropdown' || !attr.attribute_type) && (
+                      <>
+                        <TextField
+                      fullWidth
+                      size="small"
+                      placeholder={`Add ${attr.attribute_name} option`}
+                      onKeyPress={async (e) => {
+                        if (e.key === 'Enter' && e.target.value.trim()) {
+                          const newValue = e.target.value.trim();
+                          const currentOptions = attr.attribute_options || [];
+
+                          if (!currentOptions.includes(newValue)) {
+                            try {
+                              await axios.post(`${API_BASE_URL}/attribute-config`, {
+                                attribute_name: attr.attribute_name,
+                                attribute_type: attr.attribute_type || 'dropdown',
+                                attribute_options: [...currentOptions, newValue],
+                                inventory_type: attr.inventory_type
+                              });
+                              e.target.value = '';
+                              await loadAttributeConfig();
+                            } catch (error) {
+                              console.error('Error adding option:', error);
+                            }
+                          }
+                        }
+                      }}
+                      sx={{ mb: 2 }}
+                    />
+
+                    <Box>
+                      {(attr.attribute_options || []).map((value, index) => (
+                        <Box
+                          key={index}
+                          sx={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            p: 1,
+                            mb: 1,
+                            bgcolor: 'white',
+                            borderRadius: 1,
+                            border: '1px solid #e0e0e0'
+                          }}
+                        >
+                          <Typography variant="body2">{value}</Typography>
+                          <IconButton
+                            size="small"
+                            onClick={async () => {
+                              const updatedOptions = (attr.attribute_options || []).filter((_, i) => i !== index);
+                              try {
+                                await axios.post(`${API_BASE_URL}/attribute-config`, {
+                                  attribute_name: attr.attribute_name,
+                                  attribute_type: attr.attribute_type || 'dropdown',
+                                  attribute_options: updatedOptions,
+                                  inventory_type: attr.inventory_type
+                                });
+                                await loadAttributeConfig();
+                              } catch (error) {
+                                console.error('Error deleting option:', error);
+                              }
+                            }}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      ))}
+                    </Box>
+                      </>
+                    )}
+                  </Paper>
+                </Grid>
+              ))}
             </Grid>
           </ConfigSection>
         </StyledPaper>

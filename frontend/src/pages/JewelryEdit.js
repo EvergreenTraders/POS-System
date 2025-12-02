@@ -554,6 +554,11 @@ function JewelryEdit() {
             notes: 'Item details updated via combined editor'
           });
 
+          // Save item attributes
+          if (Object.keys(itemAttributeValues).length > 0) {
+            await axios.post(`${API_BASE_URL}/item-attributes/${item.item_id}`, itemAttributeValues);
+          }
+
           // Update baseline to reflect the new current state after successful save
           setBaselineItem(JSON.parse(JSON.stringify(updatedItemWithGems)));
 
@@ -1039,6 +1044,8 @@ function JewelryEdit() {
   const [discountType, setDiscountType] = useState('percentage'); // 'percentage' or 'amount'
   const [transactionType, setTransactionType] = useState('retail'); // 'sell' or 'retail'
   const [updatedMetalData, setUpdatedMetalData] = useState(null);
+  const [attributeConfig, setAttributeConfig] = useState([]);
+  const [itemAttributeValues, setItemAttributeValues] = useState({});
 
   // Auto-save effect: monitors editedItem changes and triggers save after a delay
   useEffect(() => {
@@ -1267,6 +1274,11 @@ function JewelryEdit() {
               notes: 'Item details updated via direct edit (auto-save)'
             });
 
+            // Save item attributes
+            if (Object.keys(itemAttributeValues).length > 0) {
+              await axios.post(`${API_BASE_URL}/item-attributes/${item.item_id}`, itemAttributeValues);
+            }
+
             // Update baseline to reflect the new current state
             const updatedItem = { ...item, ...editedItem };
 
@@ -1310,7 +1322,7 @@ function JewelryEdit() {
         clearTimeout(autoSaveTimerRef.current);
       }
     };
-  }, [editedItem, baselineItem, item, currentUser, API_BASE_URL]); // Dependencies
+  }, [editedItem, baselineItem, item, currentUser, API_BASE_URL, itemAttributeValues]); // Dependencies
 
   // Effects
   useEffect(() => {
@@ -1484,6 +1496,36 @@ function JewelryEdit() {
     // Calculate tax and total amount when selling price or discount changes
     calculateTotals();
   }, [sellingPrice, discount, discountType]);
+
+  // Load attribute configuration on mount
+  useEffect(() => {
+    const loadAttributeConfig = async () => {
+      try {
+        const configRes = await axios.get(`${API_BASE_URL}/attribute-config`);
+        setAttributeConfig(configRes.data || []);
+      } catch (error) {
+        console.error('Error loading attribute config:', error);
+      }
+    };
+
+    loadAttributeConfig();
+  }, []);
+
+  // Load item attribute values when item changes
+  useEffect(() => {
+    const loadItemAttributes = async () => {
+      if (item?.item_id) {
+        try {
+          const valuesRes = await axios.get(`${API_BASE_URL}/item-attributes/${item.item_id}`);
+          setItemAttributeValues(valuesRes.data || {});
+        } catch (error) {
+          console.error('Error loading item attributes:', error);
+        }
+      }
+    };
+
+    loadItemAttributes();
+  }, [item?.item_id]);
 
   // Fetch functions
   const fetchJewelryItem = async (itemId, secondaryGems = []) => {
@@ -4241,11 +4283,142 @@ function JewelryEdit() {
                   </Box>
                 </Grid>
               </Box>
+
+              {/* Item Attributes Section */}
+              <Typography variant="h6" gutterBottom sx={{ mt: 3 }}>
+                Item Attributes
+              </Typography>
+
+              <Grid container spacing={2}>
+                {attributeConfig.length === 0 && (
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="text.secondary">
+                      No attributes configured. Go to System Config → Item Attributes to add attributes.
+                    </Typography>
+                  </Grid>
+                )}
+                {attributeConfig.map((attr) => (
+                  <Grid item xs={12} sm={6} md={4} key={attr.id}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 'bold', fontSize: '0.875rem' }}>
+                        {attr.attribute_name}
+                      </Typography>
+                      <Box>
+                        {(() => {
+                          const attributeType = attr.attribute_type || 'dropdown';
+                          const currentValue = itemAttributeValues[attr.attribute_name];
+
+                          // Display value based on type
+                          let displayValue = '—';
+                          if (currentValue !== undefined && currentValue !== null && currentValue !== '') {
+                            if (attributeType === 'checkbox') {
+                              displayValue = currentValue === 'true' || currentValue === true ? 'Yes' : 'No';
+                            } else {
+                              displayValue = String(currentValue);
+                            }
+                          }
+
+                          // Render different input types based on attribute_type
+                          let editComponent;
+
+                          if (attributeType === 'dropdown') {
+                            editComponent = (
+                              <FormControl fullWidth size="small">
+                                <InputLabel>{attr.attribute_name}</InputLabel>
+                                <Select
+                                  name={attr.attribute_name}
+                                  value={currentValue || ''}
+                                  onChange={(e) => {
+                                    setItemAttributeValues(prev => ({
+                                      ...prev,
+                                      [attr.attribute_name]: e.target.value
+                                    }));
+                                    setHasUnsavedChanges(true);
+                                  }}
+                                  label={attr.attribute_name}
+                                >
+                                  <MenuItem value="">
+                                    <em>None</em>
+                                  </MenuItem>
+                                  {(attr.attribute_options || []).map((option, idx) => (
+                                    <MenuItem key={idx} value={option}>
+                                      {option}
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
+                            );
+                          } else if (attributeType === 'text') {
+                            editComponent = (
+                              <TextField
+                                fullWidth
+                                size="small"
+                                name={attr.attribute_name}
+                                value={currentValue || ''}
+                                onChange={(e) => {
+                                  setItemAttributeValues(prev => ({
+                                    ...prev,
+                                    [attr.attribute_name]: e.target.value
+                                  }));
+                                  setHasUnsavedChanges(true);
+                                }}
+                                label={attr.attribute_name}
+                              />
+                            );
+                          } else if (attributeType === 'number') {
+                            editComponent = (
+                              <TextField
+                                fullWidth
+                                size="small"
+                                type="number"
+                                name={attr.attribute_name}
+                                value={currentValue || ''}
+                                onChange={(e) => {
+                                  setItemAttributeValues(prev => ({
+                                    ...prev,
+                                    [attr.attribute_name]: e.target.value
+                                  }));
+                                  setHasUnsavedChanges(true);
+                                }}
+                                label={attr.attribute_name}
+                              />
+                            );
+                          } else if (attributeType === 'checkbox') {
+                            editComponent = (
+                              <FormControlLabel
+                                control={
+                                  <Checkbox
+                                    checked={currentValue === 'true' || currentValue === true}
+                                    onChange={(e) => {
+                                      setItemAttributeValues(prev => ({
+                                        ...prev,
+                                        [attr.attribute_name]: e.target.checked ? 'true' : 'false'
+                                      }));
+                                      setHasUnsavedChanges(true);
+                                    }}
+                                  />
+                                }
+                                label={attr.attribute_name}
+                              />
+                            );
+                          }
+
+                          return renderEditableField(
+                            attr.attribute_name,
+                            displayValue,
+                            editComponent
+                          );
+                        })()}
+                      </Box>
+                    </Box>
+                  </Grid>
+                ))}
+              </Grid>
             </Paper>
           </Grid>
         </Grid>
       </Paper>
-      
+
       {/* Snackbar for notifications */}
       <Snackbar
         open={snackbar.open}
