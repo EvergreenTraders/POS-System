@@ -216,7 +216,19 @@ function Jewelry() {
       let details = [];
 
       Object.entries(changes).forEach(([field, value]) => {
-        if (value && typeof value === 'object' && 'from' in value && 'to' in value) {
+        // Special handling for Item Attributes (nested object)
+        if (field === 'Item Attributes' && value && typeof value === 'object') {
+          Object.entries(value).forEach(([attrName, attrValue]) => {
+            if (attrValue && typeof attrValue === 'object' && 'from' in attrValue && 'to' in attrValue) {
+              const fromVal = attrValue.from !== null && attrValue.from !== undefined ? String(attrValue.from) : 'None';
+              const toVal = attrValue.to !== null && attrValue.to !== undefined ? String(attrValue.to) : 'None';
+
+              if (fromVal !== toVal) {
+                details.push(`Attribute ${attrName}: ${fromVal} → ${toVal}`);
+              }
+            }
+          });
+        } else if (value && typeof value === 'object' && 'from' in value && 'to' in value) {
           const displayName = getFieldDisplayName(field);
           const fromVal = value.from !== null && value.from !== undefined ? String(value.from) : 'None';
           const toVal = value.to !== null && value.to !== undefined ? String(value.to) : 'None';
