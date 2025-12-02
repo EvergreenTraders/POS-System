@@ -3024,8 +3024,7 @@ return (
                             <TableRow>
                               <TableCell width="12%" align="center">Inventory</TableCell>
                               <TableCell width="8%" align="center">Image</TableCell>
-                              <TableCell width="35%">Item Description</TableCell>
-                              <TableCell width="15%">Category</TableCell>
+                              <TableCell width="50%">Item Description</TableCell>
                               <TableCell width="10%">Sale Price</TableCell>
                               <TableCell width="20%" align="right" padding="none">
                                 <Tooltip title="Add Item">
@@ -3108,14 +3107,6 @@ return (
                                     <TextField
                                       variant="standard"
                                       fullWidth
-                                      value={item.category}
-                                      onChange={(e) => handleItemChange(item.id, 'category', e.target.value)}
-                                    />
-                                  </TableCell>
-                                  <TableCell>
-                                    <TextField
-                                      variant="standard"
-                                      fullWidth
                                       value={item.price}
                                       onChange={(e) => handleItemChange(item.id, 'price', e.target.value)}
                                     />
@@ -3162,7 +3153,6 @@ return (
                                         Protection Plan (15%)
                                       </Typography>
                                     </TableCell>
-                                    <TableCell />
                                     <TableCell>
                                       <Typography variant="body2">
                                         ${((parseFloat(item.price) || 0) * 0.15).toFixed(2)}
