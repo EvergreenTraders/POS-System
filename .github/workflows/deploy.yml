@@ -104,6 +104,7 @@ jobs:
           cd frontend
           npm run build
         env:
+          CI: false
           REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
 
       - name: Configure AWS credentials
@@ -118,6 +119,8 @@ jobs:
           aws s3 sync frontend/build/ s3://${{ env.FRONTEND_S3_BUCKET }}/ --delete
 
       - name: Invalidate CloudFront cache
+        if: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID != '' }}
+        continue-on-error: true
         run: |
           aws cloudfront create-invalidation \
             --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
