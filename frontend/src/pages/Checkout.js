@@ -544,11 +544,20 @@ function Checkout() {
       }
 
       // Add payment to list and update remaining amount
-      const newPayment = { 
+      // Map frontend payment method values to backend expected format
+      const paymentMethodMap = {
+        'cash': 'CASH',
+        'debit': 'DEBIT_CARD',
+        'credit': 'CREDIT_CARD',
+        'check': 'CHECK',
+        'bank_transfer': 'BANK_TRANSFER'
+      };
+
+      const newPayment = {
         transaction_id: transactionId,
-        method: paymentMethod, 
+        method: paymentMethod,
         amount: paymentAmount,
-        payment_method: paymentMethod.toUpperCase(),
+        payment_method: paymentMethodMap[paymentMethod] || paymentMethod.toUpperCase(),
         timestamp: new Date().toISOString()
       };
       const updatedPayments = [...payments, newPayment];
@@ -870,9 +879,21 @@ function Checkout() {
           } else {
             // For non-jewelry items from CustomerTicket, just send transaction type and price
             transactionPayload.cartItems = checkoutItems.map(item => {
-              const type = item.transaction_type.toLowerCase();
+              const type = item.transaction_type?.toLowerCase() || 'sale';
+              const transactionTypeId = transactionTypes[type];
+
+              if (!transactionTypeId) {
+                console.error(`Unable to find transaction type ID for type: ${type}. Using 'sale' as fallback.`);
+                // Fallback to 'sale' type if mapping fails
+                return {
+                  transaction_type_id: transactionTypes['sale'] || transactionTypes['retail'],
+                  price: item.price,
+                  description: item.description || 'Item'
+                };
+              }
+
               return {
-                transaction_type_id: transactionTypes[type],
+                transaction_type_id: transactionTypeId,
                 price: item.price,
                 description: item.description || 'Item'
               };
@@ -889,19 +910,28 @@ function Checkout() {
 
           realTransactionId = transactionResponse.data.transaction.transaction_id;
 
-          // Step 2.5: Post buy_ticket records for each unique buy_ticket_id
+          // Step 2.5: Post buy_ticket and sale_ticket records for each unique ticket_id
+          // Separate buy and sale tickets
           const buyTicketIds = new Set();
+          const saleTicketIds = new Set();
+
           checkoutItems.forEach(item => {
             if (item.buyTicketId) {
-              buyTicketIds.add(item.buyTicketId);
+              const transactionType = item.transaction_type?.toLowerCase() || '';
+              if (transactionType === 'sale') {
+                saleTicketIds.add(item.buyTicketId);
+              } else if (transactionType === 'buy') {
+                buyTicketIds.add(item.buyTicketId);
+              }
             }
           });
 
+          // Process buy_ticket records
           for (const buyTicketId of buyTicketIds) {
             // Find all items with this buyTicketId
             const itemsForTicket = checkoutItems
               .map((item, index) => ({ ...item, index }))
-              .filter(item => item.buyTicketId === buyTicketId);
+              .filter(item => item.buyTicketId === buyTicketId && item.transaction_type?.toLowerCase() === 'buy');
 
             // Post a buy_ticket record for each item with this ticket
             for (const item of itemsForTicket) {
@@ -932,6 +962,46 @@ function Checkout() {
                 console.error('Error details:', buyTicketError.response?.data);
                 console.error('Error status:', buyTicketError.response?.status);
                 // Continue with checkout even if buy_ticket posting fails
+              }
+            }
+          }
+
+          // Process sale_ticket records
+          for (const saleTicketId of saleTicketIds) {
+            // Find all items with this saleTicketId
+            const itemsForTicket = checkoutItems
+              .map((item, index) => ({ ...item, index }))
+              .filter(item => item.buyTicketId === saleTicketId && item.transaction_type?.toLowerCase() === 'sale');
+
+            // Post a sale_ticket record for each item with this ticket
+            for (const item of itemsForTicket) {
+              try {
+                // Get item_id from createdJewelryItems if it's a jewelry item
+                let itemId = null;
+                if (createdJewelryItems && createdJewelryItems.length > 0 && createdJewelryItems[item.index]) {
+                  itemId = createdJewelryItems[item.index].item_id;
+                } else if (item.item_id) {
+                  // Use item_id from the item itself if available
+                  itemId = item.item_id;
+                }
+
+                await axios.post(
+                  `${config.apiUrl}/sale-ticket`,
+                  {
+                    sale_ticket_id: saleTicketId,
+                    transaction_id: realTransactionId,
+                    item_id: itemId
+                  },
+                  {
+                    headers: { Authorization: `Bearer ${token}` }
+                  }
+                );
+
+              } catch (saleTicketError) {
+                console.error('Error posting sale_ticket:', saleTicketError);
+                console.error('Error details:', saleTicketError.response?.data);
+                console.error('Error status:', saleTicketError.response?.status);
+                // Continue with checkout even if sale_ticket posting fails
               }
             }
           }
@@ -1027,6 +1097,25 @@ function Checkout() {
                 headers: { Authorization: `Bearer ${token}` }
               }
             );
+          }
+
+          // Step 3.5: Update jewelry inventory status to SOLD for sale transactions
+          for (const item of checkoutItems) {
+            const transactionType = item.transaction_type?.toLowerCase() || '';
+            // Only update status for sale transactions with inventory items
+            if (transactionType === 'sale' && item.item_id && item.fromInventory) {
+              try {
+                await axios.put(
+                  `${config.apiUrl}/jewelry/${item.item_id}`,
+                  { status: 'SOLD' },
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+                console.log(`Updated item ${item.item_id} status to SOLD`);
+              } catch (updateError) {
+                console.error(`Error updating item ${item.item_id} status:`, updateError);
+                // Continue with checkout even if status update fails
+              }
+            }
           }
 
           // Step 4: Display success message and navigate to home

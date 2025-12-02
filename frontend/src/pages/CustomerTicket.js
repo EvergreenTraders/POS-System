@@ -27,6 +27,7 @@ import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import ClearIcon from '@mui/icons-material/Clear';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
+import SecurityIcon from '@mui/icons-material/Security';
 
 // Helper function to convert buffer to data URL for image preview
 function bufferToDataUrl(bufferObj) {
@@ -3023,10 +3024,8 @@ return (
                             <TableRow>
                               <TableCell width="12%" align="center">Inventory</TableCell>
                               <TableCell width="8%" align="center">Image</TableCell>
-                              <TableCell width="30%">Item Description</TableCell>
-                              <TableCell width="12%">Category</TableCell>
+                              <TableCell width="50%">Item Description</TableCell>
                               <TableCell width="10%">Sale Price</TableCell>
-                              <TableCell width="8%" align="center">Protection (15%)</TableCell>
                               <TableCell width="20%" align="right" padding="none">
                                 <Tooltip title="Add Item">
                                   <IconButton size="small" color="primary" onClick={handleAddRow}>
@@ -3038,116 +3037,131 @@ return (
                           </TableHead>
                           <TableBody>
                             {saleItems.map((item) => (
-                              <TableRow key={item.id}>
-                                <TableCell align="center" padding="normal">
-                                  <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
-                                    <Tooltip title="Inventory">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
-                                        <DiamondIcon fontSize="small" />
+                              <React.Fragment key={item.id}>
+                                {/* Main item row */}
+                                <TableRow>
+                                  <TableCell align="center" padding="normal">
+                                    <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
+                                      <Tooltip title="Inventory">
+                                        <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                          <DiamondIcon fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                      <Tooltip title="Bullion Estimator">
+                                        <IconButton size="small" color="primary" onClick={handleBullionEstimatorClick}>
+                                          <MonetizationOnIcon fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                      <Tooltip title="Misc Estimator">
+                                        <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
+                                          <WatchIcon fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                    </Box>
+                                  </TableCell>
+                                  <TableCell align="center">
+                                    <Tooltip title="Click to capture image">
+                                      <IconButton
+                                        onClick={() => handleOpenCamera(item.id, 'sale')}
+                                        size="small"
+                                        sx={{
+                                          padding: 0,
+                                          '&:hover': { opacity: 0.7 }
+                                        }}
+                                      >
+                                        {item.images && item.images.length > 0 ? (
+                                          <img
+                                            src={item.images[0].url}
+                                            alt="Item"
+                                            style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                          />
+                                        ) : (
+                                          <Box
+                                            sx={{
+                                              width: '50px',
+                                              height: '50px',
+                                              bgcolor: 'grey.200',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              borderRadius: '4px'
+                                            }}
+                                          >
+                                            <PhotoCamera sx={{ color: 'grey.400' }} />
+                                          </Box>
+                                        )}
                                       </IconButton>
                                     </Tooltip>
-                                    <Tooltip title="Bullion Estimator">
-                                      <IconButton size="small" color="primary" onClick={handleBullionEstimatorClick}>
-                                        <MonetizationOnIcon fontSize="small" />
+                                  </TableCell>
+                                  <TableCell>
+                                    <TextField
+                                      variant="standard"
+                                      fullWidth
+                                      value={item.description}
+                                      onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
+                                      onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
+                                      placeholder="e.g., JR 10k 2g YG"
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <TextField
+                                      variant="standard"
+                                      fullWidth
+                                      value={item.price}
+                                      onChange={(e) => handleItemChange(item.id, 'price', e.target.value)}
+                                    />
+                                  </TableCell>
+                                  <TableCell align="right">
+                                    <Tooltip title="Edit">
+                                      <IconButton size="small" onClick={() => handleEditItem(item.id)}>
+                                        <EditIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
-                                    <Tooltip title="Misc Estimator">
-                                      <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
-                                        <WatchIcon fontSize="small" />
+                                    <Tooltip title="Protection Plan">
+                                      <IconButton
+                                        size="small"
+                                        onClick={() => handleItemChange(item.id, 'protectionPlan', !item.protectionPlan)}
+                                        color={item.protectionPlan ? 'primary' : 'default'}
+                                      >
+                                        <SecurityIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
-                                  </Box>
-                                </TableCell>
-                                <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'sale')}
-                                      size="small"
-                                      sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
-                                      }}
-                                    >
-                                      {item.images && item.images.length > 0 ? (
-                                        <img
-                                          src={item.images[0].url}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
-                                </TableCell>
-                                <TableCell>
-                                  <TextField
-                                    variant="standard"
-                                    fullWidth
-                                    value={item.description}
-                                    onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
-                                    onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
-                                    placeholder="e.g., JR 10k 2g YG"
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
-                                    value={item.category}
-                                    onChange={(e) => handleItemChange(item.id, 'category', e.target.value)}
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <TextField
-                                    variant="standard"
-                                    fullWidth
-                                    value={item.price}
-                                    onChange={(e) => handleItemChange(item.id, 'price', e.target.value)}
-                                  />
-                                </TableCell>
-                                <TableCell align="center">
-                                  <Checkbox
-                                    checked={item.protectionPlan || false}
-                                    onChange={(e) => handleItemChange(item.id, 'protectionPlan', e.target.checked)}
-                                    size="small"
-                                  />
-                                </TableCell>
-                                <TableCell align="right">
-                                  <Tooltip title="Edit">
-                                    <IconButton size="small" onClick={() => handleEditItem(item.id)}>
-                                      <EditIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Convert">
-                                    <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
-                                      <SwapHorizIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Duplicate">
-                                    <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
-                                      <ContentCopyIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Delete">
-                                    <IconButton size="small" onClick={() => handleDeleteItem(item.id)}>
-                                      <DeleteIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                </TableCell>
-                              </TableRow>
+                                    <Tooltip title="Convert">
+                                      <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
+                                        <SwapHorizIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                    <Tooltip title="Duplicate">
+                                      <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
+                                        <ContentCopyIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                    <Tooltip title="Delete">
+                                      <IconButton size="small" onClick={() => handleDeleteItem(item.id)}>
+                                        <DeleteIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                  </TableCell>
+                                </TableRow>
+
+                                {/* Protection plan row - shown as separate line if enabled */}
+                                {item.protectionPlan && (
+                                  <TableRow sx={{ bgcolor: 'action.hover' }}>
+                                    <TableCell colSpan={2} />
+                                    <TableCell>
+                                      <Typography variant="body2" sx={{ fontStyle: 'italic', pl: 2 }}>
+                                        Protection Plan (15%)
+                                      </Typography>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Typography variant="body2">
+                                        ${((parseFloat(item.price) || 0) * 0.15).toFixed(2)}
+                                      </Typography>
+                                    </TableCell>
+                                    <TableCell />
+                                  </TableRow>
+                                )}
+                              </React.Fragment>
                             ))}
                           </TableBody>
                         </Table>

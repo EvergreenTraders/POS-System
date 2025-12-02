@@ -50,11 +50,13 @@ function TransactionJournals() {
   const [isEditingPayments, setIsEditingPayments] = useState(false);
   const [editedPayments, setEditedPayments] = useState([]);
   const [buyTickets, setBuyTickets] = useState([]);
+  const [saleTickets, setSaleTickets] = useState([]);
   const API_BASE_URL = config.apiUrl;
 
   const [transactions, setTransactions] = useState([]);
   const [transactionItemsMap, setTransactionItemsMap] = useState({});
   const [buyTicketsMap, setBuyTicketsMap] = useState({}); // Map of transaction_id to buy_tickets
+  const [saleTicketsMap, setSaleTicketsMap] = useState({}); // Map of transaction_id to sale_tickets
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stores, setStores] = useState([]);
@@ -63,7 +65,8 @@ function TransactionJournals() {
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [receiptConfig, setReceiptConfig] = useState({
     transaction_receipt: 'Thank you for shopping with us',
-    buy_receipt: 'Thank you for shopping with us'
+    buy_receipt: 'Thank you for shopping with us',
+    sales_receipt: 'Thank you for shopping with us'
   });
 
   // Fetch receipt config from API
@@ -74,7 +77,8 @@ function TransactionJournals() {
         if (response.data) {
           setReceiptConfig({
             transaction_receipt: response.data.transaction_receipt || 'Thank you for shopping with us',
-            buy_receipt: response.data.buy_receipt || 'Thank you for shopping with us'
+            buy_receipt: response.data.buy_receipt || 'Thank you for shopping with us',
+            sales_receipt: response.data.sales_receipt || 'Thank you for shopping with us'
           });
         }
       } catch (error) {
@@ -136,13 +140,21 @@ function TransactionJournals() {
         total_paid: response.data.total_paid || 0
       });
 
-      // Fetch buy_ticket data for this transaction
+      // Fetch buy_ticket and sale_ticket data for this transaction
       try {
         const buyTicketResponse = await axios.get(`${API_BASE_URL}/buy-ticket?transaction_id=${transaction.transaction_id}`);
         setBuyTickets(buyTicketResponse.data || []);
       } catch (buyTicketError) {
         console.error('Error fetching buy tickets:', buyTicketError);
         setBuyTickets([]);
+      }
+
+      try {
+        const saleTicketResponse = await axios.get(`${API_BASE_URL}/sale-ticket?transaction_id=${transaction.transaction_id}`);
+        setSaleTickets(saleTicketResponse.data || []);
+      } catch (saleTicketError) {
+        console.error('Error fetching sale tickets:', saleTicketError);
+        setSaleTickets([]);
       }
     } catch (error) {
       console.error('Error fetching transaction details:', error);
@@ -161,17 +173,28 @@ function TransactionJournals() {
     // Reset payment details when closing dialog
     setPaymentDetails({ payments: [], total_paid: 0 });
     setBuyTickets([]);
+    setSaleTickets([]);
     // Don't clear transaction items to keep them in memory
   };
 
-  // Group transaction items by buy_ticket_id
+  // Group transaction items by ticket_id (buy_ticket or sale_ticket)
   const groupItemsByTicket = () => {
     const grouped = {};
 
     transactionItems.forEach((item, index) => {
-      // Find the buy_ticket record for this item
-      const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
-      const ticketId = buyTicket?.buy_ticket_id || 'no-ticket';
+      // Check transaction type to determine which ticket to look for
+      const transactionType = item.transaction_type?.toLowerCase() || '';
+      let ticketId = 'no-ticket';
+
+      if (transactionType === 'sale') {
+        // Find the sale_ticket record for this item
+        const saleTicket = saleTickets.find(st => st.item_id === item.item_id);
+        ticketId = saleTicket?.sale_ticket_id || 'no-ticket';
+      } else if (transactionType === 'buy') {
+        // Find the buy_ticket record for this item
+        const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
+        ticketId = buyTicket?.buy_ticket_id || 'no-ticket';
+      }
 
       if (!grouped[ticketId]) {
         grouped[ticketId] = [];
@@ -182,18 +205,35 @@ function TransactionJournals() {
     return grouped;
   };
 
-  // Handle double click on buy_ticket_id to show receipt in new tab
-  const handleBuyTicketClick = async (buyTicketId) => {
+  // Handle double click on ticket_id to show receipt in new tab
+  const handleBuyTicketClick = async (ticketId) => {
+    // Determine if this is a sale or buy ticket by checking which ticket list contains it
+    const isSaleTicket = saleTickets.some(st => st.sale_ticket_id === ticketId);
+    const isBuyTicket = buyTickets.some(bt => bt.buy_ticket_id === ticketId);
+
     // Get items for this ticket
-    const ticketItems = transactionItems.filter(item => {
-      const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
-      return buyTicket?.buy_ticket_id === buyTicketId;
-    });
+    let ticketItems = [];
+    if (isSaleTicket) {
+      ticketItems = transactionItems.filter(item => {
+        const saleTicket = saleTickets.find(st => st.item_id === item.item_id);
+        return saleTicket?.sale_ticket_id === ticketId;
+      });
+    } else if (isBuyTicket) {
+      ticketItems = transactionItems.filter(item => {
+        const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
+        return buyTicket?.buy_ticket_id === ticketId;
+      });
+    }
 
     if (ticketItems.length === 0) {
       alert('No items found for this ticket');
       return;
     }
+
+    // Determine if this is a sale transaction
+    const isSaleTransaction = isSaleTicket || ticketItems.some(item =>
+      item.transaction_type?.toLowerCase() === 'sale'
+    ) || selectedTransaction?.transaction_type_name?.toLowerCase() === 'sale';
 
     // Fetch business info
     let businessName = 'PAWNALL NEW MOBILE';
@@ -235,7 +275,7 @@ function TransactionJournals() {
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Ticket ${buyTicketId}</title>
+          <title>Ticket ${ticketId}</title>
           <style>
             @page { size: portrait; margin: 0.5in; }
             body {
@@ -327,7 +367,7 @@ function TransactionJournals() {
                 <p style="margin: 2px 0;"><strong>Date/Time:</strong> ${formattedDate} ${formattedTime}</p>
               </div>
               <div style="text-align: right;">
-                <p class="bold" style="font-size: 12pt; margin: 0;">${buyTicketId}</p>
+                <p class="bold" style="font-size: 12pt; margin: 0;">${ticketId}</p>
               </div>
             </div>
 
@@ -336,7 +376,6 @@ function TransactionJournals() {
               <table style="width: 100%; border-collapse: collapse; font-family: 'Courier New', monospace;">
                 <thead>
                   <tr style="border-bottom: 1px solid black;">
-                    <th style="text-align: left; padding: 5px 0; font-size: 8pt;">CATEGORY</th>
                     <th style="text-align: left; padding: 5px 0; font-size: 8pt;">DESCRIPTION</th>
                     <th style="text-align: right; padding: 5px 0; font-size: 8pt;">PRICE</th>
                   </tr>
@@ -344,9 +383,6 @@ function TransactionJournals() {
                 <tbody>
                   ${ticketItems.map((item, idx) => `
                     <tr>
-                      <td style="padding: 5px 5px 5px 0; font-size: 8pt; vertical-align: top;">
-                        ${item.item_details?.category || item.transaction_type || 'N/A'}
-                      </td>
                       <td style="padding: 5px; font-size: 8pt; vertical-align: top;">
                         ${item.item_details?.long_desc || item.item_details?.description || item.description || `Item ${idx + 1}`}
                       </td>
@@ -367,7 +403,7 @@ function TransactionJournals() {
 
             <!-- Footer Text -->
             <div class="terms">
-              <p style="white-space: pre-wrap;">${receiptConfig.buy_receipt}</p>
+              <p style="white-space: pre-wrap;">${isSaleTransaction ? receiptConfig.sales_receipt : receiptConfig.buy_receipt}</p>
             </div>
 
             <!-- Signature Lines -->
@@ -745,11 +781,32 @@ function TransactionJournals() {
 
         // Process all buy tickets responses
         const buyTicketsResponses = await Promise.all(buyTicketsPromises);
-        const ticketsMap = {};
+        const buyTicketsMapData = {};
         buyTicketsResponses.forEach(({ transactionId, buyTickets }) => {
-          ticketsMap[transactionId] = buyTickets;
+          buyTicketsMapData[transactionId] = buyTickets;
         });
-        setBuyTicketsMap(ticketsMap);
+        setBuyTicketsMap(buyTicketsMapData);
+
+        // Fetch all sale tickets in parallel
+        const saleTicketsPromises = transactionsData.map(tx =>
+          axios.get(`${API_BASE_URL}/sale-ticket?transaction_id=${tx.transaction_id}`)
+            .then(res => ({
+              transactionId: tx.transaction_id,
+              saleTickets: res.data || []
+            }))
+            .catch(() => ({
+              transactionId: tx.transaction_id,
+              saleTickets: []
+            }))
+        );
+
+        // Process all sale tickets responses
+        const saleTicketsResponses = await Promise.all(saleTicketsPromises);
+        const saleTicketsMapData = {};
+        saleTicketsResponses.forEach(({ transactionId, saleTickets }) => {
+          saleTicketsMapData[transactionId] = saleTickets;
+        });
+        setSaleTicketsMap(saleTicketsMapData);
 
         // Transform employees data for the dropdown
         const employeeOptions = employeesRes.data.map(emp => ({
@@ -857,13 +914,16 @@ function TransactionJournals() {
       matchesDate = txDate === selectedDate;
     }
 
-    // Check ticket ID match - search through buy_tickets for this transaction
+    // Check ticket ID match - search through buy_tickets and sale_tickets for this transaction
     let matchesTicketId = true;
     if (ticketId) {
       const txBuyTickets = buyTicketsMap[tx.transaction_id] || [];
-      // Match if any buy ticket ID contains the search string
+      const txSaleTickets = saleTicketsMap[tx.transaction_id] || [];
+      // Match if any buy ticket ID or sale ticket ID contains the search string
       matchesTicketId = txBuyTickets.some(ticket =>
         ticket.buy_ticket_id?.toLowerCase().includes(ticketId.toLowerCase())
+      ) || txSaleTickets.some(ticket =>
+        ticket.sale_ticket_id?.toLowerCase().includes(ticketId.toLowerCase())
       );
     }
 

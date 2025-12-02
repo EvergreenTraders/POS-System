@@ -85,43 +85,71 @@ const Cart = () => {
     return null;
   });
 
-  // Initialize cart items from session storage only
+  // Monitor customer changes in sessionStorage
   useEffect(() => {
-    // Load cart items from session storage
-    const savedCartItems = sessionStorage.getItem('cartItems');
-    if (savedCartItems) {
+    const savedCustomer = sessionStorage.getItem('selectedCustomer');
+    if (savedCustomer) {
       try {
-        const parsedItems = JSON.parse(savedCartItems);
-
-        // Fix customer data for items that don't have first_name and last_name
-        const fixedItems = parsedItems.map(item => {
-          if (item.customer && !item.customer.first_name && !item.customer.last_name && item.customer.name) {
-            const nameParts = item.customer.name.split(' ');
-            return {
-              ...item,
-              customer: {
-                ...item.customer,
-                first_name: nameParts[0] || '',
-                last_name: nameParts.slice(1).join(' ') || ''
-              }
-            };
-          }
-          return item;
-        });
-
-        setCartItems(fixedItems);
-
-        // Save the fixed items back to sessionStorage
-        if (JSON.stringify(fixedItems) !== JSON.stringify(parsedItems)) {
-          sessionStorage.setItem('cartItems', JSON.stringify(fixedItems));
-        }
+        const parsedCustomer = JSON.parse(savedCustomer);
+        setCustomer(parsedCustomer);
       } catch (error) {
-        console.error('Error parsing cart items from session storage:', error);
-        // If there's an error parsing, reset the cart
-        sessionStorage.removeItem('cartItems');
-        setCartItems([]);
+        console.error('Error parsing customer from session storage:', error);
       }
     }
+  }, [cartItems]); // Re-check when cartItems change (indicating new items were added)
+
+  // Initialize cart items from session storage only
+  useEffect(() => {
+    const loadCartItems = () => {
+      // Load cart items from session storage
+      const savedCartItems = sessionStorage.getItem('cartItems');
+      if (savedCartItems) {
+        try {
+          const parsedItems = JSON.parse(savedCartItems);
+
+          // Fix customer data for items that don't have first_name and last_name
+          const fixedItems = parsedItems.map(item => {
+            if (item.customer && !item.customer.first_name && !item.customer.last_name && item.customer.name) {
+              const nameParts = item.customer.name.split(' ');
+              return {
+                ...item,
+                customer: {
+                  ...item.customer,
+                  first_name: nameParts[0] || '',
+                  last_name: nameParts.slice(1).join(' ') || ''
+                }
+              };
+            }
+            return item;
+          });
+
+          setCartItems(fixedItems);
+
+          // Save the fixed items back to sessionStorage
+          if (JSON.stringify(fixedItems) !== JSON.stringify(parsedItems)) {
+            sessionStorage.setItem('cartItems', JSON.stringify(fixedItems));
+          }
+        } catch (error) {
+          console.error('Error parsing cart items from session storage:', error);
+          // If there's an error parsing, reset the cart
+          sessionStorage.removeItem('cartItems');
+          setCartItems([]);
+        }
+      }
+    };
+
+    // Load initially
+    loadCartItems();
+
+    // Reload when window gains focus (user navigates back to this page)
+    const handleFocus = () => {
+      loadCartItems();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   // Extract unique customers and employees from cart items

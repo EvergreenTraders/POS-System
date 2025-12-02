@@ -2138,6 +2138,69 @@ app.post('/api/buy-ticket', async (req, res) => {
   }
 });
 
+// Sale Ticket API Endpoints
+app.get('/api/sale-ticket', async (req, res) => {
+  try {
+    const { sale_ticket_id, transaction_id } = req.query;
+
+    let query = 'SELECT * FROM sale_ticket';
+    const params = [];
+
+    if (sale_ticket_id) {
+      query += ' WHERE sale_ticket_id = $1';
+      params.push(sale_ticket_id);
+    } else if (transaction_id) {
+      query += ' WHERE transaction_id = $1';
+      params.push(transaction_id);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching sale tickets:', error);
+    res.status(500).json({ error: 'Failed to fetch sale tickets' });
+  }
+});
+
+app.post('/api/sale-ticket', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { sale_ticket_id, transaction_id, item_id } = req.body;
+
+    // Validate required fields
+    if (!sale_ticket_id) {
+      return res.status(400).json({ error: 'sale_ticket_id is required' });
+    }
+
+    await client.query('BEGIN');
+
+    // Insert new sale_ticket record
+    const insertQuery = `
+      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `;
+
+    const result = await client.query(insertQuery, [
+      sale_ticket_id,
+      transaction_id || null,
+      item_id || null
+    ]);
+
+    await client.query('COMMIT');
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating sale ticket:', error);
+    res.status(500).json({ error: 'Failed to create sale ticket' });
+  } finally {
+    client.release();
+  }
+});
+
 // Quote Expiration Configuration API Endpoints
 app.get('/api/quote-expiration/config', async (req, res) => {
   try {
@@ -3501,21 +3564,20 @@ app.post('/api/transactions', async (req, res) => {
 
         // Insert items into transaction_items
         for (const item of cartItems) {
-            const itemQuery = `
-                INSERT INTO transaction_items (
-                  transaction_id, item_id, transaction_type_id,
-                    item_price
-                )
-                VALUES ($1, $2, $3, $4)
-                RETURNING *
-            `;
+            // Handle both jewelry items (with item_id) and non-jewelry items (without item_id)
+            const itemQuery = item.item_id
+                ? `INSERT INTO transaction_items (
+                      transaction_id, item_id, transaction_type_id, item_price
+                  ) VALUES ($1, $2, $3, $4) RETURNING *`
+                : `INSERT INTO transaction_items (
+                      transaction_id, transaction_type_id, item_price, description
+                  ) VALUES ($1, $2, $3, $4) RETURNING *`;
 
-            await client.query(itemQuery, [
-                transactionId,
-                item.item_id,
-                item.transaction_type_id,
-                item.price
-            ]);
+            const params = item.item_id
+                ? [transactionId, item.item_id, item.transaction_type_id, item.price]
+                : [transactionId, item.transaction_type_id, item.price, item.description || 'Item'];
+
+            await client.query(itemQuery, params);
         }
 
         await client.query('COMMIT');
@@ -5424,6 +5486,136 @@ app.get('/api/layaways/:id/payments', async (req, res) => {
   } catch (err) {
     console.error('Error fetching layaway payments:', err);
     res.status(500).json({ error: 'Failed to fetch layaway payments' });
+  }
+});
+
+// ============================================
+// ITEM ATTRIBUTES ENDPOINTS
+// ============================================
+
+// Get all attribute configurations
+app.get('/api/attribute-config', async (req, res) => {
+  try {
+    const { inventory_type } = req.query;
+    let query = 'SELECT * FROM attribute_config';
+    let params = [];
+
+    if (inventory_type) {
+      query += ' WHERE inventory_type = $1 OR inventory_type IS NULL';
+      params = [inventory_type];
+    }
+
+    query += ' ORDER BY attribute_name';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching attribute config:', err);
+    res.status(500).json({ error: 'Failed to fetch attribute configuration' });
+  }
+});
+
+// Save/Update attribute configuration
+app.post('/api/attribute-config', async (req, res) => {
+  try {
+    const { attribute_name, attribute_type, attribute_options, inventory_type } = req.body;
+
+    const query = `
+      INSERT INTO attribute_config (attribute_name, attribute_type, attribute_options, inventory_type, updated_at)
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+      ON CONFLICT (attribute_name)
+      DO UPDATE SET
+        attribute_type = $2,
+        attribute_options = $3,
+        inventory_type = $4,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `;
+
+    const result = await pool.query(query, [attribute_name, attribute_type || 'dropdown', attribute_options, inventory_type]);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error saving attribute config:', err);
+    res.status(500).json({ error: 'Failed to save attribute configuration' });
+  }
+});
+
+// Delete attribute configuration
+app.delete('/api/attribute-config/:attribute_name', async (req, res) => {
+  try {
+    const { attribute_name } = req.params;
+    await pool.query('DELETE FROM attribute_config WHERE attribute_name = $1', [attribute_name]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting attribute config:', err);
+    res.status(500).json({ error: 'Failed to delete attribute configuration' });
+  }
+});
+
+// Get item attributes for a specific item
+app.get('/api/item-attributes/:item_id', async (req, res) => {
+  try {
+    const { item_id } = req.params;
+    const query = 'SELECT * FROM item_attributes WHERE item_id = $1';
+    const result = await pool.query(query, [item_id]);
+
+    // Convert to object format { attribute_name: attribute_value }
+    const attributes = {};
+    result.rows.forEach(row => {
+      attributes[row.attribute_name] = row.attribute_value;
+    });
+
+    res.json(attributes);
+  } catch (err) {
+    console.error('Error fetching item attributes:', err);
+    res.status(500).json({ error: 'Failed to fetch item attributes' });
+  }
+});
+
+// Save/Update item attributes
+app.post('/api/item-attributes/:item_id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { item_id } = req.params;
+    const attributes = req.body; // { attribute_name: value, ... }
+
+    // Delete existing attributes for this item
+    await client.query('DELETE FROM item_attributes WHERE item_id = $1', [item_id]);
+
+    // Insert new attributes
+    for (const [attribute_name, attribute_value] of Object.entries(attributes)) {
+      if (attribute_value) { // Only save if value is not empty
+        await client.query(
+          `INSERT INTO item_attributes (item_id, attribute_name, attribute_value)
+           VALUES ($1, $2, $3)`,
+          [item_id, attribute_name, attribute_value]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error saving item attributes:', err);
+    res.status(500).json({ error: 'Failed to save item attributes' });
+  } finally {
+    client.release();
+  }
+});
+
+// Delete specific attribute for an item
+app.delete('/api/item-attributes/:item_id/:attribute_name', async (req, res) => {
+  try {
+    const { item_id, attribute_name } = req.params;
+    await pool.query(
+      'DELETE FROM item_attributes WHERE item_id = $1 AND attribute_name = $2',
+      [item_id, attribute_name]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting item attribute:', err);
+    res.status(500).json({ error: 'Failed to delete item attribute' });
   }
 });
 

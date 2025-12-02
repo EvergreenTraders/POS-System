@@ -189,6 +189,7 @@ function JewelryEdit() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false); // Track if there are unsaved changes
   const autoSaveTimerRef = useRef(null); // Reference for auto-save timer
   const isInitialLoadRef = useRef(true); // Track if this is the initial load
+  const baselineAttributeValuesRef = useRef({}); // Track baseline attribute values
   const [gemTab, setGemTab] = useState('diamond');  // Initialize with all secondary gems visible by default
   const [secondaryGemTab, setSecondaryGemTab] = useState('all'); // Controls which secondary gem tab is active
   const [isSecondaryGem, setIsSecondaryGem] = useState(false); // Tracks whether we're editing primary or secondary gem
@@ -324,6 +325,187 @@ function JewelryEdit() {
   });
 
   // Handler for saving changes from combined dialog
+  const handleSaveAttributes = async () => {
+    try {
+      setIsSaving(true);
+
+      // Track ALL changes (metal, gems, AND attributes)
+      const changes = {};
+
+      // Helper function to normalize values for comparison
+      const normalizeValue = (value) => {
+        if (value === null || value === undefined) return value;
+        if (typeof value === 'string' && !isNaN(parseFloat(value)) && isFinite(value)) {
+          return parseFloat(value);
+        }
+        return value;
+      };
+
+      // Helper function to check if a value is "empty" or default
+      const isEmpty = (value) => {
+        return value === null || value === undefined || value === '' ||
+               (typeof value === 'string' && value.trim() === '');
+      };
+
+      // Helper function to check if values are effectively the same
+      const areSameValue = (val1, val2) => {
+        // Both empty
+        if (isEmpty(val1) && isEmpty(val2)) return true;
+
+        // Both are 0 or falsy numbers
+        if ((val1 === 0 || val1 === '0') && (val2 === 0 || val2 === '0')) return true;
+
+        // Same value after normalization
+        const norm1 = normalizeValue(val1);
+        const norm2 = normalizeValue(val2);
+        return JSON.stringify(norm1) === JSON.stringify(norm2);
+      };
+
+      // Get all unique field names dynamically from item and editedItem
+      const allFields = new Set([
+        ...Object.keys(baselineItem || {}),
+        ...Object.keys(editedItem || {})
+      ]);
+
+      // Fields to exclude from tracking (internal state fields)
+      const excludeFields = ['secondaryGems'];
+
+      // Track changes for each field dynamically (excluding secondary gems)
+      allFields.forEach(field => {
+        if (excludeFields.includes(field)) return;
+
+        // Skip flat secondary gem properties
+        if (/^secondary_gem_\w+_\d+$/.test(field)) return;
+
+        const baselineValue = baselineItem?.[field];
+        const editedValue = editedItem?.[field];
+
+        // Skip if values are the same
+        if (areSameValue(baselineValue, editedValue)) {
+          return;
+        }
+
+        // Map inventory_status to status for database compatibility
+        const dbFieldName = field === 'inventory_status' ? 'status' : field;
+
+        changes[dbFieldName] = {
+          from: baselineValue,
+          to: editedValue
+        };
+      });
+
+      // Handle secondaryGems separately
+      if (baselineItem?.secondaryGems || editedItem?.secondaryGems) {
+        const baselineGems = baselineItem?.secondaryGems || [];
+        const editedGems = editedItem?.secondaryGems || [];
+
+        const maxLength = Math.max(baselineGems.length, editedGems.length);
+
+        for (let i = 0; i < maxLength; i++) {
+          const baselineGem = baselineGems[i] || {};
+          const editedGem = editedGems[i] || {};
+
+          const gemFields = new Set([
+            ...Object.keys(baselineGem),
+            ...Object.keys(editedGem)
+          ]);
+
+          const gemChanges = {};
+
+          gemFields.forEach(field => {
+            const baselineGemValue = baselineGem[field];
+            const editedGemValue = editedGem[field];
+
+            if (areSameValue(baselineGemValue, editedGemValue)) {
+              return;
+            }
+
+            gemChanges[field] = {
+              from: baselineGemValue,
+              to: editedGemValue
+            };
+          });
+
+          if (Object.keys(gemChanges).length > 0) {
+            changes[`secondary_gem_${i + 1}`] = gemChanges;
+          }
+        }
+      }
+
+      // Track attribute changes - group all attributes together
+      const baselineAttributes = baselineAttributeValuesRef.current || {};
+      const currentAttributes = itemAttributeValues || {};
+
+      const allAttributeNames = new Set([
+        ...Object.keys(baselineAttributes),
+        ...Object.keys(currentAttributes)
+      ]);
+
+      const attributeChanges = {};
+      allAttributeNames.forEach(attrName => {
+        const baselineValue = baselineAttributes[attrName];
+        const currentValue = currentAttributes[attrName];
+
+        if (areSameValue(baselineValue, currentValue)) {
+          return;
+        }
+
+        attributeChanges[attrName] = {
+          from: baselineValue || null,
+          to: currentValue || null
+        };
+      });
+
+      // If there are attribute changes, add them as a single grouped entry
+      if (Object.keys(attributeChanges).length > 0) {
+        changes['Item Attributes'] = attributeChanges;
+      }
+
+      // Save item attributes
+      if (Object.keys(itemAttributeValues).length > 0) {
+        await axios.post(`${API_BASE_URL}/item-attributes/${item.item_id}`, itemAttributeValues);
+      }
+
+      // If there are changes, save them to history
+      if (Object.keys(changes).length > 0) {
+        await axios.post(`${API_BASE_URL}/jewelry/history`, {
+          item_id: item.item_id,
+          changed_fields: changes,
+          changed_by: currentUser?.id || 1,
+          action: 'update',
+          notes: 'Item updated (manual save)'
+        });
+
+        // Update baselines after successful save
+        const updatedItem = { ...item, ...editedItem };
+        setItem(updatedItem);
+        setBaselineItem(JSON.parse(JSON.stringify(updatedItem)));
+        baselineAttributeValuesRef.current = JSON.parse(JSON.stringify(itemAttributeValues));
+
+        setSnackbar({
+          open: true,
+          message: 'Changes saved successfully!',
+          severity: 'success'
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: 'No changes to save',
+          severity: 'info'
+        });
+      }
+    } catch (error) {
+      console.error('Error saving changes:', error);
+      setSnackbar({
+        open: true,
+        message: `Failed to save: ${error.response?.data?.message || error.message}`,
+        severity: 'error'
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleCombinedSave = async () => {
     try {
       setIsSaving(true);
@@ -541,7 +723,47 @@ function JewelryEdit() {
       
       setItem(updatedItemWithGems);
       setEditedItem(updatedItemWithGems);
-      
+
+      // Track attribute changes - group all attributes together
+      const baselineAttributes = baselineAttributeValuesRef.current || {};
+      const currentAttributes = itemAttributeValues || {};
+
+      // Get all unique attribute names
+      const allAttributeNames = new Set([
+        ...Object.keys(baselineAttributes),
+        ...Object.keys(currentAttributes)
+      ]);
+
+      // Helper to check if values are same
+      const areSameValue = (val1, val2) => {
+        if (val1 === val2) return true;
+        if ((val1 === null || val1 === undefined || val1 === '') &&
+            (val2 === null || val2 === undefined || val2 === '')) return true;
+        return false;
+      };
+
+      const attributeChanges = {};
+      allAttributeNames.forEach(attrName => {
+        const baselineValue = baselineAttributes[attrName];
+        const currentValue = currentAttributes[attrName];
+
+        // Skip if values are the same
+        if (areSameValue(baselineValue, currentValue)) {
+          return;
+        }
+
+        // Track the attribute change in a grouped object
+        attributeChanges[attrName] = {
+          from: baselineValue || null,
+          to: currentValue || null
+        };
+      });
+
+      // If there are attribute changes, add them as a single grouped entry
+      if (Object.keys(attributeChanges).length > 0) {
+        changes['Item Attributes'] = attributeChanges;
+      }
+
       // If there are changes, save them to item_history
       if (Object.keys(changes).length > 0) {
         try {
@@ -554,8 +776,15 @@ function JewelryEdit() {
             notes: 'Item details updated via combined editor'
           });
 
+          // Save item attributes
+          if (Object.keys(itemAttributeValues).length > 0) {
+            await axios.post(`${API_BASE_URL}/item-attributes/${item.item_id}`, itemAttributeValues);
+          }
+
           // Update baseline to reflect the new current state after successful save
           setBaselineItem(JSON.parse(JSON.stringify(updatedItemWithGems)));
+          // Update baseline attribute values after successful save
+          baselineAttributeValuesRef.current = JSON.parse(JSON.stringify(itemAttributeValues));
 
           setSnackbar({
             open: true,
@@ -1039,9 +1268,11 @@ function JewelryEdit() {
   const [discountType, setDiscountType] = useState('percentage'); // 'percentage' or 'amount'
   const [transactionType, setTransactionType] = useState('retail'); // 'sell' or 'retail'
   const [updatedMetalData, setUpdatedMetalData] = useState(null);
+  const [attributeConfig, setAttributeConfig] = useState([]);
+  const [itemAttributeValues, setItemAttributeValues] = useState({});
 
-  // Auto-save effect: monitors editedItem changes and triggers save after a delay
-  useEffect(() => {
+  // Auto-save effect: DISABLED - Manual save only
+  /* useEffect(() => {
     // Skip if no baseline or edited item (initial load)
     if (!baselineItem || !editedItem || !item) return;
 
@@ -1127,6 +1358,24 @@ function JewelryEdit() {
               return true; // Found a change in secondary gem
             }
           }
+        }
+      }
+
+      // Check attribute changes
+      const baselineAttributes = baselineAttributeValuesRef.current || {};
+      const currentAttributes = itemAttributeValues || {};
+
+      const allAttributeNames = new Set([
+        ...Object.keys(baselineAttributes),
+        ...Object.keys(currentAttributes)
+      ]);
+
+      for (const attrName of allAttributeNames) {
+        const baselineValue = baselineAttributes[attrName];
+        const currentValue = currentAttributes[attrName];
+
+        if (!areSameValue(baselineValue, currentValue)) {
+          return true; // Found a change in attributes
         }
       }
 
@@ -1257,6 +1506,43 @@ function JewelryEdit() {
             }
           }
 
+          // Track attribute changes - group all attributes together
+          const baselineAttributes = baselineAttributeValuesRef.current || {};
+          const currentAttributes = itemAttributeValues || {};
+
+          // Get all unique attribute names
+          const allAttributeNames = new Set([
+            ...Object.keys(baselineAttributes),
+            ...Object.keys(currentAttributes)
+          ]);
+
+          const attributeChanges = {};
+          allAttributeNames.forEach(attrName => {
+            const baselineValue = baselineAttributes[attrName];
+            const currentValue = currentAttributes[attrName];
+
+            // Skip if values are the same
+            if (areSameValue(baselineValue, currentValue)) {
+              return;
+            }
+
+            // Track the attribute change in a grouped object
+            attributeChanges[attrName] = {
+              from: baselineValue || null,
+              to: currentValue || null
+            };
+          });
+
+          // If there are attribute changes, add them as a single grouped entry
+          if (Object.keys(attributeChanges).length > 0) {
+            changes['Item Attributes'] = attributeChanges;
+          }
+
+          // Save item attributes (always save if there are any)
+          if (Object.keys(itemAttributeValues).length > 0) {
+            await axios.post(`${API_BASE_URL}/item-attributes/${item.item_id}`, itemAttributeValues);
+          }
+
           // If there are changes, save them to history
           if (Object.keys(changes).length > 0) {
             await axios.post(`${API_BASE_URL}/jewelry/history`, {
@@ -1283,6 +1569,8 @@ function JewelryEdit() {
             const finalUpdatedItem = { ...updatedItem, ...flatSecondaryGemProps };
             setItem(finalUpdatedItem);
             setBaselineItem(JSON.parse(JSON.stringify(finalUpdatedItem)));
+            // Update baseline attribute values after successful save
+            baselineAttributeValuesRef.current = JSON.parse(JSON.stringify(itemAttributeValues));
             setHasUnsavedChanges(false);
 
             setSnackbar({
@@ -1310,7 +1598,7 @@ function JewelryEdit() {
         clearTimeout(autoSaveTimerRef.current);
       }
     };
-  }, [editedItem, baselineItem, item, currentUser, API_BASE_URL]); // Dependencies
+  }, [editedItem, baselineItem, item, currentUser, API_BASE_URL, itemAttributeValues]); // Dependencies */
 
   // Effects
   useEffect(() => {
@@ -1484,6 +1772,39 @@ function JewelryEdit() {
     // Calculate tax and total amount when selling price or discount changes
     calculateTotals();
   }, [sellingPrice, discount, discountType]);
+
+  // Load attribute configuration on mount
+  useEffect(() => {
+    const loadAttributeConfig = async () => {
+      try {
+        const configRes = await axios.get(`${API_BASE_URL}/attribute-config`);
+        setAttributeConfig(configRes.data || []);
+      } catch (error) {
+        console.error('Error loading attribute config:', error);
+      }
+    };
+
+    loadAttributeConfig();
+  }, []);
+
+  // Load item attribute values when item changes
+  useEffect(() => {
+    const loadItemAttributes = async () => {
+      if (item?.item_id) {
+        try {
+          const valuesRes = await axios.get(`${API_BASE_URL}/item-attributes/${item.item_id}`);
+          const attributeValues = valuesRes.data || {};
+          setItemAttributeValues(attributeValues);
+          // Store baseline for change tracking
+          baselineAttributeValuesRef.current = JSON.parse(JSON.stringify(attributeValues));
+        } catch (error) {
+          console.error('Error loading item attributes:', error);
+        }
+      }
+    };
+
+    loadItemAttributes();
+  }, [item?.item_id]);
 
   // Fetch functions
   const fetchJewelryItem = async (itemId, secondaryGems = []) => {
@@ -4241,11 +4562,153 @@ function JewelryEdit() {
                   </Box>
                 </Grid>
               </Box>
+
+              {/* Item Attributes Section */}
+              <Typography variant="h6" gutterBottom sx={{ mt: 3 }}>
+                Item Attributes
+              </Typography>
+
+              <Grid container spacing={2}>
+                {attributeConfig.length === 0 && (
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="text.secondary">
+                      No attributes configured. Go to System Config → Item Attributes to add attributes.
+                    </Typography>
+                  </Grid>
+                )}
+                {attributeConfig.map((attr) => (
+                  <Grid item xs={12} sm={6} md={4} key={attr.id}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 'bold', fontSize: '0.875rem' }}>
+                        {attr.attribute_name}
+                      </Typography>
+                      <Box>
+                        {(() => {
+                          const attributeType = attr.attribute_type || 'dropdown';
+                          const currentValue = itemAttributeValues[attr.attribute_name];
+
+                          // Display value based on type
+                          let displayValue = '—';
+                          if (currentValue !== undefined && currentValue !== null && currentValue !== '') {
+                            if (attributeType === 'checkbox') {
+                              displayValue = currentValue === 'true' || currentValue === true ? 'Yes' : 'No';
+                            } else {
+                              displayValue = String(currentValue);
+                            }
+                          }
+
+                          // Render different input types based on attribute_type
+                          let editComponent;
+
+                          if (attributeType === 'dropdown') {
+                            editComponent = (
+                              <FormControl fullWidth size="small">
+                                <InputLabel>{attr.attribute_name}</InputLabel>
+                                <Select
+                                  name={attr.attribute_name}
+                                  value={currentValue || ''}
+                                  onChange={(e) => {
+                                    setItemAttributeValues(prev => ({
+                                      ...prev,
+                                      [attr.attribute_name]: e.target.value
+                                    }));
+                                  }}
+                                  label={attr.attribute_name}
+                                >
+                                  <MenuItem value="">
+                                    <em>None</em>
+                                  </MenuItem>
+                                  {(attr.attribute_options || []).map((option, idx) => (
+                                    <MenuItem key={idx} value={option}>
+                                      {option}
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
+                            );
+                          } else if (attributeType === 'text') {
+                            editComponent = (
+                              <TextField
+                                fullWidth
+                                size="small"
+                                name={attr.attribute_name}
+                                value={currentValue || ''}
+                                onChange={(e) => {
+                                  setItemAttributeValues(prev => ({
+                                    ...prev,
+                                    [attr.attribute_name]: e.target.value
+                                  }));
+                                }}
+                                label={attr.attribute_name}
+                              />
+                            );
+                          } else if (attributeType === 'number') {
+                            editComponent = (
+                              <TextField
+                                fullWidth
+                                size="small"
+                                type="number"
+                                name={attr.attribute_name}
+                                value={currentValue || ''}
+                                onChange={(e) => {
+                                  setItemAttributeValues(prev => ({
+                                    ...prev,
+                                    [attr.attribute_name]: e.target.value
+                                  }));
+                                }}
+                                label={attr.attribute_name}
+                              />
+                            );
+                          } else if (attributeType === 'checkbox') {
+                            editComponent = (
+                              <FormControlLabel
+                                control={
+                                  <Checkbox
+                                    checked={currentValue === 'true' || currentValue === true}
+                                    onChange={(e) => {
+                                      setItemAttributeValues(prev => ({
+                                        ...prev,
+                                        [attr.attribute_name]: e.target.checked ? 'true' : 'false'
+                                      }));
+                                    }}
+                                  />
+                                }
+                                label={attr.attribute_name}
+                              />
+                            );
+                          }
+
+                          return renderEditableField(
+                            attr.attribute_name,
+                            displayValue,
+                            editComponent
+                          );
+                        })()}
+                      </Box>
+                    </Box>
+                  </Grid>
+                ))}
+              </Grid>
+
+              {/* Save Button */}
+              {attributeConfig.length > 0 && (
+                <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleSaveAttributes}
+                    disabled={isSaving}
+                    startIcon={isSaving ? <CircularProgress size={20} /> : <SaveIcon />}
+                  >
+                    {isSaving ? 'Saving...' : 'Save'}
+                  </Button>
+                </Box>
+              )}
             </Paper>
           </Grid>
         </Grid>
       </Paper>
-      
+
       {/* Snackbar for notifications */}
       <Snackbar
         open={snackbar.open}

@@ -83,16 +83,21 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE TABLE IF NOT EXISTS transaction_items (
     id SERIAL PRIMARY KEY,
     transaction_id VARCHAR(50) NOT NULL,
-    item_id VARCHAR(50) NOT NULL,
+    item_id VARCHAR(50),
     transaction_type_id INTEGER NOT NULL,
     item_price DECIMAL(10,2) NOT NULL,
+    description TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT unique_transaction_item UNIQUE (item_id),
     FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id),
     FOREIGN KEY (item_id) REFERENCES jewelry(item_id),
     FOREIGN KEY (transaction_type_id) REFERENCES transaction_type(id)
 );
+
+-- Drop old unique constraint if it exists and create conditional unique constraint
+-- Only enforce uniqueness when item_id is not null
+ALTER TABLE transaction_items DROP CONSTRAINT IF EXISTS unique_transaction_item;
+CREATE UNIQUE INDEX IF NOT EXISTS unique_transaction_item_idx ON transaction_items(item_id) WHERE item_id IS NOT NULL;
 
 -- Create index on transaction_id (non-unique)
 CREATE INDEX IF NOT EXISTS idx_transactions_transaction_id ON transactions(transaction_id);

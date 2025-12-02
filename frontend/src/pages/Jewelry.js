@@ -59,14 +59,43 @@ function Jewelry() {
     }
 
     try {
-      // Fetch both history and item details in parallel
+      const token = localStorage.getItem('token');
+
+      // Fetch history and item details in parallel
       const [historyResponse, itemResponse] = await Promise.all([
         axios.get(`${API_BASE_URL}/jewelry/${itemId}/history`),
         axios.get(`${API_BASE_URL}/jewelry/${itemId}`)
       ]);
 
+      // Try to fetch transaction information if item was sold
+      let transactionInfo = null;
+      try {
+        // Check transaction_items table for this item_id
+        const transactionResponse = await axios.get(
+          `${API_BASE_URL}/transaction-items?item_id=${itemId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (transactionResponse.data && transactionResponse.data.length > 0) {
+          // Get the most recent transaction for this item
+          const transactionItem = transactionResponse.data[0];
+
+          // Fetch full transaction details
+          const txDetailResponse = await axios.get(
+            `${API_BASE_URL}/transactions/${transactionItem.transaction_id}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+
+          if (txDetailResponse.data) {
+            transactionInfo = txDetailResponse.data;
+          }
+        }
+      } catch (txError) {
+        console.log('No transaction found for this item (may not be sold yet)');
+      }
+
       if (historyResponse.data) {
-        generateHistoryPDF(historyResponse.data.history, itemId, itemResponse.data);
+        generateHistoryPDF(historyResponse.data.history, itemId, itemResponse.data, transactionInfo);
       } else {
         enqueueSnackbar('No history found for this item', { variant: 'info' });
       }
@@ -81,80 +110,175 @@ function Jewelry() {
     }
   };
 
-  const generateHistoryPDF = async (historyData, itemId, itemData) => {
+  const generateHistoryPDF = async (historyData, itemId, itemData, transactionInfo = null) => {
     const doc = new jsPDF();
-    const title = `Item History - #${itemId}`;
-    const headers = [['Date', 'Changed By', 'Field', 'From', 'To', 'Notes']];
-    // Sort history by date (newest first)
+    const title = `Item Lifecycle History - #${itemId}`;
+
+    // Sort history by date (oldest first for chronological order)
     const sortedHistory = [...historyData].sort((a, b) =>
-      new Date(b.changed_at) - new Date(a.changed_at)
+      new Date(a.changed_at) - new Date(b.changed_at)
     );
 
     // Get source and bought_from from item details
     const source = itemData?.source || 'N/A';
     const boughtFrom = itemData?.bought_from || 'N/A';
+    const category = itemData?.category || 'N/A';
+    const metalType = itemData?.metal_type || 'N/A';
+    const metalWeight = itemData?.metal_weight || 'N/A';
+    const buyPrice = itemData?.buy_price || 'N/A';
+    const retailPrice = itemData?.retail_price || 'N/A';
 
-    // Process history data into table rows
-    const tableData = [];
+    // Function to get user-friendly field names - convert snake_case to Title Case
+    const getFieldDisplayName = (field) => {
+      // Convert snake_case to Title Case (e.g., "inventory_status" -> "Inventory Status")
+      return field
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+    };
 
-    sortedHistory.forEach(entry => {
-      const changedAt = new Date(entry.changed_at).toLocaleString();
-      const changedBy = entry.first_name && entry.last_name
-        ? `${entry.first_name} ${entry.last_name}`
-        : `User ID: ${entry.changed_by || 'System'}`;
-
-      // Process each changed field
+    // Function to format event descriptions
+    const getEventDescription = (entry) => {
       const changes = entry.changed_fields;
 
-      // Handle nested changes (like in secondary_gem_*)
-      const processChanges = (changes, prefix = '') => {
-        return Object.entries(changes).flatMap(([field, value]) => {
-          const fullFieldName = prefix ? `${prefix}.${field}` : field;
+      // Check for status changes (most important)
+      if (changes.inventory_status || changes.status) {
+        const statusChange = changes.inventory_status || changes.status;
+        const from = statusChange.from || 'Unknown';
+        const to = statusChange.to || 'Unknown';
 
-          // If the value has 'from' and 'to' properties, it's a direct change
-          if (value && typeof value === 'object' && 'from' in value && 'to' in value) {
-            return [{
-              field: fullFieldName,
-              from: value.from !== undefined ? String(value.from) : 'N/A',
-              to: value.to !== undefined ? String(value.to) : 'N/A'
-            }];
+        if (to === 'HOLD') return `Item placed on HOLD`;
+        if (to === 'IN_PROCESS') return `Item moved to processing`;
+        if (to === 'ACTIVE') return `Item activated for sale`;
+        if (to === 'SOLD') return `Item SOLD to customer`;
+        if (to === 'SCRAP PROCESS') return `Item moved to scrap`;
+        if (from === 'Unknown' && to) return `Item received (Status: ${to})`;
+        return `Status changed from ${from} to ${to}`;
+      }
+
+      // Check for price changes
+      if (changes.buy_price || changes.retail_price) {
+        return 'Pricing updated';
+      }
+
+      // Check for gem/jewelry details
+      if (Object.keys(changes).some(k => k.includes('gem') || k.includes('metal'))) {
+        return 'Item details/specifications updated';
+      }
+
+      // Check for description changes
+      if (changes.short_desc || changes.long_desc) {
+        return 'Description updated';
+      }
+
+      // Default
+      return 'Item information updated';
+    };
+
+    // Process history data into detailed timeline
+    const timelineData = [];
+
+    // Add initial creation event if available
+    if (itemData?.created_at) {
+      timelineData.push({
+        date: new Date(itemData.created_at).toLocaleString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        }),
+        event: 'Item Received/Created',
+        details: '',
+        user: 'System',
+        section: 'initial'
+      });
+    }
+
+    sortedHistory.forEach(entry => {
+      const changedAt = new Date(entry.changed_at).toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+      const changedBy = entry.first_name && entry.last_name
+        ? `${entry.first_name} ${entry.last_name}`
+        : 'System';
+
+      const changes = entry.changed_fields;
+      const eventDesc = getEventDescription(entry);
+
+      // Build detailed change information
+      let details = [];
+
+      Object.entries(changes).forEach(([field, value]) => {
+        // Special handling for Item Attributes (nested object)
+        if (field === 'Item Attributes' && value && typeof value === 'object') {
+          Object.entries(value).forEach(([attrName, attrValue]) => {
+            if (attrValue && typeof attrValue === 'object' && 'from' in attrValue && 'to' in attrValue) {
+              const fromVal = attrValue.from !== null && attrValue.from !== undefined ? String(attrValue.from) : 'None';
+              const toVal = attrValue.to !== null && attrValue.to !== undefined ? String(attrValue.to) : 'None';
+
+              if (fromVal !== toVal) {
+                details.push(`Attribute ${attrName}: ${fromVal} → ${toVal}`);
+              }
+            }
+          });
+        } else if (value && typeof value === 'object' && 'from' in value && 'to' in value) {
+          const displayName = getFieldDisplayName(field);
+          const fromVal = value.from !== null && value.from !== undefined ? String(value.from) : 'None';
+          const toVal = value.to !== null && value.to !== undefined ? String(value.to) : 'None';
+
+          if (fromVal !== toVal) {
+            details.push(`${displayName}: ${fromVal} → ${toVal}`);
           }
-          // If it's a nested object (like secondary_gem_1), process it recursively
-          else if (value && typeof value === 'object') {
-            return processChanges(value, fullFieldName);
-          }
-          // Simple value
-          return [{
-            field: fullFieldName,
-            from: 'N/A',
-            to: value !== undefined ? String(value) : 'N/A'
-          }];
-        });
-      };
-
-      const fieldChanges = processChanges(changes);
-
-      // Add a row for each changed field
-      fieldChanges.forEach((change, index) => {
-        tableData.push([
-          index === 0 ? changedAt : '',
-          index === 0 ? changedBy : '',
-          change.field,
-          change.from,
-          change.to,
-          index === 0 ? (entry.change_notes || '') : ''
-        ]);
+        }
       });
 
-      // Add a separator row between different history entries
-      if (fieldChanges.length > 0) {
-        tableData.push(Array(6).fill(''));
+      if (entry.change_notes) {
+        details.push(`Notes: ${entry.change_notes}`);
       }
+
+      timelineData.push({
+        date: changedAt,
+        event: eventDesc,
+        details: details.join('\n'),
+        user: changedBy,
+        section: 'history'
+      });
     });
 
-    // Remove the last separator row if it exists
-    if (tableData.length > 0 && tableData[tableData.length - 1].every(cell => cell === '')) {
-      tableData.pop();
+    // Add transaction/sale information if available
+    if (transactionInfo) {
+      const saleDate = new Date(transactionInfo.created_at).toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+
+      const saleDetails = [
+        `Transaction ID: ${transactionInfo.transaction_id}`,
+        `Customer: ${transactionInfo.customer_name || 'Walk-in Customer'}`,
+        `Employee: ${transactionInfo.employee_name || 'N/A'}`,
+        `Transaction Type: ${transactionInfo.transaction_type_name || 'Sale'}`,
+        `Amount: $${transactionInfo.total_amount || '0.00'}`,
+        `Payment Method: ${transactionInfo.payment_method_name || 'N/A'}`
+      ].join('\n');
+
+      timelineData.push({
+        date: saleDate,
+        event: '🔔 Item SOLD to Customer',
+        details: saleDetails,
+        user: transactionInfo.employee_name || 'System',
+        section: 'transaction'
+      });
     }
 
     // Add primary image to top right corner
@@ -195,63 +319,166 @@ function Jewelry() {
       // Continue with PDF generation even if image fails
     }
 
-    // Add title
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // Add header background
+    doc.setFillColor(41, 128, 185);
+    doc.rect(0, 0, pageWidth, 45, 'F');
+
+    // Add title in white on blue background
+    doc.setTextColor(255, 255, 255);
     doc.setFontSize(18);
-    doc.text(title, 14, 22);
-    doc.setFontSize(11);
-    doc.setTextColor(100);
-    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+    doc.setFont(undefined, 'bold');
+    doc.text('ITEM HISTORY REPORT', 14, 20);
 
-    // Add Source and Bought From information
-    doc.setFontSize(10);
+    // Add item ID prominently
+    doc.setFontSize(14);
+    doc.text(`Item #${itemId}`, 14, 32);
+
+    // Add generation date on the right
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'normal');
+    const genDate = new Date().toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+    doc.text(`Generated: ${genDate}`, pageWidth - 14, 20, { align: 'right' });
+
+    // Add current status badge
+    const currentStatus = itemData?.inventory_status || itemData?.status || 'N/A';
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Status: ${currentStatus}`, pageWidth - 14, 32, { align: 'right' });
+
+    // Reset text color for rest of document
     doc.setTextColor(0, 0, 0);
+
+    // Item Details Section
+    let yPos = 55;
+    doc.setFontSize(11);
     doc.setFont(undefined, 'bold');
-    doc.text(`Source: `, 14, 38);
+    doc.setTextColor(41, 128, 185);
+    doc.text('ITEM DETAILS', 14, yPos);
+
+    yPos += 2;
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.5);
+    doc.line(14, yPos, pageWidth - 14, yPos);
+
+    yPos += 8;
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(9);
     doc.setFont(undefined, 'normal');
-    doc.text(source, 32, 38);
+
+    // Create two-column layout for item details
+    const col1X = 14;
+    const col2X = pageWidth / 2 + 7;
+    const labelWidth = 35;
+
+    // Column 1
+    doc.setFont(undefined, 'bold');
+    doc.text('Category:', col1X, yPos);
+    doc.setFont(undefined, 'normal');
+    doc.text(category, col1X + labelWidth, yPos);
 
     doc.setFont(undefined, 'bold');
-    doc.text(`Bought From: `, 80, 38);
+    doc.text('Source:', col2X, yPos);
     doc.setFont(undefined, 'normal');
-    doc.text(boughtFrom, 110, 38);
+    doc.text(source, col2X + labelWidth, yPos);
 
-    // Register autoTable plugin
-    autoTable(doc, {
-      head: headers,
-      body: tableData,
-      startY: 44,
-      headStyles: {
-        fillColor: [41, 128, 185],
-        textColor: 255,
-        fontStyle: 'bold',
-        fontSize: 8
-      },
-      bodyStyles: {
-        fontSize: 7,
-        cellPadding: 1.5
-      },
-      columnStyles: {
-        0: { cellWidth: 28, fontStyle: 'bold' }, // Date
-        1: { cellWidth: 25 }, // Changed By
-        2: { cellWidth: 35 }, // Field
-        3: { cellWidth: 28 }, // From
-        4: { cellWidth: 28 }, // To
-        5: { cellWidth: 42 }  // Notes
-      },
-      alternateRowStyles: {
-        fillColor: [245, 245, 245]
-      },
-      margin: { top: 44 },
-      didParseCell: function(data) {
-        // Make the first column (Date) and second column (Changed By) bold for the first row of each change set
-        if (data.column.index <= 1 && data.row.index > 0 && tableData[data.row.index - 1][0] === '') {
-        }
+    yPos += 6;
+    doc.setFont(undefined, 'bold');
+    doc.text('Metal Type:', col1X, yPos);
+    doc.setFont(undefined, 'normal');
+    doc.text(metalType, col1X + labelWidth, yPos);
 
-        // Add a border between different change sets
-        if (data.row.index > 0 && data.column.index === 0 && tableData[data.row.index][0] === '') {
-          data.cell.styles.lineWidth = 0.5;
-        }
+    doc.setFont(undefined, 'bold');
+    doc.text('Bought From:', col2X, yPos);
+    doc.setFont(undefined, 'normal');
+    doc.text(boughtFrom, col2X + labelWidth, yPos);
+
+    yPos += 6;
+    doc.setFont(undefined, 'bold');
+    doc.text('Weight:', col1X, yPos);
+    doc.setFont(undefined, 'normal');
+    doc.text(`${metalWeight}g`, col1X + labelWidth, yPos);
+
+    doc.setFont(undefined, 'bold');
+    doc.text('Buy Price:', col2X, yPos);
+    doc.setFont(undefined, 'normal');
+    doc.text(`$${buyPrice}`, col2X + labelWidth, yPos);
+
+    // Transaction History Section
+    yPos += 15;
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(41, 128, 185);
+    doc.text('TRANSACTION HISTORY', 14, yPos);
+
+    yPos += 2;
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.5);
+    doc.line(14, yPos, pageWidth - 14, yPos);
+
+    yPos += 6;
+
+    // Create timeline entries as cards
+    timelineData.forEach((entry, index) => {
+      // Check if we need a new page
+      if (yPos > pageHeight - 40) {
+        doc.addPage();
+        yPos = 20;
       }
+
+      // Draw card background
+      const cardHeight = entry.details ? 22 : 16;
+      doc.setFillColor(250, 250, 250);
+      doc.roundedRect(14, yPos, pageWidth - 28, cardHeight, 2, 2, 'F');
+
+      // Draw left colored border based on event type
+      let borderColor = [100, 100, 100]; // Default gray
+      if (entry.event.includes('SOLD')) borderColor = [220, 53, 69]; // Red
+      else if (entry.event.includes('ACTIVE')) borderColor = [40, 167, 69]; // Green
+      else if (entry.event.includes('HOLD')) borderColor = [255, 193, 7]; // Yellow
+      else if (entry.event.includes('IN_PROCESS')) borderColor = [0, 123, 255]; // Blue
+      else if (entry.event.includes('Received')) borderColor = [108, 117, 125]; // Gray
+
+      doc.setFillColor(borderColor[0], borderColor[1], borderColor[2]);
+      doc.roundedRect(14, yPos, 3, cardHeight, 1, 1, 'F');
+
+      // Add date/time
+      doc.setFontSize(7);
+      doc.setTextColor(100, 100, 100);
+      doc.setFont(undefined, 'normal');
+      doc.text(entry.date, 20, yPos + 5);
+
+      // Add event name
+      doc.setFontSize(9);
+      doc.setTextColor(0, 0, 0);
+      doc.setFont(undefined, 'bold');
+      doc.text(entry.event, 20, yPos + 10);
+
+      // Add user on the right
+      doc.setFontSize(7);
+      doc.setTextColor(100, 100, 100);
+      doc.setFont(undefined, 'italic');
+      doc.text(`by ${entry.user}`, pageWidth - 16, yPos + 5, { align: 'right' });
+
+      // Add details if present
+      if (entry.details && entry.details !== '-') {
+        doc.setFontSize(7);
+        doc.setTextColor(60, 60, 60);
+        doc.setFont(undefined, 'normal');
+        const detailLines = doc.splitTextToSize(entry.details, pageWidth - 50);
+        doc.text(detailLines, 20, yPos + 15);
+      }
+
+      yPos += cardHeight + 4;
     });
     
     // Generate PDF blob and open in new tab
@@ -611,6 +838,9 @@ function Jewelry() {
     // Exclude items with 'quoted' status
     const notQuoted = item.status?.toLowerCase() !== 'quoted';
 
+    // Only exclude HOLD items when 'ALL' is selected, not when specifically filtering for HOLD
+    const notHold = selectedStatus === 'ALL' ? (item.inventory_status || item.status) !== 'HOLD' : true;
+
     const matchesSearch = searchQuery === '' ||
       item.short_desc?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.category?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -622,7 +852,7 @@ function Jewelry() {
     const matchesStatus = selectedStatus === 'ALL' ||
       (item.inventory_status || item.status) === selectedStatus;
 
-    return matchesSearch && matchesSerial && notQuoted && matchesStatus;
+    return matchesSearch && matchesSerial && notQuoted && notHold && matchesStatus;
   });
 
   return (
@@ -726,15 +956,19 @@ function Jewelry() {
                     >
                       <TableCell>{item.item_id}</TableCell>
                       <TableCell>{item.short_desc || item.long_desc}</TableCell>
-                      <TableCell>{item.category}</TableCell>
+                      <TableCell>
+                        {typeof item.category === 'object' && item.category !== null
+                          ? (item.category.category || item.category.value || item.category.name || '')
+                          : (item.category || '')}
+                      </TableCell>
                       <TableCell>${item.buy_price}</TableCell>
                       <TableCell>{item.metal_weight}g</TableCell>
                       <TableCell>{item.inventory_status || item.status}</TableCell>
                       <TableCell>{new Date(item.created_at).toLocaleDateString()}</TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1 }}>
-                          {/* Only show Edit button for HOLD status items */}
-                          {(item.inventory_status === 'HOLD' || item.status === 'HOLD') && (
+                          {/* Only show Edit button for IN_PROCESS status items */}
+                          {(item.inventory_status === 'IN_PROCESS' || item.status === 'IN_PROCESS') && (
                             <Button
                               variant="contained"
                               color="primary"
@@ -876,9 +1110,20 @@ function Jewelry() {
                 {/* Basic Info */}
                 <Box sx={{ flex: 1 }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-                    {`${selectedItem.metal_weight}g ${selectedItem.metal_purity} ${selectedItem.metal_type}`}
+                    {`${selectedItem.metal_weight}g ${
+                      typeof selectedItem.metal_purity === 'object' && selectedItem.metal_purity !== null
+                        ? (selectedItem.metal_purity.purity || selectedItem.metal_purity.value || '')
+                        : (selectedItem.metal_purity || '')
+                    } ${
+                      typeof selectedItem.metal_type === 'object' && selectedItem.metal_type !== null
+                        ? (selectedItem.metal_type.type || selectedItem.metal_type.value || '')
+                        : (selectedItem.metal_type || '')
+                    }`}
                   </Typography>
-                  <Typography variant="body2" color="textSecondary" sx={{ mb: 0.5 }}> {selectedItem.metal_category}
+                  <Typography variant="body2" color="textSecondary" sx={{ mb: 0.5 }}>
+                    {typeof selectedItem.metal_category === 'object' && selectedItem.metal_category !== null
+                      ? (selectedItem.metal_category.category || selectedItem.metal_category.value || '')
+                      : (selectedItem.metal_category || '')}
                   </Typography>
                   <Typography variant="h6" sx={{ color: 'success.main', mb: 0.5 }}>
                     ${formatPrice(selectedItem.retail_price)}
