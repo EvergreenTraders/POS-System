@@ -12,6 +12,14 @@ on:
         options:
           - production
           - staging
+      run_migrations:
+        description: 'Run database migrations'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
   # Auto-deploy when pushing to deploy branch
   push:
@@ -89,6 +97,72 @@ jobs:
           aws elasticbeanstalk wait environment-updated \
             --application-name ${{ env.EB_APPLICATION_NAME }} \
             --environment-name ${{ env.EB_ENVIRONMENT_NAME }}
+
+  migrate-database:
+    name: Run Database Migrations
+    runs-on: ubuntu-latest
+    needs: deploy-backend
+    if: ${{ github.event.inputs.run_migrations == 'true' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Run database migrations
+        env:
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          echo "Running database migrations..."
+
+          cd backend/database
+
+          # List of critical migration files in order
+          MIGRATION_FILES=(
+            "employees.sql"
+            "customers.sql"
+            "business_info.sql"
+            "inventory.sql"
+            "system_config.sql"
+            "item_attributes.sql"
+            "item_history.sql"
+            "transactions.sql"
+            "customer_ticket.sql"
+            "layaway.sql"
+            "scrap.sql"
+            "metal_estimator.sql"
+            "gem_estimator.sql"
+            "quotes.sql"
+            "tax_config.sql"
+            "add_performance_indexes.sql"
+          )
+
+          for sql_file in "${MIGRATION_FILES[@]}"; do
+            if [ -f "$sql_file" ]; then
+              echo "Running $sql_file..."
+              psql -h ${{ secrets.DB_HOST }} \
+                   -U ${{ secrets.DB_USER }} \
+                   -d ${{ secrets.DB_NAME }} \
+                   -p ${{ secrets.DB_PORT }} \
+                   -f "$sql_file" \
+                   -v ON_ERROR_STOP=1
+
+              if [ $? -eq 0 ]; then
+                echo "✓ $sql_file completed successfully"
+              else
+                echo "✗ $sql_file failed"
+                exit 1
+              fi
+            else
+              echo "⚠ $sql_file not found, skipping"
+            fi
+          done
+
+          echo "Database migration complete!"
 
   deploy-frontend:
     name: Deploy Frontend to S3
