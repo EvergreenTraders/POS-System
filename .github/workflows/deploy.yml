@@ -107,23 +107,24 @@ jobs:
     steps:
       - name: Wait for backend to be ready
         run: |
-          echo "Waiting for backend to be fully deployed..."
-          sleep 30
+          echo "Waiting for backend to be fully deployed and healthy..."
+          sleep 60
 
       - name: Run migrations via API
         run: |
           echo "Running database migrations via API..."
 
-          # Get the EB environment URL
-          EB_URL="http://${{ env.EB_ENVIRONMENT_NAME }}.elasticbeanstalk.com"
+          # Get the EB environment URL with region
+          EB_URL="http://${{ env.EB_ENVIRONMENT_NAME }}.ca-central-1.elasticbeanstalk.com"
 
           echo "Calling migration endpoint at $EB_URL/api/migrate"
 
-          # Call the migration endpoint
+          # Call the migration endpoint with increased timeout
           RESPONSE=$(curl -X POST "$EB_URL/api/migrate" \
             -H "X-Migration-Key: ${{ secrets.MIGRATION_KEY }}" \
             -H "Content-Type: application/json" \
             -w "\nHTTP_STATUS:%{http_code}" \
+            --max-time 300 \
             -s)
 
           # Extract HTTP status
@@ -131,13 +132,14 @@ jobs:
           BODY=$(echo "$RESPONSE" | sed '/HTTP_STATUS/d')
 
           echo "Response:"
-          echo "$BODY" | jq '.' || echo "$BODY"
+          echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
 
           # Check if successful
-          if [ "$HTTP_STATUS" -eq 200 ]; then
+          if [ "$HTTP_STATUS" = "200" ]; then
             echo "✓ Database migrations completed successfully!"
           else
             echo "✗ Migration failed with HTTP status: $HTTP_STATUS"
+            echo "Response body: $BODY"
             exit 1
           fi
 
