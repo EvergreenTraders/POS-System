@@ -5619,6 +5619,36 @@ app.delete('/api/item-attributes/:item_id/:attribute_name', async (req, res) => 
   }
 });
 
+// Database migration endpoint (protected)
+app.post('/api/migrate', async (req, res) => {
+  try {
+    // Simple authentication - require a migration key
+    const migrationKey = req.header('X-Migration-Key');
+
+    if (migrationKey !== process.env.MIGRATION_KEY) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    console.log('Running database migrations...');
+    const { runMigrations } = require('./migrate');
+
+    const results = await runMigrations();
+
+    res.json({
+      success: true,
+      message: 'Migrations completed successfully',
+      results
+    });
+  } catch (error) {
+    console.error('Migration error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Migration failed',
+      message: error.message
+    });
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);
