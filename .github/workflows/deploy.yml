@@ -105,64 +105,90 @@ jobs:
     if: ${{ github.event.inputs.run_migrations == 'true' }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install PostgreSQL client
+      - name: Run migrations via SSM on EB instance
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          echo "Finding Elastic Beanstalk EC2 instance..."
 
-      - name: Run database migrations
-        env:
-          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
-        run: |
-          echo "Running database migrations..."
+          # Get the EC2 instance ID from Elastic Beanstalk environment
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:elasticbeanstalk:environment-name,Values=${{ env.EB_ENVIRONMENT_NAME }}" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text)
 
-          cd backend/database
+          echo "Instance ID: $INSTANCE_ID"
 
-          # List of critical migration files in order
-          MIGRATION_FILES=(
-            "employees.sql"
-            "customers.sql"
-            "business_info.sql"
-            "inventory.sql"
-            "system_config.sql"
-            "item_attributes.sql"
-            "item_history.sql"
-            "transactions.sql"
-            "customer_ticket.sql"
-            "layaway.sql"
-            "scrap.sql"
-            "metal_estimator.sql"
-            "gem_estimator.sql"
-            "quotes.sql"
-            "tax_config.sql"
-            "add_performance_indexes.sql"
-          )
+          if [ "$INSTANCE_ID" = "None" ] || [ -z "$INSTANCE_ID" ]; then
+            echo "Error: Could not find Elastic Beanstalk instance"
+            exit 1
+          fi
 
-          for sql_file in "${MIGRATION_FILES[@]}"; do
-            if [ -f "$sql_file" ]; then
-              echo "Running $sql_file..."
-              psql -h ${{ secrets.DB_HOST }} \
-                   -U ${{ secrets.DB_USER }} \
-                   -d ${{ secrets.DB_NAME }} \
-                   -p ${{ secrets.DB_PORT }} \
-                   -f "$sql_file" \
-                   -v ON_ERROR_STOP=1
+          echo "Running database migrations on EB instance..."
 
-              if [ $? -eq 0 ]; then
-                echo "✓ $sql_file completed successfully"
-              else
-                echo "✗ $sql_file failed"
-                exit 1
-              fi
-            else
-              echo "⚠ $sql_file not found, skipping"
-            fi
-          done
+          # Run migrations via SSM
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "cd /var/app/current/backend/database",
+              "export PGPASSWORD=${{ secrets.DB_PASSWORD }}",
+              "for sql_file in employees.sql customers.sql business_info.sql inventory.sql system_config.sql item_attributes.sql item_history.sql transactions.sql customer_ticket.sql layaway.sql scrap.sql metal_estimator.sql gem_estimator.sql quotes.sql tax_config.sql add_performance_indexes.sql; do",
+              "  if [ -f \"$sql_file\" ]; then",
+              "    echo \"Running $sql_file...\"",
+              "    psql -h ${{ secrets.DB_HOST }} -U ${{ secrets.DB_USER }} -d ${{ secrets.DB_NAME }} -p ${{ secrets.DB_PORT }} -f \"$sql_file\" -v ON_ERROR_STOP=1",
+              "    if [ $? -eq 0 ]; then",
+              "      echo \"✓ $sql_file completed\"",
+              "    else",
+              "      echo \"✗ $sql_file failed\"",
+              "      exit 1",
+              "    fi",
+              "  fi",
+              "done",
+              "echo \"Database migration complete!\""
+            ]' \
+            --query 'Command.CommandId' \
+            --output text)
 
-          echo "Database migration complete!"
+          echo "Command ID: $COMMAND_ID"
+
+          # Wait for command to complete
+          echo "Waiting for migrations to complete..."
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID"
+
+          # Get command output
+          echo "Migration output:"
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query 'StandardOutputContent' \
+            --output text
+
+          # Check if command was successful
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query 'Status' \
+            --output text)
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "Migration failed with status: $STATUS"
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query 'StandardErrorContent' \
+              --output text
+            exit 1
+          fi
+
+          echo "✓ Database migrations completed successfully!"
 
   deploy-frontend:
     name: Deploy Frontend to S3
