@@ -56,7 +56,7 @@ jobs:
 
       - name: Generate deployment package
         run: |
-          zip -r deploy.zip backend/ .ebextensions/ .platform/ -x "*/node_modules/*" "*.git*"
+          zip -r deploy.zip backend/ .platform/ -x "backend/node_modules/*" "*.git*"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -108,7 +108,22 @@ jobs:
       - name: Wait for backend to be ready
         run: |
           echo "Waiting for backend to be fully deployed and healthy..."
-          sleep 60
+          EB_URL="http://${{ env.EB_ENVIRONMENT_NAME }}.ca-central-1.elasticbeanstalk.com"
+
+          for i in {1..30}; do
+            if curl -sf "$EB_URL/api/health" > /dev/null 2>&1; then
+              echo "✓ Backend is ready!"
+              break
+            fi
+            echo "Waiting for backend... attempt $i/30"
+            sleep 10
+          done
+
+          # Final check
+          if ! curl -sf "$EB_URL/api/health" > /dev/null 2>&1; then
+            echo "✗ Backend failed to become ready after 5 minutes"
+            exit 1
+          fi
 
       - name: Run migrations via API
         run: |

@@ -5619,6 +5619,11 @@ app.delete('/api/item-attributes/:item_id/:attribute_name', async (req, res) => 
   }
 });
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // Database migration endpoint (protected)
 app.post('/api/migrate', async (req, res) => {
   try {
