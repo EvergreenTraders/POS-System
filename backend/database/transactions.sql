@@ -14,19 +14,6 @@ BEGIN
     END IF;
 END $$;
 
--- Add action column to payments table
-DO $$
-BEGIN
-    ALTER TABLE IF EXISTS payments
-        ADD COLUMN IF NOT EXISTS action VARCHAR(10) NOT NULL DEFAULT 'in' CHECK (action IN ('in', 'out', 'transfer'));
-
-    -- Add comment to explain the column
-    COMMENT ON COLUMN payments.action IS 'Type of payment flow: in (receiving money), out (paying money), or transfer (moving money between accounts)';
-END $$;
-
--- Drop the old payment_method constraint if it exists
-ALTER TABLE IF EXISTS payments DROP CONSTRAINT IF EXISTS chk_payment_method;
-
 -- Create payment_methods table
 CREATE TABLE IF NOT EXISTS payment_methods (
     id SERIAL PRIMARY KEY,
@@ -113,6 +100,19 @@ CREATE TABLE IF NOT EXISTS payments (
     FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)
 );
 
+-- Add action column to payments table
+DO $$
+BEGIN
+    ALTER TABLE IF EXISTS payments
+        ADD COLUMN IF NOT EXISTS action VARCHAR(10) NOT NULL DEFAULT 'in' CHECK (action IN ('in', 'out', 'transfer'));
+
+    -- Add comment to explain the column
+    COMMENT ON COLUMN payments.action IS 'Type of payment flow: in (receiving money), out (paying money), or transfer (moving money between accounts)';
+END $$;
+
+-- Drop the old payment_method constraint if it exists
+ALTER TABLE IF EXISTS payments DROP CONSTRAINT IF EXISTS chk_payment_method;
+
 -- Create indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_payments_transaction_id ON payments(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_customer ON transactions(customer_id);
@@ -130,26 +130,31 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create triggers for automatic timestamp updates
+DROP TRIGGER IF EXISTS update_transactions_timestamp ON transactions;
 CREATE TRIGGER update_transactions_timestamp
     BEFORE UPDATE ON transactions
     FOR EACH ROW
     EXECUTE FUNCTION update_timestamp();
 
+DROP TRIGGER IF EXISTS update_payments_timestamp ON payments;
 CREATE TRIGGER update_payments_timestamp
     BEFORE UPDATE ON payments
     FOR EACH ROW
     EXECUTE FUNCTION update_timestamp();
 
+DROP TRIGGER IF EXISTS update_transaction_items_timestamp ON transaction_items;
 CREATE TRIGGER update_transaction_items_timestamp
     BEFORE UPDATE ON transaction_items
     FOR EACH ROW
     EXECUTE FUNCTION update_timestamp();
 
+DROP TRIGGER IF EXISTS update_transaction_type_timestamp ON transaction_type;
 CREATE TRIGGER update_transaction_type_timestamp
     BEFORE UPDATE ON transaction_type
     FOR EACH ROW
     EXECUTE FUNCTION update_timestamp();
 
+DROP TRIGGER IF EXISTS update_payment_methods_timestamp ON payment_methods;
 CREATE TRIGGER update_payment_methods_timestamp
     BEFORE UPDATE ON payment_methods
     FOR EACH ROW

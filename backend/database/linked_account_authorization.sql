@@ -115,6 +115,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS linked_account_authorization_template_updated_at ON linked_account_authorization_template;
 CREATE TRIGGER linked_account_authorization_template_updated_at
     BEFORE UPDATE ON linked_account_authorization_template
     FOR EACH ROW

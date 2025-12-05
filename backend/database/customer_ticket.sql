@@ -25,10 +25,6 @@ CREATE TABLE IF NOT EXISTS sale_ticket (
 );
 
 -- Create indexes for better query performance
-CREATE INDEX IF NOT EXISTS idx_pawn_ticket_buy_ticket_id ON pawn_ticket(buy_ticket_id);
-CREATE INDEX IF NOT EXISTS idx_pawn_ticket_transaction_id ON pawn_ticket(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_pawn_ticket_item_id ON pawn_ticket(item_id);
-
 CREATE INDEX IF NOT EXISTS idx_buy_ticket_buy_ticket_id ON buy_ticket(buy_ticket_id);
 CREATE INDEX IF NOT EXISTS idx_buy_ticket_transaction_id ON buy_ticket(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_buy_ticket_item_id ON buy_ticket(item_id);

@@ -16,22 +16,8 @@ CREATE INDEX IF NOT EXISTS idx_transaction_items_item_id ON transaction_items(it
 CREATE INDEX IF NOT EXISTS idx_payments_txn_id ON payments(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_payments_created ON payments(created_at DESC);
 
--- Customer account links indexes
-CREATE INDEX IF NOT EXISTS idx_account_links_composite ON customer_account_links(primary_customer_id, is_active, linked_customer_id);
-
 -- Analyze tables to update statistics for query planner
 ANALYZE customers;
 ANALYZE transactions;
 ANALYZE transaction_items;
 ANALYZE payments;
-ANALYZE customer_account_links;
-
--- Show indexes created
-SELECT
-    tablename,
-    indexname,
-    indexdef
-FROM pg_indexes
-WHERE schemaname = 'public'
-AND tablename IN ('customers', 'transactions', 'transaction_items', 'payments', 'customer_account_links')
-ORDER BY tablename, indexname;

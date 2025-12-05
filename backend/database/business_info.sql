@@ -30,6 +30,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS business_info_updated_at ON business_info;
 CREATE TRIGGER business_info_updated_at
     BEFORE UPDATE ON business_info
     FOR EACH ROW

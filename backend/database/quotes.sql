@@ -32,12 +32,12 @@ CREATE TABLE IF NOT EXISTS quote_items (
 );
 
 -- Create indexes for better performance
-CREATE INDEX idx_quotes_quote_id ON quotes(quote_id);
-CREATE INDEX idx_quotes_customer_id ON quotes(customer_id);
-CREATE INDEX idx_quotes_employee_id ON quotes(employee_id);
-CREATE INDEX idx_quotes_created_at ON quotes(created_at);
-CREATE INDEX idx_quote_items_quote_id ON quote_items(quote_id);
-CREATE INDEX idx_quote_items_item_id ON quote_items(item_id);
+CREATE INDEX IF NOT EXISTS idx_quotes_quote_id ON quotes(quote_id);
+CREATE INDEX IF NOT EXISTS idx_quotes_customer_id ON quotes(customer_id);
+CREATE INDEX IF NOT EXISTS idx_quotes_employee_id ON quotes(employee_id);
+CREATE INDEX IF NOT EXISTS idx_quotes_created_at ON quotes(created_at);
+CREATE INDEX IF NOT EXISTS idx_quote_items_quote_id ON quote_items(quote_id);
+CREATE INDEX IF NOT EXISTS idx_quote_items_item_id ON quote_items(item_id);
 
 -- Add comments
 COMMENT ON TABLE quotes IS 'Stores customer quotes for future transactions';
@@ -61,6 +61,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger to update days_remaining
+DROP TRIGGER IF EXISTS update_quote_days_remaining_trigger ON quotes;
 CREATE TRIGGER update_quote_days_remaining_trigger
     BEFORE INSERT OR UPDATE ON quotes
     FOR EACH ROW

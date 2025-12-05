@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS inventory_status (
 -- ALTER TABLE jewelry ADD COLUMN inventory_type DECIMAL(10,2);
 
 -- Add inventory_type column with check constraint
-ALTER TABLE jewelry ADD COLUMN inventory_type VARCHAR(20) 
-    CHECK (inventory_type IN ('jewelry', 'bullion', 'hard_goods'));
+-- ALTER TABLE jewelry ADD COLUMN inventory_type VARCHAR(20)
+--     CHECK (inventory_type IN ('jewelry', 'bullion', 'hard_goods'));
 --     ('IN_PROCESS', 'In Process', 'Item is being processed or worked on'),
 --     ('SCRAP', 'Scrap', 'Item is scrap and not available for sale'),
 --     ('RESERVED', 'Reserved', 'Item is reserved for a customer'),
@@ -83,10 +83,10 @@ CREATE TABLE IF NOT EXISTS jewelry (
 );
 
 -- Create indexes for common queries
-CREATE INDEX idx_jewelry_status ON jewelry(status);
-CREATE INDEX idx_jewelry_category ON jewelry(category);
-CREATE INDEX idx_jewelry_metal_type ON jewelry(precious_metal_type);
-CREATE INDEX idx_jewelry_images ON jewelry USING GIN (images);
+CREATE INDEX IF NOT EXISTS idx_jewelry_status ON jewelry(status);
+CREATE INDEX IF NOT EXISTS idx_jewelry_category ON jewelry(category);
+CREATE INDEX IF NOT EXISTS idx_jewelry_metal_type ON jewelry(precious_metal_type);
+CREATE INDEX IF NOT EXISTS idx_jewelry_images ON jewelry USING GIN (images);
 
 -- Add table and column comments
 COMMENT ON TABLE jewelry IS 'Stores inventory of jewelry items with detailed specifications';
@@ -121,6 +121,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for updated_at
+DROP TRIGGER IF EXISTS update_jewelry_timestamp ON jewelry;
 CREATE TRIGGER update_jewelry_timestamp
     BEFORE UPDATE ON jewelry
     FOR EACH ROW
@@ -148,7 +149,7 @@ CREATE TABLE IF NOT EXISTS jewelry_secondary_gems (
 );
 
 -- Create index on item_id for faster lookups
-CREATE INDEX idx_jewelry_secondary_gems_item_id ON jewelry_secondary_gems(item_id);
+CREATE INDEX IF NOT EXISTS idx_jewelry_secondary_gems_item_id ON jewelry_secondary_gems(item_id);
 
 -- Create trigger function for secondary_gems updated_at
 CREATE OR REPLACE FUNCTION update_jewelry_secondary_gems_timestamp() RETURNS TRIGGER AS $$
@@ -159,6 +160,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for secondary_gems updated_at
+DROP TRIGGER IF EXISTS update_jewelry_secondary_gems_timestamp ON jewelry_secondary_gems;
 CREATE TRIGGER update_jewelry_secondary_gems_timestamp
     BEFORE UPDATE ON jewelry_secondary_gems
     FOR EACH ROW

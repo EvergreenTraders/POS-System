@@ -1,5 +1,5 @@
 -- Create employees table
-CREATE TABLE employees (
+CREATE TABLE IF NOT EXISTS employees (
     employee_id SERIAL PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
     first_name VARCHAR(50) NOT NULL,
@@ -40,8 +40,12 @@ CREATE TRIGGER update_employee_timestamp
     FOR EACH ROW
     EXECUTE FUNCTION update_employee_timestamp();
 
--- Insert sample employee data
-INSERT INTO employees (username, first_name, last_name, email, password, phone, role, hire_date, salary, status) VALUES
+-- Insert sample employee data (only if table is empty)
+INSERT INTO employees (username, first_name, last_name, email, password, phone, role, hire_date, salary, status)
+SELECT
+    username, first_name, last_name, email, password, phone, role,
+    hire_date::DATE, salary, status
+FROM (VALUES
 ('cbaker', 'Chris', 'Baker', 'chris.baker@evergreen.com', 'password123', '555-0101', 'Store Manager', '2022-01-15', 65000.00, 'Active'),
 ('ejohnson', 'Emily', 'Johnson', 'emily.johnson@evergreen.com', 'password123', '555-0102', 'Sales Associate', '2022-03-20', 42000.00, 'Active'),
 ('mwilliams', 'Michael', 'Williams', 'michael.williams@evergreen.com', 'password123', '555-0103', 'Jewellery Specialist', '2022-02-10', 48000.00, 'Active'),
@@ -51,7 +55,9 @@ INSERT INTO employees (username, first_name, last_name, email, password, phone, 
 ('trivett', 'Trevor', 'Rivett', 'trevor.rivett@evergreen.com', 'password123', '555-0107', 'Store Owner', '1998-03-01', 47000.00, 'Active'),
 ('jwilson', 'Jennifer', 'Wilson', 'jennifer.wilson@evergreen.com', 'password123', '555-0108', 'Cashier', '2022-06-10', 37500.00, 'Active'),
 ('pguntupalli', 'Priya', 'Guntupalli', 'guntupallipriya1998@gmail.com', 'password123', '897-1932', 'Software Developer', '2024-11-14', 43000.00, 'Active'),
-('ataylor', 'Amanda', 'Taylor', 'amanda.taylor@evergreen.com', 'password123', '555-0110', 'Sales Associate', '2022-04-20', 41500.00, 'Active');
+('ataylor', 'Amanda', 'Taylor', 'amanda.taylor@evergreen.com', 'password123', '555-0110', 'Sales Associate', '2022-04-20', 41500.00, 'Active')
+) AS v(username, first_name, last_name, email, password, phone, role, hire_date, salary, status)
+WHERE NOT EXISTS (SELECT 1 FROM employees LIMIT 1);
 
 -- ALTER TABLE for existing databases (add image column if it doesn't exist)
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS image BYTEA;

@@ -44,6 +44,15 @@ BEGIN
         UPDATE precious_metal_type SET type_code = 'N' WHERE type = 'Non-Precious Metal Type';
     END IF;
 
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_type') THEN
+        CREATE TABLE metal_type (
+            id SERIAL PRIMARY KEY,
+            type VARCHAR(25) NOT NULL
+        );
+        INSERT INTO metal_type (type) VALUES
+        ('Jewelry');
+    END IF;
+
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_category') THEN
         CREATE TABLE metal_category (
             id SERIAL PRIMARY KEY,

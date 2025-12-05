@@ -121,7 +121,9 @@ BEGIN
     COMMENT ON COLUMN quote_expiration.days IS 'Number of days to keep quotes before marking them as expired';
 
     -- Insert default configuration if table is empty
-  --  INSERT INTO quote_expiration (days) VALUES (30);
+    INSERT INTO quote_expiration (days)
+    SELECT 30
+    WHERE NOT EXISTS (SELECT 1 FROM quote_expiration LIMIT 1);
 
     -- Create inventory_hold_period table for storing hold duration configuration
     CREATE TABLE IF NOT EXISTS inventory_hold_period (
@@ -136,7 +138,9 @@ BEGIN
     COMMENT ON COLUMN inventory_hold_period.days IS 'Number of days to keep inventory items in HOLD status';
 
     -- Insert default configuration if table is empty
-   -- INSERT INTO inventory_hold_period (days) VALUES (7);
+    INSERT INTO inventory_hold_period (days)
+    SELECT 7
+    WHERE NOT EXISTS (SELECT 1 FROM inventory_hold_period LIMIT 1);
 
     -- Create receipt_config table for storing receipt footer text
     CREATE TABLE IF NOT EXISTS receipt_config (
