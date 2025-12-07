@@ -45,7 +45,7 @@ jobs:
       - name: Generate deployment package
         run: |
           cd backend
-          zip -r ../deploy.zip . -x "node_modules/*" "*.git*" "*.env*"
+          zip -r ../deploy.zip . -x "node_modules/*" "*.git*" "*.env*" "uploads/*"
           cd ..
           zip -r deploy.zip .platform/
 
