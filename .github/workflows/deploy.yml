@@ -1,39 +1,25 @@
 name: Deploy to AWS
 
 on:
-  # Manual deployment trigger - click "Run workflow" button in GitHub Actions
+  # Manual deployment trigger only - click "Run workflow" button in GitHub Actions
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Deployment environment'
-        required: true
-        default: 'production'
-        type: choice
-        options:
-          - production
-          - staging
       run_migrations:
         description: 'Run database migrations'
         required: true
-        default: 'false'
+        default: 'true'
         type: choice
         options:
           - 'true'
           - 'false'
-
-  # Auto-deploy when pushing to deploy branch
-  push:
-    branches:
-      - deploy
-      # Uncomment below to auto-deploy on main branch merges
-      # - main
 
 env:
   AWS_REGION: ca-central-1
   EB_APPLICATION_NAME: pos-system
   EB_ENVIRONMENT_NAME: pos-system-prod
   FRONTEND_S3_BUCKET: pos-system-frontend
-  NODE_VERSION: '18'
+  NODE_VERSION: '20'
+  MIGRATION_KEY: pos-system-migration-secret-2024
 
 jobs:
   deploy-backend:
@@ -42,24 +28,29 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
 
       - name: Install backend dependencies
         run: |
           cd backend
-          npm install --production
+          npm ci --production
 
       - name: Generate deployment package
         run: |
-          zip -r deploy.zip backend/ .platform/ -x "backend/node_modules/*" "*.git*"
+          cd backend
+          zip -r ../deploy.zip . -x "node_modules/*" "*.git*" "*.env*"
+          cd ..
+          zip -r deploy.zip .platform/
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -74,14 +65,14 @@ jobs:
           # Check if version already exists
           if aws elasticbeanstalk describe-application-versions \
             --application-name ${{ env.EB_APPLICATION_NAME }} \
-            --version-labels ${{ github.sha }} \
+            --version-labels deploy-${{ github.sha }} \
             --query 'ApplicationVersions[0]' \
-            --output text | grep -q ${{ github.sha }}; then
-            echo "Version ${{ github.sha }} already exists, skipping creation"
+            --output text 2>/dev/null | grep -q deploy-${{ github.sha }}; then
+            echo "Version deploy-${{ github.sha }} already exists, skipping creation"
           else
             aws elasticbeanstalk create-application-version \
               --application-name ${{ env.EB_APPLICATION_NAME }} \
-              --version-label ${{ github.sha }} \
+              --version-label deploy-${{ github.sha }} \
               --source-bundle S3Bucket="elasticbeanstalk-${{ env.AWS_REGION }}-${{ secrets.AWS_ACCOUNT_ID }}",S3Key="pos-system/deploy-${{ github.sha }}.zip"
           fi
 
@@ -90,13 +81,15 @@ jobs:
           aws elasticbeanstalk update-environment \
             --application-name ${{ env.EB_APPLICATION_NAME }} \
             --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
-            --version-label ${{ github.sha }}
+            --version-label deploy-${{ github.sha }}
 
       - name: Wait for deployment
         run: |
+          echo "Waiting for environment to update..."
           aws elasticbeanstalk wait environment-updated \
             --application-name ${{ env.EB_APPLICATION_NAME }} \
             --environment-name ${{ env.EB_ENVIRONMENT_NAME }}
+          echo "✓ Backend deployment complete!"
 
   migrate-database:
     name: Run Database Migrations
@@ -108,7 +101,7 @@ jobs:
       - name: Wait for backend to be ready
         run: |
           echo "Waiting for backend to be fully deployed and healthy..."
-          EB_URL="http://${{ env.EB_ENVIRONMENT_NAME }}.ca-central-1.elasticbeanstalk.com"
+          EB_URL="http://${{ env.EB_ENVIRONMENT_NAME }}.eba-3fkkan5u.${{ env.AWS_REGION }}.elasticbeanstalk.com"
 
           for i in {1..30}; do
             if curl -sf "$EB_URL/api/health" > /dev/null 2>&1; then
@@ -129,14 +122,13 @@ jobs:
         run: |
           echo "Running database migrations via API..."
 
-          # Get the EB environment URL with region
-          EB_URL="http://${{ env.EB_ENVIRONMENT_NAME }}.ca-central-1.elasticbeanstalk.com"
+          EB_URL="http://${{ env.EB_ENVIRONMENT_NAME }}.eba-3fkkan5u.${{ env.AWS_REGION }}.elasticbeanstalk.com"
 
           echo "Calling migration endpoint at $EB_URL/api/migrate"
 
           # Call the migration endpoint with increased timeout
           RESPONSE=$(curl -X POST "$EB_URL/api/migrate" \
-            -H "X-Migration-Key: ${{ secrets.MIGRATION_KEY }}" \
+            -H "X-Migration-Key: ${{ env.MIGRATION_KEY }}" \
             -H "Content-Type: application/json" \
             -w "\nHTTP_STATUS:%{http_code}" \
             --max-time 300 \
@@ -161,20 +153,23 @@ jobs:
   deploy-frontend:
     name: Deploy Frontend to S3
     runs-on: ubuntu-latest
+    needs: deploy-backend
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
         run: |
           cd frontend
-          npm install
+          npm ci
 
       - name: Build React app
         run: |
@@ -182,10 +177,10 @@ jobs:
           npm run build
         env:
           CI: false
-          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
+          REACT_APP_API_URL: http://${{ env.EB_ENVIRONMENT_NAME }}.eba-3fkkan5u.${{ env.AWS_REGION }}.elasticbeanstalk.com/api
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -194,14 +189,10 @@ jobs:
       - name: Deploy to S3
         run: |
           aws s3 sync frontend/build/ s3://${{ env.FRONTEND_S3_BUCKET }}/ --delete
+          echo "✓ Frontend deployed to S3!"
 
-      - name: Invalidate CloudFront cache (optional)
-        continue-on-error: true
+      - name: Output deployment URL
         run: |
-          if [ -n "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" ]; then
-            aws cloudfront create-invalidation \
-              --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-              --paths "/*"
-          else
-            echo "CloudFront distribution ID not set, skipping cache invalidation"
-          fi
+          echo "🚀 Deployment complete!"
+          echo "Frontend URL: http://${{ env.FRONTEND_S3_BUCKET }}.s3-website.${{ env.AWS_REGION }}.amazonaws.com"
+          echo "Backend URL: http://${{ env.EB_ENVIRONMENT_NAME }}.eba-3fkkan5u.${{ env.AWS_REGION }}.elasticbeanstalk.com"
