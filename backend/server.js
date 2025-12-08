@@ -398,18 +398,360 @@ app.put('/api/employees/:id', async (req, res) => {
 app.delete('/api/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const query = 'DELETE FROM employees WHERE employee_id = $1 RETURNING employee_id';
     const result = await pool.query(query, [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found' });
     }
-    
+
     res.json({ message: 'Employee deleted successfully' });
   } catch (err) {
     console.error('Error deleting employee:', err);
     res.status(500).json({ error: 'Failed to delete employee' });
+  }
+});
+
+// ============================================================================
+// Cash Drawer API Routes
+// ============================================================================
+
+// GET /api/cash-drawer/active - Get all active (open) drawer sessions
+app.get('/api/cash-drawer/active', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM active_drawer_sessions
+      ORDER BY opened_at DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching active drawer sessions:', error);
+    res.status(500).json({ error: 'Failed to fetch active drawer sessions' });
+  }
+});
+
+// GET /api/cash-drawer/employee/:employeeId/active - Check if employee has an active drawer session
+app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
+  const { employeeId } = req.params;
+
+  try {
+    const result = await pool.query(`
+      SELECT
+        s.*,
+        calculate_expected_balance(s.session_id) AS current_expected_balance,
+        (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS transaction_count,
+        (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
+        (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments
+      FROM cash_drawer_sessions s
+      WHERE s.employee_id = $1 AND s.status = 'open'
+      ORDER BY s.opened_at DESC
+      LIMIT 1
+    `, [employeeId]);
+
+    if (result.rows.length > 0) {
+      res.json(result.rows[0]);
+    } else {
+      res.json(null);
+    }
+  } catch (error) {
+    console.error('Error checking active drawer:', error);
+    res.status(500).json({ error: 'Failed to check active drawer' });
+  }
+});
+
+// GET /api/cash-drawer/history - Get drawer session history with optional filters
+app.get('/api/cash-drawer/history', async (req, res) => {
+  const {
+    employee_id,
+    start_date,
+    end_date,
+    status,
+    limit = 50,
+    offset = 0
+  } = req.query;
+
+  try {
+    let query = 'SELECT * FROM drawer_session_history WHERE 1=1';
+    const params = [];
+    let paramCount = 1;
+
+    if (employee_id) {
+      params.push(employee_id);
+      query += ` AND employee_id = $${paramCount++}`;
+    }
+
+    if (start_date) {
+      params.push(start_date);
+      query += ` AND opened_at >= $${paramCount++}`;
+    }
+
+    if (end_date) {
+      params.push(end_date);
+      query += ` AND opened_at <= $${paramCount++}`;
+    }
+
+    if (status) {
+      params.push(status);
+      query += ` AND status = $${paramCount++}`;
+    }
+
+    params.push(limit, offset);
+    query += ` LIMIT $${paramCount++} OFFSET $${paramCount++}`;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching drawer history:', error);
+    res.status(500).json({ error: 'Failed to fetch drawer history' });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/details - Get detailed information about a drawer session
+app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    // Get session details
+    const sessionResult = await pool.query(`
+      SELECT
+        s.*,
+        e.first_name || ' ' || e.last_name AS employee_name,
+        r.first_name || ' ' || r.last_name AS reconciled_by_name,
+        calculate_expected_balance(s.session_id) AS current_expected_balance
+      FROM cash_drawer_sessions s
+      JOIN employees e ON s.employee_id = e.employee_id
+      LEFT JOIN employees r ON s.reconciled_by = r.employee_id
+      WHERE s.session_id = $1
+    `, [sessionId]);
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Get transactions for this session
+    const transactionsResult = await pool.query(`
+      SELECT dt.*, t.transaction_date
+      FROM cash_drawer_transactions dt
+      JOIN transactions t ON dt.transaction_id = t.transaction_id
+      WHERE dt.session_id = $1
+      ORDER BY dt.created_at DESC
+    `, [sessionId]);
+
+    // Get adjustments for this session
+    const adjustmentsResult = await pool.query(`
+      SELECT
+        a.*,
+        e.first_name || ' ' || e.last_name AS performed_by_name,
+        ap.first_name || ' ' || ap.last_name AS approved_by_name
+      FROM cash_drawer_adjustments a
+      JOIN employees e ON a.performed_by = e.employee_id
+      LEFT JOIN employees ap ON a.approved_by = ap.employee_id
+      WHERE a.session_id = $1
+      ORDER BY a.created_at DESC
+    `, [sessionId]);
+
+    res.json({
+      session: sessionResult.rows[0],
+      transactions: transactionsResult.rows,
+      adjustments: adjustmentsResult.rows
+    });
+  } catch (error) {
+    console.error('Error fetching drawer session details:', error);
+    res.status(500).json({ error: 'Failed to fetch session details' });
+  }
+});
+
+// POST /api/cash-drawer/open - Open a new cash drawer session for an employee
+app.post('/api/cash-drawer/open', async (req, res) => {
+  const { employee_id, opening_balance, opening_notes } = req.body;
+
+  // Validation
+  if (!employee_id || opening_balance === undefined) {
+    return res.status(400).json({ error: 'employee_id and opening_balance are required' });
+  }
+
+  if (opening_balance < 0) {
+    return res.status(400).json({ error: 'Opening balance cannot be negative' });
+  }
+
+  try {
+    // Check if employee already has an open drawer
+    const existingDrawer = await pool.query(
+      'SELECT session_id FROM cash_drawer_sessions WHERE employee_id = $1 AND status = $2',
+      [employee_id, 'open']
+    );
+
+    if (existingDrawer.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Employee already has an open drawer session',
+        session_id: existingDrawer.rows[0].session_id
+      });
+    }
+
+    // Create new drawer session
+    const result = await pool.query(`
+      INSERT INTO cash_drawer_sessions (employee_id, opening_balance, opening_notes, status)
+      VALUES ($1, $2, $3, 'open')
+      RETURNING *
+    `, [employee_id, opening_balance, opening_notes || null]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error opening cash drawer:', error);
+    res.status(500).json({ error: 'Failed to open cash drawer' });
+  }
+});
+
+// POST /api/cash-drawer/:sessionId/adjustment - Add a cash adjustment to a drawer session
+app.post('/api/cash-drawer/:sessionId/adjustment', async (req, res) => {
+  const { sessionId } = req.params;
+  const { amount, adjustment_type, reason, performed_by, approved_by } = req.body;
+
+  // Validation
+  if (!amount || !adjustment_type || !reason || !performed_by) {
+    return res.status(400).json({
+      error: 'amount, adjustment_type, reason, and performed_by are required'
+    });
+  }
+
+  const validTypes = ['bank_deposit', 'change_order', 'petty_cash', 'correction', 'other'];
+  if (!validTypes.includes(adjustment_type)) {
+    return res.status(400).json({
+      error: `adjustment_type must be one of: ${validTypes.join(', ')}`
+    });
+  }
+
+  try {
+    // Verify session exists and is open
+    const sessionCheck = await pool.query(
+      'SELECT status FROM cash_drawer_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (sessionCheck.rows[0].status !== 'open') {
+      return res.status(400).json({ error: 'Can only add adjustments to open sessions' });
+    }
+
+    // Insert adjustment
+    const result = await pool.query(`
+      INSERT INTO cash_drawer_adjustments
+        (session_id, amount, adjustment_type, reason, performed_by, approved_by)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `, [sessionId, amount, adjustment_type, reason, performed_by, approved_by || null]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error adding cash drawer adjustment:', error);
+    res.status(500).json({ error: 'Failed to add adjustment' });
+  }
+});
+
+// POST /api/cash-drawer/:sessionId/transaction - Link a cash transaction to a drawer session
+app.post('/api/cash-drawer/:sessionId/transaction', async (req, res) => {
+  const { sessionId } = req.params;
+  const { transaction_id, amount, transaction_type, payment_id, notes } = req.body;
+
+  // Validation
+  if (!transaction_id || !amount || !transaction_type) {
+    return res.status(400).json({
+      error: 'transaction_id, amount, and transaction_type are required'
+    });
+  }
+
+  const validTypes = ['sale', 'refund', 'payout'];
+  if (!validTypes.includes(transaction_type)) {
+    return res.status(400).json({
+      error: `transaction_type must be one of: ${validTypes.join(', ')}`
+    });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO cash_drawer_transactions
+        (session_id, transaction_id, amount, transaction_type, payment_id, notes)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `, [sessionId, transaction_id, amount, transaction_type, payment_id || null, notes || null]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error linking transaction to drawer:', error);
+    res.status(500).json({ error: 'Failed to link transaction' });
+  }
+});
+
+// PUT /api/cash-drawer/:sessionId/close - Close a cash drawer session
+app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
+  const { sessionId } = req.params;
+  const { actual_balance, closing_notes } = req.body;
+
+  // Validation
+  if (actual_balance === undefined) {
+    return res.status(400).json({ error: 'actual_balance is required' });
+  }
+
+  if (actual_balance < 0) {
+    return res.status(400).json({ error: 'Actual balance cannot be negative' });
+  }
+
+  try {
+    // Update session to closed status
+    // The trigger will automatically calculate expected_balance and discrepancy
+    const result = await pool.query(`
+      UPDATE cash_drawer_sessions
+      SET status = 'closed',
+          actual_balance = $1,
+          closing_notes = $2
+      WHERE session_id = $3 AND status = 'open'
+      RETURNING *,
+        calculate_expected_balance(session_id) AS calculated_expected
+    `, [actual_balance, closing_notes || null, sessionId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found or already closed' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error closing cash drawer:', error);
+    res.status(500).json({ error: 'Failed to close cash drawer' });
+  }
+});
+
+// PUT /api/cash-drawer/:sessionId/reconcile - Reconcile a closed drawer session (manager approval)
+app.put('/api/cash-drawer/:sessionId/reconcile', async (req, res) => {
+  const { sessionId } = req.params;
+  const { reconciled_by, reconciliation_notes } = req.body;
+
+  if (!reconciled_by) {
+    return res.status(400).json({ error: 'reconciled_by (employee_id) is required' });
+  }
+
+  try {
+    const result = await pool.query(`
+      UPDATE cash_drawer_sessions
+      SET status = 'reconciled',
+          reconciled_by = $1,
+          reconciled_at = CURRENT_TIMESTAMP,
+          reconciliation_notes = $2
+      WHERE session_id = $3 AND status = 'closed'
+      RETURNING *
+    `, [reconciled_by, reconciliation_notes || null, sessionId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found or not in closed status' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error reconciling cash drawer:', error);
+    res.status(500).json({ error: 'Failed to reconcile cash drawer' });
   }
 });
 

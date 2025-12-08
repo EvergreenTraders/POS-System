@@ -35,6 +35,7 @@ const MIGRATION_FILES = [
   'scrap_history.sql',
   'quotes.sql',
   'tax_config.sql',
+  'cash_drawer.sql',
   'add_performance_indexes.sql'
 ];
 
