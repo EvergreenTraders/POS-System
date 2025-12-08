@@ -9,7 +9,8 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 5432,
-  ssl: {
+  // Only use SSL for production (AWS RDS), not for local development
+  ssl: process.env.DB_HOST === 'localhost' ? false : {
     rejectUnauthorized: false
   }
 });
