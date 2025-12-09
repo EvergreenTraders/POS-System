@@ -29,6 +29,7 @@ import {
   Assessment as AssessmentIcon,
   Schedule as LayawayIcon,
   PointOfSale as TransactionsIcon,
+  AccountBalance as CashDrawerIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
@@ -154,6 +155,15 @@ function Sidebar() {
               <TransactionsIcon />
             </ListItemIcon>
             {isOpen && <ListItemText primary="Transactions" />}
+          </StyledListItem>
+        </StyledLink>
+
+        <StyledLink to="/cash-drawer">
+          <StyledListItem active={isActive('/cash-drawer')}>
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+              <CashDrawerIcon />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Cash Drawer" />}
           </StyledListItem>
         </StyledLink>
 
