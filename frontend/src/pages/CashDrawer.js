@@ -80,6 +80,16 @@ function CashDrawer() {
     fetchHistory();
   }, []);
 
+  // Auto-select current user when opening drawer dialog
+  useEffect(() => {
+    if (openDrawerDialog && !selectedEmployee) {
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      if (currentUser.id) {
+        setSelectedEmployee(currentUser.id);
+      }
+    }
+  }, [openDrawerDialog]);
+
   const fetchEmployees = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/employees`);
@@ -96,14 +106,20 @@ function CashDrawer() {
       // Get current logged-in employee from localStorage or context
       const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
-      if (currentUser.employee_id) {
+      if (currentUser.id) {
         const response = await axios.get(
-          `${API_BASE_URL}/cash-drawer/employee/${currentUser.employee_id}/active`
+          `${API_BASE_URL}/cash-drawer/employee/${currentUser.id}/active`
         );
-        setActiveSession(response.data);
+
+        // Only set active session if response.data is not null
+        setActiveSession(response.data || null);
+      } else {
+        console.log('No employee_id found in localStorage');
+        setActiveSession(null);
       }
     } catch (err) {
       console.error('Error checking active session:', err);
+      setActiveSession(null);
     } finally {
       setLoading(false);
     }
@@ -133,14 +149,18 @@ function CashDrawer() {
   };
 
   const handleOpenDrawer = async () => {
-    if (!selectedEmployee || !openingBalance) {
+    // Get current logged-in user
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const employeeId = selectedEmployee || currentUser.id;
+
+    if (!employeeId || !openingBalance) {
       showSnackbar('Please fill in all required fields', 'error');
       return;
     }
 
     try {
       await axios.post(`${API_BASE_URL}/cash-drawer/open`, {
-        employee_id: selectedEmployee,
+        employee_id: employeeId,
         opening_balance: parseFloat(openingBalance),
         opening_notes: openingNotes || null
       });
@@ -207,7 +227,7 @@ function CashDrawer() {
           amount: parseFloat(adjustmentAmount),
           adjustment_type: adjustmentType,
           reason: adjustmentReason,
-          performed_by: currentUser.employee_id
+          performed_by: currentUser.id
         }
       );
 
