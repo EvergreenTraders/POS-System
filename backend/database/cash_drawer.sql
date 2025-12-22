@@ -253,3 +253,69 @@ COMMENT ON TABLE cash_drawer_transactions IS 'Links cash transactions to drawer 
 COMMENT ON TABLE cash_drawer_adjustments IS 'Records manual cash additions/removals during shifts';
 COMMENT ON COLUMN cash_drawer_sessions.discrepancy IS 'Difference between actual and expected balance (positive = overage, negative = shortage)';
 COMMENT ON COLUMN cash_drawer_adjustments.amount IS 'Positive for cash added to drawer, negative for cash removed';
+
+-- Create cash_denominations table to store denomination counts for open count mode
+CREATE TABLE IF NOT EXISTS cash_denominations (
+    denomination_id SERIAL PRIMARY KEY,
+    session_id INTEGER NOT NULL,
+    denomination_type VARCHAR(20) NOT NULL, -- 'opening' or 'closing'
+
+    -- Bill denominations (CAD)
+    bill_100 INTEGER DEFAULT 0,
+    bill_50 INTEGER DEFAULT 0,
+    bill_20 INTEGER DEFAULT 0,
+    bill_10 INTEGER DEFAULT 0,
+    bill_5 INTEGER DEFAULT 0,
+
+    -- Coin denominations (CAD)
+    coin_2 INTEGER DEFAULT 0,
+    coin_1 INTEGER DEFAULT 0,
+    coin_0_25 INTEGER DEFAULT 0,
+    coin_0_10 INTEGER DEFAULT 0,
+    coin_0_05 INTEGER DEFAULT 0,
+
+    -- Calculated total
+    total_amount DECIMAL(10,2) GENERATED ALWAYS AS (
+        (bill_100 * 100) +
+        (bill_50 * 50) +
+        (bill_20 * 20) +
+        (bill_10 * 10) +
+        (bill_5 * 5) +
+        (coin_2 * 2) +
+        (coin_1 * 1) +
+        (coin_0_25 * 0.25) +
+        (coin_0_10 * 0.10) +
+        (coin_0_05 * 0.05)
+    ) STORED,
+
+    counted_by INTEGER NOT NULL, -- Employee who counted
+    counted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT,
+
+    FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE CASCADE,
+    FOREIGN KEY (counted_by) REFERENCES employees(employee_id),
+
+    CONSTRAINT chk_denomination_type CHECK (denomination_type IN ('opening', 'closing')),
+    CONSTRAINT chk_non_negative_bills CHECK (
+        bill_100 >= 0 AND bill_50 >= 0 AND bill_20 >= 0 AND
+        bill_10 >= 0 AND bill_5 >= 0
+    ),
+    CONSTRAINT chk_non_negative_coins CHECK (
+        coin_2 >= 0 AND coin_1 >= 0 AND coin_0_25 >= 0 AND
+        coin_0_10 >= 0 AND coin_0_05 >= 0
+    )
+);
+
+-- Create index for performance
+CREATE INDEX IF NOT EXISTS idx_cash_denominations_session ON cash_denominations(session_id);
+CREATE INDEX IF NOT EXISTS idx_cash_denominations_type ON cash_denominations(denomination_type);
+
+-- Add comments for documentation
+COMMENT ON TABLE cash_denominations IS 'Stores denomination counts for cash drawer sessions in open count mode';
+COMMENT ON COLUMN cash_denominations.denomination_type IS 'Type of count: opening (start of shift) or closing (end of shift)';
+COMMENT ON COLUMN cash_denominations.total_amount IS 'Automatically calculated total from all denominations';
+
+-- Add blindCount preference for cash drawer counting mode
+INSERT INTO user_preferences (preference_name, preference_value)
+VALUES ('blindCount', 'true')
+ON CONFLICT (preference_name) DO NOTHING;

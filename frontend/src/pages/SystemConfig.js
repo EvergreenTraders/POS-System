@@ -142,6 +142,7 @@ function SystemConfig() {
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
   const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
   const [drawers, setDrawers] = useState([]);
+  const [isBlindCount, setIsBlindCount] = useState(true);
   const [loading, setLoading] = useState(false);
   const [customerColumns, setCustomerColumns] = useState([]);
   const [itemAttributes, setItemAttributes] = useState([]);
@@ -174,6 +175,17 @@ function SystemConfig() {
     } catch (error) {
       console.error('Error fetching drawers:', error);
       setDrawers([]);
+    }
+  };
+
+  const fetchBlindCountPreference = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/user_preferences`);
+      const blindCountPreference = response.data.find(pref => pref.preference_name === 'blindCount');
+      setIsBlindCount(blindCountPreference ? blindCountPreference.preference_value === 'true' : true);
+    } catch (error) {
+      console.error('Error fetching blind count preference:', error);
+      setIsBlindCount(true); // Default to blind count
     }
   };
 
@@ -476,6 +488,7 @@ function SystemConfig() {
     fetchInventoryHoldPeriod();
     fetchDrawerConfig();
     fetchDrawers();
+    fetchBlindCountPreference();
     fetchTaxConfig();
     fetchAuthorizationTemplate();
     fetchReceiptConfig();
@@ -953,6 +966,30 @@ function SystemConfig() {
     }
   };
 
+  const handleBlindCountToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsBlindCount(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/user_preferences`, {
+        preference_name: 'blindCount',
+        preference_value: newValue.toString()
+      });
+      setSnackbar({
+        open: true,
+        message: `Cash drawer count mode set to ${newValue ? 'Blind Count' : 'Open Count'}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating blind count preference:', error);
+      setIsBlindCount(!newValue); // Revert on error
+      setSnackbar({
+        open: true,
+        message: 'Failed to update count mode settings',
+        severity: 'error'
+      });
+    }
+  };
+
   const handleCloseSnackbar = () => {
     setSnackbar({ ...snackbar, open: false });
   };
@@ -1408,6 +1445,33 @@ function SystemConfig() {
                   fullWidth
                   inputProps={{ min: 0, max: 50 }}
                 />
+              </Grid>
+              <Grid item xs={12}>
+                <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight="medium">
+                      Cash Drawer Count Mode
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {isBlindCount
+                        ? 'Blind Count: Expected balance is hidden during counting'
+                        : 'Open Count: Expected balance is visible during counting'}
+                    </Typography>
+                  </Box>
+                  <Box display="flex" alignItems="center" gap={2}>
+                    <Typography variant="body2" color={!isBlindCount ? 'primary' : 'text.secondary'} fontWeight={!isBlindCount ? 'bold' : 'normal'}>
+                      Open Count
+                    </Typography>
+                    <Switch
+                      checked={isBlindCount}
+                      onChange={handleBlindCountToggle}
+                      color="primary"
+                    />
+                    <Typography variant="body2" color={isBlindCount ? 'primary' : 'text.secondary'} fontWeight={isBlindCount ? 'bold' : 'normal'}>
+                      Blind Count
+                    </Typography>
+                  </Box>
+                </Box>
               </Grid>
             </Grid>
             {drawers.length > 0 && (
