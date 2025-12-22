@@ -827,12 +827,12 @@ app.put('/api/drawer-config', async (req, res) => {
           INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
           VALUES ($1, 'physical', TRUE, $2)
           ON CONFLICT (drawer_name) DO NOTHING
-        `, [`Drawer_${i}`, i]);
+        `, [`Drawer ${i}`, i]);
       }
     } else if (number_of_drawers < currentCount) {
       // Remove excess drawers (only if they have no sessions)
       for (let i = currentCount; i > number_of_drawers; i--) {
-        const drawerName = `Drawer_${i}`;
+        const drawerName = `Drawer ${i}`;
         // Check if drawer has any sessions
         const sessionCheck = await pool.query(`
           SELECT COUNT(*) as count FROM cash_drawer_sessions

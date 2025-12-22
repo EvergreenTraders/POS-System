@@ -49,6 +49,7 @@ function CashDrawer() {
   const [loading, setLoading] = useState(true);
   const [tabValue, setTabValue] = useState(0);
   const [employees, setEmployees] = useState([]);
+  const [drawers, setDrawers] = useState([]);
   const [history, setHistory] = useState([]);
   const [sessionDetails, setSessionDetails] = useState(null);
 
@@ -60,6 +61,7 @@ function CashDrawer() {
 
   // Form states
   const [selectedEmployee, setSelectedEmployee] = useState('');
+  const [selectedDrawer, setSelectedDrawer] = useState('');
   const [openingBalance, setOpeningBalance] = useState('');
   const [openingNotes, setOpeningNotes] = useState('');
   const [actualBalance, setActualBalance] = useState('');
@@ -76,6 +78,7 @@ function CashDrawer() {
 
   useEffect(() => {
     fetchEmployees();
+    fetchDrawers();
     checkActiveSession();
     fetchHistory();
   }, []);
@@ -97,6 +100,18 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching employees:', err);
       showSnackbar('Failed to load employees', 'error');
+    }
+  };
+
+  const fetchDrawers = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/drawers`);
+      // Filter out the Safe drawer (only show physical drawers)
+      const physicalDrawers = response.data.filter(drawer => drawer.drawer_type !== 'safe' && drawer.is_active);
+      setDrawers(physicalDrawers);
+    } catch (err) {
+      console.error('Error fetching drawers:', err);
+      showSnackbar('Failed to load drawers', 'error');
     }
   };
 
@@ -153,13 +168,14 @@ function CashDrawer() {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = selectedEmployee || currentUser.id;
 
-    if (!employeeId || !openingBalance) {
+    if (!employeeId || !openingBalance || !selectedDrawer) {
       showSnackbar('Please fill in all required fields', 'error');
       return;
     }
 
     try {
       await axios.post(`${API_BASE_URL}/cash-drawer/open`, {
+        drawer_id: selectedDrawer,
         employee_id: employeeId,
         opening_balance: parseFloat(openingBalance),
         opening_notes: openingNotes || null
@@ -243,6 +259,7 @@ function CashDrawer() {
 
   const resetOpenForm = () => {
     setSelectedEmployee('');
+    setSelectedDrawer('');
     setOpeningBalance('');
     setOpeningNotes('');
   };
@@ -453,16 +470,16 @@ function CashDrawer() {
         <DialogTitle>Open Cash Drawer</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <FormControl fullWidth>
-              <InputLabel>Employee</InputLabel>
+            <FormControl fullWidth required>
+              <InputLabel>Select Drawer</InputLabel>
               <Select
-                value={selectedEmployee}
-                onChange={(e) => setSelectedEmployee(e.target.value)}
-                label="Employee"
+                value={selectedDrawer}
+                label="Select Drawer"
+                onChange={(e) => setSelectedDrawer(e.target.value)}
               >
-                {employees.map((emp) => (
-                  <MenuItem key={emp.employee_id} value={emp.employee_id}>
-                    {emp.first_name} {emp.last_name}
+                {drawers.map((drawer) => (
+                  <MenuItem key={drawer.drawer_id} value={drawer.drawer_id}>
+                    {drawer.drawer_name}
                   </MenuItem>
                 ))}
               </Select>

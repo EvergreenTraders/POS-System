@@ -949,7 +949,7 @@ function SystemConfig() {
 
       const drawerMessage = newCount === 0
         ? 'Only the Safe drawer is available.'
-        : `${newCount} physical drawer${newCount > 1 ? 's' : ''} created (Drawer_1${newCount > 1 ? ` to Drawer_${newCount}` : ''}).`;
+        : `${newCount} physical drawer${newCount > 1 ? 's' : ''} created (Drawer 1${newCount > 1 ? ` to Drawer ${newCount}` : ''}).`;
 
       setSnackbar({
         open: true,
