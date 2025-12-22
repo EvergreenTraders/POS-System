@@ -1,9 +1,52 @@
 -- Cash Drawer Management System
 -- Tracks cash drawer sessions for employees, including opening/closing balance verification
 
+-- Create drawer_config table to store number of drawers configuration
+CREATE TABLE IF NOT EXISTS drawer_config (
+    id SERIAL PRIMARY KEY,
+    number_of_drawers INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP,
+    CONSTRAINT valid_drawer_count CHECK (number_of_drawers >= 0 AND number_of_drawers <= 50)
+);
+
+-- Add comment for documentation
+COMMENT ON TABLE drawer_config IS 'Stores configuration for number of cash drawers in the system';
+COMMENT ON COLUMN drawer_config.number_of_drawers IS 'Number of physical cash drawers (Safe drawer is always available separately)';
+
+-- Insert default configuration if table is empty
+INSERT INTO drawer_config (number_of_drawers)
+SELECT 0
+WHERE NOT EXISTS (SELECT 1 FROM drawer_config LIMIT 1);
+
+-- Create drawers table to store individual drawer information
+CREATE TABLE IF NOT EXISTS drawers (
+    drawer_id SERIAL PRIMARY KEY,
+    drawer_name VARCHAR(100) NOT NULL UNIQUE,
+    drawer_type VARCHAR(20) NOT NULL DEFAULT 'physical', -- 'safe' or 'physical'
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP,
+    CONSTRAINT chk_drawer_type CHECK (drawer_type IN ('safe', 'physical'))
+);
+
+-- Add comment for documentation
+COMMENT ON TABLE drawers IS 'Stores individual drawer information (safe and physical drawers)';
+COMMENT ON COLUMN drawers.drawer_name IS 'Name of the drawer (e.g., "Safe", "Drawer 1", "Drawer 2")';
+COMMENT ON COLUMN drawers.drawer_type IS 'Type of drawer: safe (vault/safe) or physical (cash drawer)';
+COMMENT ON COLUMN drawers.is_active IS 'Whether this drawer is currently active and usable';
+COMMENT ON COLUMN drawers.display_order IS 'Order in which drawers should be displayed in the UI';
+
+-- Insert default safe drawer
+INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
+VALUES ('Safe', 'safe', TRUE, 0)
+ON CONFLICT (drawer_name) DO NOTHING;
+
 -- Create cash_drawer_sessions table
 CREATE TABLE IF NOT EXISTS cash_drawer_sessions (
     session_id SERIAL PRIMARY KEY,
+    drawer_id INTEGER NOT NULL,
     employee_id INTEGER NOT NULL,
 
     -- Session timing
@@ -31,6 +74,7 @@ CREATE TABLE IF NOT EXISTS cash_drawer_sessions (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
+    FOREIGN KEY (drawer_id) REFERENCES drawers(drawer_id),
     FOREIGN KEY (employee_id) REFERENCES employees(employee_id),
     FOREIGN KEY (reconciled_by) REFERENCES employees(employee_id),
 
@@ -155,6 +199,9 @@ CREATE TRIGGER update_cash_drawer_sessions_timestamp
 CREATE OR REPLACE VIEW active_drawer_sessions AS
 SELECT
     s.session_id,
+    s.drawer_id,
+    d.drawer_name,
+    d.drawer_type,
     s.employee_id,
     e.first_name || ' ' || e.last_name AS employee_name,
     s.opened_at,
@@ -164,16 +211,20 @@ SELECT
     COALESCE(SUM(da.amount), 0) AS total_adjustments,
     COUNT(DISTINCT dt.transaction_id) AS transaction_count
 FROM cash_drawer_sessions s
+JOIN drawers d ON s.drawer_id = d.drawer_id
 JOIN employees e ON s.employee_id = e.employee_id
 LEFT JOIN cash_drawer_transactions dt ON s.session_id = dt.session_id
 LEFT JOIN cash_drawer_adjustments da ON s.session_id = da.session_id
 WHERE s.status = 'open'
-GROUP BY s.session_id, s.employee_id, e.first_name, e.last_name, s.opened_at, s.opening_balance;
+GROUP BY s.session_id, s.drawer_id, d.drawer_name, d.drawer_type, s.employee_id, e.first_name, e.last_name, s.opened_at, s.opening_balance;
 
 -- View for drawer session history with discrepancies
 CREATE OR REPLACE VIEW drawer_session_history AS
 SELECT
     s.session_id,
+    s.drawer_id,
+    d.drawer_name,
+    d.drawer_type,
     s.employee_id,
     e.first_name || ' ' || e.last_name AS employee_name,
     s.opened_at,
@@ -187,10 +238,11 @@ SELECT
     COALESCE(SUM(dt.amount), 0) AS total_cash_amount,
     COALESCE(SUM(da.amount), 0) AS total_adjustments
 FROM cash_drawer_sessions s
+JOIN drawers d ON s.drawer_id = d.drawer_id
 JOIN employees e ON s.employee_id = e.employee_id
 LEFT JOIN cash_drawer_transactions dt ON s.session_id = dt.session_id
 LEFT JOIN cash_drawer_adjustments da ON s.session_id = da.session_id
-GROUP BY s.session_id, s.employee_id, e.first_name, e.last_name,
+GROUP BY s.session_id, s.drawer_id, d.drawer_name, d.drawer_type, s.employee_id, e.first_name, e.last_name,
          s.opened_at, s.closed_at, s.opening_balance, s.expected_balance,
          s.actual_balance, s.discrepancy, s.status
 ORDER BY s.opened_at DESC;

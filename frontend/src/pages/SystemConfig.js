@@ -140,6 +140,8 @@ function SystemConfig() {
   const [gramsInput, setGramsInput] = useState('');
   const [diamondEstimates, setDiamondEstimates] = useState([]);
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
+  const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
+  const [drawers, setDrawers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [customerColumns, setCustomerColumns] = useState([]);
   const [itemAttributes, setItemAttributes] = useState([]);
@@ -147,6 +149,33 @@ function SystemConfig() {
   const [newAttributeType, setNewAttributeType] = useState('dropdown');
   const [newAttributeValue, setNewAttributeValue] = useState({});
   const [selectedCustomerColumns, setSelectedCustomerColumns] = useState({});
+
+  const fetchDrawerConfig = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/drawer-config`);
+      if (response.data) {
+        setNumberOfDrawers({
+          count: response.data.number_of_drawers,
+          id: response.data.id || null
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching drawer config:', error);
+      setNumberOfDrawers({ count: 0, id: null });
+    }
+  };
+
+  const fetchDrawers = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/drawers`);
+      if (response.data) {
+        setDrawers(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching drawers:', error);
+      setDrawers([]);
+    }
+  };
 
   // Tax configuration state
   const [provinceTaxRates, setProvinceTaxRates] = useState({
@@ -445,6 +474,8 @@ function SystemConfig() {
     fetchUserPreference();
     fetchCaratConversion();
     fetchInventoryHoldPeriod();
+    fetchDrawerConfig();
+    fetchDrawers();
     fetchTaxConfig();
     fetchAuthorizationTemplate();
     fetchReceiptConfig();
@@ -849,12 +880,12 @@ function SystemConfig() {
       const response = await axios.put(`${API_BASE_URL}/inventory-hold-period/config`, {
         days: newDays
       });
-      
+
       setInventoryHoldPeriod({
         days: response.data.days,
         id: response.data.id
       });
-      
+
       setSnackbar({
         open: true,
         message: `Inventory hold period updated successfully. Items in HOLD status will become AVAILABLE after ${newDays} days.`,
@@ -865,6 +896,58 @@ function SystemConfig() {
       setSnackbar({
         open: true,
         message: 'Failed to update inventory hold period configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleNumberOfDrawersChange = async (event) => {
+    const newCount = parseInt(event.target.value);
+    if (newCount < 0) {
+      setSnackbar({
+        open: true,
+        message: 'Number of drawers cannot be negative',
+        severity: 'error'
+      });
+      return;
+    }
+
+    if (newCount > 50) {
+      setSnackbar({
+        open: true,
+        message: 'Number of drawers cannot exceed 50',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.put(`${API_BASE_URL}/drawer-config`, {
+        number_of_drawers: newCount
+      });
+
+      setNumberOfDrawers({
+        count: response.data.number_of_drawers,
+        id: response.data.id
+      });
+
+      // Refresh the drawers list
+      await fetchDrawers();
+
+      const drawerMessage = newCount === 0
+        ? 'Only the Safe drawer is available.'
+        : `${newCount} physical drawer${newCount > 1 ? 's' : ''} created (Drawer_1${newCount > 1 ? ` to Drawer_${newCount}` : ''}).`;
+
+      setSnackbar({
+        open: true,
+        message: `Cash drawer configuration updated. ${drawerMessage}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating number of drawers:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update number of drawers configuration',
         severity: 'error'
       });
     }
@@ -1311,7 +1394,57 @@ function SystemConfig() {
                   disabled={!isInventoryHoldPeriodEnabled}
                 />
               </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  label="Number of Cash Drawers"
+                  type="number"
+                  value={numberOfDrawers.count}
+                  onChange={(e) => setNumberOfDrawers(prev => ({ ...prev, count: e.target.value }))}
+                  onBlur={(e) => handleNumberOfDrawersChange(e)}
+                  InputProps={{
+                    endAdornment: <InputAdornment position="end">drawers</InputAdornment>,
+                  }}
+                  helperText="Number of physical cash drawers (Safe drawer is always available)"
+                  fullWidth
+                  inputProps={{ min: 0, max: 50 }}
+                />
+              </Grid>
             </Grid>
+            {drawers.length > 0 && (
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                  Configured Drawers:
+                </Typography>
+                <TableContainer component={Paper} sx={{ mt: 1 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Drawer Name</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell align="center">Status</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {drawers.map((drawer) => (
+                        <TableRow key={drawer.drawer_id}>
+                          <TableCell>{drawer.drawer_name}</TableCell>
+                          <TableCell>
+                            {drawer.drawer_type === 'safe' ? 'Safe/Vault' : 'Physical Drawer'}
+                          </TableCell>
+                          <TableCell align="center">
+                            {drawer.is_active ? (
+                              <Typography color="success.main" variant="body2">Active</Typography>
+                            ) : (
+                              <Typography color="error.main" variant="body2">Inactive</Typography>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            )}
           </ConfigSection>
 
           <ConfigSection>

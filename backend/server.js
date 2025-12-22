@@ -755,6 +755,123 @@ app.put('/api/cash-drawer/:sessionId/reconcile', async (req, res) => {
   }
 });
 
+// Drawer Configuration Routes
+// GET /api/drawer-config - Get drawer configuration
+app.get('/api/drawer-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM drawer_config LIMIT 1');
+    if (result.rows.length === 0) {
+      // Insert default if doesn't exist
+      const insertResult = await pool.query(
+        'INSERT INTO drawer_config (number_of_drawers) VALUES (0) RETURNING *'
+      );
+      res.json(insertResult.rows[0]);
+    } else {
+      res.json(result.rows[0]);
+    }
+  } catch (error) {
+    console.error('Error fetching drawer config:', error);
+    res.status(500).json({ error: 'Failed to fetch drawer configuration' });
+  }
+});
+
+// PUT /api/drawer-config - Update drawer configuration
+app.put('/api/drawer-config', async (req, res) => {
+  const { number_of_drawers } = req.body;
+
+  if (number_of_drawers === undefined || number_of_drawers < 0 || number_of_drawers > 50) {
+    return res.status(400).json({ error: 'number_of_drawers must be between 0 and 50' });
+  }
+
+  try {
+    // Update the config
+    const configResult = await pool.query(`
+      UPDATE drawer_config
+      SET number_of_drawers = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT id FROM drawer_config LIMIT 1)
+      RETURNING *
+    `, [number_of_drawers]);
+
+    let config;
+    if (configResult.rows.length === 0) {
+      // Insert if doesn't exist
+      const insertResult = await pool.query(
+        'INSERT INTO drawer_config (number_of_drawers) VALUES ($1) RETURNING *',
+        [number_of_drawers]
+      );
+      config = insertResult.rows[0];
+    } else {
+      config = configResult.rows[0];
+    }
+
+    // Ensure Safe drawer exists
+    await pool.query(`
+      INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
+      VALUES ('Safe', 'safe', TRUE, 0)
+      ON CONFLICT (drawer_name) DO NOTHING
+    `);
+
+    // Get current physical drawers
+    const currentDrawers = await pool.query(`
+      SELECT drawer_id, drawer_name FROM drawers
+      WHERE drawer_type = 'physical'
+      ORDER BY display_order
+    `);
+
+    const currentCount = currentDrawers.rows.length;
+
+    if (number_of_drawers > currentCount) {
+      // Add new drawers
+      for (let i = currentCount + 1; i <= number_of_drawers; i++) {
+        await pool.query(`
+          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
+          VALUES ($1, 'physical', TRUE, $2)
+          ON CONFLICT (drawer_name) DO NOTHING
+        `, [`Drawer_${i}`, i]);
+      }
+    } else if (number_of_drawers < currentCount) {
+      // Remove excess drawers (only if they have no sessions)
+      for (let i = currentCount; i > number_of_drawers; i--) {
+        const drawerName = `Drawer_${i}`;
+        // Check if drawer has any sessions
+        const sessionCheck = await pool.query(`
+          SELECT COUNT(*) as count FROM cash_drawer_sessions
+          WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
+        `, [drawerName]);
+
+        if (parseInt(sessionCheck.rows[0].count) === 0) {
+          await pool.query('DELETE FROM drawers WHERE drawer_name = $1', [drawerName]);
+        } else {
+          // Mark as inactive instead of deleting
+          await pool.query(
+            'UPDATE drawers SET is_active = FALSE WHERE drawer_name = $1',
+            [drawerName]
+          );
+        }
+      }
+    }
+
+    res.json(config);
+  } catch (error) {
+    console.error('Error updating drawer config:', error);
+    res.status(500).json({ error: 'Failed to update drawer configuration' });
+  }
+});
+
+// GET /api/drawers - Get all drawers
+app.get('/api/drawers', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM drawers
+      ORDER BY display_order, drawer_id
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching drawers:', error);
+    res.status(500).json({ error: 'Failed to fetch drawers' });
+  }
+});
+
 // Products routes
 app.get('/api/products', async (req, res) => {
   try {
