@@ -144,6 +144,8 @@ function SystemConfig() {
   const [drawers, setDrawers] = useState([]);
   const [isBlindCount, setIsBlindCount] = useState(true);
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState({ amount: 0.00, id: null });
+  const [minClose, setMinClose] = useState(0);
+  const [maxClose, setMaxClose] = useState(0);
   const [loading, setLoading] = useState(false);
   const [customerColumns, setCustomerColumns] = useState([]);
   const [itemAttributes, setItemAttributes] = useState([]);
@@ -1484,61 +1486,76 @@ function SystemConfig() {
                   disabled={!isInventoryHoldPeriodEnabled}
                 />
               </Grid>
-              <Grid item xs={12} md={4}>
-                <TextField
-                  label="Number of Cash Drawers"
-                  type="number"
-                  value={numberOfDrawers.count}
-                  onChange={(e) => setNumberOfDrawers(prev => ({ ...prev, count: e.target.value }))}
-                  onBlur={(e) => handleNumberOfDrawersChange(e)}
-                  InputProps={{
-                    endAdornment: <InputAdornment position="end">drawers</InputAdornment>,
-                  }}
-                  helperText="Number of physical cash drawers (Safe drawer is always available)"
-                  fullWidth
-                  inputProps={{ min: 0, max: 50 }}
-                />
-              </Grid>
-               <Grid item xs={12} md={4}>
-                <TextField
-                  label="Discrepancy Threshold"
-                  type="number"
-                  value={discrepancyThreshold.amount}
-                  onChange={(e) => setDiscrepancyThreshold(prev => ({ ...prev, amount: e.target.value }))}
-                  onBlur={(e) => handleDiscrepancyThresholdChange(e)}
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                  }}
-                  helperText="Maximum acceptable discrepancy when closing drawer. Amounts exceeding this will require recount."
-                  fullWidth
-                  inputProps={{ min: 0, step: 0.01 }}
-                />
-              </Grid>
               <Grid item xs={12}>
-                <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                <Box display="flex" alignItems="center" gap={3} sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
                   <Box>
-                    <Typography variant="subtitle1" fontWeight="medium">
-                      Cash Drawer Count Mode
+                    <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                      Count Mode
                     </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {isBlindCount
-                        ? 'Blind Count: Expected balance is hidden during counting'
-                        : 'Open Count: Expected balance is visible during counting'}
-                    </Typography>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="body2" color={!isBlindCount ? 'primary' : 'text.secondary'} fontWeight={!isBlindCount ? 'bold' : 'normal'}>
+                        Open
+                      </Typography>
+                      <Switch
+                        checked={isBlindCount}
+                        onChange={handleBlindCountToggle}
+                        color="primary"
+                      />
+                      <Typography variant="body2" color={isBlindCount ? 'primary' : 'text.secondary'} fontWeight={isBlindCount ? 'bold' : 'normal'}>
+                        Blind
+                      </Typography>
+                    </Box>
                   </Box>
-                  <Box display="flex" alignItems="center" gap={2}>
-                    <Typography variant="body2" color={!isBlindCount ? 'primary' : 'text.secondary'} fontWeight={!isBlindCount ? 'bold' : 'normal'}>
-                      Open Count
-                    </Typography>
-                    <Switch
-                      checked={isBlindCount}
-                      onChange={handleBlindCountToggle}
-                      color="primary"
-                    />
-                    <Typography variant="body2" color={isBlindCount ? 'primary' : 'text.secondary'} fontWeight={isBlindCount ? 'bold' : 'normal'}>
-                      Blind Count
-                    </Typography>
-                  </Box>
+                  <TextField
+                    label="Number of Cash Drawers"
+                    type="number"
+                    value={numberOfDrawers.count}
+                    onChange={(e) => setNumberOfDrawers(prev => ({ ...prev, count: e.target.value }))}
+                    onBlur={(e) => handleNumberOfDrawersChange(e)}
+                    size="small"
+                    sx={{ width: 200, mt: 1 }}
+                    InputProps={{
+                      endAdornment: <InputAdornment position="end">drawers</InputAdornment>,
+                    }}
+                    inputProps={{ min: 0, max: 50 }}
+                  />
+                  <TextField
+                    label="Discrepancy Threshold"
+                    type="number"
+                    value={discrepancyThreshold.amount}
+                    onChange={(e) => setDiscrepancyThreshold(prev => ({ ...prev, amount: e.target.value }))}
+                    onBlur={(e) => handleDiscrepancyThresholdChange(e)}
+                    size="small"
+                    sx={{ width: 200, mt: 1 }}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                    }}
+                    inputProps={{ min: 0, step: 0.01 }}
+                  />
+                  <TextField
+                    label="Min Close"
+                    type="number"
+                    value={minClose}
+                    onChange={(e) => setMinClose(parseFloat(e.target.value) || 0)}
+                    size="small"
+                    sx={{ width: 150, mt: 1 }}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                    }}
+                    inputProps={{ min: 0, step: 0.01 }}
+                  />
+                  <TextField
+                    label="Max Close"
+                    type="number"
+                    value={maxClose}
+                    onChange={(e) => setMaxClose(parseFloat(e.target.value) || 0)}
+                    size="small"
+                    sx={{ width: 150, mt: 1 }}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                    }}
+                    inputProps={{ min: 0, step: 0.01 }}
+                  />
                 </Box>
               </Grid>
             </Grid>
