@@ -564,11 +564,11 @@ app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
 
 // POST /api/cash-drawer/open - Open a new cash drawer session for an employee
 app.post('/api/cash-drawer/open', async (req, res) => {
-  const { employee_id, opening_balance, opening_notes } = req.body;
+  const { drawer_id, employee_id, opening_balance, opening_notes } = req.body;
 
   // Validation
-  if (!employee_id || opening_balance === undefined) {
-    return res.status(400).json({ error: 'employee_id and opening_balance are required' });
+  if (!drawer_id || !employee_id || opening_balance === undefined) {
+    return res.status(400).json({ error: 'drawer_id, employee_id and opening_balance are required' });
   }
 
   if (opening_balance < 0) {
@@ -591,10 +591,10 @@ app.post('/api/cash-drawer/open', async (req, res) => {
 
     // Create new drawer session
     const result = await pool.query(`
-      INSERT INTO cash_drawer_sessions (employee_id, opening_balance, opening_notes, status)
-      VALUES ($1, $2, $3, 'open')
+      INSERT INTO cash_drawer_sessions (drawer_id, employee_id, opening_balance, opening_notes, status)
+      VALUES ($1, $2, $3, $4, 'open')
       RETURNING *
-    `, [employee_id, opening_balance, opening_notes || null]);
+    `, [drawer_id, employee_id, opening_balance, opening_notes || null]);
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -869,6 +869,59 @@ app.get('/api/drawers', async (req, res) => {
   } catch (error) {
     console.error('Error fetching drawers:', error);
     res.status(500).json({ error: 'Failed to fetch drawers' });
+  }
+});
+
+// GET /api/discrepancy-threshold - Get discrepancy threshold configuration
+app.get('/api/discrepancy-threshold', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM discrepancy_threshold LIMIT 1');
+    if (result.rows.length > 0) {
+      res.json(result.rows[0]);
+    } else {
+      // Return default if not found
+      res.json({ threshold_amount: 0.00 });
+    }
+  } catch (error) {
+    console.error('Error fetching discrepancy threshold:', error);
+    res.status(500).json({ error: 'Failed to fetch discrepancy threshold' });
+  }
+});
+
+// PUT /api/discrepancy-threshold - Update discrepancy threshold configuration
+app.put('/api/discrepancy-threshold', async (req, res) => {
+  const { threshold_amount } = req.body;
+
+  if (threshold_amount === undefined || threshold_amount < 0) {
+    return res.status(400).json({ error: 'Valid threshold_amount is required (must be >= 0)' });
+  }
+
+  try {
+    // Check if a record exists
+    const existing = await pool.query('SELECT id FROM discrepancy_threshold LIMIT 1');
+
+    let result;
+    if (existing.rows.length > 0) {
+      // Update existing record
+      result = await pool.query(`
+        UPDATE discrepancy_threshold
+        SET threshold_amount = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        RETURNING *
+      `, [threshold_amount, existing.rows[0].id]);
+    } else {
+      // Insert new record
+      result = await pool.query(`
+        INSERT INTO discrepancy_threshold (threshold_amount)
+        VALUES ($1)
+        RETURNING *
+      `, [threshold_amount]);
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating discrepancy threshold:', error);
+    res.status(500).json({ error: 'Failed to update discrepancy threshold' });
   }
 });
 

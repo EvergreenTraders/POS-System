@@ -319,3 +319,21 @@ COMMENT ON COLUMN cash_denominations.total_amount IS 'Automatically calculated t
 INSERT INTO user_preferences (preference_name, preference_value)
 VALUES ('blindCount', 'true')
 ON CONFLICT (preference_name) DO NOTHING;
+
+-- Create discrepancy_threshold table to store acceptable discrepancy amount
+CREATE TABLE IF NOT EXISTS discrepancy_threshold (
+    id SERIAL PRIMARY KEY,
+    threshold_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP,
+    CONSTRAINT valid_threshold CHECK (threshold_amount >= 0)
+);
+
+-- Add comment for documentation
+COMMENT ON TABLE discrepancy_threshold IS 'Stores acceptable cash drawer discrepancy threshold';
+COMMENT ON COLUMN discrepancy_threshold.threshold_amount IS 'Maximum acceptable discrepancy amount. If actual discrepancy exceeds this, user must recount.';
+
+-- Insert default threshold if table is empty
+INSERT INTO discrepancy_threshold (threshold_amount)
+SELECT 0.00
+WHERE NOT EXISTS (SELECT 1 FROM discrepancy_threshold LIMIT 1);

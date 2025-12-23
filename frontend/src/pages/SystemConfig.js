@@ -143,6 +143,7 @@ function SystemConfig() {
   const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
   const [drawers, setDrawers] = useState([]);
   const [isBlindCount, setIsBlindCount] = useState(true);
+  const [discrepancyThreshold, setDiscrepancyThreshold] = useState({ amount: 0.00, id: null });
   const [loading, setLoading] = useState(false);
   const [customerColumns, setCustomerColumns] = useState([]);
   const [itemAttributes, setItemAttributes] = useState([]);
@@ -186,6 +187,21 @@ function SystemConfig() {
     } catch (error) {
       console.error('Error fetching blind count preference:', error);
       setIsBlindCount(true); // Default to blind count
+    }
+  };
+
+  const fetchDiscrepancyThreshold = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/discrepancy-threshold`);
+      if (response.data) {
+        setDiscrepancyThreshold({
+          amount: response.data.threshold_amount || 0.00,
+          id: response.data.id || null
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching discrepancy threshold:', error);
+      setDiscrepancyThreshold({ amount: 0.00, id: null });
     }
   };
 
@@ -489,6 +505,7 @@ function SystemConfig() {
     fetchDrawerConfig();
     fetchDrawers();
     fetchBlindCountPreference();
+    fetchDiscrepancyThreshold();
     fetchTaxConfig();
     fetchAuthorizationTemplate();
     fetchReceiptConfig();
@@ -990,6 +1007,42 @@ function SystemConfig() {
     }
   };
 
+  const handleDiscrepancyThresholdChange = async (event) => {
+    const newAmount = parseFloat(event.target.value);
+    if (isNaN(newAmount) || newAmount < 0) {
+      setSnackbar({
+        open: true,
+        message: 'Discrepancy threshold must be a positive number',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.put(`${API_BASE_URL}/discrepancy-threshold`, {
+        threshold_amount: newAmount
+      });
+
+      setDiscrepancyThreshold({
+        amount: response.data.threshold_amount,
+        id: response.data.id
+      });
+
+      setSnackbar({
+        open: true,
+        message: `Discrepancy threshold updated to $${newAmount.toFixed(2)}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating discrepancy threshold:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update discrepancy threshold',
+        severity: 'error'
+      });
+    }
+  };
+
   const handleCloseSnackbar = () => {
     setSnackbar({ ...snackbar, open: false });
   };
@@ -1416,7 +1469,7 @@ function SystemConfig() {
               />
             </Box>
             <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
+              <Grid item xs={12} md={4}>
                 <TextField
                   label="Hold Period Duration"
                   type="number"
@@ -1431,7 +1484,7 @@ function SystemConfig() {
                   disabled={!isInventoryHoldPeriodEnabled}
                 />
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid item xs={12} md={4}>
                 <TextField
                   label="Number of Cash Drawers"
                   type="number"
@@ -1444,6 +1497,21 @@ function SystemConfig() {
                   helperText="Number of physical cash drawers (Safe drawer is always available)"
                   fullWidth
                   inputProps={{ min: 0, max: 50 }}
+                />
+              </Grid>
+               <Grid item xs={12} md={4}>
+                <TextField
+                  label="Discrepancy Threshold"
+                  type="number"
+                  value={discrepancyThreshold.amount}
+                  onChange={(e) => setDiscrepancyThreshold(prev => ({ ...prev, amount: e.target.value }))}
+                  onBlur={(e) => handleDiscrepancyThresholdChange(e)}
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                  }}
+                  helperText="Maximum acceptable discrepancy when closing drawer. Amounts exceeding this will require recount."
+                  fullWidth
+                  inputProps={{ min: 0, step: 0.01 }}
                 />
               </Grid>
               <Grid item xs={12}>

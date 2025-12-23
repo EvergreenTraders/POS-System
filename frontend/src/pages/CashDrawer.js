@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Container,
   Typography,
@@ -44,6 +45,7 @@ import config from '../config';
 
 function CashDrawer() {
   const API_BASE_URL = config.apiUrl;
+  const location = useLocation();
 
   const [activeSession, setActiveSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +60,10 @@ function CashDrawer() {
   const [closeDrawerDialog, setCloseDrawerDialog] = useState(false);
   const [adjustmentDialog, setAdjustmentDialog] = useState(false);
   const [detailsDialog, setDetailsDialog] = useState(false);
+  const [discrepancyWarningDialog, setDiscrepancyWarningDialog] = useState(false);
+
+  // Configuration
+  const [discrepancyThreshold, setDiscrepancyThreshold] = useState(0.00);
 
   // Form states
   const [selectedEmployee, setSelectedEmployee] = useState('');
@@ -81,7 +87,17 @@ function CashDrawer() {
     fetchDrawers();
     checkActiveSession();
     fetchHistory();
+    fetchDiscrepancyThreshold();
   }, []);
+
+  // Show message if redirected from checkout
+  useEffect(() => {
+    if (location.state?.message) {
+      showSnackbar(location.state.message, 'warning');
+      // Clear the message from location state
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   // Auto-select current user when opening drawer dialog
   useEffect(() => {
@@ -115,6 +131,17 @@ function CashDrawer() {
     }
   };
 
+  const fetchDiscrepancyThreshold = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/discrepancy-threshold`);
+      const thresholdValue = response.data.threshold_amount || 0.00;
+      setDiscrepancyThreshold(thresholdValue);
+    } catch (err) {
+      console.error('Error fetching discrepancy threshold:', err);
+      setDiscrepancyThreshold(0.00);
+    }
+  };
+
   const checkActiveSession = async () => {
     try {
       setLoading(true);
@@ -129,7 +156,6 @@ function CashDrawer() {
         // Only set active session if response.data is not null
         setActiveSession(response.data || null);
       } else {
-        console.log('No employee_id found in localStorage');
         setActiveSession(null);
       }
     } catch (err) {
@@ -191,9 +217,23 @@ function CashDrawer() {
     }
   };
 
-  const handleCloseDrawer = async () => {
+  const handleCloseDrawer = async (forceClose = false) => {
+
     if (!actualBalance) {
       showSnackbar('Please enter the actual balance', 'error');
+      return;
+    }
+
+    // Calculate discrepancy before closing
+    const expected = parseFloat(activeSession?.current_expected_balance || 0);
+    const actual = parseFloat(actualBalance);
+    const discrepancyAmount = Math.abs(actual - expected);
+    const threshold = parseFloat(discrepancyThreshold || 0);
+
+    // Check if discrepancy exceeds threshold and not forcing close
+    if (!forceClose && discrepancyAmount > threshold) {
+      setCloseDrawerDialog(false); // Close the original dialog
+      setDiscrepancyWarningDialog(true);
       return;
     }
 
@@ -219,6 +259,7 @@ function CashDrawer() {
 
       showSnackbar(message, discrepancy === 0 ? 'success' : 'warning');
       setCloseDrawerDialog(false);
+      setDiscrepancyWarningDialog(false);
       resetCloseForm();
       checkActiveSession();
       fetchHistory();
@@ -551,8 +592,47 @@ function CashDrawer() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCloseDrawerDialog(false)}>Cancel</Button>
-          <Button onClick={handleCloseDrawer} variant="contained" color="primary">
+          <Button onClick={() => handleCloseDrawer(false)} variant="contained" color="primary">
             Close Drawer
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Discrepancy Warning Dialog */}
+      <Dialog open={discrepancyWarningDialog} onClose={() => setDiscrepancyWarningDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarningIcon color="warning" />
+            <Typography variant="h6">Discrepancy Warning</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="warning">
+              The discrepancy amount exceeds the acceptable threshold of ${Number(discrepancyThreshold || 0).toFixed(2)}.
+            </Alert>
+            <Box>
+              <Typography variant="body1" gutterBottom>
+                <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
+              </Typography>
+              <Typography variant="body1" gutterBottom>
+                <strong>Actual Balance:</strong> {formatCurrency(parseFloat(actualBalance || 0))}
+              </Typography>
+              <Typography variant="body1" color="error" gutterBottom>
+                <strong>Discrepancy:</strong> {formatCurrency(Math.abs(parseFloat(actualBalance || 0) - parseFloat(activeSession?.current_expected_balance || 0)))}
+              </Typography>
+            </Box>
+            <Typography variant="body2" color="text.secondary">
+              Please recount the cash drawer to verify the balance. If the discrepancy is correct, you can proceed to close the drawer anyway.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDiscrepancyWarningDialog(false)}>
+            Recount
+          </Button>
+          <Button onClick={() => handleCloseDrawer(true)} variant="contained" color="warning">
+            Close Anyway
           </Button>
         </DialogActions>
       </Dialog>
