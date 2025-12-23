@@ -19,9 +19,8 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 5432,
-  ssl: {
-    rejectUnauthorized: false
-  }
+  // Disable SSL for local development
+  ssl: false
 });
 
 // Multer setup for file uploads
@@ -397,18 +396,726 @@ app.put('/api/employees/:id', async (req, res) => {
 app.delete('/api/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const query = 'DELETE FROM employees WHERE employee_id = $1 RETURNING employee_id';
     const result = await pool.query(query, [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found' });
     }
-    
+
     res.json({ message: 'Employee deleted successfully' });
   } catch (err) {
     console.error('Error deleting employee:', err);
     res.status(500).json({ error: 'Failed to delete employee' });
+  }
+});
+
+// ============================================================================
+// Cash Drawer API Routes
+// ============================================================================
+
+// GET /api/cash-drawer/active - Get all active (open) drawer sessions
+app.get('/api/cash-drawer/active', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM active_drawer_sessions
+      ORDER BY opened_at DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching active drawer sessions:', error);
+    res.status(500).json({ error: 'Failed to fetch active drawer sessions' });
+  }
+});
+
+// GET /api/cash-drawer/employee/:employeeId/active - Check if employee has an active drawer session
+app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
+  const { employeeId } = req.params;
+
+  try {
+    const result = await pool.query(`
+      SELECT
+        s.*,
+        calculate_expected_balance(s.session_id) AS current_expected_balance,
+        (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS transaction_count,
+        (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
+        (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments
+      FROM cash_drawer_sessions s
+      WHERE s.employee_id = $1 AND s.status = 'open'
+      ORDER BY s.opened_at DESC
+      LIMIT 1
+    `, [employeeId]);
+
+    if (result.rows.length > 0) {
+      res.json(result.rows[0]);
+    } else {
+      res.json(null);
+    }
+  } catch (error) {
+    console.error('Error checking active drawer:', error);
+    res.status(500).json({ error: 'Failed to check active drawer' });
+  }
+});
+
+// GET /api/cash-drawer/history - Get drawer session history with optional filters
+app.get('/api/cash-drawer/history', async (req, res) => {
+  const {
+    employee_id,
+    start_date,
+    end_date,
+    status,
+    limit = 50,
+    offset = 0
+  } = req.query;
+
+  try {
+    let query = 'SELECT * FROM drawer_session_history WHERE 1=1';
+    const params = [];
+    let paramCount = 1;
+
+    if (employee_id) {
+      params.push(employee_id);
+      query += ` AND employee_id = $${paramCount++}`;
+    }
+
+    if (start_date) {
+      params.push(start_date);
+      query += ` AND opened_at >= $${paramCount++}`;
+    }
+
+    if (end_date) {
+      params.push(end_date);
+      query += ` AND opened_at <= $${paramCount++}`;
+    }
+
+    if (status) {
+      params.push(status);
+      query += ` AND status = $${paramCount++}`;
+    }
+
+    params.push(limit, offset);
+    query += ` LIMIT $${paramCount++} OFFSET $${paramCount++}`;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching drawer history:', error);
+    res.status(500).json({ error: 'Failed to fetch drawer history' });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/details - Get detailed information about a drawer session
+app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    // Get session details
+    const sessionResult = await pool.query(`
+      SELECT
+        s.*,
+        e.first_name || ' ' || e.last_name AS employee_name,
+        r.first_name || ' ' || r.last_name AS reconciled_by_name,
+        calculate_expected_balance(s.session_id) AS current_expected_balance
+      FROM cash_drawer_sessions s
+      JOIN employees e ON s.employee_id = e.employee_id
+      LEFT JOIN employees r ON s.reconciled_by = r.employee_id
+      WHERE s.session_id = $1
+    `, [sessionId]);
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Get transactions for this session
+    const transactionsResult = await pool.query(`
+      SELECT dt.*, t.transaction_date
+      FROM cash_drawer_transactions dt
+      JOIN transactions t ON dt.transaction_id = t.transaction_id
+      WHERE dt.session_id = $1
+      ORDER BY dt.created_at DESC
+    `, [sessionId]);
+
+    // Get adjustments for this session
+    const adjustmentsResult = await pool.query(`
+      SELECT
+        a.*,
+        e.first_name || ' ' || e.last_name AS performed_by_name,
+        ap.first_name || ' ' || ap.last_name AS approved_by_name
+      FROM cash_drawer_adjustments a
+      JOIN employees e ON a.performed_by = e.employee_id
+      LEFT JOIN employees ap ON a.approved_by = ap.employee_id
+      WHERE a.session_id = $1
+      ORDER BY a.created_at DESC
+    `, [sessionId]);
+
+    res.json({
+      session: sessionResult.rows[0],
+      transactions: transactionsResult.rows,
+      adjustments: adjustmentsResult.rows
+    });
+  } catch (error) {
+    console.error('Error fetching drawer session details:', error);
+    res.status(500).json({ error: 'Failed to fetch session details' });
+  }
+});
+
+// POST /api/cash-drawer/open - Open a new cash drawer session for an employee
+app.post('/api/cash-drawer/open', async (req, res) => {
+  const { drawer_id, employee_id, opening_balance, opening_notes } = req.body;
+
+  // Validation
+  if (!drawer_id || !employee_id || opening_balance === undefined) {
+    return res.status(400).json({ error: 'drawer_id, employee_id and opening_balance are required' });
+  }
+
+  if (opening_balance < 0) {
+    return res.status(400).json({ error: 'Opening balance cannot be negative' });
+  }
+
+  try {
+    // Check if employee already has an open drawer
+    const existingDrawer = await pool.query(
+      'SELECT session_id FROM cash_drawer_sessions WHERE employee_id = $1 AND status = $2',
+      [employee_id, 'open']
+    );
+
+    if (existingDrawer.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Employee already has an open drawer session',
+        session_id: existingDrawer.rows[0].session_id
+      });
+    }
+
+    // Create new drawer session
+    const result = await pool.query(`
+      INSERT INTO cash_drawer_sessions (drawer_id, employee_id, opening_balance, opening_notes, status)
+      VALUES ($1, $2, $3, $4, 'open')
+      RETURNING *
+    `, [drawer_id, employee_id, opening_balance, opening_notes || null]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error opening cash drawer:', error);
+    res.status(500).json({ error: 'Failed to open cash drawer' });
+  }
+});
+
+// POST /api/cash-drawer/:sessionId/adjustment - Add a cash adjustment to a drawer session
+app.post('/api/cash-drawer/:sessionId/adjustment', async (req, res) => {
+  const { sessionId } = req.params;
+  const { amount, adjustment_type, reason, performed_by, approved_by } = req.body;
+
+  // Validation
+  if (!amount || !adjustment_type || !reason || !performed_by) {
+    return res.status(400).json({
+      error: 'amount, adjustment_type, reason, and performed_by are required'
+    });
+  }
+
+  const validTypes = ['bank_deposit', 'change_order', 'petty_cash', 'correction', 'other'];
+  if (!validTypes.includes(adjustment_type)) {
+    return res.status(400).json({
+      error: `adjustment_type must be one of: ${validTypes.join(', ')}`
+    });
+  }
+
+  try {
+    // Verify session exists and is open
+    const sessionCheck = await pool.query(
+      'SELECT status FROM cash_drawer_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (sessionCheck.rows[0].status !== 'open') {
+      return res.status(400).json({ error: 'Can only add adjustments to open sessions' });
+    }
+
+    // Insert adjustment
+    const result = await pool.query(`
+      INSERT INTO cash_drawer_adjustments
+        (session_id, amount, adjustment_type, reason, performed_by, approved_by)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `, [sessionId, amount, adjustment_type, reason, performed_by, approved_by || null]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error adding cash drawer adjustment:', error);
+    res.status(500).json({ error: 'Failed to add adjustment' });
+  }
+});
+
+// POST /api/cash-drawer/:sessionId/transaction - Link a cash transaction to a drawer session
+app.post('/api/cash-drawer/:sessionId/transaction', async (req, res) => {
+  const { sessionId } = req.params;
+  const { transaction_id, amount, transaction_type, payment_id, notes } = req.body;
+
+  // Validation
+  if (!transaction_id || !amount || !transaction_type) {
+    return res.status(400).json({
+      error: 'transaction_id, amount, and transaction_type are required'
+    });
+  }
+
+  const validTypes = ['sale', 'refund', 'payout'];
+  if (!validTypes.includes(transaction_type)) {
+    return res.status(400).json({
+      error: `transaction_type must be one of: ${validTypes.join(', ')}`
+    });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO cash_drawer_transactions
+        (session_id, transaction_id, amount, transaction_type, payment_id, notes)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `, [sessionId, transaction_id, amount, transaction_type, payment_id || null, notes || null]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error linking transaction to drawer:', error);
+    res.status(500).json({ error: 'Failed to link transaction' });
+  }
+});
+
+// PUT /api/cash-drawer/:sessionId/close - Close a cash drawer session
+app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
+  const { sessionId } = req.params;
+  const { actual_balance, closing_notes } = req.body;
+
+  // Validation
+  if (actual_balance === undefined) {
+    return res.status(400).json({ error: 'actual_balance is required' });
+  }
+
+  if (actual_balance < 0) {
+    return res.status(400).json({ error: 'Actual balance cannot be negative' });
+  }
+
+  try {
+    // Update session to closed status
+    // The trigger will automatically calculate expected_balance and discrepancy
+    const result = await pool.query(`
+      UPDATE cash_drawer_sessions
+      SET status = 'closed',
+          actual_balance = $1,
+          closing_notes = $2
+      WHERE session_id = $3 AND status = 'open'
+      RETURNING *,
+        calculate_expected_balance(session_id) AS calculated_expected
+    `, [actual_balance, closing_notes || null, sessionId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found or already closed' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error closing cash drawer:', error);
+    res.status(500).json({ error: 'Failed to close cash drawer' });
+  }
+});
+
+// PUT /api/cash-drawer/:sessionId/reconcile - Reconcile a closed drawer session (manager approval)
+app.put('/api/cash-drawer/:sessionId/reconcile', async (req, res) => {
+  const { sessionId } = req.params;
+  const { reconciled_by, reconciliation_notes } = req.body;
+
+  if (!reconciled_by) {
+    return res.status(400).json({ error: 'reconciled_by (employee_id) is required' });
+  }
+
+  try {
+    const result = await pool.query(`
+      UPDATE cash_drawer_sessions
+      SET status = 'reconciled',
+          reconciled_by = $1,
+          reconciled_at = CURRENT_TIMESTAMP,
+          reconciliation_notes = $2
+      WHERE session_id = $3 AND status = 'closed'
+      RETURNING *
+    `, [reconciled_by, reconciliation_notes || null, sessionId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found or not in closed status' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error reconciling cash drawer:', error);
+    res.status(500).json({ error: 'Failed to reconcile cash drawer' });
+  }
+});
+
+// POST /api/cash-drawer/:sessionId/denominations - Save cash denominations for a session
+app.post('/api/cash-drawer/:sessionId/denominations', async (req, res) => {
+  const { sessionId } = req.params;
+  const { denomination_type, counted_by, notes, ...denominations } = req.body;
+
+  // Validation
+  if (!denomination_type || !['opening', 'closing'].includes(denomination_type)) {
+    return res.status(400).json({ error: 'denomination_type must be either "opening" or "closing"' });
+  }
+
+  if (!counted_by) {
+    return res.status(400).json({ error: 'counted_by (employee_id) is required' });
+  }
+
+  try {
+    // Check if session exists
+    const sessionCheck = await pool.query(
+      'SELECT session_id FROM cash_drawer_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Check if denomination entry already exists for this session and type
+    const existingCheck = await pool.query(
+      'SELECT denomination_id FROM cash_denominations WHERE session_id = $1 AND denomination_type = $2',
+      [sessionId, denomination_type]
+    );
+
+    let result;
+    if (existingCheck.rows.length > 0) {
+      // Update existing entry
+      result = await pool.query(`
+        UPDATE cash_denominations
+        SET bill_100 = $1, bill_50 = $2, bill_20 = $3, bill_10 = $4, bill_5 = $5,
+            coin_2 = $6, coin_1 = $7, coin_0_25 = $8, coin_0_10 = $9, coin_0_05 = $10,
+            counted_by = $11, counted_at = CURRENT_TIMESTAMP, notes = $12
+        WHERE session_id = $13 AND denomination_type = $14
+        RETURNING *, total_amount
+      `, [
+        denominations.bill_100 || 0, denominations.bill_50 || 0, denominations.bill_20 || 0,
+        denominations.bill_10 || 0, denominations.bill_5 || 0, denominations.coin_2 || 0,
+        denominations.coin_1 || 0, denominations.coin_0_25 || 0, denominations.coin_0_10 || 0,
+        denominations.coin_0_05 || 0, counted_by, notes || null, sessionId, denomination_type
+      ]);
+    } else {
+      // Insert new entry
+      result = await pool.query(`
+        INSERT INTO cash_denominations (
+          session_id, denomination_type, bill_100, bill_50, bill_20, bill_10, bill_5,
+          coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05, counted_by, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        RETURNING *, total_amount
+      `, [
+        sessionId, denomination_type, denominations.bill_100 || 0, denominations.bill_50 || 0,
+        denominations.bill_20 || 0, denominations.bill_10 || 0, denominations.bill_5 || 0,
+        denominations.coin_2 || 0, denominations.coin_1 || 0, denominations.coin_0_25 || 0,
+        denominations.coin_0_10 || 0, denominations.coin_0_05 || 0, counted_by, notes || null
+      ]);
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error saving denominations:', error);
+    res.status(500).json({ error: 'Failed to save denominations' });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/denominations/:type - Get denominations for a session
+app.get('/api/cash-drawer/:sessionId/denominations/:type', async (req, res) => {
+  const { sessionId, type } = req.params;
+
+  if (!['opening', 'closing'].includes(type)) {
+    return res.status(400).json({ error: 'Type must be either "opening" or "closing"' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT * FROM cash_denominations
+      WHERE session_id = $1 AND denomination_type = $2
+    `, [sessionId, type]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Denominations not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching denominations:', error);
+    res.status(500).json({ error: 'Failed to fetch denominations' });
+  }
+});
+
+// Drawer Configuration Routes
+// GET /api/drawer-config - Get drawer configuration
+app.get('/api/drawer-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM drawer_config LIMIT 1');
+    if (result.rows.length === 0) {
+      // Insert default if doesn't exist
+      const insertResult = await pool.query(
+        'INSERT INTO drawer_config (number_of_drawers) VALUES (0) RETURNING *'
+      );
+      res.json(insertResult.rows[0]);
+    } else {
+      res.json(result.rows[0]);
+    }
+  } catch (error) {
+    console.error('Error fetching drawer config:', error);
+    res.status(500).json({ error: 'Failed to fetch drawer configuration' });
+  }
+});
+
+// PUT /api/drawer-config - Update drawer configuration
+app.put('/api/drawer-config', async (req, res) => {
+  const { number_of_drawers } = req.body;
+
+  if (number_of_drawers === undefined || number_of_drawers < 0 || number_of_drawers > 50) {
+    return res.status(400).json({ error: 'number_of_drawers must be between 0 and 50' });
+  }
+
+  try {
+    // Update the config
+    const configResult = await pool.query(`
+      UPDATE drawer_config
+      SET number_of_drawers = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT id FROM drawer_config LIMIT 1)
+      RETURNING *
+    `, [number_of_drawers]);
+
+    let config;
+    if (configResult.rows.length === 0) {
+      // Insert if doesn't exist
+      const insertResult = await pool.query(
+        'INSERT INTO drawer_config (number_of_drawers) VALUES ($1) RETURNING *',
+        [number_of_drawers]
+      );
+      config = insertResult.rows[0];
+    } else {
+      config = configResult.rows[0];
+    }
+
+    // Ensure Safe drawer exists
+    await pool.query(`
+      INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
+      VALUES ('Safe', 'safe', TRUE, 0)
+      ON CONFLICT (drawer_name) DO NOTHING
+    `);
+
+    // Get current physical drawers
+    const currentDrawers = await pool.query(`
+      SELECT drawer_id, drawer_name FROM drawers
+      WHERE drawer_type = 'physical'
+      ORDER BY display_order
+    `);
+
+    const currentCount = currentDrawers.rows.length;
+
+    if (number_of_drawers > currentCount) {
+      // Add new drawers
+      for (let i = currentCount + 1; i <= number_of_drawers; i++) {
+        await pool.query(`
+          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
+          VALUES ($1, 'physical', TRUE, $2)
+          ON CONFLICT (drawer_name) DO NOTHING
+        `, [`Drawer ${i}`, i]);
+      }
+    } else if (number_of_drawers < currentCount) {
+      // Remove excess drawers (only if they have no sessions)
+      for (let i = currentCount; i > number_of_drawers; i--) {
+        const drawerName = `Drawer ${i}`;
+        // Check if drawer has any sessions
+        const sessionCheck = await pool.query(`
+          SELECT COUNT(*) as count FROM cash_drawer_sessions
+          WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
+        `, [drawerName]);
+
+        if (parseInt(sessionCheck.rows[0].count) === 0) {
+          await pool.query('DELETE FROM drawers WHERE drawer_name = $1', [drawerName]);
+        } else {
+          // Mark as inactive instead of deleting
+          await pool.query(
+            'UPDATE drawers SET is_active = FALSE WHERE drawer_name = $1',
+            [drawerName]
+          );
+        }
+      }
+    }
+
+    res.json(config);
+  } catch (error) {
+    console.error('Error updating drawer config:', error);
+    res.status(500).json({ error: 'Failed to update drawer configuration' });
+  }
+});
+
+// GET /api/drawers - Get all drawers
+app.get('/api/drawers', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM drawers
+      ORDER BY display_order, drawer_id
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching drawers:', error);
+    res.status(500).json({ error: 'Failed to fetch drawers' });
+  }
+});
+
+// GET /api/discrepancy-threshold - Get discrepancy threshold configuration
+app.get('/api/discrepancy-threshold', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM discrepancy_threshold LIMIT 1');
+    if (result.rows.length > 0) {
+      res.json(result.rows[0]);
+    } else {
+      // Return default if not found
+      res.json({ threshold_amount: 0.00 });
+    }
+  } catch (error) {
+    console.error('Error fetching discrepancy threshold:', error);
+    res.status(500).json({ error: 'Failed to fetch discrepancy threshold' });
+  }
+});
+
+// PUT /api/discrepancy-threshold - Update discrepancy threshold configuration
+app.put('/api/discrepancy-threshold', async (req, res) => {
+  const { threshold_amount } = req.body;
+
+  if (threshold_amount === undefined || threshold_amount < 0) {
+    return res.status(400).json({ error: 'Valid threshold_amount is required (must be >= 0)' });
+  }
+
+  try {
+    // Check if a record exists
+    const existing = await pool.query('SELECT id FROM discrepancy_threshold LIMIT 1');
+
+    let result;
+    if (existing.rows.length > 0) {
+      // Update existing record
+      result = await pool.query(`
+        UPDATE discrepancy_threshold
+        SET threshold_amount = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        RETURNING *
+      `, [threshold_amount, existing.rows[0].id]);
+    } else {
+      // Insert new record
+      result = await pool.query(`
+        INSERT INTO discrepancy_threshold (threshold_amount)
+        VALUES ($1)
+        RETURNING *
+      `, [threshold_amount]);
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating discrepancy threshold:', error);
+    res.status(500).json({ error: 'Failed to update discrepancy threshold' });
+  }
+});
+
+// Cash Denomination Routes (for Open Count mode)
+// POST /api/cash-drawer/:sessionId/denominations - Save denomination count
+app.post('/api/cash-drawer/:sessionId/denominations', async (req, res) => {
+  const { sessionId } = req.params;
+  const {
+    denomination_type,
+    bill_100, bill_50, bill_20, bill_10, bill_5,
+    coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05,
+    counted_by,
+    notes
+  } = req.body;
+
+  if (!denomination_type || !counted_by) {
+    return res.status(400).json({ error: 'denomination_type and counted_by are required' });
+  }
+
+  if (!['opening', 'closing'].includes(denomination_type)) {
+    return res.status(400).json({ error: 'denomination_type must be either opening or closing' });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO cash_denominations (
+        session_id, denomination_type,
+        bill_100, bill_50, bill_20, bill_10, bill_5,
+        coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05,
+        counted_by, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      RETURNING *
+    `, [
+      sessionId, denomination_type,
+      bill_100 || 0, bill_50 || 0, bill_20 || 0, bill_10 || 0, bill_5 || 0,
+      coin_2 || 0, coin_1 || 0, coin_0_25 || 0, coin_0_10 || 0, coin_0_05 || 0,
+      counted_by, notes || null
+    ]);
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error saving denominations:', error);
+    res.status(500).json({ error: 'Failed to save denominations' });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/denominations - Get denomination counts for a session
+app.get('/api/cash-drawer/:sessionId/denominations', async (req, res) => {
+  const { sessionId } = req.params;
+  const { type } = req.query; // optional: 'opening' or 'closing'
+
+  try {
+    let query = 'SELECT * FROM cash_denominations WHERE session_id = $1';
+    const params = [sessionId];
+
+    if (type && ['opening', 'closing'].includes(type)) {
+      query += ' AND denomination_type = $2';
+      params.push(type);
+    }
+
+    query += ' ORDER BY counted_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching denominations:', error);
+    res.status(500).json({ error: 'Failed to fetch denominations' });
+  }
+});
+
+// PUT /api/cash-drawer/denominations/:denominationId - Update denomination count
+app.put('/api/cash-drawer/denominations/:denominationId', async (req, res) => {
+  const { denominationId } = req.params;
+  const {
+    bill_100, bill_50, bill_20, bill_10, bill_5,
+    coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05,
+    notes
+  } = req.body;
+
+  try {
+    const result = await pool.query(`
+      UPDATE cash_denominations
+      SET bill_100 = $1, bill_50 = $2, bill_20 = $3, bill_10 = $4, bill_5 = $5,
+          coin_2 = $6, coin_1 = $7, coin_0_25 = $8, coin_0_10 = $9, coin_0_05 = $10,
+          notes = $11
+      WHERE denomination_id = $12
+      RETURNING *
+    `, [
+      bill_100 || 0, bill_50 || 0, bill_20 || 0, bill_10 || 0, bill_5 || 0,
+      coin_2 || 0, coin_1 || 0, coin_0_25 || 0, coin_0_10 || 0, coin_0_05 || 0,
+      notes || null, denominationId
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Denomination record not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating denominations:', error);
+    res.status(500).json({ error: 'Failed to update denominations' });
   }
 });
 
@@ -672,6 +1379,26 @@ app.get('/api/user_preferences', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching user preferences:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET route for fetching a specific user preference by name
+app.get('/api/user_preferences/:preferenceName', async (req, res) => {
+  try {
+    const { preferenceName } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM user_preferences WHERE preference_name = $1',
+      [preferenceName]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Preference not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching user preference:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

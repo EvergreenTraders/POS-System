@@ -197,6 +197,50 @@ function Checkout() {
     }
   }, [location.state, addToCart, setCustomer, clearCart, isInitialized]);
 
+  // Check if employee has an active cash drawer session
+  useEffect(() => {
+    const checkCashDrawerSession = async () => {
+      if (!user?.id) return;
+
+      try {
+        const response = await axios.get(`${API_BASE_URL}/cash-drawer/employee/${user.id}/active`);
+
+        // If no active session exists, redirect to cash drawer page
+        if (!response.data) {
+          setSnackbar({
+            open: true,
+            message: 'You must open a cash drawer before processing transactions',
+            severity: 'warning'
+          });
+
+          // Delay navigation slightly to show the snackbar
+          setTimeout(() => {
+            navigate('/cash-drawer', {
+              state: {
+                message: 'Please open a cash drawer to continue with transactions',
+                returnTo: '/checkout'
+              }
+            });
+          }, 1500);
+        }
+      } catch (error) {
+        console.error('Error checking cash drawer session:', error);
+        // On error, also redirect to cash drawer page
+        setSnackbar({
+          open: true,
+          message: 'Unable to verify cash drawer session. Please open a drawer.',
+          severity: 'error'
+        });
+
+        setTimeout(() => {
+          navigate('/cash-drawer');
+        }, 1500);
+      }
+    };
+
+    checkCashDrawerSession();
+  }, [user, navigate]);
+
   // Fetch transaction types on component mount
   useEffect(() => {
     const fetchTransactionTypes = async () => {

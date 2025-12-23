@@ -140,6 +140,12 @@ function SystemConfig() {
   const [gramsInput, setGramsInput] = useState('');
   const [diamondEstimates, setDiamondEstimates] = useState([]);
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
+  const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
+  const [drawers, setDrawers] = useState([]);
+  const [isBlindCount, setIsBlindCount] = useState(true);
+  const [discrepancyThreshold, setDiscrepancyThreshold] = useState({ amount: 0.00, id: null });
+  const [minClose, setMinClose] = useState(0);
+  const [maxClose, setMaxClose] = useState(0);
   const [loading, setLoading] = useState(false);
   const [customerColumns, setCustomerColumns] = useState([]);
   const [itemAttributes, setItemAttributes] = useState([]);
@@ -147,6 +153,59 @@ function SystemConfig() {
   const [newAttributeType, setNewAttributeType] = useState('dropdown');
   const [newAttributeValue, setNewAttributeValue] = useState({});
   const [selectedCustomerColumns, setSelectedCustomerColumns] = useState({});
+
+  const fetchDrawerConfig = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/drawer-config`);
+      if (response.data) {
+        setNumberOfDrawers({
+          count: response.data.number_of_drawers,
+          id: response.data.id || null
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching drawer config:', error);
+      setNumberOfDrawers({ count: 0, id: null });
+    }
+  };
+
+  const fetchDrawers = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/drawers`);
+      if (response.data) {
+        setDrawers(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching drawers:', error);
+      setDrawers([]);
+    }
+  };
+
+  const fetchBlindCountPreference = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/user_preferences`);
+      const blindCountPreference = response.data.find(pref => pref.preference_name === 'blindCount');
+      setIsBlindCount(blindCountPreference ? blindCountPreference.preference_value === 'true' : true);
+    } catch (error) {
+      console.error('Error fetching blind count preference:', error);
+      setIsBlindCount(true); // Default to blind count
+    }
+  };
+
+  const fetchDiscrepancyThreshold = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/discrepancy-threshold`);
+      if (response.data) {
+        setDiscrepancyThreshold({
+          amount: response.data.threshold_amount || 0.00,
+          id: response.data.id || null
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching discrepancy threshold:', error);
+      setDiscrepancyThreshold({ amount: 0.00, id: null });
+    }
+  };
 
   // Tax configuration state
   const [provinceTaxRates, setProvinceTaxRates] = useState({
@@ -445,6 +504,10 @@ function SystemConfig() {
     fetchUserPreference();
     fetchCaratConversion();
     fetchInventoryHoldPeriod();
+    fetchDrawerConfig();
+    fetchDrawers();
+    fetchBlindCountPreference();
+    fetchDiscrepancyThreshold();
     fetchTaxConfig();
     fetchAuthorizationTemplate();
     fetchReceiptConfig();
@@ -849,12 +912,12 @@ function SystemConfig() {
       const response = await axios.put(`${API_BASE_URL}/inventory-hold-period/config`, {
         days: newDays
       });
-      
+
       setInventoryHoldPeriod({
         days: response.data.days,
         id: response.data.id
       });
-      
+
       setSnackbar({
         open: true,
         message: `Inventory hold period updated successfully. Items in HOLD status will become AVAILABLE after ${newDays} days.`,
@@ -865,6 +928,118 @@ function SystemConfig() {
       setSnackbar({
         open: true,
         message: 'Failed to update inventory hold period configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleNumberOfDrawersChange = async (event) => {
+    const newCount = parseInt(event.target.value);
+    if (newCount < 0) {
+      setSnackbar({
+        open: true,
+        message: 'Number of drawers cannot be negative',
+        severity: 'error'
+      });
+      return;
+    }
+
+    if (newCount > 50) {
+      setSnackbar({
+        open: true,
+        message: 'Number of drawers cannot exceed 50',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.put(`${API_BASE_URL}/drawer-config`, {
+        number_of_drawers: newCount
+      });
+
+      setNumberOfDrawers({
+        count: response.data.number_of_drawers,
+        id: response.data.id
+      });
+
+      // Refresh the drawers list
+      await fetchDrawers();
+
+      const drawerMessage = newCount === 0
+        ? 'Only the Safe drawer is available.'
+        : `${newCount} physical drawer${newCount > 1 ? 's' : ''} created (Drawer 1${newCount > 1 ? ` to Drawer ${newCount}` : ''}).`;
+
+      setSnackbar({
+        open: true,
+        message: `Cash drawer configuration updated. ${drawerMessage}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating number of drawers:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update number of drawers configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleBlindCountToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsBlindCount(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/user_preferences`, {
+        preference_name: 'blindCount',
+        preference_value: newValue.toString()
+      });
+      setSnackbar({
+        open: true,
+        message: `Cash drawer count mode set to ${newValue ? 'Blind Count' : 'Open Count'}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating blind count preference:', error);
+      setIsBlindCount(!newValue); // Revert on error
+      setSnackbar({
+        open: true,
+        message: 'Failed to update count mode settings',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleDiscrepancyThresholdChange = async (event) => {
+    const newAmount = parseFloat(event.target.value);
+    if (isNaN(newAmount) || newAmount < 0) {
+      setSnackbar({
+        open: true,
+        message: 'Discrepancy threshold must be a positive number',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.put(`${API_BASE_URL}/discrepancy-threshold`, {
+        threshold_amount: newAmount
+      });
+
+      setDiscrepancyThreshold({
+        amount: response.data.threshold_amount,
+        id: response.data.id
+      });
+
+      setSnackbar({
+        open: true,
+        message: `Discrepancy threshold updated to $${newAmount.toFixed(2)}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating discrepancy threshold:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update discrepancy threshold',
         severity: 'error'
       });
     }
@@ -1296,7 +1471,7 @@ function SystemConfig() {
               />
             </Box>
             <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
+              <Grid item xs={12} md={4}>
                 <TextField
                   label="Hold Period Duration"
                   type="number"
@@ -1311,7 +1486,114 @@ function SystemConfig() {
                   disabled={!isInventoryHoldPeriodEnabled}
                 />
               </Grid>
+              <Grid item xs={12}>
+                <Box display="flex" alignItems="center" gap={3} sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                      Count Mode
+                    </Typography>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="body2" color={!isBlindCount ? 'primary' : 'text.secondary'} fontWeight={!isBlindCount ? 'bold' : 'normal'}>
+                        Open
+                      </Typography>
+                      <Switch
+                        checked={isBlindCount}
+                        onChange={handleBlindCountToggle}
+                        color="primary"
+                      />
+                      <Typography variant="body2" color={isBlindCount ? 'primary' : 'text.secondary'} fontWeight={isBlindCount ? 'bold' : 'normal'}>
+                        Blind
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <TextField
+                    label="Number of Cash Drawers"
+                    type="number"
+                    value={numberOfDrawers.count}
+                    onChange={(e) => setNumberOfDrawers(prev => ({ ...prev, count: e.target.value }))}
+                    onBlur={(e) => handleNumberOfDrawersChange(e)}
+                    size="small"
+                    sx={{ width: 200, mt: 1 }}
+                    InputProps={{
+                      endAdornment: <InputAdornment position="end">drawers</InputAdornment>,
+                    }}
+                    inputProps={{ min: 0, max: 50 }}
+                  />
+                  <TextField
+                    label="Discrepancy Threshold"
+                    type="number"
+                    value={discrepancyThreshold.amount}
+                    onChange={(e) => setDiscrepancyThreshold(prev => ({ ...prev, amount: e.target.value }))}
+                    onBlur={(e) => handleDiscrepancyThresholdChange(e)}
+                    size="small"
+                    sx={{ width: 200, mt: 1 }}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                    }}
+                    inputProps={{ min: 0, step: 0.01 }}
+                  />
+                  <TextField
+                    label="Min Close"
+                    type="number"
+                    value={minClose}
+                    onChange={(e) => setMinClose(parseFloat(e.target.value) || 0)}
+                    size="small"
+                    sx={{ width: 150, mt: 1 }}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                    }}
+                    inputProps={{ min: 0, step: 0.01 }}
+                  />
+                  <TextField
+                    label="Max Close"
+                    type="number"
+                    value={maxClose}
+                    onChange={(e) => setMaxClose(parseFloat(e.target.value) || 0)}
+                    size="small"
+                    sx={{ width: 150, mt: 1 }}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                    }}
+                    inputProps={{ min: 0, step: 0.01 }}
+                  />
+                </Box>
+              </Grid>
             </Grid>
+            {drawers.length > 0 && (
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                  Configured Drawers:
+                </Typography>
+                <TableContainer component={Paper} sx={{ mt: 1 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Drawer Name</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell align="center">Status</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {drawers.map((drawer) => (
+                        <TableRow key={drawer.drawer_id}>
+                          <TableCell>{drawer.drawer_name}</TableCell>
+                          <TableCell>
+                            {drawer.drawer_type === 'safe' ? 'Safe/Vault' : 'Physical Drawer'}
+                          </TableCell>
+                          <TableCell align="center">
+                            {drawer.is_active ? (
+                              <Typography color="success.main" variant="body2">Active</Typography>
+                            ) : (
+                              <Typography color="error.main" variant="body2">Inactive</Typography>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            )}
           </ConfigSection>
 
           <ConfigSection>

@@ -29,6 +29,7 @@ import Cart from './pages/Cart';
 import JewelryEdit from './pages/JewelryEdit';
 import SalesHistory from './pages/SalesHistory';
 import Layaway from './pages/Layaway';
+import CashDrawer from './pages/CashDrawer';
 
 const theme = createTheme({
   palette: {
@@ -460,6 +461,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <Layaway />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/cash-drawer"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CashDrawer />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
