@@ -64,6 +64,7 @@ function CashDrawer() {
 
   // Configuration
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState(0.00);
+  const [isBlindCount, setIsBlindCount] = useState(true);
 
   // Form states
   const [selectedEmployee, setSelectedEmployee] = useState('');
@@ -75,6 +76,16 @@ function CashDrawer() {
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
   const [adjustmentType, setAdjustmentType] = useState('bank_deposit');
   const [adjustmentReason, setAdjustmentReason] = useState('');
+
+  // Denomination states for Open Count mode
+  const [openingDenominations, setOpeningDenominations] = useState({
+    bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+    coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+  });
+  const [closingDenominations, setClosingDenominations] = useState({
+    bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+    coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+  });
 
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -88,6 +99,7 @@ function CashDrawer() {
     checkActiveSession();
     fetchHistory();
     fetchDiscrepancyThreshold();
+    fetchBlindCountPreference();
   }, []);
 
   // Show message if redirected from checkout
@@ -139,6 +151,17 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching discrepancy threshold:', err);
       setDiscrepancyThreshold(0.00);
+    }
+  };
+
+  const fetchBlindCountPreference = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/user_preferences/blindCount`);
+      const blindCountValue = response.data.preference_value === 'true';
+      setIsBlindCount(blindCountValue);
+    } catch (err) {
+      console.error('Error fetching blind count preference:', err);
+      setIsBlindCount(true); // Default to blind count
     }
   };
 
@@ -194,18 +217,47 @@ function CashDrawer() {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = selectedEmployee || currentUser.id;
 
-    if (!employeeId || !openingBalance || !selectedDrawer) {
+    // Calculate balance based on mode
+    const calculatedBalance = isBlindCount
+      ? parseFloat(openingBalance)
+      : calculateDenominationTotal(openingDenominations);
+
+    // Validation
+    if (!employeeId || !selectedDrawer) {
       showSnackbar('Please fill in all required fields', 'error');
       return;
     }
 
+    if (isBlindCount && !openingBalance) {
+      showSnackbar('Please enter the opening balance', 'error');
+      return;
+    }
+
+    if (!isBlindCount && calculatedBalance === 0) {
+      showSnackbar('Please enter denomination counts', 'error');
+      return;
+    }
+
     try {
-      await axios.post(`${API_BASE_URL}/cash-drawer/open`, {
+      // Open the drawer
+      const openResponse = await axios.post(`${API_BASE_URL}/cash-drawer/open`, {
         drawer_id: selectedDrawer,
         employee_id: employeeId,
-        opening_balance: parseFloat(openingBalance),
+        opening_balance: calculatedBalance,
         opening_notes: openingNotes || null
       });
+
+      const sessionId = openResponse.data.session_id;
+
+      // If Open Count mode, save denominations
+      if (!isBlindCount) {
+        await axios.post(`${API_BASE_URL}/cash-drawer/${sessionId}/denominations`, {
+          denomination_type: 'opening',
+          counted_by: employeeId,
+          notes: openingNotes || null,
+          ...openingDenominations
+        });
+      }
 
       showSnackbar('Cash drawer opened successfully', 'success');
       setOpenDrawerDialog(false);
@@ -218,15 +270,29 @@ function CashDrawer() {
   };
 
   const handleCloseDrawer = async (forceClose = false) => {
+    // Get current logged-in user
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const employeeId = currentUser.id;
 
-    if (!actualBalance) {
+    // Calculate balance based on mode
+    const calculatedBalance = isBlindCount
+      ? parseFloat(actualBalance)
+      : calculateDenominationTotal(closingDenominations);
+
+    // Validation
+    if (isBlindCount && !actualBalance) {
       showSnackbar('Please enter the actual balance', 'error');
+      return;
+    }
+
+    if (!isBlindCount && calculatedBalance === 0) {
+      showSnackbar('Please enter denomination counts', 'error');
       return;
     }
 
     // Calculate discrepancy before closing
     const expected = parseFloat(activeSession?.current_expected_balance || 0);
-    const actual = parseFloat(actualBalance);
+    const actual = calculatedBalance;
     const discrepancyAmount = Math.abs(actual - expected);
     const threshold = parseFloat(discrepancyThreshold || 0);
 
@@ -238,10 +304,21 @@ function CashDrawer() {
     }
 
     try {
+      // If Open Count mode, save denominations first
+      if (!isBlindCount) {
+        await axios.post(`${API_BASE_URL}/cash-drawer/${activeSession.session_id}/denominations`, {
+          denomination_type: 'closing',
+          counted_by: employeeId,
+          notes: closingNotes || null,
+          ...closingDenominations
+        });
+      }
+
+      // Close the drawer
       const response = await axios.put(
         `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/close`,
         {
-          actual_balance: parseFloat(actualBalance),
+          actual_balance: calculatedBalance,
           closing_notes: closingNotes || null
         }
       );
@@ -303,11 +380,19 @@ function CashDrawer() {
     setSelectedDrawer('');
     setOpeningBalance('');
     setOpeningNotes('');
+    setOpeningDenominations({
+      bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+      coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+    });
   };
 
   const resetCloseForm = () => {
     setActualBalance('');
     setClosingNotes('');
+    setClosingDenominations({
+      bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+      coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+    });
   };
 
   const resetAdjustmentForm = () => {
@@ -325,6 +410,21 @@ function CashDrawer() {
       style: 'currency',
       currency: 'USD'
     }).format(amount || 0);
+  };
+
+  const calculateDenominationTotal = (denominations) => {
+    return (
+      (parseInt(denominations.bill_100 || 0) * 100) +
+      (parseInt(denominations.bill_50 || 0) * 50) +
+      (parseInt(denominations.bill_20 || 0) * 20) +
+      (parseInt(denominations.bill_10 || 0) * 10) +
+      (parseInt(denominations.bill_5 || 0) * 5) +
+      (parseInt(denominations.coin_2 || 0) * 2) +
+      (parseInt(denominations.coin_1 || 0) * 1) +
+      (parseInt(denominations.coin_0_25 || 0) * 0.25) +
+      (parseInt(denominations.coin_0_10 || 0) * 0.10) +
+      (parseInt(denominations.coin_0_05 || 0) * 0.05)
+    );
   };
 
   const formatDateTime = (dateString) => {
@@ -356,6 +456,56 @@ function CashDrawer() {
     } else {
       return <Chip label={`Shortage ${formatCurrency(Math.abs(discrepancy))}`} color="error" size="small" icon={<WarningIcon />} />;
     }
+  };
+
+  const renderDenominationEntry = (denominations, setDenominations, calculatedTotal) => {
+    const handleDenominationChange = (field, value) => {
+      setDenominations(prev => ({
+        ...prev,
+        [field]: parseInt(value) || 0
+      }));
+    };
+
+    const denominationFields = [
+      { label: '$100 Bills', field: 'bill_100', value: 100 },
+      { label: '$50 Bills', field: 'bill_50', value: 50 },
+      { label: '$20 Bills', field: 'bill_20', value: 20 },
+      { label: '$10 Bills', field: 'bill_10', value: 10 },
+      { label: '$5 Bills', field: 'bill_5', value: 5 },
+      { label: '$2 Coins', field: 'coin_2', value: 2 },
+      { label: '$1 Coins', field: 'coin_1', value: 1 },
+      { label: '$0.25 Coins', field: 'coin_0_25', value: 0.25 },
+      { label: '$0.10 Coins', field: 'coin_0_10', value: 0.10 },
+      { label: '$0.05 Coins', field: 'coin_0_05', value: 0.05 },
+    ];
+
+    return (
+      <Box>
+        <Typography variant="subtitle2" gutterBottom sx={{ mt: 2, mb: 1, fontWeight: 'bold' }}>
+          Cash Denominations
+        </Typography>
+        <Grid container spacing={2}>
+          {denominationFields.map((item) => (
+            <Grid item xs={6} sm={4} md={3} key={item.field}>
+              <TextField
+                label={item.label}
+                type="number"
+                size="small"
+                fullWidth
+                value={denominations[item.field]}
+                onChange={(e) => handleDenominationChange(item.field, e.target.value)}
+                inputProps={{ min: 0, step: 1 }}
+              />
+            </Grid>
+          ))}
+        </Grid>
+        <Box sx={{ mt: 2, p: 2, bgcolor: 'primary.50', borderRadius: 1 }}>
+          <Typography variant="h6" color="primary">
+            Total: {formatCurrency(calculatedTotal)}
+          </Typography>
+        </Box>
+      </Box>
+    );
   };
 
   if (loading) {
@@ -507,8 +657,8 @@ function CashDrawer() {
       )}
 
       {/* Open Drawer Dialog */}
-      <Dialog open={openDrawerDialog} onClose={() => setOpenDrawerDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Open Cash Drawer</DialogTitle>
+      <Dialog open={openDrawerDialog} onClose={() => setOpenDrawerDialog(false)} maxWidth={isBlindCount ? "sm" : "md"} fullWidth>
+        <DialogTitle>Open Cash Drawer {!isBlindCount && '(Open Count Mode)'}</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <FormControl fullWidth required>
@@ -525,15 +675,26 @@ function CashDrawer() {
                 ))}
               </Select>
             </FormControl>
-            <TextField
-              label="Opening Balance"
-              type="number"
-              fullWidth
-              value={openingBalance}
-              onChange={(e) => setOpeningBalance(e.target.value)}
-              required
-              inputProps={{ step: '0.01', min: '0' }}
-            />
+
+            {isBlindCount ? (
+              <TextField
+                label="Opening Balance"
+                type="number"
+                fullWidth
+                value={openingBalance}
+                onChange={(e) => setOpeningBalance(e.target.value)}
+                required
+                inputProps={{ step: '0.01', min: '0' }}
+              />
+            ) : (
+              <>
+                {renderDenominationEntry(openingDenominations, setOpeningDenominations, calculateDenominationTotal(openingDenominations))}
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  Opening balance will be automatically set to the total of counted denominations: {formatCurrency(calculateDenominationTotal(openingDenominations))}
+                </Alert>
+              </>
+            )}
+
             <TextField
               label="Notes (Optional)"
               fullWidth
@@ -553,33 +714,61 @@ function CashDrawer() {
       </Dialog>
 
       {/* Close Drawer Dialog */}
-      <Dialog open={closeDrawerDialog} onClose={() => setCloseDrawerDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={closeDrawerDialog} onClose={() => setCloseDrawerDialog(false)} maxWidth={isBlindCount ? "sm" : "md"} fullWidth>
         <DialogTitle>Close Cash Drawer</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Alert severity="info">
               Expected Balance: {formatCurrency(activeSession?.current_expected_balance)}
             </Alert>
-            <TextField
-              label="Actual Balance (Counted)"
-              type="number"
-              fullWidth
-              value={actualBalance}
-              onChange={(e) => setActualBalance(e.target.value)}
-              required
-              inputProps={{ step: '0.01', min: '0' }}
-              autoFocus
-            />
-            {actualBalance && activeSession && (
-              <Box>
-                <Typography variant="body2" color="text.secondary">
-                  Discrepancy: {' '}
-                  <strong>
-                    {formatCurrency(parseFloat(actualBalance) - activeSession.current_expected_balance)}
-                  </strong>
-                </Typography>
-              </Box>
+
+            {isBlindCount ? (
+              <>
+                <TextField
+                  label="Actual Balance (Counted)"
+                  type="number"
+                  fullWidth
+                  value={actualBalance}
+                  onChange={(e) => setActualBalance(e.target.value)}
+                  required
+                  inputProps={{ step: '0.01', min: '0' }}
+                  autoFocus
+                />
+                {actualBalance && activeSession && (
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Discrepancy: {' '}
+                      <strong>
+                        {formatCurrency(parseFloat(actualBalance) - activeSession.current_expected_balance)}
+                      </strong>
+                    </Typography>
+                  </Box>
+                )}
+              </>
+            ) : (
+              <>
+                {renderDenominationEntry(closingDenominations, setClosingDenominations, calculateDenominationTotal(closingDenominations))}
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  Actual balance will be automatically set to the total of counted denominations: {formatCurrency(calculateDenominationTotal(closingDenominations))}
+                </Alert>
+                {calculateDenominationTotal(closingDenominations) > 0 && activeSession && (
+                  <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Actual Balance (Counted): {formatCurrency(calculateDenominationTotal(closingDenominations))}
+                    </Typography>
+                    <Typography variant="body1" sx={{ mt: 1 }} color={
+                      Math.abs(calculateDenominationTotal(closingDenominations) - activeSession.current_expected_balance) === 0 ? 'success.main' : 'error.main'
+                    }>
+                      <strong>Discrepancy: {formatCurrency(calculateDenominationTotal(closingDenominations) - activeSession.current_expected_balance)}</strong>
+                    </Typography>
+                  </Box>
+                )}
+              </>
             )}
+
             <TextField
               label="Closing Notes (Optional)"
               fullWidth

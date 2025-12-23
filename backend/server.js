@@ -755,6 +755,101 @@ app.put('/api/cash-drawer/:sessionId/reconcile', async (req, res) => {
   }
 });
 
+// POST /api/cash-drawer/:sessionId/denominations - Save cash denominations for a session
+app.post('/api/cash-drawer/:sessionId/denominations', async (req, res) => {
+  const { sessionId } = req.params;
+  const { denomination_type, counted_by, notes, ...denominations } = req.body;
+
+  // Validation
+  if (!denomination_type || !['opening', 'closing'].includes(denomination_type)) {
+    return res.status(400).json({ error: 'denomination_type must be either "opening" or "closing"' });
+  }
+
+  if (!counted_by) {
+    return res.status(400).json({ error: 'counted_by (employee_id) is required' });
+  }
+
+  try {
+    // Check if session exists
+    const sessionCheck = await pool.query(
+      'SELECT session_id FROM cash_drawer_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Check if denomination entry already exists for this session and type
+    const existingCheck = await pool.query(
+      'SELECT denomination_id FROM cash_denominations WHERE session_id = $1 AND denomination_type = $2',
+      [sessionId, denomination_type]
+    );
+
+    let result;
+    if (existingCheck.rows.length > 0) {
+      // Update existing entry
+      result = await pool.query(`
+        UPDATE cash_denominations
+        SET bill_100 = $1, bill_50 = $2, bill_20 = $3, bill_10 = $4, bill_5 = $5,
+            coin_2 = $6, coin_1 = $7, coin_0_25 = $8, coin_0_10 = $9, coin_0_05 = $10,
+            counted_by = $11, counted_at = CURRENT_TIMESTAMP, notes = $12
+        WHERE session_id = $13 AND denomination_type = $14
+        RETURNING *, total_amount
+      `, [
+        denominations.bill_100 || 0, denominations.bill_50 || 0, denominations.bill_20 || 0,
+        denominations.bill_10 || 0, denominations.bill_5 || 0, denominations.coin_2 || 0,
+        denominations.coin_1 || 0, denominations.coin_0_25 || 0, denominations.coin_0_10 || 0,
+        denominations.coin_0_05 || 0, counted_by, notes || null, sessionId, denomination_type
+      ]);
+    } else {
+      // Insert new entry
+      result = await pool.query(`
+        INSERT INTO cash_denominations (
+          session_id, denomination_type, bill_100, bill_50, bill_20, bill_10, bill_5,
+          coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05, counted_by, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        RETURNING *, total_amount
+      `, [
+        sessionId, denomination_type, denominations.bill_100 || 0, denominations.bill_50 || 0,
+        denominations.bill_20 || 0, denominations.bill_10 || 0, denominations.bill_5 || 0,
+        denominations.coin_2 || 0, denominations.coin_1 || 0, denominations.coin_0_25 || 0,
+        denominations.coin_0_10 || 0, denominations.coin_0_05 || 0, counted_by, notes || null
+      ]);
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error saving denominations:', error);
+    res.status(500).json({ error: 'Failed to save denominations' });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/denominations/:type - Get denominations for a session
+app.get('/api/cash-drawer/:sessionId/denominations/:type', async (req, res) => {
+  const { sessionId, type } = req.params;
+
+  if (!['opening', 'closing'].includes(type)) {
+    return res.status(400).json({ error: 'Type must be either "opening" or "closing"' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT * FROM cash_denominations
+      WHERE session_id = $1 AND denomination_type = $2
+    `, [sessionId, type]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Denominations not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching denominations:', error);
+    res.status(500).json({ error: 'Failed to fetch denominations' });
+  }
+});
+
 // Drawer Configuration Routes
 // GET /api/drawer-config - Get drawer configuration
 app.get('/api/drawer-config', async (req, res) => {
@@ -1286,6 +1381,26 @@ app.get('/api/user_preferences', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching user preferences:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET route for fetching a specific user preference by name
+app.get('/api/user_preferences/:preferenceName', async (req, res) => {
+  try {
+    const { preferenceName } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM user_preferences WHERE preference_name = $1',
+      [preferenceName]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Preference not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching user preference:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
