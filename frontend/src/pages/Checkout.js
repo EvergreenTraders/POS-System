@@ -335,10 +335,14 @@ function Checkout() {
       let itemValue = 0;
       const transactionType = item.transaction_type?.toLowerCase() || '';
 
-      if (item.price !== undefined) itemValue = parseFloat(item.price);
-      else if (item.value !== undefined) itemValue = parseFloat(item.value);
-      else if (item.fee !== undefined) itemValue = parseFloat(item.fee);
-      else if (item.amount !== undefined) itemValue = parseFloat(item.amount);
+      if (item.price !== undefined) itemValue = parseFloat(item.price) || 0;
+      else if (item.value !== undefined) itemValue = parseFloat(item.value) || 0;
+      else if (item.fee !== undefined) itemValue = parseFloat(item.fee) || 0;
+      else if (item.amount !== undefined) itemValue = parseFloat(item.amount) || 0;
+
+      // Add protection plan (15% of item price) if enabled
+      const protectionPlanAmount = item.protectionPlan ? itemValue * 0.15 : 0;
+      itemValue = itemValue + protectionPlanAmount;
 
       // Apply sign based on transaction type
       // Money going OUT (buy/pawn) = negative values
@@ -365,9 +369,14 @@ function Checkout() {
       // Only include sale/repair transactions
       if (transactionType === 'sale' || transactionType === 'repair') {
         let itemValue = 0;
-        if (item.price !== undefined) itemValue = parseFloat(item.price);
-        else if (item.value !== undefined) itemValue = parseFloat(item.value);
-        else if (item.fee !== undefined) itemValue = parseFloat(item.fee);
+        if (item.price !== undefined) itemValue = parseFloat(item.price) || 0;
+        else if (item.value !== undefined) itemValue = parseFloat(item.value) || 0;
+        else if (item.fee !== undefined) itemValue = parseFloat(item.fee) || 0;
+
+        // Add protection plan (15% of item price) if enabled
+        const protectionPlanAmount = item.protectionPlan ? itemValue * 0.15 : 0;
+        itemValue = itemValue + protectionPlanAmount;
+
         return total + Math.abs(itemValue);
       }
       return total;
@@ -1183,13 +1192,21 @@ function Checkout() {
             // Only update status for sale transactions with inventory items
             if (transactionType === 'sale' && item.item_id && item.fromInventory) {
               try {
-                console.log(`Updating item ${item.item_id} status to SOLD...`);
+                // Calculate total price including protection plan
+                const basePrice = parseFloat(item.price) || 0;
+                const protectionPlanAmount = item.protectionPlan ? basePrice * 0.15 : 0;
+                const totalItemPrice = basePrice + protectionPlanAmount;
+
+                console.log(`Updating item ${item.item_id} status to SOLD with item price ${totalItemPrice} (base: ${basePrice}, protection: ${protectionPlanAmount})...`);
                 const response = await axios.put(
                   `${config.apiUrl}/jewelry/${item.item_id}/status`,
-                  { status: 'SOLD' },
+                  {
+                    status: 'SOLD',
+                    item_price: totalItemPrice
+                  },
                   { headers: { Authorization: `Bearer ${token}` } }
                 );
-                console.log(`Successfully updated item ${item.item_id} status to SOLD`, response.data);
+                console.log(`Successfully updated item ${item.item_id} status to SOLD with item price`, response.data);
               } catch (updateError) {
                 console.error(`Error updating item ${item.item_id} status:`, updateError);
                 console.error('Error details:', updateError.response?.data);
@@ -1831,19 +1848,24 @@ function Checkout() {
                       
                       // Determine price to display
                       let price = 0;
-                      if (item.price !== undefined) price = item.price;
-                      else if (item.value !== undefined) price = item.value;
-                      else if (item.fee !== undefined) price = item.fee;
-                      else if (item.amount !== undefined) price = item.amount;
+                      if (item.price !== undefined) price = parseFloat(item.price) || 0;
+                      else if (item.value !== undefined) price = parseFloat(item.value) || 0;
+                      else if (item.fee !== undefined) price = parseFloat(item.fee) || 0;
+                      else if (item.amount !== undefined) price = parseFloat(item.amount) || 0;
+
+                      // Add protection plan (15% of item price) if enabled
+                      const protectionPlanAmount = item.protectionPlan ? price * 0.15 : 0;
+                      const totalPrice = price + protectionPlanAmount;
 
                       // Apply sign based on transaction type
                       // Money going OUT (buy/pawn) = negative values
                       // Money coming IN (sale/repair/other) = positive values
                       const itemTransactionType = (item.transaction_type || item.transactionType || '').toLowerCase();
+                      let displayPrice = totalPrice;
                       if (itemTransactionType === 'buy' || itemTransactionType === 'pawn') {
-                        price = -Math.abs(price);
+                        displayPrice = -Math.abs(totalPrice);
                       } else {
-                        price = Math.abs(price);
+                        displayPrice = Math.abs(totalPrice);
                       }
 
                       return (
@@ -1868,14 +1890,19 @@ function Checkout() {
                           <TableCell>
                             <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                               <span>{displayDescription}</span>
+                              {item.protectionPlan && (
+                                <span style={{ fontSize: '0.85em', color: '#666', fontStyle: 'italic' }}>
+                                  + Protection Plan (15%): ${protectionPlanAmount.toFixed(2)}
+                                </span>
+                              )}
                             </Box>
                           </TableCell>
                           <TableCell>{transactionType}</TableCell>
                           <TableCell align="right" sx={{
-                            color: price < 0 ? 'error.main' : 'success.main',
+                            color: displayPrice < 0 ? 'error.main' : 'success.main',
                             fontWeight: 'bold'
                           }}>
-                            ${parseFloat(price).toFixed(2)}
+                            ${parseFloat(displayPrice).toFixed(2)}
                           </TableCell>
                         </TableRow>
                       );

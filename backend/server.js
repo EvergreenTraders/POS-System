@@ -2133,7 +2133,7 @@ app.put('/api/jewelry/:id', async (req, res) => {
       'secondary_gem_category', 'secondary_gem_size', 'secondary_gem_quantity',
       'secondary_gem_shape', 'secondary_gem_color', 'secondary_gem_quality',
       'secondary_gem_weight', 'metal_spot_price', 'notes', 'price',
-      'melt_value', 'weight_grams', 'metal_category'
+      'melt_value', 'weight_grams', 'metal_category', 'item_price'
     ];
 
     for (const field of allowedFields) {
@@ -2181,7 +2181,7 @@ app.put('/api/jewelry/:id/status', async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, item_price } = req.body;
 
     if (!status) {
       return res.status(400).json({ error: 'Status is required' });
@@ -2200,15 +2200,27 @@ app.put('/api/jewelry/:id/status', async (req, res) => {
 
     const oldStatus = checkResult.rows[0].status;
 
-    // Update the status
-    const updateQuery = `
-      UPDATE jewelry
-      SET status = $1, updated_at = CURRENT_TIMESTAMP
-      WHERE item_id = $2
-      RETURNING *
-    `;
+    // Update the status and item_price when sold
+    let updateQuery, queryParams;
+    if (status === 'SOLD' && item_price !== undefined && item_price !== null) {
+      updateQuery = `
+        UPDATE jewelry
+        SET status = $1, item_price = $2, updated_at = CURRENT_TIMESTAMP
+        WHERE item_id = $3
+        RETURNING *
+      `;
+      queryParams = [status, item_price, id];
+    } else {
+      updateQuery = `
+        UPDATE jewelry
+        SET status = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE item_id = $2
+        RETURNING *
+      `;
+      queryParams = [status, id];
+    }
 
-    const result = await client.query(updateQuery, [status, id]);
+    const result = await client.query(updateQuery, queryParams);
 
     // Note: jewelry_history table doesn't exist, so we skip logging for now
     // If you need history tracking, create the jewelry_history table first
