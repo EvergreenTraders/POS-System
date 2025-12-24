@@ -709,6 +709,7 @@ const CustomerTicket = () => {
           // Store the original estimator data for editing
           originalData: { ...item },
           sourceEstimator: 'jewelry',
+          images: item.images || [],
           image: item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url || null
         };
         
@@ -974,6 +975,7 @@ const CustomerTicket = () => {
         buy_price: inventoryItem.buy_price,
         metal_weight: inventoryItem.metal_weight,
         item_id: inventoryItem.item_id,
+        images: inventoryItem.images || [],
         fromInventory: true,
         protectionPlan: false
       };
@@ -3151,38 +3153,42 @@ return (
                                     </Box>
                                   </TableCell>
                                   <TableCell align="center">
-                                    <Tooltip title="Click to capture image">
-                                      <IconButton
-                                        onClick={() => handleOpenCamera(item.id, 'sale')}
-                                        size="small"
-                                        sx={{
-                                          padding: 0,
-                                          '&:hover': { opacity: 0.7 }
-                                        }}
-                                      >
-                                        {item.images && item.images.length > 0 ? (
+                                    {item.images && item.images.length > 0 ? (
+                                      <Tooltip title="Item image">
+                                        <Box
+                                          sx={{
+                                            padding: 0,
+                                            display: 'inline-block'
+                                          }}
+                                        >
                                           <img
-                                            src={item.images[0].url}
+                                            src={
+                                              typeof item.images[0] === 'string'
+                                                ? (item.images[0].startsWith('http') ? item.images[0] : `http://localhost:5000${item.images[0]}`)
+                                                : (item.images[0].url?.startsWith('http') ? item.images[0].url : `http://localhost:5000${item.images[0].url}`)
+                                            }
                                             alt="Item"
                                             style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
                                           />
-                                        ) : (
-                                          <Box
-                                            sx={{
-                                              width: '50px',
-                                              height: '50px',
-                                              bgcolor: 'grey.200',
-                                              display: 'flex',
-                                              alignItems: 'center',
-                                              justifyContent: 'center',
-                                              borderRadius: '4px'
-                                            }}
-                                          >
-                                            <PhotoCamera sx={{ color: 'grey.400' }} />
-                                          </Box>
-                                        )}
-                                      </IconButton>
-                                    </Tooltip>
+                                        </Box>
+                                      </Tooltip>
+                                    ) : (
+                                      <Tooltip title="No image available">
+                                        <Box
+                                          sx={{
+                                            width: '50px',
+                                            height: '50px',
+                                            bgcolor: 'grey.200',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: '4px'
+                                          }}
+                                        >
+                                          <PhotoCamera sx={{ color: 'grey.400' }} />
+                                        </Box>
+                                      </Tooltip>
+                                    )}
                                   </TableCell>
                                   <TableCell>
                                     <TextField

@@ -2243,6 +2243,88 @@ app.put('/api/jewelry/:id/status', async (req, res) => {
   }
 });
 
+// Update jewelry item images
+app.put('/api/jewelry/:id/images', uploadJewelryImages, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    // Check if item exists
+    const checkQuery = 'SELECT item_id, images FROM jewelry WHERE item_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+
+    const uploadedFiles = req.files || [];
+    const processedImages = [];
+
+    // Parse existing images to determine next image number
+    let existingImages = [];
+    try {
+      if (checkResult.rows[0].images) {
+        existingImages = typeof checkResult.rows[0].images === 'string'
+          ? JSON.parse(checkResult.rows[0].images)
+          : checkResult.rows[0].images;
+      }
+    } catch (e) {
+      console.error('Error parsing existing images:', e);
+    }
+
+    // Save new uploaded files
+    for (let i = 0; i < uploadedFiles.length; i++) {
+      const file = uploadedFiles[i];
+      const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+
+      // Create filename: ITEMID-N.jpg where N is the next available number
+      const imageNumber = existingImages.length + i + 1;
+      const filename = `${id}-${imageNumber}${ext}`;
+      const filepath = path.join(jewelryUploadDir, filename);
+
+      // Save file to disk
+      await fs.promises.writeFile(filepath, file.buffer);
+
+      // Add to processed images
+      processedImages.push({
+        url: `/uploads/jewelry/${filename}`,
+        isPrimary: existingImages.length === 0 && i === 0 // First image is primary if no existing images
+      });
+    }
+
+    // Merge with existing images
+    const allImages = [...existingImages, ...processedImages];
+
+    // Update database with merged images
+    const updateQuery = `
+      UPDATE jewelry
+      SET images = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = $2
+      RETURNING *
+    `;
+
+    const result = await client.query(updateQuery, [JSON.stringify(allImages), id]);
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      item: result.rows[0],
+      message: `Added ${processedImages.length} image(s)`
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating jewelry images:', err);
+    res.status(500).json({
+      error: 'Failed to update jewelry images',
+      details: err.message
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // Get a single jewelry item by ID
 app.get('/api/jewelry/:id', async (req, res) => {
   try {

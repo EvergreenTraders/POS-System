@@ -2562,6 +2562,54 @@ function JewelryEdit() {
                     alt={item.short_desc || 'Jewelry item'}
                     style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
                   />
+                  <Button
+                    component="label"
+                    variant="outlined"
+                    size="small"
+                    sx={{ mt: 1, width: '100%' }}
+                  >
+                    Upload Image
+                    <input
+                      type="file"
+                      hidden
+                      accept="image/*"
+                      multiple
+                      onChange={async (e) => {
+                        const files = Array.from(e.target.files);
+                        if (files.length === 0) return;
+
+                        try {
+                          const formData = new FormData();
+                          files.forEach((file) => {
+                            formData.append('images', file);
+                          });
+
+                          const response = await axios.put(
+                            `${API_BASE_URL}/jewelry/${item.item_id}/images`,
+                            formData,
+                            {
+                              headers: {
+                                'Content-Type': 'multipart/form-data',
+                                Authorization: `Bearer ${localStorage.getItem('token')}`
+                              }
+                            }
+                          );
+
+                          if (response.data.success) {
+                            // Update all item states with new images to ensure consistency
+                            const updatedItem = response.data.item;
+                            setItem(updatedItem);
+                            setEditedItem(prev => ({ ...prev, images: updatedItem.images }));
+                            setBaselineItem(prev => ({ ...prev, images: updatedItem.images }));
+                            enqueueSnackbar(`Successfully uploaded ${files.length} image(s)`, { variant: 'success' });
+                          }
+                        } catch (error) {
+                          console.error('Error uploading images:', error);
+                          enqueueSnackbar('Failed to upload images', { variant: 'error' });
+                        }
+                      }}
+                    />
+                  </Button>
                 </Box>
                 
                 {/* Basic Item Info */}
@@ -2647,7 +2695,63 @@ function JewelryEdit() {
                   )}
                   </Box>
                 </Box>
-              
+
+              {/* Image Gallery Section */}
+              {item.images && (() => {
+                let images = [];
+                try {
+                  images = typeof item.images === 'string' ? JSON.parse(item.images) : item.images;
+                } catch (e) {
+                  console.error('Error parsing images:', e);
+                }
+
+                if (Array.isArray(images) && images.length > 1) {
+                  return (
+                    <Box sx={{ mb: 3 }}>
+                      <Typography variant="caption" color="textSecondary" sx={{ mb: 1, display: 'block' }}>
+                        All Images ({images.length})
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                        {images.map((img, idx) => (
+                          <Box
+                            key={idx}
+                            sx={{
+                              position: 'relative',
+                              width: 80,
+                              height: 80,
+                              border: img.isPrimary ? '2px solid #1976d2' : '1px solid #ddd',
+                              borderRadius: 1,
+                              overflow: 'hidden'
+                            }}
+                          >
+                            <img
+                              src={makeAbsoluteUrl(img.url || img.image_url || img)}
+                              alt={`Item ${idx + 1}`}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                            {img.isPrimary && (
+                              <Chip
+                                label="Primary"
+                                size="small"
+                                color="primary"
+                                sx={{
+                                  position: 'absolute',
+                                  bottom: 2,
+                                  left: 2,
+                                  height: 16,
+                                  fontSize: '0.65rem'
+                                }}
+                              />
+                            )}
+                          </Box>
+                        ))}
+                      </Box>
+                    </Box>
+                  );
+                }
+                return null;
+              })()}
+
               {/* Editable Fields in Grid Layout */}
               <Grid container spacing={2}>
                 
