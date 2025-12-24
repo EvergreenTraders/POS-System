@@ -2210,24 +2210,8 @@ app.put('/api/jewelry/:id/status', async (req, res) => {
 
     const result = await client.query(updateQuery, [status, id]);
 
-    // Log the status change to history
-    const historyQuery = `
-      INSERT INTO jewelry_history (item_id, changed_by, changed_fields)
-      VALUES ($1, $2, $3)
-    `;
-
-    const changedFields = {
-      status: {
-        from: oldStatus,
-        to: status
-      }
-    };
-
-    await client.query(historyQuery, [
-      id,
-      'system', // You can replace with actual user if available
-      JSON.stringify(changedFields)
-    ]);
+    // Note: jewelry_history table doesn't exist, so we skip logging for now
+    // If you need history tracking, create the jewelry_history table first
 
     await client.query('COMMIT');
     res.json({

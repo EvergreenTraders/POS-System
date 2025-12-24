@@ -1173,17 +1173,26 @@ function Checkout() {
           // Step 3.5: Update jewelry inventory status to SOLD for sale transactions
           for (const item of checkoutItems) {
             const transactionType = item.transaction_type?.toLowerCase() || '';
+            console.log(`Checking item for status update:`, {
+              item_id: item.item_id,
+              transactionType,
+              fromInventory: item.fromInventory,
+              shouldUpdate: transactionType === 'sale' && item.item_id && item.fromInventory
+            });
+
             // Only update status for sale transactions with inventory items
             if (transactionType === 'sale' && item.item_id && item.fromInventory) {
               try {
-                await axios.put(
+                console.log(`Updating item ${item.item_id} status to SOLD...`);
+                const response = await axios.put(
                   `${config.apiUrl}/jewelry/${item.item_id}/status`,
                   { status: 'SOLD' },
                   { headers: { Authorization: `Bearer ${token}` } }
                 );
-                console.log(`Updated item ${item.item_id} status to SOLD`);
+                console.log(`Successfully updated item ${item.item_id} status to SOLD`, response.data);
               } catch (updateError) {
                 console.error(`Error updating item ${item.item_id} status:`, updateError);
+                console.error('Error details:', updateError.response?.data);
                 // Continue with checkout even if status update fails
               }
             }

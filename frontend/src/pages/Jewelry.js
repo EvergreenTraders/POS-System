@@ -1034,8 +1034,8 @@ function Jewelry() {
                               sx={{
                                 minWidth: '120px',
                                 height: '28px',
-                                fontSize: '0.75rem',
-                                padding: '4px 8px',
+                                fontSize: '0.7rem',
+                                padding: '4px 4px',
                                 '& .MuiButton-label': {
                                   lineHeight: 1.2
                                 }
