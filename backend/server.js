@@ -4150,7 +4150,8 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
       return {
         id: row.id,
         transaction_id: row.transaction_id,
-        item_id: row.transaction_item_id,
+        item_id: row.item_id,
+        ticket_id: row.ticket_id,
         item_price: row.item_price,
         notes: row.notes || '',
         transaction_type: row.transaction_type,
