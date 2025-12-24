@@ -950,6 +950,48 @@ const CustomerTicket = () => {
     }
   }, [estimatedItems, from, location.state, customer]);
 
+  // Handle selected inventory item from Jewelry page
+  React.useEffect(() => {
+    if (location.state?.selectedInventoryItem) {
+      const stateHash = JSON.stringify({ selectedInventoryItem: location.state.selectedInventoryItem });
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+
+      const inventoryItem = location.state.selectedInventoryItem;
+
+      // Clear empty sale items if needed
+      const hasEmptySaleItems = saleItems.length === 1 && !saleItems[0].description;
+
+      // Create sale item from inventory - use original item_id as id
+      const newSaleItem = {
+        id: inventoryItem.item_id, // Use original item_id instead of generating new one
+        description: inventoryItem.description,
+        category: inventoryItem.category,
+        price: inventoryItem.price,
+        retail_price: inventoryItem.retail_price,
+        buy_price: inventoryItem.buy_price,
+        metal_weight: inventoryItem.metal_weight,
+        item_id: inventoryItem.item_id,
+        fromInventory: true,
+        protectionPlan: false
+      };
+
+      setSaleItems(prevItems => {
+        const newItems = hasEmptySaleItems ? [newSaleItem] : [...prevItems, newSaleItem];
+        saveTicketItems('sale', newItems);
+        return newItems;
+      });
+
+      setActiveTab(3); // Set active tab to Sale
+      showSnackbar('Inventory item added to sale ticket', 'success');
+
+      // Clear the location state
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
+
   // Recalculate totals whenever any item array changes
   React.useEffect(() => {
     // Calculate totals for all tabs

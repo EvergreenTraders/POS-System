@@ -591,6 +591,36 @@ function Jewelry() {
     }
   };
 
+  const handleAddToTicket = (item) => {
+    // Check if item is ACTIVE
+    const currentStatus = item.inventory_status || item.status;
+    if (currentStatus !== 'ACTIVE') {
+      enqueueSnackbar('Only ACTIVE items can be added to ticket', { variant: 'warning' });
+      return;
+    }
+
+    // Navigate to CustomerTicket with the selected item
+    const customer = location.state?.customer;
+    navigate('/customer-ticket', {
+      state: {
+        customer,
+        selectedInventoryItem: {
+          ...item,
+          id: item.item_id,
+          item_id: item.item_id,
+          description: item.short_desc || item.long_desc,
+          category: item.category,
+          price: item.retail_price || item.buy_price,
+          retail_price: item.retail_price,
+          buy_price: item.buy_price,
+          metal_weight: item.metal_weight,
+          transactionType: 'sale',
+          fromInventory: true
+        }
+      }
+    });
+  };
+
   const handleAddToCart = (item) => {
     // Check if item is ACTIVE
     const currentStatus = item.inventory_status || item.status;
@@ -947,7 +977,7 @@ function Jewelry() {
                   filteredItems.map((item) => (
                     <TableRow
                       key={item.id}
-                      sx={{ 
+                      sx={{
                         cursor: 'pointer',
                         '&:hover': { bgcolor: 'action.hover' },
                         bgcolor: selectedItem?.id === item.id ? 'action.selected' : 'inherit'
@@ -990,42 +1020,29 @@ function Jewelry() {
                               Edit
                             </Button>
                           )}
-                          {/* Only show Add to Cart button for ACTIVE status items */}
+                          {/* Only show Add to Ticket button for ACTIVE status items */}
                           {(item.inventory_status === 'ACTIVE' || item.status === 'ACTIVE') && (
-                            <Badge
-                              badgeContent={getItemCartCount(item.item_id)}
-                              color="error"
+                            <Button
+                              variant="contained"
+                              color="success"
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAddToTicket(item);
+                              }}
+                              startIcon={<ShoppingCartIcon />}
                               sx={{
-                                '& .MuiBadge-badge': {
-                                  right: -3,
-                                  top: 3,
-                                  border: '2px solid white',
-                                  padding: '0 4px',
+                                minWidth: '120px',
+                                height: '28px',
+                                fontSize: '0.75rem',
+                                padding: '4px 8px',
+                                '& .MuiButton-label': {
+                                  lineHeight: 1.2
                                 }
                               }}
                             >
-                              <Button
-                                variant="contained"
-                                color="success"
-                                size="small"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleAddToCart(item);
-                                }}
-                                startIcon={<ShoppingCartIcon />}
-                                sx={{
-                                  minWidth: '100px',
-                                  height: '28px',
-                                  fontSize: '0.75rem',
-                                  padding: '4px 8px',
-                                  '& .MuiButton-label': {
-                                    lineHeight: 1.2
-                                  }
-                                }}
-                              >
-                                Add to Cart
-                              </Button>
-                            </Badge>
+                              Add to Ticket
+                            </Button>
                           )}
                           {item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER' && (
                             <Button

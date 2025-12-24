@@ -129,8 +129,9 @@ function TransactionJournals() {
     setViewDialogOpen(true);
 
     try {
-      // Get all transaction items from the pre-fetched map
-      const items = transactionItemsMap[transaction.transaction_id] || [];
+      // Fetch transaction items from the updated endpoint (reads from buy_ticket/sale_ticket)
+      const itemsResponse = await axios.get(`${API_BASE_URL}/transactions/${transaction.transaction_id}/items`);
+      const items = itemsResponse.data || [];
       setTransactionItems(items);
 
       // Fetch payment details
@@ -159,8 +160,10 @@ function TransactionJournals() {
     } catch (error) {
       console.error('Error fetching transaction details:', error);
       // Initialize with empty data if there's an error
+      setTransactionItems([]);
       setPaymentDetails({ payments: [], total_paid: 0 });
       setBuyTickets([]);
+      setSaleTickets([]);
     } finally {
       setLoadingItems(false);
       setLoadingPayments(false);

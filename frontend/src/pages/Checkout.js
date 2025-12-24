@@ -631,12 +631,15 @@ function Checkout() {
         try {
           // Check if items are jewelry items (have jewelry-specific fields or sourceEstimator flag)
           // Use checkoutItems instead of cartItems to only process items being checked out
+          // Exclude items from inventory (they already exist in jewelry table)
           const hasJewelryItems = checkoutItems.some(item =>
-            item.sourceEstimator === 'jewelry' ||
-            item.metal_weight ||
-            item.metal_purity ||
-            item.precious_metal_type ||
-            item.originalData
+            !item.fromInventory && (
+              item.sourceEstimator === 'jewelry' ||
+              item.metal_weight ||
+              item.metal_purity ||
+              item.precious_metal_type ||
+              item.originalData
+            )
           );
 
           // Step 1: Create jewelry items FIRST (only if we have jewelry items)
@@ -709,9 +712,11 @@ function Checkout() {
             }
           } else if (hasJewelryItems) {
             // If coming from estimator, create new jewelry items (only if we have jewelry items)
+            // Filter out items from inventory as they already exist in the database
+            const newJewelryItems = checkoutItems.filter(item => !item.fromInventory);
 
             // Check if any items have actual file objects (not just blob URLs)
-            const hasImageFiles = checkoutItems.some(item =>
+            const hasImageFiles = newJewelryItems.some(item =>
               item.images && Array.isArray(item.images) &&
               item.images.some(img => img.file instanceof File)
             );
@@ -726,7 +731,7 @@ function Checkout() {
 
               // Collect all image files from all items and track their metadata
               const imageMetadata = [];
-              checkoutItems.forEach((item, itemIndex) => {
+              newJewelryItems.forEach((item, itemIndex) => {
                 if (item.images && Array.isArray(item.images)) {
                   item.images.forEach((img, imgIndex) => {
                     if (img.file instanceof File) {
@@ -743,7 +748,7 @@ function Checkout() {
               });
 
               // Process cart items to remove file objects but keep image metadata
-              const processedItems = checkoutItems.map(item => {
+              const processedItems = newJewelryItems.map(item => {
                 const { images, ...itemWithoutImages } = item;
 
                 // Keep image metadata (isPrimary flag) but remove file objects
@@ -792,7 +797,7 @@ function Checkout() {
               );
             } else {
               // No files, use regular JSON approach (for backward compatibility)
-              const processedItems = checkoutItems.map(item => {
+              const processedItems = newJewelryItems.map(item => {
                 const { images, ...itemWithoutImages } = item;
 
                 let processedImages = [];
@@ -910,18 +915,38 @@ function Checkout() {
             transaction_date: new Date().toISOString().split('T')[0]
           };
 
-          // Only add cartItems if we have jewelry items (which need item_id linking)
+          // Build cart items for transaction
+          // If we have created jewelry items, map them with their item_ids
+          // Also include items from inventory with their existing item_ids
           if (createdJewelryItems && createdJewelryItems.length > 0) {
-            transactionPayload.cartItems = createdJewelryItems.map((item, index) => {
-              const type = checkoutItems[index].transaction_type.toLowerCase();
+            // Map created jewelry items to cart items
+            let createdItemIndex = 0;
+            transactionPayload.cartItems = checkoutItems.map(item => {
+              const type = item.transaction_type?.toLowerCase() || 'sale';
+
+              // If this is an inventory item, use its existing item_id
+              if (item.fromInventory && item.item_id) {
+                return {
+                  item_id: item.item_id,
+                  transaction_type_id: transactionTypes[type],
+                  price: item.price,
+                  description: item.description
+                };
+              }
+
+              // Otherwise, use the newly created jewelry item
+              const createdItem = createdJewelryItems[createdItemIndex];
+              createdItemIndex++;
+
               return {
-                item_id: item.item_id,
+                item_id: createdItem.item_id,
                 transaction_type_id: transactionTypes[type],
-                price: checkoutItems[index].price
+                price: item.price,
+                description: item.description
               };
             });
           } else {
-            // For non-jewelry items from CustomerTicket, just send transaction type and price
+            // No newly created jewelry items - handle inventory and non-jewelry items
             transactionPayload.cartItems = checkoutItems.map(item => {
               const type = item.transaction_type?.toLowerCase() || 'sale';
               const transactionTypeId = transactionTypes[type];
@@ -932,14 +957,16 @@ function Checkout() {
                 return {
                   transaction_type_id: transactionTypes['sale'] || transactionTypes['retail'],
                   price: item.price,
-                  description: item.description || 'Item'
+                  description: item.description || 'Item',
+                  ...(item.fromInventory && item.item_id ? { item_id: item.item_id } : {})
                 };
               }
 
               return {
                 transaction_type_id: transactionTypeId,
                 price: item.price,
-                description: item.description || 'Item'
+                description: item.description || 'Item',
+                ...(item.fromInventory && item.item_id ? { item_id: item.item_id } : {})
               };
             });
           }
@@ -1150,7 +1177,7 @@ function Checkout() {
             if (transactionType === 'sale' && item.item_id && item.fromInventory) {
               try {
                 await axios.put(
-                  `${config.apiUrl}/jewelry/${item.item_id}`,
+                  `${config.apiUrl}/jewelry/${item.item_id}/status`,
                   { status: 'SOLD' },
                   { headers: { Authorization: `Bearer ${token}` } }
                 );
