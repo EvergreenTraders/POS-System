@@ -2222,8 +2222,49 @@ app.put('/api/jewelry/:id/status', async (req, res) => {
 
     const result = await client.query(updateQuery, queryParams);
 
-    // Note: jewelry_history table doesn't exist, so we skip logging for now
-    // If you need history tracking, create the jewelry_history table first
+    // Log status change to jewelry_item_history
+    try {
+      // Get the next version number for this item
+      const versionQuery = `
+        SELECT COALESCE(MAX(version_number), 0) + 1 as next_version
+        FROM jewelry_item_history
+        WHERE item_id = $1
+      `;
+      const versionResult = await client.query(versionQuery, [id]);
+      const nextVersion = versionResult.rows[0].next_version;
+
+      const historyQuery = `
+        INSERT INTO jewelry_item_history (item_id, version_number, changed_fields, changed_by, action_type, change_notes)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `;
+
+      const changedFields = {
+        status: {
+          from: oldStatus,
+          to: status
+        }
+      };
+
+      // If item_price was also updated, include it in the changed fields
+      if (status === 'SOLD' && item_price !== undefined && item_price !== null) {
+        changedFields.item_price = {
+          from: null,
+          to: item_price
+        };
+      }
+
+      await client.query(historyQuery, [
+        id,
+        nextVersion,
+        JSON.stringify(changedFields),
+        1, // Default user ID - should be passed from request if available
+        'update',
+        `Status updated from ${oldStatus} to ${status}`
+      ]);
+    } catch (historyError) {
+      console.error('Error logging status change to history:', historyError);
+      // Don't fail the request if history logging fails
+    }
 
     await client.query('COMMIT');
     res.json({
