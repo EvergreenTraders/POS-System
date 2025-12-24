@@ -2195,176 +2195,225 @@ const CustomerTicket = () => {
   };
   
   const handleCheckout = () => {
+    // Helper function to generate buyTicketId for a transaction type
+    const generateBuyTicketId = (transactionType) => {
+      let ticketPrefix;
+      switch(transactionType) {
+        case 'pawn': ticketPrefix = 'PT'; break;
+        case 'buy': ticketPrefix = 'BT'; break;
+        case 'trade': ticketPrefix = 'TT'; break;
+        case 'sale': ticketPrefix = 'ST'; break;
+        case 'repair': ticketPrefix = 'RT'; break;
+        case 'payment': ticketPrefix = 'PMT'; break;
+        case 'refund': ticketPrefix = 'RFT'; break;
+        default: ticketPrefix = 'TKT';
+      }
+
+      const storageKey = `last${ticketPrefix}TicketNumber`;
+      let lastTicketNumber = parseInt(localStorage.getItem(storageKey) || '0');
+      lastTicketNumber += 1;
+      localStorage.setItem(storageKey, lastTicketNumber.toString());
+      return `${ticketPrefix}-${lastTicketNumber.toString().padStart(8, '0')}`;
+    };
+
     // Get all valid items from all tabs
     const allItems = [];
-    
+
     // Add pawn items
     const validPawnItems = pawnItems.filter(item => item.description || item.value);
-    validPawnItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'pawn',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validPawnItems.length > 0) {
+      const pawnTicketId = generateBuyTicketId('pawn');
+      validPawnItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'pawn',
+          buyTicketId: pawnTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add buy items
     const validBuyItems = buyItems.filter(item => item.description || item.price);
-    validBuyItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'buy',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validBuyItems.length > 0) {
+      const buyTicketId = generateBuyTicketId('buy');
+      validBuyItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'buy',
+          buyTicketId: buyTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add trade items
     const validTradeItems = tradeItems.filter(item => item.tradeItem || item.storeItem);
-    validTradeItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'trade',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validTradeItems.length > 0) {
+      const tradeTicketId = generateBuyTicketId('trade');
+      validTradeItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'trade',
+          buyTicketId: tradeTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add sale items
     const validSaleItems = saleItems.filter(item => item.description || item.price);
-    validSaleItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'sale',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validSaleItems.length > 0) {
+      const saleTicketId = generateBuyTicketId('sale');
+      validSaleItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'sale',
+          buyTicketId: saleTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add repair items
     const validRepairItems = repairItems.filter(item => item.description || item.issue || item.fee);
-    validRepairItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'repair',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validRepairItems.length > 0) {
+      const repairTicketId = generateBuyTicketId('repair');
+      validRepairItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'repair',
+          buyTicketId: repairTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add payment items
     const validPaymentItems = paymentItems.filter(item => item.amount || item.method);
-    validPaymentItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'payment',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validPaymentItems.length > 0) {
+      const paymentTicketId = generateBuyTicketId('payment');
+      validPaymentItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'payment',
+          buyTicketId: paymentTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add refund items
     const validRefundItems = refundItems.filter(item => item.amount || item.method || item.reason);
-    validRefundItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'refund',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validRefundItems.length > 0) {
+      const refundTicketId = generateBuyTicketId('refund');
+      validRefundItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'refund',
+          buyTicketId: refundTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     if (allItems.length === 0) {
       showSnackbar('No valid items to proceed to checkout', 'warning');
       return;
     }
-    
+
     // Save all items to session storage for checkout
     sessionStorage.setItem('checkoutItems', JSON.stringify(allItems));
-    
+
     // Save customer data to session storage
     if (customer) {
       sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
     }
-    
+
     // Navigate to checkout
     navigate('/checkout');
   };

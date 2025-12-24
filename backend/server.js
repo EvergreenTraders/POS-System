@@ -3966,116 +3966,192 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
   try {
     const { transaction_id } = req.params;
 
-    // Get items from buy_ticket and sale_ticket tables (union of both)
-    const query = `
-      WITH item_list AS (
-        -- Get buy ticket items
-        SELECT
-          bt.id,
-          bt.transaction_id,
-          bt.item_id,
-          bt.buy_ticket_id as ticket_id,
-          bt.created_at,
-          j.updated_at,
-          'buy' as transaction_type,
-          j.item_id as jewelry_item_id,
-          j.long_desc,
-          j.short_desc,
-          j.category,
-          j.metal_weight,
-          j.precious_metal_type,
-          j.non_precious_metal_type,
-          j.metal_purity,
-          j.purity_value,
-          j.jewelry_color,
-          j.metal_spot_price,
-          j.est_metal_value,
-          j.buy_price as item_price,
-          j.images,
-          j.status as item_status,
-          j.primary_gem_type,
-          j.primary_gem_category,
-          j.primary_gem_size,
-          j.primary_gem_weight,
-          j.primary_gem_quantity,
-          j.primary_gem_shape,
-          j.primary_gem_color,
-          j.primary_gem_exact_color,
-          j.primary_gem_clarity,
-          j.primary_gem_cut,
-          j.primary_gem_lab_grown,
-          j.primary_gem_authentic,
-          j.primary_gem_value,
-          EXISTS (
-            SELECT * FROM jewelry_secondary_gems jsg
-            WHERE jsg.item_id = bt.item_id
-          ) as has_secondary_gems
-        FROM buy_ticket bt
-        LEFT JOIN jewelry j ON bt.item_id = j.item_id
-        WHERE bt.transaction_id = $1
-
-        UNION ALL
-
-        -- Get sale ticket items
-        SELECT
-          st.id,
-          st.transaction_id,
-          st.item_id,
-          st.sale_ticket_id as ticket_id,
-          st.created_at,
-          j.updated_at,
-          'sale' as transaction_type,
-          j.item_id as jewelry_item_id,
-          j.long_desc,
-          j.short_desc,
-          j.category,
-          j.metal_weight,
-          j.precious_metal_type,
-          j.non_precious_metal_type,
-          j.metal_purity,
-          j.purity_value,
-          j.jewelry_color,
-          j.metal_spot_price,
-          j.est_metal_value,
-          j.retail_price as item_price,
-          j.images,
-          j.status as item_status,
-          j.primary_gem_type,
-          j.primary_gem_category,
-          j.primary_gem_size,
-          j.primary_gem_weight,
-          j.primary_gem_quantity,
-          j.primary_gem_shape,
-          j.primary_gem_color,
-          j.primary_gem_exact_color,
-          j.primary_gem_clarity,
-          j.primary_gem_cut,
-          j.primary_gem_lab_grown,
-          j.primary_gem_authentic,
-          j.primary_gem_value,
-          EXISTS (
-            SELECT * FROM jewelry_secondary_gems jsg
-            WHERE jsg.item_id = st.item_id
-          ) as has_secondary_gems
-        FROM sale_ticket st
-        LEFT JOIN jewelry j ON st.item_id = j.item_id
-        WHERE st.transaction_id = $1
-      )
+    // First, try to get items from transaction_items table (legacy)
+    const transactionItemsQuery = `
       SELECT
-        il.*,
+        ti.id,
+        ti.transaction_id,
+        ti.item_id,
+        NULL as ticket_id,
+        ti.created_at,
+        j.updated_at,
+        CASE
+          WHEN ti.transaction_type_id = 1 THEN 'pawn'
+          WHEN ti.transaction_type_id = 2 THEN 'buy'
+          WHEN ti.transaction_type_id = 3 THEN 'sale'
+          WHEN ti.transaction_type_id = 4 THEN 'trade'
+          WHEN ti.transaction_type_id = 5 THEN 'repair'
+          WHEN ti.transaction_type_id = 6 THEN 'payment'
+          WHEN ti.transaction_type_id = 7 THEN 'refund'
+          ELSE 'unknown'
+        END as transaction_type,
+        j.item_id as jewelry_item_id,
+        j.long_desc,
+        j.short_desc,
+        j.category,
+        j.metal_weight,
+        j.precious_metal_type,
+        j.non_precious_metal_type,
+        j.metal_purity,
+        j.purity_value,
+        j.jewelry_color,
+        j.metal_spot_price,
+        j.est_metal_value,
+        CASE
+          WHEN ti.transaction_type_id = 2 THEN j.buy_price
+          ELSE j.retail_price
+        END as item_price,
+        j.images,
+        j.status as item_status,
+        j.primary_gem_type,
+        j.primary_gem_category,
+        j.primary_gem_size,
+        j.primary_gem_weight,
+        j.primary_gem_quantity,
+        j.primary_gem_shape,
+        j.primary_gem_color,
+        j.primary_gem_exact_color,
+        j.primary_gem_clarity,
+        j.primary_gem_cut,
+        j.primary_gem_lab_grown,
+        j.primary_gem_authentic,
+        j.primary_gem_value,
+        EXISTS (
+          SELECT * FROM jewelry_secondary_gems jsg
+          WHERE jsg.item_id = ti.item_id
+        ) as has_secondary_gems,
         (
           SELECT COALESCE(
             json_agg(jsg.*) FILTER (WHERE jsg.item_id IS NOT NULL),
             '[]'::json
           )
           FROM jewelry_secondary_gems jsg
-          WHERE jsg.item_id = il.item_id
+          WHERE jsg.item_id = ti.item_id
         ) as secondary_gems
-      FROM item_list il
-      ORDER BY il.created_at ASC
+      FROM transaction_items ti
+      LEFT JOIN jewelry j ON ti.item_id = j.item_id
+      WHERE ti.transaction_id = $1
+      ORDER BY ti.created_at ASC
     `;
 
-    const result = await pool.query(query, [transaction_id]);
+    const transactionItemsResult = await pool.query(transactionItemsQuery, [transaction_id]);
+
+    // If items found in transaction_items, use those
+    let result;
+    if (transactionItemsResult.rows.length > 0) {
+      result = transactionItemsResult;
+    } else {
+      // Fallback: Get items from buy_ticket and sale_ticket tables (union of both)
+      const ticketQuery = `
+        WITH item_list AS (
+          -- Get buy ticket items
+          SELECT
+            bt.id,
+            bt.transaction_id,
+            bt.item_id,
+            bt.buy_ticket_id as ticket_id,
+            bt.created_at,
+            j.updated_at,
+            'buy' as transaction_type,
+            j.item_id as jewelry_item_id,
+            j.long_desc,
+            j.short_desc,
+            j.category,
+            j.metal_weight,
+            j.precious_metal_type,
+            j.non_precious_metal_type,
+            j.metal_purity,
+            j.purity_value,
+            j.jewelry_color,
+            j.metal_spot_price,
+            j.est_metal_value,
+            j.buy_price as item_price,
+            j.images,
+            j.status as item_status,
+            j.primary_gem_type,
+            j.primary_gem_category,
+            j.primary_gem_size,
+            j.primary_gem_weight,
+            j.primary_gem_quantity,
+            j.primary_gem_shape,
+            j.primary_gem_color,
+            j.primary_gem_exact_color,
+            j.primary_gem_clarity,
+            j.primary_gem_cut,
+            j.primary_gem_lab_grown,
+            j.primary_gem_authentic,
+            j.primary_gem_value,
+            EXISTS (
+              SELECT * FROM jewelry_secondary_gems jsg
+              WHERE jsg.item_id = bt.item_id
+            ) as has_secondary_gems
+          FROM buy_ticket bt
+          LEFT JOIN jewelry j ON bt.item_id = j.item_id
+          WHERE bt.transaction_id = $1
+
+          UNION ALL
+
+          -- Get sale ticket items
+          SELECT
+            st.id,
+            st.transaction_id,
+            st.item_id,
+            st.sale_ticket_id as ticket_id,
+            st.created_at,
+            j.updated_at,
+            'sale' as transaction_type,
+            j.item_id as jewelry_item_id,
+            j.long_desc,
+            j.short_desc,
+            j.category,
+            j.metal_weight,
+            j.precious_metal_type,
+            j.non_precious_metal_type,
+            j.metal_purity,
+            j.purity_value,
+            j.jewelry_color,
+            j.metal_spot_price,
+            j.est_metal_value,
+            j.retail_price as item_price,
+            j.images,
+            j.status as item_status,
+            j.primary_gem_type,
+            j.primary_gem_category,
+            j.primary_gem_size,
+            j.primary_gem_weight,
+            j.primary_gem_quantity,
+            j.primary_gem_shape,
+            j.primary_gem_color,
+            j.primary_gem_exact_color,
+            j.primary_gem_clarity,
+            j.primary_gem_cut,
+            j.primary_gem_lab_grown,
+            j.primary_gem_authentic,
+            j.primary_gem_value,
+            EXISTS (
+              SELECT * FROM jewelry_secondary_gems jsg
+              WHERE jsg.item_id = st.item_id
+            ) as has_secondary_gems
+          FROM sale_ticket st
+          LEFT JOIN jewelry j ON st.item_id = j.item_id
+          WHERE st.transaction_id = $1
+        )
+        SELECT
+          il.*,
+          (
+            SELECT COALESCE(
+              json_agg(jsg.*) FILTER (WHERE jsg.item_id IS NOT NULL),
+              '[]'::json
+            )
+            FROM jewelry_secondary_gems jsg
+            WHERE jsg.item_id = il.item_id
+          ) as secondary_gems
+        FROM item_list il
+        ORDER BY il.created_at ASC
+      `;
+
+      result = await pool.query(ticketQuery, [transaction_id]);
+    }
     
     // Transform the result to a more usable format
     const items = result.rows.map(row => {
