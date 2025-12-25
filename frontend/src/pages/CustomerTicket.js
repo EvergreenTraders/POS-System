@@ -1378,20 +1378,124 @@ const CustomerTicket = () => {
     return tabNames[tabIndex] || 'Unknown';
   };
 
-  const handleJewelryEstimatorClick = () => {
-    navigate('/inventory', { state: { customer } });
+  const [jewelryInventoryDialog, setJewelryInventoryDialog] = React.useState({
+    open: false,
+    itemId: null,
+    transactionType: null
+  });
+  const [jewelryInventoryItems, setJewelryInventoryItems] = React.useState([]);
+  const [selectedJewelryEstimator, setSelectedJewelryEstimator] = React.useState({});
+
+  const handleJewelryEstimatorClick = async (itemId, transactionType) => {
+    // For Sale tab, open inventory dialog
+    if (transactionType === 'sale') {
+      try {
+        const response = await fetch(`${config.apiUrl}/jewelry?status=ACTIVE`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        const items = await response.json();
+        setJewelryInventoryItems(items);
+        setJewelryInventoryDialog({ open: true, itemId, transactionType });
+      } catch (error) {
+        console.error('Error fetching jewelry inventory:', error);
+      }
+    } else {
+      // For other tabs, just toggle the highlight/selection
+      const key = `${transactionType}-${itemId}`;
+      setSelectedJewelryEstimator(prev => ({
+        ...prev,
+        [key]: !prev[key]
+      }));
+
+      // Mark the item as jewelry inventory
+      const updateItems = (items) => items.map(item => {
+        if (item.id === itemId) {
+          return {
+            ...item,
+            fromJewelryInventory: !item.fromJewelryInventory
+          };
+        }
+        return item;
+      });
+
+      if (transactionType === 'pawn') setPawnItems(updateItems);
+      else if (transactionType === 'buy') setBuyItems(updateItems);
+      else if (transactionType === 'trade') setTradeItems(updateItems);
+      else if (transactionType === 'repair') setRepairItems(updateItems);
+      else if (transactionType === 'payment') setPaymentItems(updateItems);
+      else if (transactionType === 'refund') setRefundItems(updateItems);
+    }
   };
 
-  // Parse description format: JR 10k 2g YG
-  // J = Jewelry, R = Ring, 10k = purity, 2g = weight, Y = Yellow, G = Gold
-  const parseDescription = (description) => {
+  const handleSelectJewelryItem = (jewelryItem) => {
+    const { itemId, transactionType } = jewelryInventoryDialog;
+
+    // Build description without J prefix since it's from jewelry inventory
+    const description = buildJewelryDescription(jewelryItem);
+
+    // Update the item with jewelry details
+    const updateItems = (items) => items.map(item => {
+      if (item.id === itemId) {
+        return {
+          ...item,
+          description,
+          fromJewelryInventory: true,
+          jewelryItemId: jewelryItem.item_id
+        };
+      }
+      return item;
+    });
+
+    if (transactionType === 'pawn') setPawnItems(updateItems);
+    else if (transactionType === 'buy') setBuyItems(updateItems);
+    else if (transactionType === 'trade') setTradeItems(updateItems);
+    else if (transactionType === 'sale') setSaleItems(updateItems);
+    else if (transactionType === 'repair') setRepairItems(updateItems);
+    else if (transactionType === 'payment') setPaymentItems(updateItems);
+    else if (transactionType === 'refund') setRefundItems(updateItems);
+
+    setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null });
+  };
+
+  const buildJewelryDescription = (item) => {
+    const parts = [];
+
+    // Category (R for Ring, B for Bracelet, etc.)
+    if (item.category) {
+      const categoryCode = item.category.charAt(0).toUpperCase();
+      parts.push(categoryCode);
+    }
+
+    // Purity (10k, 14k, etc.)
+    if (item.metal_purity) {
+      parts.push(item.metal_purity);
+    }
+
+    // Weight (2g, 5.6g, etc.)
+    if (item.metal_weight) {
+      parts.push(`${item.metal_weight}g`);
+    }
+
+    // Color (YG, WG, RG, etc.)
+    if (item.jewelry_color) {
+      parts.push(item.jewelry_color);
+    }
+
+    return parts.join(' ');
+  };
+
+  // Parse description format: R 10k 2g YG (when fromJewelryInventory=true)
+  // R = Ring, 10k = purity, 2g = weight, YG = Yellow Gold
+  const parseDescription = (description, fromJewelryInventory = false) => {
     if (!description) return null;
 
     const parts = description.trim().toUpperCase().split(/\s+/);
-    if (parts.length < 3) return null; // Minimum: purity, weight, metal (e.g., "10k 5.6g RG")
+    if (parts.length < 3) return null; // Minimum: category/purity, weight, metal (e.g., "10k 5.6g RG" or "R 10k 2g YG")
 
     const parsed = {
-      type: null,
+      type: fromJewelryInventory ? 'Jewelry' : null,
       category: null,
       purity: null,
       weight: null,
@@ -1400,34 +1504,17 @@ const CustomerTicket = () => {
     };
 
     let partIndex = 0;
-
-    // Check if first part is Type + Category (e.g., "JR" = Jewelry Ring)
-    // Type+Category should have at least 2 chars and first char should be J, B, or M
-    const typeMap = { 'J': 'Jewelry', 'B': 'Bullion', 'M': 'Misc' };
     const firstPart = parts[0];
-    const firstChar = firstPart[0];
 
-    // Determine if the first part is a type+category or just purity
-    let hasTypeCategory = false;
-    if (firstPart.length >= 2 && typeMap[firstChar]) {
-      // Check if second part looks like purity (to confirm first part is type+category)
-      if (parts.length >= 4) {
-        const secondPart = parts[1];
-        // Check for numeric purity (10K, 0.999) or text purity (pure, sterling)
-        if (secondPart.match(/^\d+K?$/i) || secondPart.match(/^0?\.\d+$/) || secondPart.match(/^1\.0+$/) || secondPart.match(/^[a-zA-Z]+$/)) {
-          hasTypeCategory = true;
-        }
+    // Check if first part looks like a category code (single letter) and second part looks like purity
+    if (fromJewelryInventory && parts.length >= 3 && firstPart.length === 1) {
+      const potentialPurity = parts[1];
+
+      if (potentialPurity.match(/^\d+K?$/i) || potentialPurity.match(/^0?\.\d+$/) || potentialPurity.match(/^1\.0+$/) || potentialPurity.match(/^[a-zA-Z]+$/)) {
+        // First part is category code
+        parsed.category = categoryCodeMap[firstPart] || firstPart;
+        partIndex++;
       }
-    }
-
-    if (hasTypeCategory) {
-      // Parse Type + Category
-      const typeCategory = parts[partIndex++];
-      const typeCode = typeCategory[0];
-      const categoryCode = typeCategory.substring(1);
-
-      parsed.type = typeMap[typeCode] || null;
-      parsed.category = categoryCodeMap[categoryCode] || categoryCode;
     }
 
     // Parse Purity (e.g., "10K", "14K", "18K", "24K", "0.585", "0.999", "pure", "sterling")
@@ -1499,7 +1586,7 @@ const CustomerTicket = () => {
       const item = items.find(i => i.id === itemId);
       if (!item || !item.description) return;
 
-      const parsed = parseDescription(item.description);
+      const parsed = parseDescription(item.description, item.fromJewelryInventory);
 
       if (!parsed) {
         return;
@@ -2731,7 +2818,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'pawn')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`pawn-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`pawn-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`pawn-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -2788,7 +2886,7 @@ return (
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                                     onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
-                                    placeholder="e.g., JR 10k 2g YG"
+                                    placeholder="e.g., R 10k 2g YG"
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -2860,7 +2958,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'buy')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`buy-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`buy-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`buy-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -2917,7 +3026,7 @@ return (
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                                     onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
-                                    placeholder="e.g., JR 10k 2g YG"
+                                    placeholder="e.g., R 10k 2g YG"
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -2991,7 +3100,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'trade')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`trade-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`trade-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`trade-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -3136,7 +3256,7 @@ return (
                                   <TableCell align="center" padding="normal">
                                     <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                       <Tooltip title="Inventory">
-                                        <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                        <IconButton size="small" color="secondary" onClick={() => handleJewelryEstimatorClick(item.id, 'sale')}>
                                           <DiamondIcon fontSize="small" />
                                         </IconButton>
                                       </Tooltip>
@@ -3197,7 +3317,7 @@ return (
                                       value={item.description}
                                       onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                                       onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
-                                      placeholder="e.g., JR 10k 2g YG"
+                                      placeholder="e.g., R 10k 2g YG"
                                     />
                                   </TableCell>
                                   <TableCell>
@@ -3299,7 +3419,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'repair')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`repair-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`repair-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`repair-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -3356,7 +3487,7 @@ return (
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                                     onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
-                                    placeholder="e.g., JR 10k 2g YG"
+                                    placeholder="e.g., R 10k 2g YG"
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -3445,7 +3576,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'payment')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`payment-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`payment-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`payment-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -3590,7 +3732,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'refund')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`refund-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`refund-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`refund-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -3985,6 +4138,64 @@ return (
         <DialogActions>
           <Button onClick={handleCombinedCancel} startIcon={<ClearIcon />}>Cancel</Button>
           <Button onClick={handleCombinedSave} variant="contained" color="primary" startIcon={<AddIcon />}>Add to Ticket</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Jewelry Inventory Selection Dialog */}
+      <Dialog
+        open={jewelryInventoryDialog.open}
+        onClose={() => setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null })}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>Select Jewelry from Inventory</DialogTitle>
+        <DialogContent>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Item ID</TableCell>
+                  <TableCell>Description</TableCell>
+                  <TableCell>Category</TableCell>
+                  <TableCell>Metal</TableCell>
+                  <TableCell>Purity</TableCell>
+                  <TableCell>Weight</TableCell>
+                  <TableCell>Color</TableCell>
+                  <TableCell>Price</TableCell>
+                  <TableCell>Action</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {jewelryInventoryItems.map((item) => (
+                  <TableRow key={item.item_id} hover>
+                    <TableCell>{item.item_id}</TableCell>
+                    <TableCell>{item.short_desc || item.long_desc}</TableCell>
+                    <TableCell>{item.category}</TableCell>
+                    <TableCell>{item.precious_metal_type}</TableCell>
+                    <TableCell>{item.metal_purity}</TableCell>
+                    <TableCell>{item.metal_weight}g</TableCell>
+                    <TableCell>{item.jewelry_color}</TableCell>
+                    <TableCell>${item.item_price}</TableCell>
+                    <TableCell>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="primary"
+                        onClick={() => handleSelectJewelryItem(item)}
+                      >
+                        Select
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null })}>
+            Cancel
+          </Button>
         </DialogActions>
       </Dialog>
     </Container>
