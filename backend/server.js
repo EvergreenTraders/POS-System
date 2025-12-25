@@ -1701,9 +1701,7 @@ app.put('/api/quotes/:id', async (req, res) => {
         c.email as customer_email,
         c.phone as customer_phone,
         j.short_desc as item_description,
-        j.buy_price,
-        j.pawn_value,
-        j.retail_price
+        j.item_price
       FROM quotes q
       LEFT JOIN customers c ON q.customer_id = c.id
       LEFT JOIN jewelry j ON q.item_id = j.item_id
@@ -1733,14 +1731,12 @@ app.get('/api/quotes/:quote_id/items', async (req, res) => {
     const { quote_id } = req.params;
     
     const query = `
-      SELECT 
+      SELECT
         qi.item_id,
         qi.item_price,
         tt.type as transaction_type,
         j.short_desc as description,
-        j.buy_price,
-        j.pawn_value,
-        j.retail_price,
+        j.item_price as jewelry_item_price,
         j.precious_metal_type,
         j.metal_spot_price,
         j.metal_weight,
@@ -1947,17 +1943,7 @@ app.put('/api/jewelry/quote/:quoteId/convert', async (req, res) => {
         // Generate new item ID based on metal category
         const usedIds = new Set();
         const newItemId = await generateItemId(jewelryItem.metal_category, client, usedIds);
-      
-        // Prepare price update based on transaction type
-        let priceUpdate = '';
-        if (quoteItem.transaction_type === 'buy') {
-          priceUpdate = 'buy_price = $3';
-        } else if (quoteItem.transaction_type === 'pawn') {
-          priceUpdate = 'pawn_value = $3';
-        } else if (quoteItem.transaction_type === 'retail') {
-          priceUpdate = 'retail_price = $3';
-        }
-        
+
         const deleteQuoteItemQuery = `
           DELETE FROM quote_items
           WHERE quote_id = $1 AND item_id = $2
@@ -1966,11 +1952,11 @@ app.put('/api/jewelry/quote/:quoteId/convert', async (req, res) => {
 
         // Update jewelry item
         const updateQuery = `
-          UPDATE jewelry 
-          SET 
+          UPDATE jewelry
+          SET
             item_id = $1,
             status = $2,
-            ${priceUpdate},
+            item_price = $3,
             updated_at = CURRENT_TIMESTAMP
           WHERE item_id = $4
           RETURNING *
@@ -2523,9 +2509,6 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           primary_gem_lab_grown,
           primary_gem_authentic,
           primary_gem_value,
-          buy_price,
-          pawn_value,
-          retail_price,
           status,
           location,
           condition,
@@ -2535,7 +2518,7 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           melt_value,
           total_weight,
           inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
         RETURNING *`;
 
       const jewelryValues = [
@@ -2567,9 +2550,6 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         item.primary_gem_lab_grown || false,
         item.primary_gem_authentic || false,
         parseFloat(item.primary_gem_value) || 0,
-        item.buy_price,
-        item.pawn_price,
-        item.retail_price,
         status,
         'SOUTH STORE',
         'GOOD',
@@ -2722,9 +2702,6 @@ app.post('/api/jewelry', async (req, res) => {
           primary_gem_lab_grown,
           primary_gem_authentic,
           primary_gem_value,
-          buy_price,
-          pawn_value,
-          retail_price,
           status,
           location,
           condition,
@@ -2734,7 +2711,7 @@ app.post('/api/jewelry', async (req, res) => {
           melt_value,
           total_weight,
           inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
         RETURNING *`;
 
       const jewelryValues = [
@@ -2745,7 +2722,7 @@ app.post('/api/jewelry', async (req, res) => {
         item.brand || '',                                       // 5
         item.vintage || false,                                 // 6
         item.stamps || '',                                     // 7
-        JSON.stringify(item.images || []),                      // 8 - Ensure proper JSON string format
+        JSON.stringify(item.images || []),                      // 8
         parseFloat(item.metal_weight) || 0,                       // 9
         item.precious_metal_type || '',                           // 10
         item.non_precious_metal_type || '',                       // 11
@@ -2766,16 +2743,13 @@ app.post('/api/jewelry', async (req, res) => {
         item.primary_gem_lab_grown || false,                     // 26
         item.primary_gem_authentic || false,                     // 27
         parseFloat(item.primary_gem_value) || 0,                 // 28
-        item.buy_price,    // 29
-        item.pawn_price,   // 30
-        item.retail_price, // 31
-        status,         //32
-        'SOUTH STORE',          // 33
-        'GOOD',          // 34
-        item.metal_spot_price,
-        item.notes,
-        item.price,
-        item.melt_value,
+        status,         // 29
+        'SOUTH STORE',          // 30
+        'GOOD',          // 31
+        item.metal_spot_price,  // 32
+        item.notes,  // 33
+        item.price,  // 34
+        item.melt_value,  // 35
         // Calculate total weight: metal_weight + primary_gem_weight + sum(secondary_gem_weights)
         (parseFloat(item.metal_weight) || 0) + 
         (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
@@ -4132,10 +4106,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
         j.jewelry_color,
         j.metal_spot_price,
         j.est_metal_value,
-        CASE
-          WHEN ti.transaction_type_id = 2 THEN j.buy_price
-          ELSE j.retail_price
-        END as item_price,
+        j.item_price,
         j.images,
         j.status as item_status,
         j.primary_gem_type,
@@ -4200,7 +4171,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.jewelry_color,
             j.metal_spot_price,
             j.est_metal_value,
-            j.buy_price as item_price,
+            j.item_price,
             j.images,
             j.status as item_status,
             j.primary_gem_type,
@@ -4247,7 +4218,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.jewelry_color,
             j.metal_spot_price,
             j.est_metal_value,
-            j.retail_price as item_price,
+            j.item_price,
             j.images,
             j.status as item_status,
             j.primary_gem_type,

@@ -1192,12 +1192,16 @@ function Checkout() {
             // Only update status for sale transactions with inventory items
             if (transactionType === 'sale' && item.item_id && item.fromInventory) {
               try {
-                // Calculate total price including protection plan
+                // Calculate total price including protection plan and tax
                 const basePrice = parseFloat(item.price) || 0;
                 const protectionPlanAmount = item.protectionPlan ? basePrice * 0.15 : 0;
-                const totalItemPrice = basePrice + protectionPlanAmount;
+                const subtotal = basePrice + protectionPlanAmount;
 
-                console.log(`Updating item ${item.item_id} status to SOLD with item price ${totalItemPrice} (base: ${basePrice}, protection: ${protectionPlanAmount})...`);
+                // Calculate tax (check if customer is tax exempt)
+                const taxAmount = selectedCustomer?.tax_exempt ? 0 : subtotal * taxRate;
+                const totalItemPrice = subtotal + taxAmount;
+
+                console.log(`Updating item ${item.item_id} status to SOLD with item price ${totalItemPrice} (base: ${basePrice}, protection: ${protectionPlanAmount}, tax: ${taxAmount})...`);
                 const response = await axios.put(
                   `${config.apiUrl}/jewelry/${item.item_id}/status`,
                   {

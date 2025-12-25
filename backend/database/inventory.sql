@@ -60,11 +60,8 @@ CREATE TABLE IF NOT EXISTS jewelry (
     primary_gem_lab_grown BOOLEAN DEFAULT false,
     primary_gem_authentic BOOLEAN DEFAULT false,
     primary_gem_value DECIMAL(10,2),
-    
+
     -- Pricing
-    buy_price DECIMAL(10,2),
-    pawn_value DECIMAL(10,2),
-    retail_price DECIMAL(10,2),
     item_price DECIMAL(10,2),
 
     -- Status and tracking
@@ -78,9 +75,6 @@ CREATE TABLE IF NOT EXISTS jewelry (
     
     -- Constraints
     CONSTRAINT valid_metal_weight CHECK (metal_weight > 0),
-    CONSTRAINT valid_buy_price CHECK (buy_price >= 0),
-    CONSTRAINT valid_pawn_value CHECK (pawn_value >= 0),
-    CONSTRAINT valid_retail_price CHECK (retail_price >= 0),
     CONSTRAINT valid_item_price CHECK (item_price IS NULL OR item_price >= 0)
 );
 
