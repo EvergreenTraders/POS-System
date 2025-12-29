@@ -11,6 +11,7 @@ import config from '../config';
 import { useAuth } from '../context/AuthContext';
 import MetalEstimator from './MetalEstimator';
 import GemEstimator from './GemEstimator';
+import JewelEstimator from './JewelEstimator';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import InventoryIcon from '@mui/icons-material/Inventory';
@@ -37,6 +38,19 @@ function bufferToDataUrl(bufferObj) {
   );
   return `data:image/jpeg;base64,${base64}`;
 }
+
+// Wrapper component to pass props to JewelEstimator in dialog
+const JewelEstimatorWrapper = ({ prefilledData, onCancel, onSave, transactionType }) => {
+  return (
+    <JewelEstimator
+      prefilledData={prefilledData}
+      inDialog={true}
+      onDialogCancel={onCancel}
+      onDialogSave={onSave}
+      transactionType={transactionType}
+    />
+  );
+};
 
 const CustomerTicket = () => {
   const location = useLocation();
@@ -69,6 +83,8 @@ const CustomerTicket = () => {
   const [gemFormState, setGemFormState] = useState({ diamonds: [], stones: [], secondaryGems: [] });
   const [currentEditingItemId, setCurrentEditingItemId] = useState(null);
   const [prefilledData, setPrefilledData] = useState(null);
+  const [addedMetals, setAddedMetals] = useState([]);
+  const [addedGems, setAddedGems] = useState([]);
 
   // Metal categories from database
   const [metalCategories, setMetalCategories] = useState([]);
@@ -1678,13 +1694,52 @@ const CustomerTicket = () => {
     setGemFormState({ diamonds: [], stones: [], secondaryGems: [] });
     setCurrentEditingItemId(null);
     setPrefilledData(null);
+    setAddedMetals([]);
+    setAddedGems([]);
   };
 
   // Handler for saving data from the combined dialog
-  const handleCombinedSave = () => {
+  const handleCombinedSave = (processedItems) => {
     if (!currentEditingItemId) return;
 
     const { items, setItems } = getCurrentItems();
+
+    // If processedItems are provided (from JewelEstimator), use them directly
+    if (processedItems && processedItems.length > 0) {
+      const jewelryItem = processedItems[0]; // Get the first processed item from JewelEstimator
+
+      // Update the item in the list
+      const updatedItems = items.map(item => {
+        if (item.id !== currentEditingItemId) return item;
+
+        return {
+          ...item,
+          ...jewelryItem,
+          // Preserve the original ID
+          id: item.id,
+          // Update the description if available
+          description: jewelryItem.short_desc || jewelryItem.long_desc || item.description,
+          // Set the appropriate price based on transaction type
+          value: activeTab === 0 ? jewelryItem.price_estimates?.pawn :
+                 activeTab === 1 ? jewelryItem.price_estimates?.buy :
+                 activeTab === 3 ? jewelryItem.price_estimates?.retail :
+                 jewelryItem.price,
+          price: jewelryItem.price || item.price
+        };
+      });
+
+      setItems(updatedItems);
+
+      // Close the dialog and reset states
+      setCombinedDialogOpen(false);
+      setMetalFormState(null);
+      setGemFormState({ diamonds: [], stones: [], secondaryGems: [] });
+      setCurrentEditingItemId(null);
+      setPrefilledData(null);
+      setAddedMetals([]);
+      setAddedGems([]);
+      return;
+    }
 
     // Get primary and secondary gems from gemFormState
     const primaryDiamond = gemFormState?.diamonds?.find(d => d.isPrimary);
@@ -4099,46 +4154,20 @@ return (
       <Dialog
         open={combinedDialogOpen}
         onClose={handleCombinedCancel}
-        maxWidth="lg"
+        maxWidth="xl"
         fullWidth
-        PaperProps={{ sx: { maxHeight: '90vh' } }}
+        PaperProps={{ sx: { maxHeight: '95vh', height: '95vh', m: 0 } }}
       >
-        <DialogTitle>Jewelry Estimator - Metal & Gem</DialogTitle>
-        <DialogContent dividers>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={5} md={4}>
-              {combinedDialogOpen && (
-                <MetalEstimator
-                  key={`metal-${combinedDialogOpen}`}
-                  initialData={prefilledData || {}}
-                  hideButtons={true}
-                  setMetalFormState={setMetalFormState}
-                />
-              )}
-            </Grid>
-            <Grid item xs={12} sm={7} md={8}>
-              {combinedDialogOpen && (
-                <GemEstimator
-                  key={`gem-${combinedDialogOpen}`}
-                  initialData={{}}
-                  hideButtons={true}
-                  editMode={false}
-                  setGemFormState={setGemFormState}
-                  onSecondaryGemsChange={(secondaryGems) => {
-                    setGemFormState(prev => ({
-                      ...prev,
-                      secondaryGems
-                    }));
-                  }}
-                />
-              )}
-            </Grid>
-          </Grid>
+        <DialogContent sx={{ height: '100%', p: 0, overflow: 'auto' }}>
+          {combinedDialogOpen && (
+            <JewelEstimatorWrapper
+              prefilledData={prefilledData}
+              onCancel={handleCombinedCancel}
+              onSave={handleCombinedSave}
+              transactionType={activeTab}
+            />
+          )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCombinedCancel} startIcon={<ClearIcon />}>Cancel</Button>
-          <Button onClick={handleCombinedSave} variant="contained" color="primary" startIcon={<AddIcon />}>Add to Ticket</Button>
-        </DialogActions>
       </Dialog>
 
       {/* Jewelry Inventory Selection Dialog */}

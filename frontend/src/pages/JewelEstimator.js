@@ -45,12 +45,23 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 
-function JewelEstimator() {
+function JewelEstimator({
+  prefilledData: propPrefilledData,
+  inDialog: propInDialog,
+  onDialogCancel: propOnDialogCancel,
+  onDialogSave: propOnDialogSave,
+  transactionType: propTransactionType
+} = {}) {
   const API_BASE_URL = config.apiUrl;
   const { user } = useAuth();
   const { addToCart } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Check if running in dialog mode - prioritize props over location state
+  const inDialog = propInDialog !== undefined ? propInDialog : (location.state?.inDialog || false);
+  const onDialogCancel = propOnDialogCancel || location.state?.onDialogCancel;
+  const onDialogSave = propOnDialogSave || location.state?.onDialogSave;
 
   // Helper function to create user-specific localStorage keys
   const getUserStorageKey = (key) => {
@@ -123,8 +134,8 @@ function JewelEstimator() {
     setSnackbar({ ...snackbar, open: false });
   };
   const [customer, setCustomer] = useState(location.state?.customer || null);
-  const [transactionType, setTransactionType] = useState(location.state?.itemToEdit?.transaction_type || 'buy');
-  const [freeText, setFreeText] = useState(location.state?.itemToEdit?.notes || '');
+  const [transactionType, setTransactionType] = useState(propTransactionType || location.state?.transactionType || location.state?.itemToEdit?.transaction_type || 'buy');
+  const [freeText, setFreeText] = useState(propPrefilledData?.free_text || location.state?.prefilledData?.free_text || location.state?.itemToEdit?.notes || '');
   const [diamondSummary, setDiamondSummary] = useState(() => {
     // Skip localStorage restoration if in edit mode
     if (location.state?.editMode) return [];
@@ -1751,6 +1762,11 @@ function JewelEstimator() {
   };
 
   const handleBackToTicket = () => {
+    // If in dialog mode, call cancel callback
+    if (inDialog && onDialogCancel) {
+      onDialogCancel();
+      return;
+    }
     navigate('/customer-ticket', { state: { customer } });
   };
 
@@ -1765,7 +1781,7 @@ function JewelEstimator() {
       // If item already has images array, use it
       if (item.images && Array.isArray(item.images)) {
         itemImages = [...item.images]; // Create a copy to avoid reference issues
-      } 
+      }
       // If item has a single image object, convert to array
       else if (item.image && (item.image.url || item.image.data)) {
         itemImages = [{
@@ -1792,6 +1808,12 @@ function JewelEstimator() {
       };
     });
 
+    // If in dialog mode, call the dialog save callback instead of navigating
+    if (inDialog && onDialogSave) {
+      onDialogSave(processedItems);
+      return;
+    }
+
     // Clear estimated items from sessionStorage when adding to ticket
     sessionStorage.removeItem('jewelEstimatorItems');
     if (editMode && ticketItemId) {
@@ -1813,7 +1835,7 @@ function JewelEstimator() {
         return;
       }
     }
-    
+
     // Default behavior for non-edit mode or if edited item not found
     navigate('/customer-ticket', {
       state: {
@@ -1926,9 +1948,9 @@ function JewelEstimator() {
   }, []);
 
   return (
-    <Container maxWidth="lg" sx={{ pt: 4 }}>
-      {/* Back to Ticket Button */}
-      {location.state?.customer && (
+    <Container maxWidth="lg" sx={{ pt: inDialog ? 2 : 4 }}>
+      {/* Back to Ticket Button - show when customer exists or in dialog mode */}
+      {(location.state?.customer || inDialog) && (
         <Button
           variant="outlined"
           color="primary"
@@ -1936,23 +1958,23 @@ function JewelEstimator() {
           onClick={handleBackToTicket}
           sx={{ mb: 2 }}
         >
-          Back to Ticket
+          {inDialog ? 'Cancel' : 'Back to Ticket'}
         </Button>
       )}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid container spacing={3} sx={{ mb: 3, alignItems: 'stretch' }}>
         {/* Metal Estimation Section */}
         <Grid item xs={12} md={3}>
-          <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
+          <Paper sx={{ height: '80vh', overflow: 'auto' }}>
             <MetalEstimator
               onMetalValueChange={handleTotalMetalValueChange}
               onAddMetal={handleAddMetal}
-              initialData={location.state?.itemToEdit} />
+              initialData={propPrefilledData || location.state?.prefilledData || location.state?.itemToEdit} />
           </Paper>
         </Grid>
 
         {/* Gem Estimation Section */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
+          <Paper sx={{ height: '80vh', overflow: 'auto' }}>
             <GemEstimator
               onAddGem={handleAddGem}
               initialData={location.state?.itemToEdit}
@@ -2681,15 +2703,17 @@ function JewelEstimator() {
                 >
                   Add to Ticket
                 </Button>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleCheckout}
-                  disabled={estimatedItems.length === 0}
-                  startIcon={<ArrowForwardIcon />}
-                >
-                  Proceed to Checkout
-                </Button>
+                {!inDialog && (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleCheckout}
+                    disabled={estimatedItems.length === 0}
+                    startIcon={<ArrowForwardIcon />}
+                  >
+                    Proceed to Checkout
+                  </Button>
+                )}
               </Box>
             </Box>
           </Paper>
