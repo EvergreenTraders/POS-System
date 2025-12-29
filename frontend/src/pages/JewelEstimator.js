@@ -1811,6 +1811,10 @@ function JewelEstimator({
     // If in dialog mode, call the dialog save callback instead of navigating
     if (inDialog && onDialogSave) {
       onDialogSave(processedItems);
+      // Clear the estimated items after adding to ticket
+      setEstimatedItems([]);
+      // Clear from sessionStorage as well
+      sessionStorage.removeItem('jewelEstimatorItems');
       return;
     }
 
@@ -1966,9 +1970,13 @@ function JewelEstimator({
         <Grid item xs={12} md={3}>
           <Paper sx={{ height: '80vh', overflow: 'auto' }}>
             <MetalEstimator
+              key={propPrefilledData ? JSON.stringify(propPrefilledData) : 'default'}
               onMetalValueChange={handleTotalMetalValueChange}
               onAddMetal={handleAddMetal}
-              initialData={propPrefilledData || location.state?.prefilledData || location.state?.itemToEdit} />
+              initialData={(() => {
+                const data = propPrefilledData || location.state?.prefilledData || location.state?.itemToEdit;
+                return data;
+              })()} />
           </Paper>
         </Grid>
 

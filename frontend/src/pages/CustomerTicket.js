@@ -1523,7 +1523,7 @@ const CustomerTicket = () => {
     const firstPart = parts[0];
 
     // Check if first part looks like a category code (single letter) and second part looks like purity
-    if (fromJewelryInventory && parts.length >= 3 && firstPart.length === 1) {
+    if (parts.length >= 3 && firstPart.length === 1) {
       const potentialPurity = parts[1];
 
       if (potentialPurity.match(/^\d+K?$/i) || potentialPurity.match(/^0?\.\d+$/) || potentialPurity.match(/^1\.0+$/) || potentialPurity.match(/^[a-zA-Z]+$/)) {
@@ -1707,10 +1707,25 @@ const CustomerTicket = () => {
     // If processedItems are provided (from JewelEstimator), use them directly
     if (processedItems && processedItems.length > 0) {
       const jewelryItem = processedItems[0]; // Get the first processed item from JewelEstimator
+      console.log('📦 [CustomerTicket] Received jewelry item from JewelEstimator:', jewelryItem);
 
       // Update the item in the list
       const updatedItems = items.map(item => {
         if (item.id !== currentEditingItemId) return item;
+
+        // Get the appropriate price based on the active tab
+        let displayValue = 0;
+        if (activeTab === 0) { // Pawn tab
+          displayValue = jewelryItem.price_estimates?.pawn || jewelryItem.pawn_price || 0;
+        } else if (activeTab === 1) { // Buy tab
+          displayValue = jewelryItem.price_estimates?.buy || jewelryItem.buy_price || 0;
+        } else if (activeTab === 3) { // Sale tab
+          displayValue = jewelryItem.price_estimates?.retail || jewelryItem.retail_price || 0;
+        } else {
+          displayValue = jewelryItem.price || 0;
+        }
+
+        console.log('💰 [CustomerTicket] Setting value for tab', activeTab, ':', displayValue);
 
         return {
           ...item,
@@ -1719,12 +1734,9 @@ const CustomerTicket = () => {
           id: item.id,
           // Update the description if available
           description: jewelryItem.short_desc || jewelryItem.long_desc || item.description,
-          // Set the appropriate price based on transaction type
-          value: activeTab === 0 ? jewelryItem.price_estimates?.pawn :
-                 activeTab === 1 ? jewelryItem.price_estimates?.buy :
-                 activeTab === 3 ? jewelryItem.price_estimates?.retail :
-                 jewelryItem.price,
-          price: jewelryItem.price || item.price
+          // Set the appropriate value based on transaction type
+          value: displayValue,
+          price: displayValue
         };
       });
 
@@ -2901,38 +2913,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'pawn')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
@@ -3041,38 +3042,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'buy')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
@@ -3183,38 +3173,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'trade')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
@@ -3502,38 +3481,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'repair')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
@@ -3659,38 +3627,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'payment')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
@@ -3815,38 +3772,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'refund')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
