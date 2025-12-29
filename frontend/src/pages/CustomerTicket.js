@@ -1706,41 +1706,97 @@ const CustomerTicket = () => {
 
     // If processedItems are provided (from JewelEstimator), use them directly
     if (processedItems && processedItems.length > 0) {
-      const jewelryItem = processedItems[0]; // Get the first processed item from JewelEstimator
-      console.log('📦 [CustomerTicket] Received jewelry item from JewelEstimator:', jewelryItem);
 
-      // Update the item in the list
-      const updatedItems = items.map(item => {
-        if (item.id !== currentEditingItemId) return item;
+      // Check if we're in REPLACE mode (editing an existing item)
+      const itemToReplace = items.find(item => item.id === currentEditingItemId);
 
-        // Get the appropriate price based on the active tab
+      if (itemToReplace) {
+        // REPLACE MODE: Replace the existing item with the first processed item
+        const firstJewelryItem = processedItems[0];
+
+        // Get the appropriate price for the first item
         let displayValue = 0;
         if (activeTab === 0) { // Pawn tab
-          displayValue = jewelryItem.price_estimates?.pawn || jewelryItem.pawn_price || 0;
+          displayValue = firstJewelryItem.price_estimates?.pawn || firstJewelryItem.pawn_price || 0;
         } else if (activeTab === 1) { // Buy tab
-          displayValue = jewelryItem.price_estimates?.buy || jewelryItem.buy_price || 0;
+          displayValue = firstJewelryItem.price_estimates?.buy || firstJewelryItem.buy_price || 0;
         } else if (activeTab === 3) { // Sale tab
-          displayValue = jewelryItem.price_estimates?.retail || jewelryItem.retail_price || 0;
+          displayValue = firstJewelryItem.price_estimates?.retail || firstJewelryItem.retail_price || 0;
         } else {
-          displayValue = jewelryItem.price || 0;
+          displayValue = firstJewelryItem.price || 0;
         }
 
-        console.log('💰 [CustomerTicket] Setting value for tab', activeTab, ':', displayValue);
+        // Replace the existing item
+        const updatedItems = items.map(item => {
+          if (item.id !== currentEditingItemId) return item;
+          return {
+            id: item.id, // Keep original ID
+            description: firstJewelryItem.short_desc || firstJewelryItem.long_desc || '',
+            value: displayValue,
+            price: displayValue,
+            ...firstJewelryItem
+          };
+        });
 
-        return {
-          ...item,
-          ...jewelryItem,
-          // Preserve the original ID
-          id: item.id,
-          // Update the description if available
-          description: jewelryItem.short_desc || jewelryItem.long_desc || item.description,
-          // Set the appropriate value based on transaction type
-          value: displayValue,
-          price: displayValue
-        };
-      });
+        // If there are additional items beyond the first one, add them as new lines
+        if (processedItems.length > 1) {
+          const additionalItems = processedItems.slice(1).map((jewelryItem) => {
+            let displayValue = 0;
+            if (activeTab === 0) { // Pawn tab
+              displayValue = jewelryItem.price_estimates?.pawn || jewelryItem.pawn_price || 0;
+            } else if (activeTab === 1) { // Buy tab
+              displayValue = jewelryItem.price_estimates?.buy || jewelryItem.buy_price || 0;
+            } else if (activeTab === 3) { // Sale tab
+              displayValue = jewelryItem.price_estimates?.retail || jewelryItem.retail_price || 0;
+            } else {
+              displayValue = jewelryItem.price || 0;
+            }
 
-      setItems(updatedItems);
+            return {
+              id: Date.now() + Math.random(),
+              description: jewelryItem.short_desc || jewelryItem.long_desc || '',
+              value: displayValue,
+              price: displayValue,
+              ...jewelryItem
+            };
+          });
+          setItems([...updatedItems, ...additionalItems]);
+        } else {
+          setItems(updatedItems);
+        }
+      } else {
+        // ADD MODE: No item to replace, add all as new items
+        const newItems = processedItems.map((jewelryItem) => {
+          // Get the appropriate price based on the active tab
+          let displayValue = 0;
+          if (activeTab === 0) { // Pawn tab
+            displayValue = jewelryItem.price_estimates?.pawn || jewelryItem.pawn_price || 0;
+          } else if (activeTab === 1) { // Buy tab
+            displayValue = jewelryItem.price_estimates?.buy || jewelryItem.buy_price || 0;
+          } else if (activeTab === 3) { // Sale tab
+            displayValue = jewelryItem.price_estimates?.retail || jewelryItem.retail_price || 0;
+          } else {
+            displayValue = jewelryItem.price || 0;
+          }
+
+          // Create a new item for the ticket
+          return {
+            id: Date.now() + Math.random(), // Generate unique ID
+            description: jewelryItem.short_desc || jewelryItem.long_desc || '',
+            value: displayValue,
+            price: displayValue,
+            ...jewelryItem
+          };
+        });
+
+        // Add all new items to the existing items list
+        setItems([...items, ...newItems]);
+      }
+
+      // Clear jewelry estimator storage to prevent items from reappearing
+      const userId = user?.id || 'guest';
+      sessionStorage.removeItem(`jewelEstimatorItems_user_${userId}`);
+      localStorage.removeItem(`jewelEstimatorItems_user_${userId}`);
 
       // Close the dialog and reset states
       setCombinedDialogOpen(false);

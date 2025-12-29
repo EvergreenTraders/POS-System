@@ -63,6 +63,9 @@ function JewelEstimator({
   const onDialogCancel = propOnDialogCancel || location.state?.onDialogCancel;
   const onDialogSave = propOnDialogSave || location.state?.onDialogSave;
 
+  // State to track metal estimator reset
+  const [metalEstimatorKey, setMetalEstimatorKey] = useState(0);
+
   // Helper function to create user-specific localStorage keys
   const getUserStorageKey = (key) => {
     const userId = user?.id || 'guest';
@@ -245,23 +248,23 @@ function JewelEstimator({
 
   const handleAddMetal = (newItem) => {
     // Find the metal type from the state
-    const metalType = metalTypes.find(mt => 
+    const metalType = metalTypes.find(mt =>
       mt.type === newItem.precious_metal_type
     );
 
     // Calculate price estimates with the found metal type ID
     const estimates = calculatePriceEstimates(newItem.estimated_value, metalType.id);
-    
+
     // Set the price estimates
     setPriceEstimates(estimates);
-    
+
     // Add the metal with its price estimates
     const metalWithEstimates = {
       ...newItem,
       priceEstimates: estimates
     };
     setAddMetal(prev => [...prev, metalWithEstimates]);
-    
+
     // Set the price estimates directly (not adding to previous)
     setPriceEstimates({
       pawn: estimates.pawn,
@@ -269,6 +272,9 @@ function JewelEstimator({
       melt: estimates.melt,
       retail: estimates.retail
     });
+
+    // Reset MetalEstimator by incrementing the key
+    setMetalEstimatorKey(prev => prev + 1);
   };
 
   const handleDeleteMetal = (index) => {
@@ -1810,11 +1816,21 @@ function JewelEstimator({
 
     // If in dialog mode, call the dialog save callback instead of navigating
     if (inDialog && onDialogSave) {
+      // Now call the save callback
       onDialogSave(processedItems);
-      // Clear the estimated items after adding to ticket
+
+      // Clear the estimated items state
       setEstimatedItems([]);
-      // Clear from sessionStorage as well
-      sessionStorage.removeItem('jewelEstimatorItems');
+
+      // Clear from all storage locations AFTER state update
+      // Use setTimeout to ensure this happens after any synchronous storage saves
+      setTimeout(() => {
+        sessionStorage.removeItem(getUserStorageKey('jewelEstimatorItems'));
+        localStorage.removeItem(getUserStorageKey('jewelEstimatorItems'));
+        sessionStorage.removeItem('jewelEstimatorItems');
+        localStorage.removeItem('jewelEstimatorItems');
+      }, 0);
+
       return;
     }
 
@@ -1970,11 +1986,15 @@ function JewelEstimator({
         <Grid item xs={12} md={3}>
           <Paper sx={{ height: '80vh', overflow: 'auto' }}>
             <MetalEstimator
-              key={propPrefilledData ? JSON.stringify(propPrefilledData) : 'default'}
+              key={`metal-${metalEstimatorKey}`}
               onMetalValueChange={handleTotalMetalValueChange}
               onAddMetal={handleAddMetal}
               initialData={(() => {
-                const data = propPrefilledData || location.state?.prefilledData || location.state?.itemToEdit;
+                // Only use prefilled data on the very first render (metalEstimatorKey === 0)
+                // After that, reset to null so form is empty with default values
+                const data = metalEstimatorKey === 0
+                  ? (propPrefilledData || location.state?.prefilledData || location.state?.itemToEdit)
+                  : null;
                 return data;
               })()} />
           </Paper>
