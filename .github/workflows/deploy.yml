@@ -44,7 +44,12 @@ jobs:
 
       - name: Generate deployment package
         run: |
-          zip -r deploy.zip backend/ .platform/ -x "backend/node_modules/*" "backend/uploads/*" "*.git*" "*.env*"
+          cd backend
+          zip -r ../deploy.zip . .platform/ -x "uploads/*" "*.git*" "*.env*"
+          cd ..
+          if [ -d ".platform" ]; then
+            zip -ur deploy.zip .platform/
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
