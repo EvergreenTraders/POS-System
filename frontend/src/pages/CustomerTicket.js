@@ -496,10 +496,10 @@ const CustomerTicket = () => {
   
   // Helper function to save ticket items in localStorage
   const saveTicketItems = (type, items) => {
-    if (!customer || !customer.id) return; // Don't save if no customer selected
-    
     try {
-      localStorage.setItem(`ticket_${customer.id}_${type}`, JSON.stringify(items));
+      // Save with customer ID if available, otherwise save globally
+      const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
+      localStorage.setItem(key, JSON.stringify(items));
     } catch (error) {
       console.error(`Error saving ${type} items to localStorage:`, error);
     }
@@ -507,21 +507,22 @@ const CustomerTicket = () => {
 
   // Helper function to load ticket items from localStorage
   const loadTicketItems = (type) => {
-    if (!customer || !customer.id) return null; // No customer selected
-    
     try {
-      const savedItems = localStorage.getItem(`ticket_${customer.id}_${type}`);
-      return savedItems ? JSON.parse(savedItems) : null;
+      // Load with customer ID if available, otherwise load globally
+      const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
+      const savedItems = localStorage.getItem(key);
+      const parsed = savedItems ? JSON.parse(savedItems) : null;
+      return parsed;
     } catch (error) {
       console.error(`Error loading ${type} items from localStorage:`, error);
       return null;
     }
   };
-  
+
   // Helper function to clear ticket items from localStorage
   const clearTicketItems = (type) => {
-    if (!customer || !customer.id) return;
-    localStorage.removeItem(`ticket_${customer.id}_${type}`);
+    const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
+    localStorage.removeItem(key);
   };
   
   // State for managing items in each tab - initialize from localStorage if available
@@ -1009,6 +1010,89 @@ const CustomerTicket = () => {
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
+
+  // Track whether initial load is complete to avoid overwriting saved data
+  const initialLoadCompleteRef = React.useRef(false);
+  const customerIdRef = React.useRef(customer?.id);
+
+  // Load ticket items from localStorage when component mounts or customer changes
+  React.useEffect(() => {
+    // Load on first mount or when customer changes
+    const customerChanged = customerIdRef.current !== customer?.id;
+    if (!initialLoadCompleteRef.current || customerChanged) {
+      // Skip loading if we're coming from an estimator or have location state with items
+      const hasEstimatorData = location.state?.updatedItem || location.state?.estimatedItems || location.state?.editItem || location.state?.selectedInventoryItem || location.state?.addedItems;
+
+      if (!hasEstimatorData) {
+        // Load saved items (will use customer ID if available, otherwise load global)
+        const savedPawn = loadTicketItems('pawn');
+        const savedBuy = loadTicketItems('buy');
+        const savedTrade = loadTicketItems('trade');
+        const savedSale = loadTicketItems('sale');
+        const savedRepair = loadTicketItems('repair');
+        const savedPayment = loadTicketItems('payment');
+        const savedRefund = loadTicketItems('refund');
+
+        // Update items - use saved items if available, otherwise use default empty item
+        setPawnItems(savedPawn || [{ id: 1, description: '', category: '', value: '' }]);
+        setBuyItems(savedBuy || [{ id: 1, description: '', category: '', price: '' }]);
+        setTradeItems(savedTrade || [{ id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }]);
+        setSaleItems(savedSale || [{ id: 1, description: '', category: '', price: '', paymentMethod: '' }]);
+        setRepairItems(savedRepair || [{ id: 1, description: '', issue: '', fee: '', completion: '' }]);
+        setPaymentItems(savedPayment || [{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
+        setRefundItems(savedRefund || [{ id: 1, amount: '', method: '', reference: '', reason: '' }]);
+      }
+
+      // Mark initial load as complete after a short delay to ensure state updates are processed
+      setTimeout(() => {
+        initialLoadCompleteRef.current = true;
+        customerIdRef.current = customer?.id;
+      }, 100);
+    }
+  }, [customer, location.state]);
+
+  // Auto-save ticket items to localStorage whenever they change (only after initial load)
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('pawn', pawnItems);
+    }
+  }, [pawnItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('buy', buyItems);
+    }
+  }, [buyItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('trade', tradeItems);
+    }
+  }, [tradeItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('sale', saleItems);
+    }
+  }, [saleItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('repair', repairItems);
+    }
+  }, [repairItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('payment', paymentItems);
+    }
+  }, [paymentItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('refund', refundItems);
+    }
+  }, [refundItems, customer]);
 
   // Recalculate totals whenever any item array changes
   React.useEffect(() => {
@@ -2360,45 +2444,9 @@ const CustomerTicket = () => {
       if (customer) {
         sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
       }
-      
-      // Clear the items from localStorage for this tab since they're now in cart
-      clearTicketItems(type);
-      
-      // Replace current tab items with a fresh empty item
-      let emptyItem;
-      switch (activeTab) {
-        case 0: // Pawn
-          emptyItem = { id: 1, description: '', category: '', value: '' };
-          setPawnItems([emptyItem]);
-          break;
-        case 1: // Buy
-          emptyItem = { id: 1, description: '', category: '', price: '' };
-          setBuyItems([emptyItem]);
-          break;
-        case 2: // Trade
-          emptyItem = { id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' };
-          setTradeItems([emptyItem]);
-          break;
-        case 3: // Sale
-          emptyItem = { id: 1, description: '', category: '', price: '', paymentMethod: '' };
-          setSaleItems([emptyItem]);
-          break;
-        case 4: // Repair
-          emptyItem = { id: 1, description: '', issue: '', fee: '', completion: '' };
-          setRepairItems([emptyItem]);
-          break;
-        case 5: // Payment
-          emptyItem = { id: 1, amount: '', method: '', reference: '', notes: '' };
-          setPaymentItems([emptyItem]);
-          break;
-        case 6: // Refund
-          emptyItem = { id: 1, amount: '', method: '', reference: '', reason: '' };
-          setRefundItems([emptyItem]);
-          break;
-      }
-      
-      // Show success message - stay on ticket screen to enter more items
-      showSnackbar('Items added to cart', 'success');
+
+      // Show success message - items remain in ticket for further editing
+      showSnackbar('Items added to cart. Ticket saved for further editing.', 'success');
       
     } catch (error) {
       console.error('Error adding items to cart:', error);
