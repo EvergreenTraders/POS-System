@@ -466,6 +466,56 @@ function JewelryEdit() {
         await axios.post(`${API_BASE_URL}/item-attributes/${item.item_id}`, itemAttributeValues);
       }
 
+      // Upload pending images if any
+      if (pendingImages.length > 0) {
+        try {
+          const formData = new FormData();
+          pendingImages.forEach((file) => {
+            formData.append('images', file);
+          });
+
+          const imageResponse = await axios.put(
+            `${API_BASE_URL}/jewelry/${item.item_id}/images`,
+            formData,
+            {
+              headers: {
+                'Content-Type': 'multipart/form-data',
+                Authorization: `Bearer ${localStorage.getItem('token')}`
+              }
+            }
+          );
+
+          if (imageResponse.data.success) {
+            // Update all item states with new images
+            const updatedItemWithImages = imageResponse.data.item;
+            setItem(updatedItemWithImages);
+            setEditedItem(prev => ({ ...prev, images: updatedItemWithImages.images }));
+            setBaselineItem(prev => ({ ...prev, images: updatedItemWithImages.images }));
+
+            // Log image update to history
+            await axios.post(`${API_BASE_URL}/jewelry/history`, {
+              item_id: item.item_id,
+              changed_fields: {
+                images: {
+                  from: `${(item.images?.length || 0)} image(s)`,
+                  to: `${(updatedItemWithImages.images?.length || 0)} image(s) - Added ${pendingImages.length} new image(s)`
+                }
+              },
+              changed_by: currentUser?.id || 1,
+              action: 'update',
+              notes: `Image(s) uploaded: ${pendingImages.map(f => f.name).join(', ')}`
+            });
+
+            // Clear pending images
+            setPendingImages([]);
+          }
+        } catch (imageError) {
+          console.error('Error uploading images:', imageError);
+          enqueueSnackbar('Failed to upload images', { variant: 'error' });
+          // Don't throw - continue with other save operations
+        }
+      }
+
       // If there are changes, save them to history
       if (Object.keys(changes).length > 0) {
         await axios.post(`${API_BASE_URL}/jewelry/history`, {
@@ -487,11 +537,19 @@ function JewelryEdit() {
           message: 'Changes saved successfully!',
           severity: 'success'
         });
-      } else {
+      } else if (pendingImages.length === 0) {
+        // Only show "no changes" if there were no images either
         setSnackbar({
           open: true,
           message: 'No changes to save',
           severity: 'info'
+        });
+      } else {
+        // Images were saved
+        setSnackbar({
+          open: true,
+          message: 'Images uploaded successfully!',
+          severity: 'success'
         });
       }
     } catch (error) {
@@ -764,6 +822,56 @@ function JewelryEdit() {
         changes['Item Attributes'] = attributeChanges;
       }
 
+      // Upload pending images if any
+      if (pendingImages.length > 0) {
+        try {
+          const formData = new FormData();
+          pendingImages.forEach((file) => {
+            formData.append('images', file);
+          });
+
+          const imageResponse = await axios.put(
+            `${API_BASE_URL}/jewelry/${item.item_id}/images`,
+            formData,
+            {
+              headers: {
+                'Content-Type': 'multipart/form-data',
+                Authorization: `Bearer ${localStorage.getItem('token')}`
+              }
+            }
+          );
+
+          if (imageResponse.data.success) {
+            // Update all item states with new images
+            const updatedItemWithImages = imageResponse.data.item;
+            setItem(updatedItemWithImages);
+            setEditedItem(prev => ({ ...prev, images: updatedItemWithImages.images }));
+            setBaselineItem(prev => ({ ...prev, images: updatedItemWithImages.images }));
+
+            // Log image update to history
+            await axios.post(`${API_BASE_URL}/jewelry/history`, {
+              item_id: item.item_id,
+              changed_fields: {
+                images: {
+                  from: `${(item.images?.length || 0)} image(s)`,
+                  to: `${(updatedItemWithImages.images?.length || 0)} image(s) - Added ${pendingImages.length} new image(s)`
+                }
+              },
+              changed_by: currentUser?.id || 1,
+              action: 'update',
+              notes: `Image(s) uploaded: ${pendingImages.map(f => f.name).join(', ')}`
+            });
+
+            // Clear pending images
+            setPendingImages([]);
+          }
+        } catch (imageError) {
+          console.error('Error uploading images:', imageError);
+          enqueueSnackbar('Failed to upload images', { variant: 'error' });
+          // Don't throw - continue with other save operations
+        }
+      }
+
       // If there are changes, save them to item_history
       if (Object.keys(changes).length > 0) {
         try {
@@ -800,11 +908,19 @@ function JewelryEdit() {
             severity: 'warning'
           });
         }
-      } else {
+      } else if (pendingImages.length === 0) {
+        // Only show "no changes" if there were no images either
         setSnackbar({
           open: true,
           message: 'No changes to save',
           severity: 'info'
+        });
+      } else {
+        // Images were saved
+        setSnackbar({
+          open: true,
+          message: 'Images uploaded successfully!',
+          severity: 'success'
         });
       }
       
@@ -1196,16 +1312,16 @@ function JewelryEdit() {
       const colors = colorResponse.data;
       setStoneColors(colors);
       
-      // Find Red color from fetched colors
+      // Find Red color from fetched colors for initial filtering
       const redColor = colors.find(color => color.color === 'Red');
       if (redColor) {
-        
         // Filter stone types for Red color
         const redStoneTypes = typeResponse.data.filter(type => type.color_id === redColor.id);
         setFilteredStoneTypes(redStoneTypes);
-        
-        // Set Red as default selected color in gemData
-        handleGemDataChange('stone', 'color', 'Red');
+
+        // NOTE: Do NOT set default color here - it causes false change tracking
+        // The color should only be set if user explicitly selects it or if item has no color
+        // handleGemDataChange('stone', 'color', 'Red'); // REMOVED - causes false history entries
       }
     } catch (error) {
       console.error('Error fetching stone data:', error);
@@ -1262,6 +1378,7 @@ function JewelryEdit() {
   const [isEditing, setIsEditing] = useState(false);
   const [editedItem, setEditedItem] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingImages, setPendingImages] = useState([]); // Store pending image files for manual save
   const [tax, setTax] = useState({ rate: 0.13, amount: 0 }); // Default tax rate of 13%
   const [totalAmount, setTotalAmount] = useState(0);
   const [discount, setDiscount] = useState(0);
@@ -1626,6 +1743,16 @@ function JewelryEdit() {
     fetchData();
   }, [location.state]);
 
+  // Cleanup object URLs for pending images when component unmounts
+  useEffect(() => {
+    return () => {
+      // Revoke all object URLs to prevent memory leaks
+      pendingImages.forEach(file => {
+        const url = URL.createObjectURL(file);
+        URL.revokeObjectURL(url);
+      });
+    };
+  }, [pendingImages]);
 
   useEffect(() => {
     if (item) {
@@ -2098,17 +2225,24 @@ function JewelryEdit() {
     try {
       // Check if item is in IN_PROCESS status
       const currentStatus = editedItem.inventory_status || item.inventory_status || item.status;
+
       if (currentStatus !== 'IN_PROCESS') {
         enqueueSnackbar('Item must be in IN_PROCESS status to activate', { variant: 'warning' });
         return;
       }
 
-      // Update status to ACTIVE
-      const response = await axios.put(`${API_BASE_URL}/jewelry/${item.item_id}`, {
+
+      // Update status to ACTIVE using the status endpoint (which logs to history)
+      const response = await axios.put(`${API_BASE_URL}/jewelry/${item.item_id}/status`, {
         status: 'ACTIVE'
+      }, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        }
       });
 
-      if (response.status === 200) {
+
+      if (response.data.success) {
         // Update local state
         setEditedItem(prev => ({
           ...prev,
@@ -2120,12 +2254,21 @@ function JewelryEdit() {
           inventory_status: 'ACTIVE',
           status: 'ACTIVE'
         }));
+        setBaselineItem(prev => ({
+          ...prev,
+          inventory_status: 'ACTIVE',
+          status: 'ACTIVE'
+        }));
 
         enqueueSnackbar('Item successfully processed and activated', { variant: 'success' });
+      } else {
+        console.error('Update failed, response:', response.data);
+        enqueueSnackbar('Failed to process item: ' + (response.data.message || 'Unknown error'), { variant: 'error' });
       }
     } catch (error) {
       console.error('Error processing item:', error);
-      enqueueSnackbar('Failed to process item', { variant: 'error' });
+      console.error('Error details:', error.response?.data);
+      enqueueSnackbar('Failed to process item: ' + (error.response?.data?.error || error.message), { variant: 'error' });
     }
   };
 
@@ -2557,11 +2700,57 @@ function JewelryEdit() {
               <Box sx={{ display: 'flex', mb: 3 }}>
                 {/* Item Image */}
                 <Box sx={{ width: 150, mr: 3 }}>
-                  <img
-                    src={getImageUrl(item)}
-                    alt={item.short_desc || 'Jewelry item'}
-                    style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
-                  />
+                  <Box sx={{ position: 'relative' }}>
+                    <img
+                      src={pendingImages.length > 0 ? URL.createObjectURL(pendingImages[0]) : getImageUrl(item)}
+                      alt={item.short_desc || 'Jewelry item'}
+                      style={{ width: '100%', height: 'auto', objectFit: 'contain' }}
+                    />
+                    {pendingImages.length > 0 && (
+                      <Chip
+                        label="Pending"
+                        size="small"
+                        sx={{
+                          position: 'absolute',
+                          top: 8,
+                          left: 8,
+                          bgcolor: '#1976d2',
+                          color: 'white',
+                          fontWeight: 'bold'
+                        }}
+                      />
+                    )}
+                  </Box>
+                  {pendingImages.length > 0 && (
+                    <Typography variant="caption" color="primary" sx={{ mt: 0.5, display: 'block', textAlign: 'center' }}>
+                      {pendingImages.length} image(s) pending save
+                    </Typography>
+                  )}
+                  <Button
+                    component="label"
+                    variant="outlined"
+                    size="small"
+                    sx={{ mt: 1, width: '100%' }}
+                  >
+                    Upload Image
+                    <input
+                      type="file"
+                      hidden
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files);
+                        if (files.length === 0) return;
+
+                        // Store files locally for manual save
+                        setPendingImages(prev => [...prev, ...files]);
+                        enqueueSnackbar(`${files.length} image(s) selected. Click Save to upload.`, { variant: 'info' });
+
+                        // Clear the input value so the same file can be selected again
+                        e.target.value = '';
+                      }}
+                    />
+                  </Button>
                 </Box>
                 
                 {/* Basic Item Info */}
@@ -2647,7 +2836,93 @@ function JewelryEdit() {
                   )}
                   </Box>
                 </Box>
-              
+
+              {/* Image Gallery Section */}
+              {(item.images || pendingImages.length > 0) && (() => {
+                let images = [];
+                try {
+                  images = typeof item.images === 'string' ? JSON.parse(item.images) : (item.images || []);
+                } catch (e) {
+                  console.error('Error parsing images:', e);
+                }
+
+                // Create preview objects for pending images
+                const pendingImagePreviews = pendingImages.map((file, idx) => ({
+                  url: URL.createObjectURL(file),
+                  isPending: true,
+                  fileName: file.name
+                }));
+
+                // Combine existing images with pending images
+                const allImages = [...(Array.isArray(images) ? images : []), ...pendingImagePreviews];
+
+                if (allImages.length > 1 || pendingImages.length > 0) {
+                  return (
+                    <Box sx={{ mb: 3 }}>
+                      <Typography variant="caption" color="textSecondary" sx={{ mb: 1, display: 'block' }}>
+                        All Images ({allImages.length})
+                        {pendingImages.length > 0 && (
+                          <span style={{ color: '#1976d2', marginLeft: 8 }}>
+                            ({pendingImages.length} pending save)
+                          </span>
+                        )}
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                        {allImages.map((img, idx) => (
+                          <Box
+                            key={idx}
+                            sx={{
+                              position: 'relative',
+                              width: 80,
+                              height: 80,
+                              border: img.isPending ? '2px dashed #1976d2' : (img.isPrimary ? '2px solid #1976d2' : '1px solid #ddd'),
+                              borderRadius: 1,
+                              overflow: 'hidden'
+                            }}
+                          >
+                            <img
+                              src={img.isPending ? img.url : makeAbsoluteUrl(img.url || img.image_url || img)}
+                              alt={`Item ${idx + 1}`}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                            {img.isPrimary && (
+                              <Chip
+                                label="Primary"
+                                size="small"
+                                color="primary"
+                                sx={{
+                                  position: 'absolute',
+                                  bottom: 2,
+                                  left: 2,
+                                  height: 16,
+                                  fontSize: '0.65rem'
+                                }}
+                              />
+                            )}
+                            {img.isPending && (
+                              <Chip
+                                label="Pending"
+                                size="small"
+                                sx={{
+                                  position: 'absolute',
+                                  bottom: 2,
+                                  left: 2,
+                                  height: 16,
+                                  fontSize: '0.65rem',
+                                  bgcolor: '#1976d2',
+                                  color: 'white'
+                                }}
+                              />
+                            )}
+                          </Box>
+                        ))}
+                      </Box>
+                    </Box>
+                  );
+                }
+                return null;
+              })()}
+
               {/* Editable Fields in Grid Layout */}
               <Grid container spacing={2}>
                 

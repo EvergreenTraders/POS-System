@@ -129,8 +129,9 @@ function TransactionJournals() {
     setViewDialogOpen(true);
 
     try {
-      // Get all transaction items from the pre-fetched map
-      const items = transactionItemsMap[transaction.transaction_id] || [];
+      // Fetch transaction items from the updated endpoint (reads from buy_ticket/sale_ticket)
+      const itemsResponse = await axios.get(`${API_BASE_URL}/transactions/${transaction.transaction_id}/items`);
+      const items = itemsResponse.data || [];
       setTransactionItems(items);
 
       // Fetch payment details
@@ -159,8 +160,10 @@ function TransactionJournals() {
     } catch (error) {
       console.error('Error fetching transaction details:', error);
       // Initialize with empty data if there's an error
+      setTransactionItems([]);
       setPaymentDetails({ payments: [], total_paid: 0 });
       setBuyTickets([]);
+      setSaleTickets([]);
     } finally {
       setLoadingItems(false);
       setLoadingPayments(false);
@@ -182,19 +185,8 @@ function TransactionJournals() {
     const grouped = {};
 
     transactionItems.forEach((item, index) => {
-      // Check transaction type to determine which ticket to look for
-      const transactionType = item.transaction_type?.toLowerCase() || '';
-      let ticketId = 'no-ticket';
-
-      if (transactionType === 'sale') {
-        // Find the sale_ticket record for this item
-        const saleTicket = saleTickets.find(st => st.item_id === item.item_id);
-        ticketId = saleTicket?.sale_ticket_id || 'no-ticket';
-      } else if (transactionType === 'buy') {
-        // Find the buy_ticket record for this item
-        const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
-        ticketId = buyTicket?.buy_ticket_id || 'no-ticket';
-      }
+      // Use ticket_id directly from the item (returned by backend query)
+      const ticketId = item.ticket_id || 'no-ticket';
 
       if (!grouped[ticketId]) {
         grouped[ticketId] = [];
@@ -1188,7 +1180,7 @@ function TransactionJournals() {
                                     onClick={() => handleBuyTicketClick(ticketId)}
                                     title="Click to view ticket receipt"
                                   >
-                                    Ticket: {ticketId}
+                                    {ticketId}
                                   </Typography>
                                 </TableCell>
                               </TableRow>

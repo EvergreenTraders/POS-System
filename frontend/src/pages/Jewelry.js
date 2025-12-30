@@ -125,8 +125,7 @@ function Jewelry() {
     const category = itemData?.category || 'N/A';
     const metalType = itemData?.metal_type || 'N/A';
     const metalWeight = itemData?.metal_weight || 'N/A';
-    const buyPrice = itemData?.buy_price || 'N/A';
-    const retailPrice = itemData?.retail_price || 'N/A';
+    const itemPrice = itemData?.item_price || 'N/A';
 
     // Function to get user-friendly field names - convert snake_case to Title Case
     const getFieldDisplayName = (field) => {
@@ -157,7 +156,7 @@ function Jewelry() {
       }
 
       // Check for price changes
-      if (changes.buy_price || changes.retail_price) {
+      if (changes.item_price) {
         return 'Pricing updated';
       }
 
@@ -409,9 +408,9 @@ function Jewelry() {
     doc.text(`${metalWeight}g`, col1X + labelWidth, yPos);
 
     doc.setFont(undefined, 'bold');
-    doc.text('Buy Price:', col2X, yPos);
+    doc.text('Item Price:', col2X, yPos);
     doc.setFont(undefined, 'normal');
-    doc.text(`$${buyPrice}`, col2X + labelWidth, yPos);
+    doc.text(`$${itemPrice}`, col2X + labelWidth, yPos);
 
     // Transaction History Section
     yPos += 15;
@@ -591,6 +590,35 @@ function Jewelry() {
     }
   };
 
+  const handleAddToTicket = (item) => {
+    // Check if item is ACTIVE
+    const currentStatus = item.inventory_status || item.status;
+    if (currentStatus !== 'ACTIVE') {
+      enqueueSnackbar('Only ACTIVE items can be added to ticket', { variant: 'warning' });
+      return;
+    }
+
+    // Navigate to CustomerTicket with the selected item
+    const customer = location.state?.customer;
+    navigate('/customer-ticket', {
+      state: {
+        customer,
+        selectedInventoryItem: {
+          ...item,
+          id: item.item_id,
+          item_id: item.item_id,
+          description: item.short_desc || item.long_desc,
+          category: item.category,
+          price: item.item_price,
+          item_price: item.item_price,
+          metal_weight: item.metal_weight,
+          transactionType: 'sale',
+          fromInventory: true
+        }
+      }
+    });
+  };
+
   const handleAddToCart = (item) => {
     // Check if item is ACTIVE
     const currentStatus = item.inventory_status || item.status;
@@ -618,9 +646,8 @@ function Jewelry() {
       item_id: item.item_id,
       description: item.short_desc || item.long_desc,
       category: item.category,
-      price: item.retail_price || item.buy_price,
-      retail_price: item.retail_price,
-      buy_price: item.buy_price,
+      price: item.item_price,
+      item_price: item.item_price,
       metal_weight: item.metal_weight,
       quantity: 1,
       transactionType: 'sale', // Always set to 'sale' for active inventory
@@ -947,7 +974,7 @@ function Jewelry() {
                   filteredItems.map((item) => (
                     <TableRow
                       key={item.id}
-                      sx={{ 
+                      sx={{
                         cursor: 'pointer',
                         '&:hover': { bgcolor: 'action.hover' },
                         bgcolor: selectedItem?.id === item.id ? 'action.selected' : 'inherit'
@@ -961,7 +988,7 @@ function Jewelry() {
                           ? (item.category.category || item.category.value || item.category.name || '')
                           : (item.category || '')}
                       </TableCell>
-                      <TableCell>${item.buy_price}</TableCell>
+                      <TableCell>${item.item_price || 'N/A'}</TableCell>
                       <TableCell>{item.metal_weight}g</TableCell>
                       <TableCell>{item.inventory_status || item.status}</TableCell>
                       <TableCell>{new Date(item.created_at).toLocaleDateString()}</TableCell>
@@ -990,42 +1017,29 @@ function Jewelry() {
                               Edit
                             </Button>
                           )}
-                          {/* Only show Add to Cart button for ACTIVE status items */}
+                          {/* Only show Add to Ticket button for ACTIVE status items */}
                           {(item.inventory_status === 'ACTIVE' || item.status === 'ACTIVE') && (
-                            <Badge
-                              badgeContent={getItemCartCount(item.item_id)}
-                              color="error"
+                            <Button
+                              variant="contained"
+                              color="success"
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAddToTicket(item);
+                              }}
+                              startIcon={<ShoppingCartIcon />}
                               sx={{
-                                '& .MuiBadge-badge': {
-                                  right: -3,
-                                  top: 3,
-                                  border: '2px solid white',
-                                  padding: '0 4px',
+                                minWidth: '120px',
+                                height: '28px',
+                                fontSize: '0.7rem',
+                                padding: '4px 4px',
+                                '& .MuiButton-label': {
+                                  lineHeight: 1.2
                                 }
                               }}
                             >
-                              <Button
-                                variant="contained"
-                                color="success"
-                                size="small"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleAddToCart(item);
-                                }}
-                                startIcon={<ShoppingCartIcon />}
-                                sx={{
-                                  minWidth: '100px',
-                                  height: '28px',
-                                  fontSize: '0.75rem',
-                                  padding: '4px 8px',
-                                  '& .MuiButton-label': {
-                                    lineHeight: 1.2
-                                  }
-                                }}
-                              >
-                                Add to Cart
-                              </Button>
-                            </Badge>
+                              Add to Ticket
+                            </Button>
                           )}
                           {item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER' && (
                             <Button
@@ -1109,33 +1123,35 @@ function Jewelry() {
                 
                 {/* Basic Info */}
                 <Box sx={{ flex: 1 }}>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-                    {`${selectedItem.metal_weight}g ${
-                      typeof selectedItem.metal_purity === 'object' && selectedItem.metal_purity !== null
-                        ? (selectedItem.metal_purity.purity || selectedItem.metal_purity.value || '')
-                        : (selectedItem.metal_purity || '')
-                    } ${
-                      typeof selectedItem.metal_type === 'object' && selectedItem.metal_type !== null
-                        ? (selectedItem.metal_type.type || selectedItem.metal_type.value || '')
-                        : (selectedItem.metal_type || '')
-                    }`}
+                  <Typography
+                    variant="subtitle1"
+                    sx={{
+                      fontWeight: 'bold',
+                      mb: 0.5,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      lineHeight: 1.4
+                    }}
+                  >
+                    {selectedItem.short_desc || selectedItem.long_desc || 'No Description'}
                   </Typography>
-                  <Typography variant="body2" color="textSecondary" sx={{ mb: 0.5 }}>
-                    {typeof selectedItem.metal_category === 'object' && selectedItem.metal_category !== null
-                      ? (selectedItem.metal_category.category || selectedItem.metal_category.value || '')
-                      : (selectedItem.metal_category || '')}
-                  </Typography>
+
                   <Typography variant="h6" sx={{ color: 'success.main', mb: 0.5 }}>
-                    ${formatPrice(selectedItem.retail_price)}
+                    ${selectedItem.item_price}
                   </Typography>
-                  <Typography 
-                    variant="body2" 
-                    sx={{ 
-                      color: selectedItem.inventory_status === 'HOLD' ? 'success.main' : 'error.main',
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: (selectedItem.status === 'SOLD' || selectedItem.inventory_status === 'SOLD') ? 'error.main' :
+                             (selectedItem.status === 'ACTIVE' || selectedItem.inventory_status === 'ACTIVE') ? 'info.main' :
+                             'success.main',
                       fontWeight: 'medium'
                     }}
                   >
-                    {selectedItem.inventory_status || 'HOLD'}
+                    {selectedItem.status || selectedItem.inventory_status || 'HOLD'}
                   </Typography>
                 </Box>
               </Box>
@@ -1166,16 +1182,48 @@ function Jewelry() {
                 </Box>
                 <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
                   <Box>
-                    <Typography variant="caption" color="textSecondary">Weight</Typography>
+                    <Typography variant="caption" color="textSecondary">Metal Weight</Typography>
                     <Typography variant="body2">{selectedItem.metal_weight}g</Typography>
                   </Box>
                   <Box>
-                    <Typography variant="caption" color="textSecondary">Dimensions</Typography>
-                    <Typography variant="body2">{selectedItem.dimensions || 'N/A'}</Typography>
+                    <Typography variant="caption" color="textSecondary">Metal Type</Typography>
+                    <Typography variant="body2">{selectedItem.precious_metal_type || selectedItem.non_precious_metal_type || 'N/A'}</Typography>
                   </Box>
                   <Box>
-                    <Typography variant="caption" color="textSecondary">Certification</Typography>
-                    <Typography variant="body2">{selectedItem.certification || 'N/A'}</Typography>
+                    <Typography variant="caption" color="textSecondary">Purity</Typography>
+                    <Typography variant="body2">{selectedItem.metal_purity || 'N/A'}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="textSecondary">Color</Typography>
+                    <Typography variant="body2">{selectedItem.jewelry_color || 'N/A'}</Typography>
+                  </Box>
+                  {selectedItem.primary_gem_type && (
+                    <>
+                      <Box>
+                        <Typography variant="caption" color="textSecondary">Primary Gem</Typography>
+                        <Typography variant="body2">{selectedItem.primary_gem_type}</Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" color="textSecondary">Gem Weight</Typography>
+                        <Typography variant="body2">{selectedItem.primary_gem_weight}ct</Typography>
+                      </Box>
+                    </>
+                  )}
+                  {selectedItem.primary_gem_color && (
+                    <Box>
+                      <Typography variant="caption" color="textSecondary">Gem Color</Typography>
+                      <Typography variant="body2">{selectedItem.primary_gem_color}</Typography>
+                    </Box>
+                  )}
+                  {selectedItem.primary_gem_clarity && (
+                    <Box>
+                      <Typography variant="caption" color="textSecondary">Gem Clarity</Typography>
+                      <Typography variant="body2">{selectedItem.primary_gem_clarity}</Typography>
+                    </Box>
+                  )}
+                  <Box>
+                    <Typography variant="caption" color="textSecondary">Created</Typography>
+                    <Typography variant="body2">{new Date(selectedItem.created_at).toLocaleDateString()}</Typography>
                   </Box>
                 </Box>
               </Paper>

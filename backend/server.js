@@ -1701,9 +1701,7 @@ app.put('/api/quotes/:id', async (req, res) => {
         c.email as customer_email,
         c.phone as customer_phone,
         j.short_desc as item_description,
-        j.buy_price,
-        j.pawn_value,
-        j.retail_price
+        j.item_price
       FROM quotes q
       LEFT JOIN customers c ON q.customer_id = c.id
       LEFT JOIN jewelry j ON q.item_id = j.item_id
@@ -1733,14 +1731,12 @@ app.get('/api/quotes/:quote_id/items', async (req, res) => {
     const { quote_id } = req.params;
     
     const query = `
-      SELECT 
+      SELECT
         qi.item_id,
         qi.item_price,
         tt.type as transaction_type,
         j.short_desc as description,
-        j.buy_price,
-        j.pawn_value,
-        j.retail_price,
+        j.item_price as jewelry_item_price,
         j.precious_metal_type,
         j.metal_spot_price,
         j.metal_weight,
@@ -1947,17 +1943,7 @@ app.put('/api/jewelry/quote/:quoteId/convert', async (req, res) => {
         // Generate new item ID based on metal category
         const usedIds = new Set();
         const newItemId = await generateItemId(jewelryItem.metal_category, client, usedIds);
-      
-        // Prepare price update based on transaction type
-        let priceUpdate = '';
-        if (quoteItem.transaction_type === 'buy') {
-          priceUpdate = 'buy_price = $3';
-        } else if (quoteItem.transaction_type === 'pawn') {
-          priceUpdate = 'pawn_value = $3';
-        } else if (quoteItem.transaction_type === 'retail') {
-          priceUpdate = 'retail_price = $3';
-        }
-        
+
         const deleteQuoteItemQuery = `
           DELETE FROM quote_items
           WHERE quote_id = $1 AND item_id = $2
@@ -1966,11 +1952,11 @@ app.put('/api/jewelry/quote/:quoteId/convert', async (req, res) => {
 
         // Update jewelry item
         const updateQuery = `
-          UPDATE jewelry 
-          SET 
+          UPDATE jewelry
+          SET
             item_id = $1,
             status = $2,
-            ${priceUpdate},
+            item_price = $3,
             updated_at = CURRENT_TIMESTAMP
           WHERE item_id = $4
           RETURNING *
@@ -2133,7 +2119,7 @@ app.put('/api/jewelry/:id', async (req, res) => {
       'secondary_gem_category', 'secondary_gem_size', 'secondary_gem_quantity',
       'secondary_gem_shape', 'secondary_gem_color', 'secondary_gem_quality',
       'secondary_gem_weight', 'metal_spot_price', 'notes', 'price',
-      'melt_value', 'weight_grams', 'metal_category'
+      'melt_value', 'weight_grams', 'metal_category', 'item_price'
     ];
 
     for (const field of allowedFields) {
@@ -2176,6 +2162,196 @@ app.put('/api/jewelry/:id', async (req, res) => {
   }
 });
 
+// Update jewelry item status
+app.put('/api/jewelry/:id/status', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { status, item_price } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
+
+    await client.query('BEGIN');
+
+    // Check if item exists and get current status
+    const checkQuery = 'SELECT item_id, status FROM jewelry WHERE item_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+
+    const oldStatus = checkResult.rows[0].status;
+
+    // Update the status and item_price when sold
+    let updateQuery, queryParams;
+    if (status === 'SOLD' && item_price !== undefined && item_price !== null) {
+      updateQuery = `
+        UPDATE jewelry
+        SET status = $1, item_price = $2, updated_at = CURRENT_TIMESTAMP
+        WHERE item_id = $3
+        RETURNING *
+      `;
+      queryParams = [status, item_price, id];
+    } else {
+      updateQuery = `
+        UPDATE jewelry
+        SET status = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE item_id = $2
+        RETURNING *
+      `;
+      queryParams = [status, id];
+    }
+
+    const result = await client.query(updateQuery, queryParams);
+
+    // Log status change to jewelry_item_history
+    try {
+      // Get the next version number for this item
+      const versionQuery = `
+        SELECT COALESCE(MAX(version_number), 0) + 1 as next_version
+        FROM jewelry_item_history
+        WHERE item_id = $1
+      `;
+      const versionResult = await client.query(versionQuery, [id]);
+      const nextVersion = versionResult.rows[0].next_version;
+
+      const historyQuery = `
+        INSERT INTO jewelry_item_history (item_id, version_number, changed_fields, changed_by, action_type, change_notes)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `;
+
+      const changedFields = {
+        status: {
+          from: oldStatus,
+          to: status
+        }
+      };
+
+      // If item_price was also updated, include it in the changed fields
+      if (status === 'SOLD' && item_price !== undefined && item_price !== null) {
+        changedFields.item_price = {
+          from: null,
+          to: item_price
+        };
+      }
+
+      await client.query(historyQuery, [
+        id,
+        nextVersion,
+        JSON.stringify(changedFields),
+        1, // Default user ID - should be passed from request if available
+        'update',
+        `Status updated from ${oldStatus} to ${status}`
+      ]);
+    } catch (historyError) {
+      console.error('Error logging status change to history:', historyError);
+      // Don't fail the request if history logging fails
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      item: result.rows[0],
+      message: `Status updated from ${oldStatus} to ${status}`
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating jewelry status:', err);
+    res.status(500).json({
+      error: 'Failed to update jewelry status',
+      details: err.message
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Update jewelry item images
+app.put('/api/jewelry/:id/images', uploadJewelryImages, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    // Check if item exists
+    const checkQuery = 'SELECT item_id, images FROM jewelry WHERE item_id = $1';
+    const checkResult = await client.query(checkQuery, [id]);
+
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+
+    const uploadedFiles = req.files || [];
+    const processedImages = [];
+
+    // Parse existing images to determine next image number
+    let existingImages = [];
+    try {
+      if (checkResult.rows[0].images) {
+        existingImages = typeof checkResult.rows[0].images === 'string'
+          ? JSON.parse(checkResult.rows[0].images)
+          : checkResult.rows[0].images;
+      }
+    } catch (e) {
+      console.error('Error parsing existing images:', e);
+    }
+
+    // Save new uploaded files
+    for (let i = 0; i < uploadedFiles.length; i++) {
+      const file = uploadedFiles[i];
+      const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+
+      // Create filename: ITEMID-N.jpg where N is the next available number
+      const imageNumber = existingImages.length + i + 1;
+      const filename = `${id}-${imageNumber}${ext}`;
+      const filepath = path.join(jewelryUploadDir, filename);
+
+      // Save file to disk
+      await fs.promises.writeFile(filepath, file.buffer);
+
+      // Add to processed images
+      processedImages.push({
+        url: `/uploads/jewelry/${filename}`,
+        isPrimary: existingImages.length === 0 && i === 0 // First image is primary if no existing images
+      });
+    }
+
+    // Merge with existing images
+    const allImages = [...existingImages, ...processedImages];
+
+    // Update database with merged images
+    const updateQuery = `
+      UPDATE jewelry
+      SET images = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = $2
+      RETURNING *
+    `;
+
+    const result = await client.query(updateQuery, [JSON.stringify(allImages), id]);
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      item: result.rows[0],
+      message: `Added ${processedImages.length} image(s)`
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating jewelry images:', err);
+    res.status(500).json({
+      error: 'Failed to update jewelry images',
+      details: err.message
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // Get a single jewelry item by ID
 app.get('/api/jewelry/:id', async (req, res) => {
   try {
@@ -2210,15 +2386,37 @@ app.get('/api/jewelry/:id', async (req, res) => {
 // Get all jewelry items
 app.get('/api/jewelry', async (req, res) => {
   try {
+    const { status, metal_category } = req.query;
+    const conditions = [];
+    const params = [];
+    let paramCount = 1;
+
+    // Add status filter if provided
+    if (status) {
+      conditions.push(`j.status = $${paramCount}`);
+      params.push(status);
+      paramCount++;
+    }
+
+    // Add metal_category filter if provided
+    if (metal_category) {
+      conditions.push(`j.category = $${paramCount}`);
+      params.push(metal_category);
+      paramCount++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
     const query = `
-      SELECT 
+      SELECT
         j.*,
         TO_CHAR(j.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
         TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at
       FROM jewelry j
+      ${whereClause}
       ORDER BY j.created_at DESC
     `;
-    const result = await pool.query(query);
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching jewelry items:', error);
@@ -2333,9 +2531,6 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           primary_gem_lab_grown,
           primary_gem_authentic,
           primary_gem_value,
-          buy_price,
-          pawn_value,
-          retail_price,
           status,
           location,
           condition,
@@ -2345,7 +2540,7 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           melt_value,
           total_weight,
           inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
         RETURNING *`;
 
       const jewelryValues = [
@@ -2377,9 +2572,6 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         item.primary_gem_lab_grown || false,
         item.primary_gem_authentic || false,
         parseFloat(item.primary_gem_value) || 0,
-        item.buy_price,
-        item.pawn_price,
-        item.retail_price,
         status,
         'SOUTH STORE',
         'GOOD',
@@ -2532,9 +2724,6 @@ app.post('/api/jewelry', async (req, res) => {
           primary_gem_lab_grown,
           primary_gem_authentic,
           primary_gem_value,
-          buy_price,
-          pawn_value,
-          retail_price,
           status,
           location,
           condition,
@@ -2544,7 +2733,7 @@ app.post('/api/jewelry', async (req, res) => {
           melt_value,
           total_weight,
           inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
         RETURNING *`;
 
       const jewelryValues = [
@@ -2555,7 +2744,7 @@ app.post('/api/jewelry', async (req, res) => {
         item.brand || '',                                       // 5
         item.vintage || false,                                 // 6
         item.stamps || '',                                     // 7
-        JSON.stringify(item.images || []),                      // 8 - Ensure proper JSON string format
+        JSON.stringify(item.images || []),                      // 8
         parseFloat(item.metal_weight) || 0,                       // 9
         item.precious_metal_type || '',                           // 10
         item.non_precious_metal_type || '',                       // 11
@@ -2576,16 +2765,13 @@ app.post('/api/jewelry', async (req, res) => {
         item.primary_gem_lab_grown || false,                     // 26
         item.primary_gem_authentic || false,                     // 27
         parseFloat(item.primary_gem_value) || 0,                 // 28
-        item.buy_price,    // 29
-        item.pawn_price,   // 30
-        item.retail_price, // 31
-        status,         //32
-        'SOUTH STORE',          // 33
-        'GOOD',          // 34
-        item.metal_spot_price,
-        item.notes,
-        item.price,
-        item.melt_value,
+        status,         // 29
+        'SOUTH STORE',          // 30
+        'GOOD',          // 31
+        item.metal_spot_price,  // 32
+        item.notes,  // 33
+        item.price,  // 34
+        item.melt_value,  // 35
         // Calculate total weight: metal_weight + primary_gem_weight + sum(secondary_gem_weights)
         (parseFloat(item.metal_weight) || 0) + 
         (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
@@ -3910,69 +4096,190 @@ app.get('/api/reports/customers/export', async (req, res) => {
 app.get('/api/transactions/:transaction_id/items', async (req, res) => {
   try {
     const { transaction_id } = req.params;
-    
-    // First, get all transaction items
-    const query = `
-      WITH item_list AS (
-        SELECT 
-          ti.id,
-          ti.transaction_id,
-          ti.item_id as transaction_item_id,
-          ti.item_price,
-          ti.created_at,
-          ti.updated_at,
-          tt.type as transaction_type,
-          j.item_id as jewelry_item_id,
-          j.long_desc,
-          j.short_desc,
-          j.category,
-          j.metal_weight,
-          j.precious_metal_type,
-          j.non_precious_metal_type,
-          j.metal_purity,
-          j.purity_value,
-          j.jewelry_color,
-          j.metal_spot_price,
-          j.est_metal_value,
-          j.images,
-          j.status as item_status,
-          j.primary_gem_type,
-          j.primary_gem_category,
-          j.primary_gem_size,
-          j.primary_gem_weight,
-          j.primary_gem_quantity,
-          j.primary_gem_shape,
-          j.primary_gem_color,
-          j.primary_gem_exact_color,
-          j.primary_gem_clarity,
-          j.primary_gem_cut,
-          j.primary_gem_lab_grown,
-          j.primary_gem_authentic,
-          j.primary_gem_value,
-          EXISTS (
-            SELECT * FROM jewelry_secondary_gems jsg 
-            WHERE jsg.item_id = ti.item_id
-          ) as has_secondary_gems
-        FROM transaction_items ti
-        JOIN transaction_type tt ON ti.transaction_type_id = tt.id
-        LEFT JOIN jewelry j ON ti.item_id = j.item_id
-        WHERE ti.transaction_id = $1
-      )
-      SELECT 
-        il.*,
+
+    // First, try to get items from transaction_items table (legacy)
+    const transactionItemsQuery = `
+      SELECT
+        ti.id,
+        ti.transaction_id,
+        ti.item_id,
+        NULL as ticket_id,
+        ti.created_at,
+        j.updated_at,
+        CASE
+          WHEN ti.transaction_type_id = 1 THEN 'pawn'
+          WHEN ti.transaction_type_id = 2 THEN 'buy'
+          WHEN ti.transaction_type_id = 3 THEN 'sale'
+          WHEN ti.transaction_type_id = 4 THEN 'trade'
+          WHEN ti.transaction_type_id = 5 THEN 'repair'
+          WHEN ti.transaction_type_id = 6 THEN 'payment'
+          WHEN ti.transaction_type_id = 7 THEN 'refund'
+          ELSE 'unknown'
+        END as transaction_type,
+        j.item_id as jewelry_item_id,
+        j.long_desc,
+        j.short_desc,
+        j.category,
+        j.metal_weight,
+        j.precious_metal_type,
+        j.non_precious_metal_type,
+        j.metal_purity,
+        j.purity_value,
+        j.jewelry_color,
+        j.metal_spot_price,
+        j.est_metal_value,
+        j.item_price,
+        j.images,
+        j.status as item_status,
+        j.primary_gem_type,
+        j.primary_gem_category,
+        j.primary_gem_size,
+        j.primary_gem_weight,
+        j.primary_gem_quantity,
+        j.primary_gem_shape,
+        j.primary_gem_color,
+        j.primary_gem_exact_color,
+        j.primary_gem_clarity,
+        j.primary_gem_cut,
+        j.primary_gem_lab_grown,
+        j.primary_gem_authentic,
+        j.primary_gem_value,
+        EXISTS (
+          SELECT * FROM jewelry_secondary_gems jsg
+          WHERE jsg.item_id = ti.item_id
+        ) as has_secondary_gems,
         (
           SELECT COALESCE(
             json_agg(jsg.*) FILTER (WHERE jsg.item_id IS NOT NULL),
             '[]'::json
           )
-          FROM jewelry_secondary_gems jsg 
-          WHERE jsg.item_id = il.transaction_item_id
+          FROM jewelry_secondary_gems jsg
+          WHERE jsg.item_id = ti.item_id
         ) as secondary_gems
-      FROM item_list il
-      ORDER BY il.created_at ASC
+      FROM transaction_items ti
+      LEFT JOIN jewelry j ON ti.item_id = j.item_id
+      WHERE ti.transaction_id = $1
+      ORDER BY ti.created_at ASC
     `;
-    
-    const result = await pool.query(query, [transaction_id]);
+
+    const transactionItemsResult = await pool.query(transactionItemsQuery, [transaction_id]);
+
+    // If items found in transaction_items, use those
+    let result;
+    if (transactionItemsResult.rows.length > 0) {
+      result = transactionItemsResult;
+    } else {
+      // Fallback: Get items from buy_ticket and sale_ticket tables (union of both)
+      const ticketQuery = `
+        WITH item_list AS (
+          -- Get buy ticket items
+          SELECT
+            bt.id,
+            bt.transaction_id,
+            bt.item_id,
+            bt.buy_ticket_id as ticket_id,
+            bt.created_at,
+            j.updated_at,
+            'buy' as transaction_type,
+            j.item_id as jewelry_item_id,
+            j.long_desc,
+            j.short_desc,
+            j.category,
+            j.metal_weight,
+            j.precious_metal_type,
+            j.non_precious_metal_type,
+            j.metal_purity,
+            j.purity_value,
+            j.jewelry_color,
+            j.metal_spot_price,
+            j.est_metal_value,
+            j.item_price,
+            j.images,
+            j.status as item_status,
+            j.primary_gem_type,
+            j.primary_gem_category,
+            j.primary_gem_size,
+            j.primary_gem_weight,
+            j.primary_gem_quantity,
+            j.primary_gem_shape,
+            j.primary_gem_color,
+            j.primary_gem_exact_color,
+            j.primary_gem_clarity,
+            j.primary_gem_cut,
+            j.primary_gem_lab_grown,
+            j.primary_gem_authentic,
+            j.primary_gem_value,
+            EXISTS (
+              SELECT * FROM jewelry_secondary_gems jsg
+              WHERE jsg.item_id = bt.item_id
+            ) as has_secondary_gems
+          FROM buy_ticket bt
+          LEFT JOIN jewelry j ON bt.item_id = j.item_id
+          WHERE bt.transaction_id = $1
+
+          UNION ALL
+
+          -- Get sale ticket items
+          SELECT
+            st.id,
+            st.transaction_id,
+            st.item_id,
+            st.sale_ticket_id as ticket_id,
+            st.created_at,
+            j.updated_at,
+            'sale' as transaction_type,
+            j.item_id as jewelry_item_id,
+            j.long_desc,
+            j.short_desc,
+            j.category,
+            j.metal_weight,
+            j.precious_metal_type,
+            j.non_precious_metal_type,
+            j.metal_purity,
+            j.purity_value,
+            j.jewelry_color,
+            j.metal_spot_price,
+            j.est_metal_value,
+            j.item_price,
+            j.images,
+            j.status as item_status,
+            j.primary_gem_type,
+            j.primary_gem_category,
+            j.primary_gem_size,
+            j.primary_gem_weight,
+            j.primary_gem_quantity,
+            j.primary_gem_shape,
+            j.primary_gem_color,
+            j.primary_gem_exact_color,
+            j.primary_gem_clarity,
+            j.primary_gem_cut,
+            j.primary_gem_lab_grown,
+            j.primary_gem_authentic,
+            j.primary_gem_value,
+            EXISTS (
+              SELECT * FROM jewelry_secondary_gems jsg
+              WHERE jsg.item_id = st.item_id
+            ) as has_secondary_gems
+          FROM sale_ticket st
+          LEFT JOIN jewelry j ON st.item_id = j.item_id
+          WHERE st.transaction_id = $1
+        )
+        SELECT
+          il.*,
+          (
+            SELECT COALESCE(
+              json_agg(jsg.*) FILTER (WHERE jsg.item_id IS NOT NULL),
+              '[]'::json
+            )
+            FROM jewelry_secondary_gems jsg
+            WHERE jsg.item_id = il.item_id
+          ) as secondary_gems
+        FROM item_list il
+        ORDER BY il.created_at ASC
+      `;
+
+      result = await pool.query(ticketQuery, [transaction_id]);
+    }
     
     // Transform the result to a more usable format
     const items = result.rows.map(row => {
@@ -4031,7 +4338,8 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
       return {
         id: row.id,
         transaction_id: row.transaction_id,
-        item_id: row.transaction_item_id,
+        item_id: row.item_id,
+        ticket_id: row.ticket_id,
         item_price: row.item_price,
         notes: row.notes || '',
         transaction_type: row.transaction_type,
@@ -4292,23 +4600,8 @@ app.post('/api/transactions', async (req, res) => {
             transaction_date
         ]);
 
-        // Insert items into transaction_items
-        for (const item of cartItems) {
-            // Handle both jewelry items (with item_id) and non-jewelry items (without item_id)
-            const itemQuery = item.item_id
-                ? `INSERT INTO transaction_items (
-                      transaction_id, item_id, transaction_type_id, item_price
-                  ) VALUES ($1, $2, $3, $4) RETURNING *`
-                : `INSERT INTO transaction_items (
-                      transaction_id, transaction_type_id, item_price, description
-                  ) VALUES ($1, $2, $3, $4) RETURNING *`;
-
-            const params = item.item_id
-                ? [transactionId, item.item_id, item.transaction_type_id, item.price]
-                : [transactionId, item.transaction_type_id, item.price, item.description || 'Item'];
-
-            await client.query(itemQuery, params);
-        }
+        // Items are now stored in buy_ticket and sale_ticket tables instead of transaction_items
+        // This is handled separately in the frontend via /api/buy-ticket and /api/sale-ticket endpoints
 
         await client.query('COMMIT');
         

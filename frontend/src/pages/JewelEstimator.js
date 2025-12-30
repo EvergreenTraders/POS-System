@@ -45,12 +45,26 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 
-function JewelEstimator() {
+function JewelEstimator({
+  prefilledData: propPrefilledData,
+  inDialog: propInDialog,
+  onDialogCancel: propOnDialogCancel,
+  onDialogSave: propOnDialogSave,
+  transactionType: propTransactionType
+} = {}) {
   const API_BASE_URL = config.apiUrl;
   const { user } = useAuth();
   const { addToCart } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Check if running in dialog mode - prioritize props over location state
+  const inDialog = propInDialog !== undefined ? propInDialog : (location.state?.inDialog || false);
+  const onDialogCancel = propOnDialogCancel || location.state?.onDialogCancel;
+  const onDialogSave = propOnDialogSave || location.state?.onDialogSave;
+
+  // State to track metal estimator reset
+  const [metalEstimatorKey, setMetalEstimatorKey] = useState(0);
 
   // Helper function to create user-specific localStorage keys
   const getUserStorageKey = (key) => {
@@ -123,8 +137,8 @@ function JewelEstimator() {
     setSnackbar({ ...snackbar, open: false });
   };
   const [customer, setCustomer] = useState(location.state?.customer || null);
-  const [transactionType, setTransactionType] = useState(location.state?.itemToEdit?.transaction_type || 'buy');
-  const [freeText, setFreeText] = useState(location.state?.itemToEdit?.notes || '');
+  const [transactionType, setTransactionType] = useState(propTransactionType || location.state?.transactionType || location.state?.itemToEdit?.transaction_type || 'buy');
+  const [freeText, setFreeText] = useState(propPrefilledData?.free_text || location.state?.prefilledData?.free_text || location.state?.itemToEdit?.notes || '');
   const [diamondSummary, setDiamondSummary] = useState(() => {
     // Skip localStorage restoration if in edit mode
     if (location.state?.editMode) return [];
@@ -234,23 +248,23 @@ function JewelEstimator() {
 
   const handleAddMetal = (newItem) => {
     // Find the metal type from the state
-    const metalType = metalTypes.find(mt => 
+    const metalType = metalTypes.find(mt =>
       mt.type === newItem.precious_metal_type
     );
 
     // Calculate price estimates with the found metal type ID
     const estimates = calculatePriceEstimates(newItem.estimated_value, metalType.id);
-    
+
     // Set the price estimates
     setPriceEstimates(estimates);
-    
+
     // Add the metal with its price estimates
     const metalWithEstimates = {
       ...newItem,
       priceEstimates: estimates
     };
     setAddMetal(prev => [...prev, metalWithEstimates]);
-    
+
     // Set the price estimates directly (not adding to previous)
     setPriceEstimates({
       pawn: estimates.pawn,
@@ -258,6 +272,9 @@ function JewelEstimator() {
       melt: estimates.melt,
       retail: estimates.retail
     });
+
+    // Reset MetalEstimator by incrementing the key
+    setMetalEstimatorKey(prev => prev + 1);
   };
 
   const handleDeleteMetal = (index) => {
@@ -1751,6 +1768,11 @@ function JewelEstimator() {
   };
 
   const handleBackToTicket = () => {
+    // If in dialog mode, call cancel callback
+    if (inDialog && onDialogCancel) {
+      onDialogCancel();
+      return;
+    }
     navigate('/customer-ticket', { state: { customer } });
   };
 
@@ -1765,7 +1787,7 @@ function JewelEstimator() {
       // If item already has images array, use it
       if (item.images && Array.isArray(item.images)) {
         itemImages = [...item.images]; // Create a copy to avoid reference issues
-      } 
+      }
       // If item has a single image object, convert to array
       else if (item.image && (item.image.url || item.image.data)) {
         itemImages = [{
@@ -1792,6 +1814,26 @@ function JewelEstimator() {
       };
     });
 
+    // If in dialog mode, call the dialog save callback instead of navigating
+    if (inDialog && onDialogSave) {
+      // Now call the save callback
+      onDialogSave(processedItems);
+
+      // Clear the estimated items state
+      setEstimatedItems([]);
+
+      // Clear from all storage locations AFTER state update
+      // Use setTimeout to ensure this happens after any synchronous storage saves
+      setTimeout(() => {
+        sessionStorage.removeItem(getUserStorageKey('jewelEstimatorItems'));
+        localStorage.removeItem(getUserStorageKey('jewelEstimatorItems'));
+        sessionStorage.removeItem('jewelEstimatorItems');
+        localStorage.removeItem('jewelEstimatorItems');
+      }, 0);
+
+      return;
+    }
+
     // Clear estimated items from sessionStorage when adding to ticket
     sessionStorage.removeItem('jewelEstimatorItems');
     if (editMode && ticketItemId) {
@@ -1813,7 +1855,7 @@ function JewelEstimator() {
         return;
       }
     }
-    
+
     // Default behavior for non-edit mode or if edited item not found
     navigate('/customer-ticket', {
       state: {
@@ -1926,9 +1968,9 @@ function JewelEstimator() {
   }, []);
 
   return (
-    <Container maxWidth="lg" sx={{ pt: 4 }}>
-      {/* Back to Ticket Button */}
-      {location.state?.customer && (
+    <Container maxWidth="lg" sx={{ pt: inDialog ? 2 : 4 }}>
+      {/* Back to Ticket Button - show when customer exists or in dialog mode */}
+      {(location.state?.customer || inDialog) && (
         <Button
           variant="outlined"
           color="primary"
@@ -1936,23 +1978,31 @@ function JewelEstimator() {
           onClick={handleBackToTicket}
           sx={{ mb: 2 }}
         >
-          Back to Ticket
+          {inDialog ? 'Cancel' : 'Back to Ticket'}
         </Button>
       )}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid container spacing={3} sx={{ mb: 3, alignItems: 'stretch' }}>
         {/* Metal Estimation Section */}
         <Grid item xs={12} md={3}>
-          <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
+          <Paper sx={{ height: '80vh', overflow: 'auto' }}>
             <MetalEstimator
+              key={`metal-${metalEstimatorKey}`}
               onMetalValueChange={handleTotalMetalValueChange}
               onAddMetal={handleAddMetal}
-              initialData={location.state?.itemToEdit} />
+              initialData={(() => {
+                // Only use prefilled data on the very first render (metalEstimatorKey === 0)
+                // After that, reset to null so form is empty with default values
+                const data = metalEstimatorKey === 0
+                  ? (propPrefilledData || location.state?.prefilledData || location.state?.itemToEdit)
+                  : null;
+                return data;
+              })()} />
           </Paper>
         </Grid>
 
         {/* Gem Estimation Section */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
+          <Paper sx={{ height: '80vh', overflow: 'auto' }}>
             <GemEstimator
               onAddGem={handleAddGem}
               initialData={location.state?.itemToEdit}
@@ -2681,15 +2731,17 @@ function JewelEstimator() {
                 >
                   Add to Ticket
                 </Button>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleCheckout}
-                  disabled={estimatedItems.length === 0}
-                  startIcon={<ArrowForwardIcon />}
-                >
-                  Proceed to Checkout
-                </Button>
+                {!inDialog && (
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleCheckout}
+                    disabled={estimatedItems.length === 0}
+                    startIcon={<ArrowForwardIcon />}
+                  >
+                    Proceed to Checkout
+                  </Button>
+                )}
               </Box>
             </Box>
           </Paper>

@@ -11,6 +11,7 @@ import config from '../config';
 import { useAuth } from '../context/AuthContext';
 import MetalEstimator from './MetalEstimator';
 import GemEstimator from './GemEstimator';
+import JewelEstimator from './JewelEstimator';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import InventoryIcon from '@mui/icons-material/Inventory';
@@ -37,6 +38,19 @@ function bufferToDataUrl(bufferObj) {
   );
   return `data:image/jpeg;base64,${base64}`;
 }
+
+// Wrapper component to pass props to JewelEstimator in dialog
+const JewelEstimatorWrapper = ({ prefilledData, onCancel, onSave, transactionType }) => {
+  return (
+    <JewelEstimator
+      prefilledData={prefilledData}
+      inDialog={true}
+      onDialogCancel={onCancel}
+      onDialogSave={onSave}
+      transactionType={transactionType}
+    />
+  );
+};
 
 const CustomerTicket = () => {
   const location = useLocation();
@@ -69,6 +83,8 @@ const CustomerTicket = () => {
   const [gemFormState, setGemFormState] = useState({ diamonds: [], stones: [], secondaryGems: [] });
   const [currentEditingItemId, setCurrentEditingItemId] = useState(null);
   const [prefilledData, setPrefilledData] = useState(null);
+  const [addedMetals, setAddedMetals] = useState([]);
+  const [addedGems, setAddedGems] = useState([]);
 
   // Metal categories from database
   const [metalCategories, setMetalCategories] = useState([]);
@@ -480,10 +496,10 @@ const CustomerTicket = () => {
   
   // Helper function to save ticket items in localStorage
   const saveTicketItems = (type, items) => {
-    if (!customer || !customer.id) return; // Don't save if no customer selected
-    
     try {
-      localStorage.setItem(`ticket_${customer.id}_${type}`, JSON.stringify(items));
+      // Save with customer ID if available, otherwise save globally
+      const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
+      localStorage.setItem(key, JSON.stringify(items));
     } catch (error) {
       console.error(`Error saving ${type} items to localStorage:`, error);
     }
@@ -491,21 +507,22 @@ const CustomerTicket = () => {
 
   // Helper function to load ticket items from localStorage
   const loadTicketItems = (type) => {
-    if (!customer || !customer.id) return null; // No customer selected
-    
     try {
-      const savedItems = localStorage.getItem(`ticket_${customer.id}_${type}`);
-      return savedItems ? JSON.parse(savedItems) : null;
+      // Load with customer ID if available, otherwise load globally
+      const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
+      const savedItems = localStorage.getItem(key);
+      const parsed = savedItems ? JSON.parse(savedItems) : null;
+      return parsed;
     } catch (error) {
       console.error(`Error loading ${type} items from localStorage:`, error);
       return null;
     }
   };
-  
+
   // Helper function to clear ticket items from localStorage
   const clearTicketItems = (type) => {
-    if (!customer || !customer.id) return;
-    localStorage.removeItem(`ticket_${customer.id}_${type}`);
+    const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
+    localStorage.removeItem(key);
   };
   
   // State for managing items in each tab - initialize from localStorage if available
@@ -709,6 +726,7 @@ const CustomerTicket = () => {
           // Store the original estimator data for editing
           originalData: { ...item },
           sourceEstimator: 'jewelry',
+          images: item.images || [],
           image: item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url || null
         };
         
@@ -949,6 +967,132 @@ const CustomerTicket = () => {
       window.history.replaceState({}, document.title);
     }
   }, [estimatedItems, from, location.state, customer]);
+
+  // Handle selected inventory item from Jewelry page
+  React.useEffect(() => {
+    if (location.state?.selectedInventoryItem) {
+      const stateHash = JSON.stringify({ selectedInventoryItem: location.state.selectedInventoryItem });
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+
+      const inventoryItem = location.state.selectedInventoryItem;
+
+      // Clear empty sale items if needed
+      const hasEmptySaleItems = saleItems.length === 1 && !saleItems[0].description;
+
+      // Create sale item from inventory - use original item_id as id
+      const newSaleItem = {
+        id: inventoryItem.item_id, // Use original item_id instead of generating new one
+        description: inventoryItem.description,
+        category: inventoryItem.category,
+        price: inventoryItem.price,
+        retail_price: inventoryItem.retail_price,
+        buy_price: inventoryItem.buy_price,
+        metal_weight: inventoryItem.metal_weight,
+        item_id: inventoryItem.item_id,
+        images: inventoryItem.images || [],
+        fromInventory: true,
+        protectionPlan: false
+      };
+
+      setSaleItems(prevItems => {
+        const newItems = hasEmptySaleItems ? [newSaleItem] : [...prevItems, newSaleItem];
+        saveTicketItems('sale', newItems);
+        return newItems;
+      });
+
+      setActiveTab(3); // Set active tab to Sale
+      showSnackbar('Inventory item added to sale ticket', 'success');
+
+      // Clear the location state
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
+
+  // Track whether initial load is complete to avoid overwriting saved data
+  const initialLoadCompleteRef = React.useRef(false);
+  const customerIdRef = React.useRef(customer?.id);
+
+  // Load ticket items from localStorage when component mounts or customer changes
+  React.useEffect(() => {
+    // Load on first mount or when customer changes
+    const customerChanged = customerIdRef.current !== customer?.id;
+    if (!initialLoadCompleteRef.current || customerChanged) {
+      // Skip loading if we're coming from an estimator or have location state with items
+      const hasEstimatorData = location.state?.updatedItem || location.state?.estimatedItems || location.state?.editItem || location.state?.selectedInventoryItem || location.state?.addedItems;
+
+      if (!hasEstimatorData) {
+        // Load saved items (will use customer ID if available, otherwise load global)
+        const savedPawn = loadTicketItems('pawn');
+        const savedBuy = loadTicketItems('buy');
+        const savedTrade = loadTicketItems('trade');
+        const savedSale = loadTicketItems('sale');
+        const savedRepair = loadTicketItems('repair');
+        const savedPayment = loadTicketItems('payment');
+        const savedRefund = loadTicketItems('refund');
+
+        // Update items - use saved items if available, otherwise use default empty item
+        setPawnItems(savedPawn || [{ id: 1, description: '', category: '', value: '' }]);
+        setBuyItems(savedBuy || [{ id: 1, description: '', category: '', price: '' }]);
+        setTradeItems(savedTrade || [{ id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }]);
+        setSaleItems(savedSale || [{ id: 1, description: '', category: '', price: '', paymentMethod: '' }]);
+        setRepairItems(savedRepair || [{ id: 1, description: '', issue: '', fee: '', completion: '' }]);
+        setPaymentItems(savedPayment || [{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
+        setRefundItems(savedRefund || [{ id: 1, amount: '', method: '', reference: '', reason: '' }]);
+      }
+
+      // Mark initial load as complete after a short delay to ensure state updates are processed
+      setTimeout(() => {
+        initialLoadCompleteRef.current = true;
+        customerIdRef.current = customer?.id;
+      }, 100);
+    }
+  }, [customer, location.state]);
+
+  // Auto-save ticket items to localStorage whenever they change (only after initial load)
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('pawn', pawnItems);
+    }
+  }, [pawnItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('buy', buyItems);
+    }
+  }, [buyItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('trade', tradeItems);
+    }
+  }, [tradeItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('sale', saleItems);
+    }
+  }, [saleItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('repair', repairItems);
+    }
+  }, [repairItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('payment', paymentItems);
+    }
+  }, [paymentItems, customer]);
+
+  React.useEffect(() => {
+    if (initialLoadCompleteRef.current) {
+      saveTicketItems('refund', refundItems);
+    }
+  }, [refundItems, customer]);
 
   // Recalculate totals whenever any item array changes
   React.useEffect(() => {
@@ -1334,20 +1478,171 @@ const CustomerTicket = () => {
     return tabNames[tabIndex] || 'Unknown';
   };
 
-  const handleJewelryEstimatorClick = () => {
-    navigate('/inventory', { state: { customer } });
+  const [jewelryInventoryDialog, setJewelryInventoryDialog] = React.useState({
+    open: false,
+    itemId: null,
+    transactionType: null
+  });
+  const [jewelryInventoryItems, setJewelryInventoryItems] = React.useState([]);
+  const [selectedJewelryEstimator, setSelectedJewelryEstimator] = React.useState({});
+
+  // Category selection dialog state
+  const [categorySelectorDialog, setCategorySelectorDialog] = React.useState({
+    open: false,
+    itemId: null,
+    transactionType: null
+  });
+  const [selectedCategory, setSelectedCategory] = React.useState(null);
+
+  const handleJewelryEstimatorClick = async (itemId, transactionType) => {
+    // For Sale tab, open category selector first
+    if (transactionType === 'sale') {
+      setCategorySelectorDialog({ open: true, itemId, transactionType });
+    } else {
+      // For other tabs, just toggle the highlight/selection
+      const key = `${transactionType}-${itemId}`;
+      setSelectedJewelryEstimator(prev => ({
+        ...prev,
+        [key]: !prev[key]
+      }));
+
+      // Mark the item as jewelry inventory
+      const updateItems = (items) => items.map(item => {
+        if (item.id === itemId) {
+          return {
+            ...item,
+            fromJewelryInventory: !item.fromJewelryInventory
+          };
+        }
+        return item;
+      });
+
+      if (transactionType === 'pawn') setPawnItems(updateItems);
+      else if (transactionType === 'buy') setBuyItems(updateItems);
+      else if (transactionType === 'trade') setTradeItems(updateItems);
+      else if (transactionType === 'repair') setRepairItems(updateItems);
+      else if (transactionType === 'payment') setPaymentItems(updateItems);
+      else if (transactionType === 'refund') setRefundItems(updateItems);
+    }
   };
 
-  // Parse description format: JR 10k 2g YG
-  // J = Jewelry, R = Ring, 10k = purity, 2g = weight, Y = Yellow, G = Gold
-  const parseDescription = (description) => {
+  const handleCategorySelect = async (category) => {
+    const { itemId, transactionType } = categorySelectorDialog;
+    setSelectedCategory(category);
+
+    // Fetch inventory filtered by category
+    try {
+      const response = await fetch(`${config.apiUrl}/jewelry?status=ACTIVE&metal_category=${encodeURIComponent(category)}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      const items = await response.json();
+      setJewelryInventoryItems(items);
+
+      // Close category selector and open inventory dialog
+      setCategorySelectorDialog({ open: false, itemId: null, transactionType: null });
+      setJewelryInventoryDialog({ open: true, itemId, transactionType });
+    } catch (error) {
+      console.error('Error fetching jewelry inventory:', error);
+      showSnackbar('Error loading inventory', 'error');
+    }
+  };
+
+  const handleSelectJewelryItem = (jewelryItem) => {
+    const { itemId, transactionType } = jewelryInventoryDialog;
+
+    if (transactionType === 'sale') {
+      // For sale tab, add the item properly like from inventory page
+      // Clear empty sale items if needed
+      const hasEmptySaleItems = saleItems.length === 1 && !saleItems[0].description;
+
+      // Create sale item from jewelry inventory - similar to selectedInventoryItem handling
+      const newSaleItem = {
+        id: jewelryItem.item_id, // Use original item_id
+        description: jewelryItem.short_desc || jewelryItem.long_desc || buildJewelryDescription(jewelryItem),
+        category: jewelryItem.category,
+        price: jewelryItem.item_price,
+        retail_price: jewelryItem.retail_price,
+        buy_price: jewelryItem.buy_price,
+        metal_weight: jewelryItem.metal_weight,
+        item_id: jewelryItem.item_id,
+        images: jewelryItem.images || [],
+        fromInventory: true,
+        protectionPlan: false
+      };
+
+      setSaleItems(prevItems => {
+        const newItems = hasEmptySaleItems ? [newSaleItem] : [...prevItems, newSaleItem];
+        saveTicketItems('sale', newItems);
+        return newItems;
+      });
+
+      showSnackbar('Jewelry item added to sale ticket', 'success');
+    } else {
+      // For other transaction types, build description and update
+      const description = buildJewelryDescription(jewelryItem);
+
+      const updateItems = (items) => items.map(item => {
+        if (item.id === itemId) {
+          return {
+            ...item,
+            description,
+            fromJewelryInventory: true,
+            jewelryItemId: jewelryItem.item_id
+          };
+        }
+        return item;
+      });
+
+      if (transactionType === 'pawn') setPawnItems(updateItems);
+      else if (transactionType === 'buy') setBuyItems(updateItems);
+      else if (transactionType === 'trade') setTradeItems(updateItems);
+      else if (transactionType === 'repair') setRepairItems(updateItems);
+      else if (transactionType === 'payment') setPaymentItems(updateItems);
+      else if (transactionType === 'refund') setRefundItems(updateItems);
+    }
+
+    setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null });
+  };
+
+  const buildJewelryDescription = (item) => {
+    const parts = [];
+
+    // Category (R for Ring, B for Bracelet, etc.)
+    if (item.category) {
+      const categoryCode = item.category.charAt(0).toUpperCase();
+      parts.push(categoryCode);
+    }
+
+    // Purity (10k, 14k, etc.)
+    if (item.metal_purity) {
+      parts.push(item.metal_purity);
+    }
+
+    // Weight (2g, 5.6g, etc.)
+    if (item.metal_weight) {
+      parts.push(`${item.metal_weight}g`);
+    }
+
+    // Color (YG, WG, RG, etc.)
+    if (item.jewelry_color) {
+      parts.push(item.jewelry_color);
+    }
+
+    return parts.join(' ');
+  };
+
+  // Parse description format: R 10k 2g YG (when fromJewelryInventory=true)
+  // R = Ring, 10k = purity, 2g = weight, YG = Yellow Gold
+  const parseDescription = (description, fromJewelryInventory = false) => {
     if (!description) return null;
 
     const parts = description.trim().toUpperCase().split(/\s+/);
-    if (parts.length < 3) return null; // Minimum: purity, weight, metal (e.g., "10k 5.6g RG")
+    if (parts.length < 3) return null; // Minimum: category/purity, weight, metal (e.g., "10k 5.6g RG" or "R 10k 2g YG")
 
     const parsed = {
-      type: null,
+      type: fromJewelryInventory ? 'Jewelry' : null,
       category: null,
       purity: null,
       weight: null,
@@ -1356,34 +1651,17 @@ const CustomerTicket = () => {
     };
 
     let partIndex = 0;
-
-    // Check if first part is Type + Category (e.g., "JR" = Jewelry Ring)
-    // Type+Category should have at least 2 chars and first char should be J, B, or M
-    const typeMap = { 'J': 'Jewelry', 'B': 'Bullion', 'M': 'Misc' };
     const firstPart = parts[0];
-    const firstChar = firstPart[0];
 
-    // Determine if the first part is a type+category or just purity
-    let hasTypeCategory = false;
-    if (firstPart.length >= 2 && typeMap[firstChar]) {
-      // Check if second part looks like purity (to confirm first part is type+category)
-      if (parts.length >= 4) {
-        const secondPart = parts[1];
-        // Check for numeric purity (10K, 0.999) or text purity (pure, sterling)
-        if (secondPart.match(/^\d+K?$/i) || secondPart.match(/^0?\.\d+$/) || secondPart.match(/^1\.0+$/) || secondPart.match(/^[a-zA-Z]+$/)) {
-          hasTypeCategory = true;
-        }
+    // Check if first part looks like a category code (single letter) and second part looks like purity
+    if (parts.length >= 3 && firstPart.length === 1) {
+      const potentialPurity = parts[1];
+
+      if (potentialPurity.match(/^\d+K?$/i) || potentialPurity.match(/^0?\.\d+$/) || potentialPurity.match(/^1\.0+$/) || potentialPurity.match(/^[a-zA-Z]+$/)) {
+        // First part is category code
+        parsed.category = categoryCodeMap[firstPart] || firstPart;
+        partIndex++;
       }
-    }
-
-    if (hasTypeCategory) {
-      // Parse Type + Category
-      const typeCategory = parts[partIndex++];
-      const typeCode = typeCategory[0];
-      const categoryCode = typeCategory.substring(1);
-
-      parsed.type = typeMap[typeCode] || null;
-      parsed.category = categoryCodeMap[categoryCode] || categoryCode;
     }
 
     // Parse Purity (e.g., "10K", "14K", "18K", "24K", "0.585", "0.999", "pure", "sterling")
@@ -1455,7 +1733,7 @@ const CustomerTicket = () => {
       const item = items.find(i => i.id === itemId);
       if (!item || !item.description) return;
 
-      const parsed = parseDescription(item.description);
+      const parsed = parseDescription(item.description, item.fromJewelryInventory);
 
       if (!parsed) {
         return;
@@ -1547,13 +1825,120 @@ const CustomerTicket = () => {
     setGemFormState({ diamonds: [], stones: [], secondaryGems: [] });
     setCurrentEditingItemId(null);
     setPrefilledData(null);
+    setAddedMetals([]);
+    setAddedGems([]);
   };
 
   // Handler for saving data from the combined dialog
-  const handleCombinedSave = () => {
+  const handleCombinedSave = (processedItems) => {
     if (!currentEditingItemId) return;
 
     const { items, setItems } = getCurrentItems();
+
+    // If processedItems are provided (from JewelEstimator), use them directly
+    if (processedItems && processedItems.length > 0) {
+
+      // Check if we're in REPLACE mode (editing an existing item)
+      const itemToReplace = items.find(item => item.id === currentEditingItemId);
+
+      if (itemToReplace) {
+        // REPLACE MODE: Replace the existing item with the first processed item
+        const firstJewelryItem = processedItems[0];
+
+        // Get the appropriate price for the first item
+        let displayValue = 0;
+        if (activeTab === 0) { // Pawn tab
+          displayValue = firstJewelryItem.price_estimates?.pawn || firstJewelryItem.pawn_price || 0;
+        } else if (activeTab === 1) { // Buy tab
+          displayValue = firstJewelryItem.price_estimates?.buy || firstJewelryItem.buy_price || 0;
+        } else if (activeTab === 3) { // Sale tab
+          displayValue = firstJewelryItem.price_estimates?.retail || firstJewelryItem.retail_price || 0;
+        } else {
+          displayValue = firstJewelryItem.price || 0;
+        }
+
+        // Replace the existing item
+        const updatedItems = items.map(item => {
+          if (item.id !== currentEditingItemId) return item;
+          return {
+            id: item.id, // Keep original ID
+            description: firstJewelryItem.short_desc || firstJewelryItem.long_desc || '',
+            value: displayValue,
+            price: displayValue,
+            ...firstJewelryItem
+          };
+        });
+
+        // If there are additional items beyond the first one, add them as new lines
+        if (processedItems.length > 1) {
+          const additionalItems = processedItems.slice(1).map((jewelryItem) => {
+            let displayValue = 0;
+            if (activeTab === 0) { // Pawn tab
+              displayValue = jewelryItem.price_estimates?.pawn || jewelryItem.pawn_price || 0;
+            } else if (activeTab === 1) { // Buy tab
+              displayValue = jewelryItem.price_estimates?.buy || jewelryItem.buy_price || 0;
+            } else if (activeTab === 3) { // Sale tab
+              displayValue = jewelryItem.price_estimates?.retail || jewelryItem.retail_price || 0;
+            } else {
+              displayValue = jewelryItem.price || 0;
+            }
+
+            return {
+              id: Date.now() + Math.random(),
+              description: jewelryItem.short_desc || jewelryItem.long_desc || '',
+              value: displayValue,
+              price: displayValue,
+              ...jewelryItem
+            };
+          });
+          setItems([...updatedItems, ...additionalItems]);
+        } else {
+          setItems(updatedItems);
+        }
+      } else {
+        // ADD MODE: No item to replace, add all as new items
+        const newItems = processedItems.map((jewelryItem) => {
+          // Get the appropriate price based on the active tab
+          let displayValue = 0;
+          if (activeTab === 0) { // Pawn tab
+            displayValue = jewelryItem.price_estimates?.pawn || jewelryItem.pawn_price || 0;
+          } else if (activeTab === 1) { // Buy tab
+            displayValue = jewelryItem.price_estimates?.buy || jewelryItem.buy_price || 0;
+          } else if (activeTab === 3) { // Sale tab
+            displayValue = jewelryItem.price_estimates?.retail || jewelryItem.retail_price || 0;
+          } else {
+            displayValue = jewelryItem.price || 0;
+          }
+
+          // Create a new item for the ticket
+          return {
+            id: Date.now() + Math.random(), // Generate unique ID
+            description: jewelryItem.short_desc || jewelryItem.long_desc || '',
+            value: displayValue,
+            price: displayValue,
+            ...jewelryItem
+          };
+        });
+
+        // Add all new items to the existing items list
+        setItems([...items, ...newItems]);
+      }
+
+      // Clear jewelry estimator storage to prevent items from reappearing
+      const userId = user?.id || 'guest';
+      sessionStorage.removeItem(`jewelEstimatorItems_user_${userId}`);
+      localStorage.removeItem(`jewelEstimatorItems_user_${userId}`);
+
+      // Close the dialog and reset states
+      setCombinedDialogOpen(false);
+      setMetalFormState(null);
+      setGemFormState({ diamonds: [], stones: [], secondaryGems: [] });
+      setCurrentEditingItemId(null);
+      setPrefilledData(null);
+      setAddedMetals([]);
+      setAddedGems([]);
+      return;
+    }
 
     // Get primary and secondary gems from gemFormState
     const primaryDiamond = gemFormState?.diamonds?.find(d => d.isPrimary);
@@ -2106,45 +2491,9 @@ const CustomerTicket = () => {
       if (customer) {
         sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
       }
-      
-      // Clear the items from localStorage for this tab since they're now in cart
-      clearTicketItems(type);
-      
-      // Replace current tab items with a fresh empty item
-      let emptyItem;
-      switch (activeTab) {
-        case 0: // Pawn
-          emptyItem = { id: 1, description: '', category: '', value: '' };
-          setPawnItems([emptyItem]);
-          break;
-        case 1: // Buy
-          emptyItem = { id: 1, description: '', category: '', price: '' };
-          setBuyItems([emptyItem]);
-          break;
-        case 2: // Trade
-          emptyItem = { id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' };
-          setTradeItems([emptyItem]);
-          break;
-        case 3: // Sale
-          emptyItem = { id: 1, description: '', category: '', price: '', paymentMethod: '' };
-          setSaleItems([emptyItem]);
-          break;
-        case 4: // Repair
-          emptyItem = { id: 1, description: '', issue: '', fee: '', completion: '' };
-          setRepairItems([emptyItem]);
-          break;
-        case 5: // Payment
-          emptyItem = { id: 1, amount: '', method: '', reference: '', notes: '' };
-          setPaymentItems([emptyItem]);
-          break;
-        case 6: // Refund
-          emptyItem = { id: 1, amount: '', method: '', reference: '', reason: '' };
-          setRefundItems([emptyItem]);
-          break;
-      }
-      
-      // Show success message - stay on ticket screen to enter more items
-      showSnackbar('Items added to cart', 'success');
+
+      // Show success message - items remain in ticket for further editing
+      showSnackbar('Items added to cart. Ticket saved for further editing.', 'success');
       
     } catch (error) {
       console.error('Error adding items to cart:', error);
@@ -2153,176 +2502,225 @@ const CustomerTicket = () => {
   };
   
   const handleCheckout = () => {
+    // Helper function to generate buyTicketId for a transaction type
+    const generateBuyTicketId = (transactionType) => {
+      let ticketPrefix;
+      switch(transactionType) {
+        case 'pawn': ticketPrefix = 'PT'; break;
+        case 'buy': ticketPrefix = 'BT'; break;
+        case 'trade': ticketPrefix = 'TT'; break;
+        case 'sale': ticketPrefix = 'ST'; break;
+        case 'repair': ticketPrefix = 'RT'; break;
+        case 'payment': ticketPrefix = 'PMT'; break;
+        case 'refund': ticketPrefix = 'RFT'; break;
+        default: ticketPrefix = 'TKT';
+      }
+
+      const storageKey = `last${ticketPrefix}TicketNumber`;
+      let lastTicketNumber = parseInt(localStorage.getItem(storageKey) || '0');
+      lastTicketNumber += 1;
+      localStorage.setItem(storageKey, lastTicketNumber.toString());
+      return `${ticketPrefix}-${lastTicketNumber.toString().padStart(8, '0')}`;
+    };
+
     // Get all valid items from all tabs
     const allItems = [];
-    
+
     // Add pawn items
     const validPawnItems = pawnItems.filter(item => item.description || item.value);
-    validPawnItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'pawn',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validPawnItems.length > 0) {
+      const pawnTicketId = generateBuyTicketId('pawn');
+      validPawnItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'pawn',
+          buyTicketId: pawnTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add buy items
     const validBuyItems = buyItems.filter(item => item.description || item.price);
-    validBuyItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'buy',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validBuyItems.length > 0) {
+      const buyTicketId = generateBuyTicketId('buy');
+      validBuyItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'buy',
+          buyTicketId: buyTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add trade items
     const validTradeItems = tradeItems.filter(item => item.tradeItem || item.storeItem);
-    validTradeItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'trade',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validTradeItems.length > 0) {
+      const tradeTicketId = generateBuyTicketId('trade');
+      validTradeItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'trade',
+          buyTicketId: tradeTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add sale items
     const validSaleItems = saleItems.filter(item => item.description || item.price);
-    validSaleItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'sale',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validSaleItems.length > 0) {
+      const saleTicketId = generateBuyTicketId('sale');
+      validSaleItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'sale',
+          buyTicketId: saleTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add repair items
     const validRepairItems = repairItems.filter(item => item.description || item.issue || item.fee);
-    validRepairItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'repair',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validRepairItems.length > 0) {
+      const repairTicketId = generateBuyTicketId('repair');
+      validRepairItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'repair',
+          buyTicketId: repairTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add payment items
     const validPaymentItems = paymentItems.filter(item => item.amount || item.method);
-    validPaymentItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'payment',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validPaymentItems.length > 0) {
+      const paymentTicketId = generateBuyTicketId('payment');
+      validPaymentItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'payment',
+          buyTicketId: paymentTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     // Add refund items
     const validRefundItems = refundItems.filter(item => item.amount || item.method || item.reason);
-    validRefundItems.forEach(item => {
-      allItems.push({
-        ...item,
-        transaction_type: 'refund',
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
+    if (validRefundItems.length > 0) {
+      const refundTicketId = generateBuyTicketId('refund');
+      validRefundItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'refund',
+          buyTicketId: refundTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
       });
-    });
-    
+    }
+
     if (allItems.length === 0) {
       showSnackbar('No valid items to proceed to checkout', 'warning');
       return;
     }
-    
+
     // Save all items to session storage for checkout
     sessionStorage.setItem('checkoutItems', JSON.stringify(allItems));
-    
+
     // Save customer data to session storage
     if (customer) {
       sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
     }
-    
+
     // Navigate to checkout
     navigate('/checkout');
   };
@@ -2638,7 +3036,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'pawn')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`pawn-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`pawn-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`pawn-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -2655,38 +3064,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'pawn')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
@@ -2695,7 +3093,7 @@ return (
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                                     onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
-                                    placeholder="e.g., JR 10k 2g YG"
+                                    placeholder="e.g., R 10k 2g YG"
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -2767,7 +3165,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'buy')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`buy-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`buy-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`buy-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -2784,38 +3193,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'buy')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
@@ -2824,7 +3222,7 @@ return (
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                                     onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
-                                    placeholder="e.g., JR 10k 2g YG"
+                                    placeholder="e.g., R 10k 2g YG"
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -2898,7 +3296,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'trade')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`trade-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`trade-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`trade-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -2915,38 +3324,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'trade')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
@@ -3043,7 +3441,7 @@ return (
                                   <TableCell align="center" padding="normal">
                                     <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                       <Tooltip title="Inventory">
-                                        <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                        <IconButton size="small" color="secondary" onClick={() => handleJewelryEstimatorClick(item.id, 'sale')}>
                                           <DiamondIcon fontSize="small" />
                                         </IconButton>
                                       </Tooltip>
@@ -3060,38 +3458,42 @@ return (
                                     </Box>
                                   </TableCell>
                                   <TableCell align="center">
-                                    <Tooltip title="Click to capture image">
-                                      <IconButton
-                                        onClick={() => handleOpenCamera(item.id, 'sale')}
-                                        size="small"
-                                        sx={{
-                                          padding: 0,
-                                          '&:hover': { opacity: 0.7 }
-                                        }}
-                                      >
-                                        {item.images && item.images.length > 0 ? (
+                                    {item.images && item.images.length > 0 ? (
+                                      <Tooltip title="Item image">
+                                        <Box
+                                          sx={{
+                                            padding: 0,
+                                            display: 'inline-block'
+                                          }}
+                                        >
                                           <img
-                                            src={item.images[0].url}
+                                            src={
+                                              typeof item.images[0] === 'string'
+                                                ? (item.images[0].startsWith('http') ? item.images[0] : `http://localhost:5000${item.images[0]}`)
+                                                : (item.images[0].url?.startsWith('http') ? item.images[0].url : `http://localhost:5000${item.images[0].url}`)
+                                            }
                                             alt="Item"
                                             style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
                                           />
-                                        ) : (
-                                          <Box
-                                            sx={{
-                                              width: '50px',
-                                              height: '50px',
-                                              bgcolor: 'grey.200',
-                                              display: 'flex',
-                                              alignItems: 'center',
-                                              justifyContent: 'center',
-                                              borderRadius: '4px'
-                                            }}
-                                          >
-                                            <PhotoCamera sx={{ color: 'grey.400' }} />
-                                          </Box>
-                                        )}
-                                      </IconButton>
-                                    </Tooltip>
+                                        </Box>
+                                      </Tooltip>
+                                    ) : (
+                                      <Tooltip title="No image available">
+                                        <Box
+                                          sx={{
+                                            width: '50px',
+                                            height: '50px',
+                                            bgcolor: 'grey.200',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            borderRadius: '4px'
+                                          }}
+                                        >
+                                          <PhotoCamera sx={{ color: 'grey.400' }} />
+                                        </Box>
+                                      </Tooltip>
+                                    )}
                                   </TableCell>
                                   <TableCell>
                                     <TextField
@@ -3100,7 +3502,7 @@ return (
                                       value={item.description}
                                       onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                                       onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
-                                      placeholder="e.g., JR 10k 2g YG"
+                                      placeholder="e.g., R 10k 2g YG"
                                     />
                                   </TableCell>
                                   <TableCell>
@@ -3202,7 +3604,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'repair')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`repair-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`repair-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`repair-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -3219,38 +3632,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'repair')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
@@ -3259,7 +3661,7 @@ return (
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                                     onKeyPress={(e) => handleDescriptionKeyPress(e, item.id)}
-                                    placeholder="e.g., JR 10k 2g YG"
+                                    placeholder="e.g., R 10k 2g YG"
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -3348,7 +3750,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'payment')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`payment-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`payment-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`payment-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -3365,38 +3778,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'payment')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
@@ -3493,7 +3895,18 @@ return (
                                 <TableCell align="center" padding="normal">
                                   <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
                                     <Tooltip title="Jewelry Estimator">
-                                      <IconButton size="small" color="secondary" onClick={handleJewelryEstimatorClick}>
+                                      <IconButton
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() => handleJewelryEstimatorClick(item.id, 'refund')}
+                                        sx={{
+                                          bgcolor: selectedJewelryEstimator[`refund-${item.id}`] ? 'secondary.main' : 'transparent',
+                                          color: selectedJewelryEstimator[`refund-${item.id}`] ? 'white' : 'inherit',
+                                          '&:hover': {
+                                            bgcolor: selectedJewelryEstimator[`refund-${item.id}`] ? 'secondary.dark' : 'action.hover'
+                                          }
+                                        }}
+                                      >
                                         <DiamondIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -3510,38 +3923,27 @@ return (
                                   </Box>
                                 </TableCell>
                                 <TableCell align="center">
-                                  <Tooltip title="Click to capture image">
-                                    <IconButton
-                                      onClick={() => handleOpenCamera(item.id, 'refund')}
-                                      size="small"
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                    />
+                                  ) : (
+                                    <Box
                                       sx={{
-                                        padding: 0,
-                                        '&:hover': { opacity: 0.7 }
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px'
                                       }}
                                     >
-                                      {(item.images && item.images.length > 0) || item.image ? (
-                                        <img
-                                          src={item.images?.[0]?.url || item.image}
-                                          alt="Item"
-                                          style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
-                                        />
-                                      ) : (
-                                        <Box
-                                          sx={{
-                                            width: '50px',
-                                            height: '50px',
-                                            bgcolor: 'grey.200',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            borderRadius: '4px'
-                                          }}
-                                        >
-                                          <PhotoCamera sx={{ color: 'grey.400' }} />
-                                        </Box>
-                                      )}
-                                    </IconButton>
-                                  </Tooltip>
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <TextField
@@ -3849,45 +4251,135 @@ return (
       <Dialog
         open={combinedDialogOpen}
         onClose={handleCombinedCancel}
-        maxWidth="lg"
+        maxWidth="xl"
         fullWidth
-        PaperProps={{ sx: { maxHeight: '90vh' } }}
+        PaperProps={{ sx: { maxHeight: '95vh', height: '95vh', m: 0 } }}
       >
-        <DialogTitle>Jewelry Estimator - Metal & Gem</DialogTitle>
-        <DialogContent dividers>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={5} md={4}>
-              {combinedDialogOpen && (
-                <MetalEstimator
-                  key={`metal-${combinedDialogOpen}`}
-                  initialData={prefilledData || {}}
-                  hideButtons={true}
-                  setMetalFormState={setMetalFormState}
-                />
-              )}
-            </Grid>
-            <Grid item xs={12} sm={7} md={8}>
-              {combinedDialogOpen && (
-                <GemEstimator
-                  key={`gem-${combinedDialogOpen}`}
-                  initialData={{}}
-                  hideButtons={true}
-                  editMode={false}
-                  setGemFormState={setGemFormState}
-                  onSecondaryGemsChange={(secondaryGems) => {
-                    setGemFormState(prev => ({
-                      ...prev,
-                      secondaryGems
-                    }));
+        <DialogContent sx={{ height: '100%', p: 0, overflow: 'auto' }}>
+          {combinedDialogOpen && (
+            <JewelEstimatorWrapper
+              prefilledData={prefilledData}
+              onCancel={handleCombinedCancel}
+              onSave={handleCombinedSave}
+              transactionType={activeTab}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Category Selection Dialog */}
+      <Dialog
+        open={categorySelectorDialog.open}
+        onClose={() => setCategorySelectorDialog({ open: false, itemId: null, transactionType: null })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Select Jewelry Category</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            {metalCategories.map((category) => (
+              <Grid item xs={6} sm={4} key={category.category_code}>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => handleCategorySelect(category.category)}
+                  sx={{
+                    py: 2,
+                    textTransform: 'none',
+                    fontSize: '1rem',
+                    '&:hover': {
+                      bgcolor: 'primary.light',
+                      color: 'white'
+                    }
                   }}
-                />
-              )}
-            </Grid>
+                >
+                  {category.category}
+                </Button>
+              </Grid>
+            ))}
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCombinedCancel} startIcon={<ClearIcon />}>Cancel</Button>
-          <Button onClick={handleCombinedSave} variant="contained" color="primary" startIcon={<AddIcon />}>Add to Ticket</Button>
+          <Button onClick={() => setCategorySelectorDialog({ open: false, itemId: null, transactionType: null })}>
+            Cancel
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Jewelry Inventory Selection Dialog */}
+      <Dialog
+        open={jewelryInventoryDialog.open}
+        onClose={() => setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null })}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          Select Jewelry from Inventory
+          {selectedCategory && (
+            <Typography variant="subtitle2" color="text.secondary">
+              Category: {selectedCategory}
+            </Typography>
+          )}
+        </DialogTitle>
+        <DialogContent>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Item ID</TableCell>
+                  <TableCell>Description</TableCell>
+                  <TableCell>Category</TableCell>
+                  <TableCell>Metal</TableCell>
+                  <TableCell>Purity</TableCell>
+                  <TableCell>Weight</TableCell>
+                  <TableCell>Color</TableCell>
+                  <TableCell>Price</TableCell>
+                  <TableCell>Action</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {jewelryInventoryItems.map((item) => (
+                  <TableRow key={item.item_id} hover>
+                    <TableCell>{item.item_id}</TableCell>
+                    <TableCell>{item.short_desc || item.long_desc}</TableCell>
+                    <TableCell>{item.category}</TableCell>
+                    <TableCell>{item.precious_metal_type}</TableCell>
+                    <TableCell>{item.metal_purity}</TableCell>
+                    <TableCell>{item.metal_weight}g</TableCell>
+                    <TableCell>{item.jewelry_color}</TableCell>
+                    <TableCell>${item.item_price}</TableCell>
+                    <TableCell>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="primary"
+                        onClick={() => handleSelectJewelryItem(item)}
+                      >
+                        Select
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null });
+              setCategorySelectorDialog({
+                open: true,
+                itemId: jewelryInventoryDialog.itemId,
+                transactionType: jewelryInventoryDialog.transactionType
+              });
+            }}
+          >
+            Back
+          </Button>
+          <Button onClick={() => setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null })}>
+            Cancel
+          </Button>
         </DialogActions>
       </Dialog>
     </Container>

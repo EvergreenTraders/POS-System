@@ -60,12 +60,10 @@ CREATE TABLE IF NOT EXISTS jewelry (
     primary_gem_lab_grown BOOLEAN DEFAULT false,
     primary_gem_authentic BOOLEAN DEFAULT false,
     primary_gem_value DECIMAL(10,2),
-    
+
     -- Pricing
-    buy_price DECIMAL(10,2),
-    pawn_value DECIMAL(10,2),
-    retail_price DECIMAL(10,2),
-    
+    item_price DECIMAL(10,2),
+
     -- Status and tracking
     status VARCHAR(20) NOT NULL DEFAULT 'HOLD',
     location VARCHAR(50),
@@ -77,9 +75,7 @@ CREATE TABLE IF NOT EXISTS jewelry (
     
     -- Constraints
     CONSTRAINT valid_metal_weight CHECK (metal_weight > 0),
-    CONSTRAINT valid_buy_price CHECK (buy_price >= 0),
-    CONSTRAINT valid_pawn_value CHECK (pawn_value >= 0),
-    CONSTRAINT valid_retail_price CHECK (retail_price >= 0)
+    CONSTRAINT valid_item_price CHECK (item_price IS NULL OR item_price >= 0)
 );
 
 -- Create indexes for common queries
@@ -111,6 +107,7 @@ COMMENT ON COLUMN jewelry.primary_gem_lab_grown IS 'Whether the primary gemstone
 COMMENT ON COLUMN jewelry.primary_gem_authentic IS 'Whether the primary gemstone is authentic';
 COMMENT ON COLUMN jewelry.primary_gem_value IS 'Estimated value of the primary gemstone';
 COMMENT ON COLUMN jewelry.images IS 'Array of image URLs for the jewelry item';
+COMMENT ON COLUMN jewelry.item_price IS 'Actual price at which the item was sold';
 
 -- Create trigger function for updated_at
 CREATE OR REPLACE FUNCTION update_jewelry_timestamp() RETURNS TRIGGER AS $$
@@ -177,3 +174,8 @@ COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_lab_grown IS 'Whether the
 COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_authentic IS 'Whether the secondary gemstone is authentic';
 COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_value IS 'Estimated value of the secondary gemstone';
 
+-- Generate sample item_price values for items where item_price is NULL
+-- Random decimal values between 50.00 and 999.99
+UPDATE jewelry
+SET item_price = ROUND((RANDOM() * 949.99 + 50.00)::numeric, 2)
+WHERE item_price IS NULL;
