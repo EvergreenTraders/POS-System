@@ -45,10 +45,13 @@ jobs:
       - name: Generate deployment package
         run: |
           cd backend
-          zip -r ../deploy.zip . .platform/ -x "uploads/*" "*.git*" "*.env*"
+          zip -r ../deploy.zip . -x "uploads/*" "*.git*" "*.env*"
           cd ..
           if [ -d ".platform" ]; then
             zip -ur deploy.zip .platform/
+          fi
+          if [ -d ".ebextensions" ]; then
+            zip -ur deploy.zip .ebextensions/
           fi
 
       - name: Configure AWS credentials
