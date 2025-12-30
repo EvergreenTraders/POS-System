@@ -2386,15 +2386,37 @@ app.get('/api/jewelry/:id', async (req, res) => {
 // Get all jewelry items
 app.get('/api/jewelry', async (req, res) => {
   try {
+    const { status, metal_category } = req.query;
+    const conditions = [];
+    const params = [];
+    let paramCount = 1;
+
+    // Add status filter if provided
+    if (status) {
+      conditions.push(`j.status = $${paramCount}`);
+      params.push(status);
+      paramCount++;
+    }
+
+    // Add metal_category filter if provided
+    if (metal_category) {
+      conditions.push(`j.category = $${paramCount}`);
+      params.push(metal_category);
+      paramCount++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
     const query = `
-      SELECT 
+      SELECT
         j.*,
         TO_CHAR(j.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
         TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at
       FROM jewelry j
+      ${whereClause}
       ORDER BY j.created_at DESC
     `;
-    const result = await pool.query(query);
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching jewelry items:', error);

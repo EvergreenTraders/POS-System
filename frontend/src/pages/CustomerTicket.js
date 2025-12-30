@@ -1486,21 +1486,18 @@ const CustomerTicket = () => {
   const [jewelryInventoryItems, setJewelryInventoryItems] = React.useState([]);
   const [selectedJewelryEstimator, setSelectedJewelryEstimator] = React.useState({});
 
+  // Category selection dialog state
+  const [categorySelectorDialog, setCategorySelectorDialog] = React.useState({
+    open: false,
+    itemId: null,
+    transactionType: null
+  });
+  const [selectedCategory, setSelectedCategory] = React.useState(null);
+
   const handleJewelryEstimatorClick = async (itemId, transactionType) => {
-    // For Sale tab, open inventory dialog
+    // For Sale tab, open category selector first
     if (transactionType === 'sale') {
-      try {
-        const response = await fetch(`${config.apiUrl}/jewelry?status=ACTIVE`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
-        const items = await response.json();
-        setJewelryInventoryItems(items);
-        setJewelryInventoryDialog({ open: true, itemId, transactionType });
-      } catch (error) {
-        console.error('Error fetching jewelry inventory:', error);
-      }
+      setCategorySelectorDialog({ open: true, itemId, transactionType });
     } else {
       // For other tabs, just toggle the highlight/selection
       const key = `${transactionType}-${itemId}`;
@@ -1529,32 +1526,82 @@ const CustomerTicket = () => {
     }
   };
 
+  const handleCategorySelect = async (category) => {
+    const { itemId, transactionType } = categorySelectorDialog;
+    setSelectedCategory(category);
+
+    // Fetch inventory filtered by category
+    try {
+      const response = await fetch(`${config.apiUrl}/jewelry?status=ACTIVE&metal_category=${encodeURIComponent(category)}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      const items = await response.json();
+      setJewelryInventoryItems(items);
+
+      // Close category selector and open inventory dialog
+      setCategorySelectorDialog({ open: false, itemId: null, transactionType: null });
+      setJewelryInventoryDialog({ open: true, itemId, transactionType });
+    } catch (error) {
+      console.error('Error fetching jewelry inventory:', error);
+      showSnackbar('Error loading inventory', 'error');
+    }
+  };
+
   const handleSelectJewelryItem = (jewelryItem) => {
     const { itemId, transactionType } = jewelryInventoryDialog;
 
-    // Build description without J prefix since it's from jewelry inventory
-    const description = buildJewelryDescription(jewelryItem);
+    if (transactionType === 'sale') {
+      // For sale tab, add the item properly like from inventory page
+      // Clear empty sale items if needed
+      const hasEmptySaleItems = saleItems.length === 1 && !saleItems[0].description;
 
-    // Update the item with jewelry details
-    const updateItems = (items) => items.map(item => {
-      if (item.id === itemId) {
-        return {
-          ...item,
-          description,
-          fromJewelryInventory: true,
-          jewelryItemId: jewelryItem.item_id
-        };
-      }
-      return item;
-    });
+      // Create sale item from jewelry inventory - similar to selectedInventoryItem handling
+      const newSaleItem = {
+        id: jewelryItem.item_id, // Use original item_id
+        description: jewelryItem.short_desc || jewelryItem.long_desc || buildJewelryDescription(jewelryItem),
+        category: jewelryItem.category,
+        price: jewelryItem.item_price,
+        retail_price: jewelryItem.retail_price,
+        buy_price: jewelryItem.buy_price,
+        metal_weight: jewelryItem.metal_weight,
+        item_id: jewelryItem.item_id,
+        images: jewelryItem.images || [],
+        fromInventory: true,
+        protectionPlan: false
+      };
 
-    if (transactionType === 'pawn') setPawnItems(updateItems);
-    else if (transactionType === 'buy') setBuyItems(updateItems);
-    else if (transactionType === 'trade') setTradeItems(updateItems);
-    else if (transactionType === 'sale') setSaleItems(updateItems);
-    else if (transactionType === 'repair') setRepairItems(updateItems);
-    else if (transactionType === 'payment') setPaymentItems(updateItems);
-    else if (transactionType === 'refund') setRefundItems(updateItems);
+      setSaleItems(prevItems => {
+        const newItems = hasEmptySaleItems ? [newSaleItem] : [...prevItems, newSaleItem];
+        saveTicketItems('sale', newItems);
+        return newItems;
+      });
+
+      showSnackbar('Jewelry item added to sale ticket', 'success');
+    } else {
+      // For other transaction types, build description and update
+      const description = buildJewelryDescription(jewelryItem);
+
+      const updateItems = (items) => items.map(item => {
+        if (item.id === itemId) {
+          return {
+            ...item,
+            description,
+            fromJewelryInventory: true,
+            jewelryItemId: jewelryItem.item_id
+          };
+        }
+        return item;
+      });
+
+      if (transactionType === 'pawn') setPawnItems(updateItems);
+      else if (transactionType === 'buy') setBuyItems(updateItems);
+      else if (transactionType === 'trade') setTradeItems(updateItems);
+      else if (transactionType === 'repair') setRepairItems(updateItems);
+      else if (transactionType === 'payment') setPaymentItems(updateItems);
+      else if (transactionType === 'refund') setRefundItems(updateItems);
+    }
 
     setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null });
   };
@@ -4220,6 +4267,45 @@ return (
         </DialogContent>
       </Dialog>
 
+      {/* Category Selection Dialog */}
+      <Dialog
+        open={categorySelectorDialog.open}
+        onClose={() => setCategorySelectorDialog({ open: false, itemId: null, transactionType: null })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Select Jewelry Category</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            {metalCategories.map((category) => (
+              <Grid item xs={6} sm={4} key={category.category_code}>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => handleCategorySelect(category.category)}
+                  sx={{
+                    py: 2,
+                    textTransform: 'none',
+                    fontSize: '1rem',
+                    '&:hover': {
+                      bgcolor: 'primary.light',
+                      color: 'white'
+                    }
+                  }}
+                >
+                  {category.category}
+                </Button>
+              </Grid>
+            ))}
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCategorySelectorDialog({ open: false, itemId: null, transactionType: null })}>
+            Cancel
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Jewelry Inventory Selection Dialog */}
       <Dialog
         open={jewelryInventoryDialog.open}
@@ -4227,7 +4313,14 @@ return (
         maxWidth="lg"
         fullWidth
       >
-        <DialogTitle>Select Jewelry from Inventory</DialogTitle>
+        <DialogTitle>
+          Select Jewelry from Inventory
+          {selectedCategory && (
+            <Typography variant="subtitle2" color="text.secondary">
+              Category: {selectedCategory}
+            </Typography>
+          )}
+        </DialogTitle>
         <DialogContent>
           <TableContainer>
             <Table size="small">
@@ -4272,6 +4365,18 @@ return (
           </TableContainer>
         </DialogContent>
         <DialogActions>
+          <Button
+            onClick={() => {
+              setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null });
+              setCategorySelectorDialog({
+                open: true,
+                itemId: jewelryInventoryDialog.itemId,
+                transactionType: jewelryInventoryDialog.transactionType
+              });
+            }}
+          >
+            Back
+          </Button>
           <Button onClick={() => setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null })}>
             Cancel
           </Button>
