@@ -1,4 +1,6 @@
-require('dotenv').config({ path: '../.env' });
+// Load environment variables from .env file if it exists (for local development)
+// On AWS EB, environment variables are set through EB configuration
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -19,8 +21,10 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 5432,
-  // Disable SSL for local development
-  ssl: false
+  // Only use SSL for production (AWS RDS), not for local development
+  ssl: process.env.DB_HOST === 'localhost' ? false : {
+    rejectUnauthorized: false
+  }
 });
 
 // Multer setup for file uploads
