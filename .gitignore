@@ -15,6 +15,7 @@ node_modules/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.aws
 
 # Logs
 npm-debug.log*
@@ -53,3 +54,4 @@ deploy*.zip
 local_*.sql
 local_*.txt
 backend/.env
+backend/data-exports/
