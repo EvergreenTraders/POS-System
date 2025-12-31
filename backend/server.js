@@ -21,10 +21,11 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT || 5432,
-  // Only use SSL for production (AWS RDS), not for local development
-  ssl: process.env.DB_HOST === 'localhost' ? false : {
+  // Only use SSL for production (AWS RDS)
+  // Local development and databases without SSL support should set NODE_ENV !== 'production'
+  ssl: process.env.NODE_ENV === 'production' ? {
     rejectUnauthorized: false
-  }
+  } : false
 });
 
 // Multer setup for file uploads

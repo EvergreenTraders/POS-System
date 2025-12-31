@@ -52,3 +52,4 @@ scripts/test_*.js
 deploy*.zip
 local_*.sql
 local_*.txt
+backend/.env
