@@ -100,7 +100,7 @@ jobs:
           echo "Waiting for backend to be fully deployed and healthy..."
           EB_URL="http://${{ env.EB_ENVIRONMENT_NAME }}.eba-3fkkan5u.${{ env.AWS_REGION }}.elasticbeanstalk.com"
 
-          for i in {1..30}; do
+          for i in {1..10}; do
             if curl -sf "$EB_URL/api/health" > /dev/null 2>&1; then
               echo "✓ Backend is ready!"
               break

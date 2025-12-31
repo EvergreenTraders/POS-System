@@ -44,6 +44,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS update_account_links_timestamp ON customer_account_links;
 CREATE TRIGGER update_account_links_timestamp
 BEFORE UPDATE ON customer_account_links
 FOR EACH ROW
