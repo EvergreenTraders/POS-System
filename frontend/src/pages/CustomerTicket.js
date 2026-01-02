@@ -540,25 +540,50 @@ const CustomerTicket = () => {
   // Store buyTicketId when editing from cart to preserve ticket grouping
   const [preservedBuyTicketId, setPreservedBuyTicketId] = React.useState(null);
   
-  // Helper function to save ticket items in localStorage
+  // Helper function to save ticket items in localStorage with timestamp
   const saveTicketItems = (type, items) => {
     try {
       // Save with customer ID if available, otherwise save globally
       const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
-      localStorage.setItem(key, JSON.stringify(items));
+      const data = {
+        items: items,
+        timestamp: Date.now()
+      };
+      localStorage.setItem(key, JSON.stringify(data));
     } catch (error) {
       console.error(`Error saving ${type} items to localStorage:`, error);
     }
   };
 
-  // Helper function to load ticket items from localStorage
+  // Helper function to load ticket items from localStorage (checks 24hr expiry)
   const loadTicketItems = (type) => {
     try {
       // Load with customer ID if available, otherwise load globally
       const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
-      const savedItems = localStorage.getItem(key);
-      const parsed = savedItems ? JSON.parse(savedItems) : null;
-      return parsed;
+      const savedData = localStorage.getItem(key);
+
+      if (!savedData) return null;
+
+      const parsed = JSON.parse(savedData);
+
+      // Check if data has new format with timestamp
+      if (parsed && typeof parsed === 'object' && parsed.timestamp) {
+        const now = Date.now();
+        const age = now - parsed.timestamp;
+        const twentyFourHours = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+        // If data is older than 24 hours, remove it and return null
+        if (age > twentyFourHours) {
+          localStorage.removeItem(key);
+          return null;
+        }
+
+        return parsed.items;
+      }
+
+      // Handle old format (data without timestamp) - return as is for backward compatibility
+      // But it will be re-saved with timestamp on next save
+      return Array.isArray(parsed) ? parsed : null;
     } catch (error) {
       console.error(`Error loading ${type} items from localStorage:`, error);
       return null;
@@ -569,6 +594,43 @@ const CustomerTicket = () => {
   const clearTicketItems = (type) => {
     const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
     localStorage.removeItem(key);
+  };
+
+  // Helper function to clean up all expired ticket items from localStorage
+  const cleanupExpiredTickets = () => {
+    try {
+      const twentyFourHours = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      let removedCount = 0;
+
+      // Get all localStorage keys
+      const keys = Object.keys(localStorage);
+
+      // Filter keys that match ticket pattern
+      const ticketKeys = keys.filter(key =>
+        key.startsWith('ticket_') || key.startsWith('cart_')
+      );
+
+      ticketKeys.forEach(key => {
+        try {
+          const data = localStorage.getItem(key);
+          const parsed = JSON.parse(data);
+
+          // Check if it has timestamp and is expired
+          if (parsed && typeof parsed === 'object' && parsed.timestamp) {
+            const age = now - parsed.timestamp;
+            if (age > twentyFourHours) {
+              localStorage.removeItem(key);
+              removedCount++;
+            }
+          }
+        } catch (e) {
+          // Skip invalid entries
+        }
+      });
+    } catch (error) {
+      console.error('Error cleaning up expired tickets:', error);
+    }
   };
   
   // State for managing items in each tab - initialize from localStorage if available
@@ -599,7 +661,12 @@ const CustomerTicket = () => {
   const [refundItems, setRefundItems] = React.useState(() => {
     return loadTicketItems('refund') || [{ id: 1, amount: '', method: '', reference: '', reason: '' }];
   });
-  
+
+  // Clean up expired ticket items on component mount
+  React.useEffect(() => {
+    cleanupExpiredTickets();
+  }, []);
+
   // Process estimated items when component mounts - use a ref to track if the current navigation state has been processed
   const processedStateRef = React.useRef(null);
   
@@ -1070,6 +1137,48 @@ const CustomerTicket = () => {
       const hasEstimatorData = location.state?.updatedItem || location.state?.estimatedItems || location.state?.editItem || location.state?.selectedInventoryItem || location.state?.addedItems;
 
       if (!hasEstimatorData) {
+        // Helper function to merge current items with saved items
+        const mergeItems = (currentItems, savedItems, defaultItem) => {
+          if (!savedItems || savedItems.length === 0) {
+            // No saved items - keep current items
+            return currentItems;
+          }
+
+          // Check if current items have actual data (not just empty placeholders)
+          const hasCurrentData = currentItems.some(item => {
+            // Check if any field has a value (excluding id)
+            return Object.keys(item).some(key => {
+              if (key === 'id') return false;
+              const value = item[key];
+              return value !== null && value !== undefined && value !== '';
+            });
+          });
+
+          if (!hasCurrentData) {
+            // Current items are empty - use saved items
+            return savedItems;
+          }
+
+          // Both have data - merge them
+          // Remove empty placeholder from saved items if it exists
+          const filteredSaved = savedItems.filter(item => {
+            return Object.keys(item).some(key => {
+              if (key === 'id') return false;
+              const value = item[key];
+              return value !== null && value !== undefined && value !== '';
+            });
+          });
+
+          // Combine current items with saved items, removing duplicates by id
+          const itemMap = new Map();
+          [...currentItems, ...filteredSaved].forEach(item => {
+            itemMap.set(item.id, item);
+          });
+
+          const merged = Array.from(itemMap.values());
+          return merged.length > 0 ? merged : [defaultItem];
+        };
+
         // Load saved items (will use customer ID if available, otherwise load global)
         const savedPawn = loadTicketItems('pawn');
         const savedBuy = loadTicketItems('buy');
@@ -1079,14 +1188,14 @@ const CustomerTicket = () => {
         const savedPayment = loadTicketItems('payment');
         const savedRefund = loadTicketItems('refund');
 
-        // Update items - use saved items if available, otherwise use default empty item
-        setPawnItems(savedPawn || [{ id: 1, description: '', category: '', value: '' }]);
-        setBuyItems(savedBuy || [{ id: 1, description: '', category: '', price: '' }]);
-        setTradeItems(savedTrade || [{ id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }]);
-        setSaleItems(savedSale || [{ id: 1, description: '', category: '', price: '', paymentMethod: '' }]);
-        setRepairItems(savedRepair || [{ id: 1, description: '', issue: '', fee: '', completion: '' }]);
-        setPaymentItems(savedPayment || [{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
-        setRefundItems(savedRefund || [{ id: 1, amount: '', method: '', reference: '', reason: '' }]);
+        // Merge current items with saved items
+        setPawnItems(mergeItems(pawnItems, savedPawn, { id: 1, description: '', category: '', value: '' }));
+        setBuyItems(mergeItems(buyItems, savedBuy, { id: 1, description: '', category: '', price: '' }));
+        setTradeItems(mergeItems(tradeItems, savedTrade, { id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }));
+        setSaleItems(mergeItems(saleItems, savedSale, { id: 1, description: '', category: '', price: '', paymentMethod: '' }));
+        setRepairItems(mergeItems(repairItems, savedRepair, { id: 1, description: '', issue: '', fee: '', completion: '' }));
+        setPaymentItems(mergeItems(paymentItems, savedPayment, { id: 1, amount: '', method: '', reference: '', notes: '' }));
+        setRefundItems(mergeItems(refundItems, savedRefund, { id: 1, amount: '', method: '', reference: '', reason: '' }));
       }
 
       // Mark initial load as complete after a short delay to ensure state updates are processed
@@ -1095,7 +1204,7 @@ const CustomerTicket = () => {
         customerIdRef.current = customer?.id;
       }, 100);
     }
-  }, [customer, location.state]);
+  }, [customer, location.state, pawnItems, buyItems, tradeItems, saleItems, repairItems, paymentItems, refundItems]);
 
   // Auto-save ticket items to localStorage whenever they change (only after initial load)
   React.useEffect(() => {
