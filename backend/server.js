@@ -3506,6 +3506,44 @@ app.put('/api/customer-preferences/update-by-context', async (req, res) => {
   }
 });
 
+// Get required customer fields for a specific transaction type
+app.get('/api/customer-preferences/required-fields/:transactionType', async (req, res) => {
+  try {
+    const { transactionType } = req.params;
+
+    const result = await pool.query(`
+      SELECT *
+      FROM customer_headers_preferences
+      WHERE header_preferences = $1
+      LIMIT 1
+    `, [transactionType]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: `No preferences found for transaction type: ${transactionType}` });
+    }
+
+    const preferences = result.rows[0];
+
+    // Extract required fields (fields where show_* = true)
+    const requiredFields = [];
+    Object.keys(preferences).forEach(key => {
+      if (key.startsWith('show_') && preferences[key] === true) {
+        const fieldName = key.replace('show_', '');
+        requiredFields.push(fieldName);
+      }
+    });
+
+    res.json({
+      transactionType: transactionType,
+      requiredFields: requiredFields,
+      preferences: preferences
+    });
+  } catch (err) {
+    console.error('Error fetching required fields:', err);
+    res.status(500).json({ error: 'Failed to fetch required fields' });
+  }
+});
+
 // Customer routes
 app.get('/api/customers', async (req, res) => {
   try {

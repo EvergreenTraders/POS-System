@@ -469,6 +469,18 @@ const CustomerTicket = () => {
   const estimatedItems = location.state?.estimatedItems || [];
   const from = location.state?.from || '';
 
+  // State for customer validation - required fields per transaction type
+  const [requiredFieldsMap, setRequiredFieldsMap] = React.useState({
+    pawn: [],
+    buy: [],
+    retail: [],
+    sale: [],
+    refund: [],
+    return: []
+  });
+  const [customerValidationErrors, setCustomerValidationErrors] = React.useState([]);
+  const [isValidatingCustomer, setIsValidatingCustomer] = React.useState(false);
+
   // Restore active tab from sessionStorage if available
   const [activeTab, setActiveTab] = React.useState(() => {
     const savedTab = sessionStorage.getItem('activeTicketTab');
@@ -486,6 +498,40 @@ const CustomerTicket = () => {
       setShowLookupForm(true);
     }
   }, [customer]);
+
+  // Reload customer data when returning from customer editor
+  React.useEffect(() => {
+    const reloadCustomer = async () => {
+      if (location.state?.customerUpdated && customer?.id) {
+        try {
+          const response = await fetch(`${config.apiUrl}/customers/${customer.id}`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          });
+
+          if (response.ok) {
+            const updatedCustomer = await response.json();
+
+            // Format the customer data
+            const formattedCustomer = {
+              ...updatedCustomer,
+              name: `${updatedCustomer.first_name || ''} ${updatedCustomer.last_name || ''}`.trim(),
+              image: updatedCustomer.image && typeof updatedCustomer.image === 'object' && updatedCustomer.image.type === 'Buffer'
+                ? bufferToDataUrl(updatedCustomer.image)
+                : updatedCustomer.image
+            };
+
+            setCustomer(formattedCustomer);
+            sessionStorage.setItem('selectedCustomer', JSON.stringify(formattedCustomer));
+            showSnackbar('Customer information updated', 'success');
+          }
+        } catch (error) {
+          console.error('Error reloading customer:', error);
+        }
+      }
+    };
+
+    reloadCustomer();
+  }, [location.state?.customerUpdated]);
 
   // State for convert dropdown menu
   const [convertMenuAnchor, setConvertMenuAnchor] = React.useState(null);
@@ -2198,7 +2244,99 @@ const CustomerTicket = () => {
       default: return 0;
     }
   };
-  
+
+  // Fetch required fields for each transaction type on component mount
+  React.useEffect(() => {
+    const fetchRequiredFields = async () => {
+      try {
+        // Fetch transaction types from database
+        const txTypesResponse = await fetch(`${config.apiUrl}/transaction-types`);
+        let transactionTypes = ['pawn', 'buy', 'retail', 'sale', 'refund', 'return'];
+
+        if (txTypesResponse.ok) {
+          const txTypesData = await txTypesResponse.json();
+          transactionTypes = txTypesData.map(tx => tx.type);
+        }
+
+        const fieldsMap = {};
+
+        // Fetch required fields for each transaction type
+        await Promise.all(
+          transactionTypes.map(async (txType) => {
+            try {
+              const response = await fetch(`${config.apiUrl}/customer-preferences/required-fields/${txType}`);
+              if (response.ok) {
+                const data = await response.json();
+                fieldsMap[txType] = data.requiredFields || [];
+              } else {
+                fieldsMap[txType] = [];
+              }
+            } catch (error) {
+              console.error(`Error fetching required fields for ${txType}:`, error);
+              fieldsMap[txType] = [];
+            }
+          })
+        );
+
+        setRequiredFieldsMap(fieldsMap);
+      } catch (error) {
+        console.error('Error fetching required fields:', error);
+      }
+    };
+
+    fetchRequiredFields();
+  }, []);
+
+  // Validate customer against required fields for current transaction type
+  const validateCustomerFields = React.useCallback(() => {
+    if (!customer) {
+      setCustomerValidationErrors(['No customer selected']);
+      return false;
+    }
+
+    // Get transaction type based on active tab
+    const transactionTypeMap = {
+      0: 'pawn',
+      1: 'buy',
+      2: 'buy', // trade uses buy
+      3: 'retail', // sale is retail
+      4: 'buy', // repair uses buy
+      5: 'buy', // payment uses buy
+      6: 'refund'
+    };
+
+    const currentTransactionType = transactionTypeMap[activeTab] || 'pawn';
+    const requiredFields = requiredFieldsMap[currentTransactionType] || [];
+
+    // Check which required fields are missing or empty
+    const missingFields = [];
+    requiredFields.forEach(field => {
+      const value = customer[field];
+      if (value === null || value === undefined || value === '') {
+        // Convert field name to readable format
+        const fieldLabel = field
+          .split('_')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+        missingFields.push(fieldLabel);
+      }
+    });
+
+    setCustomerValidationErrors(missingFields);
+    return missingFields.length === 0;
+  }, [customer, activeTab, requiredFieldsMap]);
+
+  // Validate customer whenever customer or active tab changes
+  React.useEffect(() => {
+    if (customer) {
+      setIsValidatingCustomer(true);
+      validateCustomerFields();
+      setIsValidatingCustomer(false);
+    } else {
+      setCustomerValidationErrors(['No customer selected']);
+    }
+  }, [customer, activeTab, validateCustomerFields]);
+
   const calculateTotal = () => {
     const { items } = getCurrentItems();
     let total = 0;
@@ -2328,10 +2466,29 @@ const CustomerTicket = () => {
 
   const handleAddToCart = () => {
     if (!customer) {
-      alert('Please select a customer before adding items to cart');
+      setSnackbarMessage({
+        open: true,
+        message: 'Please select a customer before adding items to cart',
+        severity: 'error'
+      });
       return;
     }
-    
+
+    // Validate customer has all required fields
+    const isValid = validateCustomerFields();
+    if (!isValid) {
+      const errorMessage = customerValidationErrors.length > 0
+        ? `Missing required customer fields: ${customerValidationErrors.join(', ')}`
+        : 'Customer is missing required fields';
+
+      setSnackbarMessage({
+        open: true,
+        message: errorMessage,
+        severity: 'error'
+      });
+      return;
+    }
+
     // Get items from current tab
     const { items, type } = getCurrentItems();
     
@@ -2800,10 +2957,27 @@ return (
         justifyContent: 'space-between'
       }}>
           {/* Left side - Customer Info or Lookup */}
-          <Box sx={{ 
-            display: 'flex', 
-            width: '40%', 
-            borderRight: '1px solid #e0e0e0'
+          <Box sx={{
+            display: 'flex',
+            width: '40%',
+            borderRight: '1px solid #e0e0e0',
+            maxHeight: '400px',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            '&::-webkit-scrollbar': {
+              width: '8px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: '#f1f1f1',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: '#888',
+              borderRadius: '4px',
+              '&:hover': {
+                backgroundColor: '#555',
+              },
+            },
           }}>
             {!showLookupForm ? (
               /* Customer info view */
@@ -2859,14 +3033,33 @@ return (
                     </Typography>
                     <Typography variant="body2">
                       <strong>Address:</strong> {customer ? (
-                        customer.address_line1 ? 
-                          `${customer.address_line1}${customer.address_line2 ? ', ' + customer.address_line2 : ''}, 
-                          ${customer.city || ''} ${customer.state || ''} ${customer.postal_code || ''}`.replace(/\s+/g, ' ').trim() 
-                          : 
+                        customer.address_line1 ?
+                          `${customer.address_line1}${customer.address_line2 ? ', ' + customer.address_line2 : ''},
+                          ${customer.city || ''} ${customer.state || ''} ${customer.postal_code || ''}`.replace(/\s+/g, ' ').trim()
+                          :
                           'Not provided'
                         ) : 'N/A'
                       }
                     </Typography>
+
+                    {/* Customer Validation Errors Display */}
+                    {customerValidationErrors.length > 0 && (
+                      <Alert severity="error" sx={{ mt: 2 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                          Missing Required Fields:
+                        </Typography>
+                        <Typography variant="body2" component="div">
+                          <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                            {customerValidationErrors.map((field, index) => (
+                              <li key={index}>{field}</li>
+                            ))}
+                          </ul>
+                        </Typography>
+                        <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
+                          Please edit the customer to add these fields before adding items to cart.
+                        </Typography>
+                      </Alert>
+                    )}
                   </Box>
                 </Grid>
               </Grid>
@@ -4026,7 +4219,7 @@ return (
                     variant="contained"
                     color="primary"
                     onClick={handleAddToCart}
-                    disabled={!customer}
+                    disabled={!customer || customerValidationErrors.length > 0}
                     startIcon={<ShoppingCartIcon />}
                   >
                     Add to Cart

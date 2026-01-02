@@ -145,45 +145,23 @@ const CustomerEditor = () => {
         }
       });
       
-      // Add image files if they exist
-      if (formData.image) {
-        if (formData.image instanceof File) {
-          submitData.append('image', formData.image);
-        } else if (typeof formData.image === 'string' && formData.image.startsWith('data:')) {
-          // Convert base64/dataURL to File
-          const file = await fetch(formData.image)
-            .then(res => res.blob())
-            .then(blob => new File([blob], 'customer-image.jpg', { type: 'image/jpeg' }));
-          submitData.append('image', file);
-        }
+      // Add image files only if they are File objects (new uploads)
+      // Skip existing image URLs to avoid re-uploading unchanged images
+      if (formData.image && formData.image instanceof File) {
+        submitData.append('image', formData.image);
       }
-      
-      if (formData.id_image_front) {
-        if (formData.id_image_front instanceof File) {
-          submitData.append('id_image_front', formData.id_image_front);
-        } else if (typeof formData.id_image_front === 'string' && formData.id_image_front.startsWith('data:')) {
-          const file = await fetch(formData.id_image_front)
-            .then(res => res.blob())
-            .then(blob => new File([blob], 'id-front.jpg', { type: 'image/jpeg' }));
-          submitData.append('id_image_front', file);
-        }
+
+      if (formData.id_image_front && formData.id_image_front instanceof File) {
+        submitData.append('id_image_front', formData.id_image_front);
       }
-      
-      if (formData.id_image_back) {
-        if (formData.id_image_back instanceof File) {
-          submitData.append('id_image_back', formData.id_image_back);
-        } else if (typeof formData.id_image_back === 'string' && formData.id_image_back.startsWith('data:')) {
-          const file = await fetch(formData.id_image_back)
-            .then(res => res.blob())
-            .then(blob => new File([blob], 'id-back.jpg', { type: 'image/jpeg' }));
-          submitData.append('id_image_back', file);
-        }
+
+      if (formData.id_image_back && formData.id_image_back instanceof File) {
+        submitData.append('id_image_back', formData.id_image_back);
       }
-      console.log("customer data",submitData);
-      const url = formData.id 
-        ? `${config.apiUrl}/customers/${formData.id}` 
+      const url = formData.id
+        ? `${config.apiUrl}/customers/${formData.id}`
         : `${config.apiUrl}/customers`;
-      
+
       const method = formData.id ? 'PUT' : 'POST';
       
       const response = await fetch(url, {
@@ -196,22 +174,32 @@ const CustomerEditor = () => {
       });
       
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Something went wrong');
+        const errorText = await response.text();
+        console.error('Response error:', response.status, errorText);
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          errorData = { message: errorText };
+        }
+        throw new Error(errorData.error || errorData.message || `Server error: ${response.status}`);
       }
-      
+
       const result = await response.json();
       showSnackbar(formData.id ? 'Customer updated successfully' : 'Customer created successfully', 'success');
-      
+
       // Navigate back to the previous page or home
-      if (location.state?.returnTo) {
-        navigate(location.state.returnTo);
-      } else {
-        navigate('/');
-      }
-      
+      setTimeout(() => {
+        if (location.state?.returnTo) {
+          navigate(location.state.returnTo, { state: { customerUpdated: true } });
+        } else {
+          navigate('/');
+        }
+      }, 500); // Small delay to show success message
+
     } catch (error) {
       console.error('Error saving customer:', error);
+      console.error('Error stack:', error.stack);
       showSnackbar(error.message || 'Failed to save customer', 'error');
     } finally {
       setLoading(false);
