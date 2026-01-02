@@ -153,6 +153,8 @@ function SystemConfig() {
   const [newAttributeType, setNewAttributeType] = useState('dropdown');
   const [newAttributeValue, setNewAttributeValue] = useState({});
   const [selectedCustomerColumns, setSelectedCustomerColumns] = useState({});
+  const [transactionTypes, setTransactionTypes] = useState([]);
+  const [customerColumnPreferences, setCustomerColumnPreferences] = useState({});
 
   const fetchDrawerConfig = async () => {
     try {
@@ -246,56 +248,66 @@ function SystemConfig() {
   const fetchCustomerHeaderPreferences = async () => {
     try {
       setLoading(true);
-      
-      // Fetch the customer preferences directly
-      const prefsResponse = await axios.get(`${API_BASE_URL}/customer-preferences/config`);
-      const preferences = prefsResponse.data || {};
-      
-      // Extract all fields that start with 'show_' from the preferences object
-      const showFields = Object.keys(preferences).filter(field => field.startsWith('show_'));
-      
-      // Create mappings between database fields and UI fields
-      const dbToUiMapping = {};
-      const uiToDbMapping = {};
-      
-      showFields.forEach(dbField => {
-        // Convert show_field_name to field_name for UI
-        const uiField = dbField.replace('show_', '');
-        dbToUiMapping[dbField] = uiField;
-        uiToDbMapping[uiField] = dbField;
-      });
-      
-      // Create preferences object for UI state
-      const columnPreferences = {};
-      
-      // Map database preferences to UI fields
-      Object.keys(dbToUiMapping).forEach(dbField => {
-        if (preferences[dbField] !== undefined) {
-          const uiField = dbToUiMapping[dbField];
-          columnPreferences[uiField] = preferences[dbField];
+
+      // Fetch all customer preferences (customers + transaction types)
+      const allPrefsResponse = await axios.get(`${API_BASE_URL}/customer-preferences/all`);
+      const allPreferences = allPrefsResponse.data || [];
+
+      // Find the 'customers' preferences
+      const customersRow = allPreferences.find(row => row.header_preferences === 'customers');
+
+      if (customersRow) {
+        // Extract all fields that start with 'show_' from the preferences object
+        const showFields = Object.keys(customersRow).filter(field => field.startsWith('show_'));
+
+        // Create preferences object for UI state (header preferences)
+        const columnPreferences = {};
+
+        showFields.forEach(dbField => {
+          const uiField = dbField.replace('show_', '');
+          columnPreferences[uiField] = customersRow[dbField];
+        });
+
+        // Update selected columns state for header preferences
+        setSelectedCustomerColumns(columnPreferences);
+
+        // Generate columns array for the UI (if still needed)
+        const uiColumns = showFields.map(dbField => {
+          const uiField = dbField.replace('show_', '');
+          return {
+            name: uiField,
+            label: uiField.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+            type: getColumnType(uiField),
+            selected: customersRow[dbField] || false
+          };
+        });
+
+        setCustomerColumns(uiColumns);
+      }
+
+      // Load transaction type preferences
+      const txTypePrefs = {};
+      allPreferences.forEach(row => {
+        if (row.header_preferences !== 'customers') {
+          const txType = row.header_preferences;
+
+          // Extract show_* fields
+          Object.keys(row).forEach(key => {
+            if (key.startsWith('show_')) {
+              const field = key.replace('show_', '');
+              const prefKey = `${txType}_${field}`;
+              txTypePrefs[prefKey] = row[key];
+            }
+          });
         }
       });
 
-      // Update selected columns state
-      setSelectedCustomerColumns(columnPreferences);
-      
-      // Generate columns array for the UI
-      const uiColumns = Object.keys(dbToUiMapping).map(dbField => {
-        const uiField = dbToUiMapping[dbField];
-        return {
-          name: uiField,
-          label: uiField.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
-          type: getColumnType(uiField),
-          selected: preferences[dbField] || false
-        };
-      });
-      
-      // Update customer columns state for UI display
-      setCustomerColumns(uiColumns);
-      
+      // Update transaction type preferences state
+      setCustomerColumnPreferences(txTypePrefs);
+
     } catch (error) {
       console.error('Error fetching customer header preferences:', error);
-      
+
 
     } finally {
       setLoading(false);
@@ -312,6 +324,44 @@ function SystemConfig() {
       return 'string';
     }
   };
+
+  // Fetch transaction types from the database
+  const fetchTransactionTypes = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/transaction-types`);
+      setTransactionTypes(response.data);
+    } catch (error) {
+      console.error('Error fetching transaction types:', error);
+    }
+  };
+
+  // Define available customer columns
+  const availableCustomerColumns = [
+    { field: 'first_name', label: 'First Name' },
+    { field: 'last_name', label: 'Last Name' },
+    { field: 'email', label: 'Email' },
+    { field: 'phone', label: 'Phone' },
+    { field: 'address_line1', label: 'Address Line 1' },
+    { field: 'address_line2', label: 'Address Line 2' },
+    { field: 'city', label: 'City' },
+    { field: 'state', label: 'State' },
+    { field: 'postal_code', label: 'Postal Code' },
+    { field: 'country', label: 'Country' },
+    { field: 'id_type', label: 'ID Type' },
+    { field: 'id_number', label: 'ID Number' },
+    { field: 'id_expiry_date', label: 'ID Expiry Date' },
+    { field: 'date_of_birth', label: 'Date of Birth' },
+    { field: 'gender', label: 'Gender' },
+    { field: 'height', label: 'Height' },
+    { field: 'weight', label: 'Weight' },
+    { field: 'status', label: 'Status' },
+    { field: 'risk_level', label: 'Risk Level' },
+    { field: 'tax_exempt', label: 'Tax Exempt' },
+    { field: 'image', label: 'Customer Image' },
+    { field: 'id_image_front', label: 'ID Image Front' },
+    { field: 'id_image_back', label: 'ID Image Back' },
+    { field: 'notes', label: 'Notes' }
+  ];
 
   useEffect(() => {
     const fetchPreciousMetalNames = async () => {
@@ -496,6 +546,7 @@ function SystemConfig() {
 
     // Fetch data on component mount
     fetchCustomerHeaderPreferences();
+    fetchTransactionTypes();
     fetchPreciousMetalNames();
     fetchLivePricing();
     fetchSpotPrices();
@@ -762,19 +813,43 @@ function SystemConfig() {
       
       // Save customer header preferences
       try {
-        // Convert the selectedCustomerColumns object to the format expected by the API
-        const headerPreferences = {
-          display_header: true,
-          header_style: 'standard'
-        };
-        
-        // Map UI fields to database fields
+        // 1. Save header preferences for 'customers' context
+        const customersPreferences = {};
         Object.keys(selectedCustomerColumns).forEach(uiField => {
-          const dbField = 'show_' + uiField; // Correct mapping from UI field to database field
-          headerPreferences[dbField] = selectedCustomerColumns[uiField];
+          const dbField = 'show_' + uiField;
+          customersPreferences[dbField] = selectedCustomerColumns[uiField];
         });
-        
-        await axios.put(`${API_BASE_URL}/customer-preferences/config`, headerPreferences);
+
+        await axios.put(`${API_BASE_URL}/customer-preferences/update-by-context`, {
+          header_preferences: 'customers',
+          preferences: customersPreferences
+        });
+
+        // 2. Save preferences for each transaction type
+        const transactionTypeUpdates = transactionTypes.map(async (txType) => {
+          const txPreferences = {};
+
+          // Extract preferences for this transaction type from customerColumnPreferences
+          Object.keys(customerColumnPreferences).forEach(key => {
+            // Key format: ${type}_${field}
+            if (key.startsWith(`${txType.type}_`)) {
+              const field = key.substring(txType.type.length + 1); // Remove "${type}_" prefix
+              const dbField = 'show_' + field;
+              txPreferences[dbField] = customerColumnPreferences[key];
+            }
+          });
+
+          // Only update if there are preferences to save
+          if (Object.keys(txPreferences).length > 0) {
+            return axios.put(`${API_BASE_URL}/customer-preferences/update-by-context`, {
+              header_preferences: txType.type,
+              preferences: txPreferences
+            });
+          }
+        });
+
+        // Wait for all transaction type updates to complete
+        await Promise.all(transactionTypeUpdates.filter(Boolean));
       } catch (headerError) {
         console.error('Error saving customer header preferences:', headerError);
       }
@@ -1602,47 +1677,64 @@ function SystemConfig() {
             </Typography>
             <Box sx={{ mb: 3 }}>
               <Typography variant="body2" color="textSecondary" paragraph>
-                Select which columns should be displayed as headers in the customer table:
+                Select which customer columns should be displayed for each transaction type:
               </Typography>
-              <TableContainer component={Paper} sx={{ mt: 2 }}>
-                <Table size="small">
+              <TableContainer component={Paper} sx={{ mt: 2, maxHeight: 600 }}>
+                <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Select</TableCell>
-                      <TableCell>Column Name</TableCell>
-                      <TableCell>Display Label</TableCell>
-                      <TableCell>Data Type</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 150 }}>Customer Field</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 120, bgcolor: '#f5f5f5' }}>
+                        Header Preferences
+                      </TableCell>
+                      {transactionTypes.map((txType) => (
+                        <TableCell key={txType.id} align="center" sx={{ fontWeight: 'bold', minWidth: 100 }}>
+                          {txType.type.charAt(0).toUpperCase() + txType.type.slice(1)}
+                        </TableCell>
+                      ))}
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {customerColumns.map((column) => (
-                      <TableRow key={column.name}>
-                        <TableCell padding="checkbox">
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={selectedCustomerColumns[column.name] || false}
-                                onChange={(e) => {
-                                  setSelectedCustomerColumns(prev => ({
-                                    ...prev,
-                                    [column.name]: e.target.checked
-                                  }));
-                                }}
-                                color="primary"
-                                size="small"
-                              />
-                            }
-                            label=""                           
+                    {availableCustomerColumns.map((column) => (
+                      <TableRow key={column.field} hover>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {column.label}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center" padding="checkbox" sx={{ bgcolor: '#fafafa' }}>
+                          <Checkbox
+                            checked={selectedCustomerColumns[column.field] || false}
+                            onChange={(e) => {
+                              setSelectedCustomerColumns(prev => ({
+                                ...prev,
+                                [column.field]: e.target.checked
+                              }));
+                            }}
+                            color="primary"
+                            size="small"
                           />
                         </TableCell>
-                        <TableCell><code>{column.name}</code></TableCell>
-                        <TableCell>{column.label}</TableCell>
-                        <TableCell>{column.type}</TableCell>
+                        {transactionTypes.map((txType) => (
+                          <TableCell key={txType.id} align="center" padding="checkbox">
+                            <Checkbox
+                              checked={customerColumnPreferences[`${txType.type}_${column.field}`] || false}
+                              onChange={(e) => {
+                                setCustomerColumnPreferences(prev => ({
+                                  ...prev,
+                                  [`${txType.type}_${column.field}`]: e.target.checked
+                                }));
+                              }}
+                              color="primary"
+                              size="small"
+                            />
+                          </TableCell>
+                        ))}
                       </TableRow>
                     ))}
-                    {customerColumns.length === 0 && (
+                    {availableCustomerColumns.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={4} align="center">
+                        <TableCell colSpan={transactionTypes.length + 1} align="center">
                           {loading ? 'Loading...' : 'No columns found'}
                         </TableCell>
                       </TableRow>
@@ -1651,9 +1743,9 @@ function SystemConfig() {
                 </Table>
               </TableContainer>
               <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-                <Button 
-                  variant="contained" 
-                  color="primary" 
+                <Button
+                  variant="contained"
+                  color="primary"
                   onClick={handleSaveSettings}
                   disabled={loading}
                 >

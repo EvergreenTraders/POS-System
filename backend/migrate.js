@@ -37,7 +37,8 @@ const MIGRATION_FILES = [
   'quotes.sql',
   'tax_config.sql',
   'cash_drawer.sql',
-  'add_performance_indexes.sql'
+  'add_performance_indexes.sql',
+  'customer_headers_preferences.sql'
 ];
 
 async function runMigrations() {

@@ -3311,15 +3311,39 @@ app.put('/api/receipt-config', async (req, res) => {
 });
 
 // Customer Preferences Configuration API Endpoints
+// Get all customer header preferences (all contexts)
+app.get('/api/customer-preferences/all', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM customer_headers_preferences
+      ORDER BY
+        CASE
+          WHEN header_preferences = 'customers' THEN 0
+          ELSE 1
+        END,
+        header_preferences
+    `);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No customer preferences found' });
+    }
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching all customer preferences:', err);
+    res.status(500).json({ error: 'Failed to fetch customer preferences' });
+  }
+});
+
 app.get('/api/customer-preferences/config', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT *
-      FROM customer_headers_preferences 
-      ORDER BY created_at DESC
+      FROM customer_headers_preferences
+      WHERE header_preferences = 'customers'
       LIMIT 1
     `);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'No customer preferences configuration found' });
     }
@@ -3415,6 +3439,68 @@ app.put('/api/customer-preferences/config', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error updating customer preferences config:', err);
     res.status(500).json({ error: 'Failed to update customer preferences configuration' });
+  } finally {
+    client.release();
+  }
+});
+
+// Update customer header preferences by header_preferences (context)
+app.put('/api/customer-preferences/update-by-context', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { header_preferences, preferences } = req.body;
+
+    if (!header_preferences || !preferences) {
+      return res.status(400).json({ error: 'header_preferences and preferences are required' });
+    }
+
+    await client.query('BEGIN');
+
+    // Build dynamic UPDATE query based on the preferences object
+    const setColumns = [];
+    const values = [];
+    let valueIndex = 1;
+
+    // Add all show_* fields from preferences
+    Object.keys(preferences).forEach(key => {
+      if (key.startsWith('show_')) {
+        setColumns.push(`${key} = $${valueIndex}`);
+        values.push(preferences[key]);
+        valueIndex++;
+      }
+    });
+
+    if (setColumns.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No valid preferences to update' });
+    }
+
+    // Add updated_at
+    setColumns.push(`updated_at = CURRENT_TIMESTAMP`);
+
+    // Add header_preferences as the WHERE condition parameter
+    values.push(header_preferences);
+
+    const updateQuery = `
+      UPDATE customer_headers_preferences
+      SET ${setColumns.join(', ')}
+      WHERE header_preferences = $${valueIndex}
+      RETURNING *
+    `;
+
+    const result = await client.query(updateQuery, values);
+
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: `No record found with header_preferences = '${header_preferences}'` });
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating customer preferences by context:', err);
+    res.status(500).json({ error: 'Failed to update customer preferences' });
   } finally {
     client.release();
   }
