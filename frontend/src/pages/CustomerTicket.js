@@ -687,27 +687,27 @@ const CustomerTicket = () => {
       const isDuplicate = location.state?.isDuplicate || false;
   
       // Create a base item with common properties from the updated item
-      
-      // Extract gem shape - using optional chaining for cleaner code
-      const gemShape = updatedItem?.primary_gem_shape || 
-                      updatedItem?.diamonds?.[0]?.shape || 
-                      updatedItem?.stones?.[0]?.shape || 
-                      updatedItem?.originalData?.primary_gem_shape || 
-                      'Round';
-      
-      // Create gem description component
-      const gemDescription = gemShape ? ` ${gemShape}` : '';
-      
+
       // Extract metal category with optional chaining for cleaner code
-      const metalCategory = updatedItem?.metal_category || 
-                           updatedItem?.category || 
-                           updatedItem?.originalData?.metal_category || 
+      const metalCategory = updatedItem?.metal_category ||
+                           updatedItem?.category ||
+                           updatedItem?.originalData?.metal_category ||
                            'Jewelry';
-      
+
+      // Use the long_desc or short_desc from the estimator if available
+      // This preserves all manual additions like vintage, stamps, brand, designer, etc.
+      const description = updatedItem?.long_desc ||
+                         updatedItem?.short_desc ||
+                         updatedItem?.description ||
+                         `${updatedItem.metal_weight || '0'}g ${updatedItem.metal_purity || ''} ${updatedItem.precious_metal_type || ''} ${metalCategory}`;
+
       const baseItem = {
         id: ticketItemId,
-        description: `${updatedItem.metal_weight || '0'}g ${updatedItem.metal_purity || ''} ${updatedItem.precious_metal_type || ''} ${metalCategory}${gemDescription}${updatedItem.free_text ? ` - ${updatedItem.free_text}` : ''}`,
+        description: description,
         category: metalCategory,
+        // Store both short and long descriptions
+        short_desc: updatedItem?.short_desc,
+        long_desc: updatedItem?.long_desc,
         // Store the original estimator data for editing
         originalData: { ...updatedItem },
         sourceEstimator: 'jewelry'
@@ -727,10 +727,13 @@ const CustomerTicket = () => {
           setPawnItems(prevItems => {
             const updatedItems = [...prevItems];
             const itemIndex = updatedItems.findIndex(item => item.id === ticketItemId);
-            
+
             if (itemIndex !== -1) {
+              // Spread ALL fields from updatedItem to preserve vintage, stamps, brand, etc.
               updatedItems[itemIndex] = {
-                ...baseItem,
+                ...updatedItem, // Spread all fields from estimator first
+                ...baseItem, // Then overlay baseItem fields (description, category, etc.)
+                id: ticketItemId, // Preserve the ticket item ID
                 value: updatedItem.price || updatedItem.price_estimates?.pawn || 0
               };
               // Show success message
@@ -739,22 +742,25 @@ const CustomerTicket = () => {
               // Item not found - might have been deleted while in editor
               showSnackbar('Could not find item to update', 'error');
             }
-            
+
             // Save to localStorage
             saveTicketItems('pawn', updatedItems);
-            
+
             return updatedItems;
           });
           break;
-          
+
         case 'buy':
           setBuyItems(prevItems => {
             const updatedItems = [...prevItems];
             const itemIndex = updatedItems.findIndex(item => item.id === ticketItemId);
-            
+
             if (itemIndex !== -1) {
+              // Spread ALL fields from updatedItem to preserve vintage, stamps, brand, etc.
               updatedItems[itemIndex] = {
-                ...baseItem,
+                ...updatedItem, // Spread all fields from estimator first
+                ...baseItem, // Then overlay baseItem fields (description, category, etc.)
+                id: ticketItemId, // Preserve the ticket item ID
                 price: updatedItem.price || updatedItem.price_estimates?.buy || 0
               };
               // Show success message
@@ -763,23 +769,26 @@ const CustomerTicket = () => {
               // Item not found - might have been deleted while in editor
               showSnackbar('Could not find item to update', 'error');
             }
-            
+
             // Save to localStorage
             saveTicketItems('buy', updatedItems);
-            
+
             return updatedItems;
           });
           break;
-          
+
         case 'sale':
         case 'retail': // Handle both 'sale' and 'retail' the same way
           setSaleItems(prevItems => {
             const updatedItems = [...prevItems];
             const itemIndex = updatedItems.findIndex(item => item.id === ticketItemId);
-            
+
             if (itemIndex !== -1) {
+              // Spread ALL fields from updatedItem to preserve vintage, stamps, brand, etc.
               updatedItems[itemIndex] = {
-                ...baseItem,
+                ...updatedItem, // Spread all fields from estimator first
+                ...baseItem, // Then overlay baseItem fields (description, category, etc.)
+                id: ticketItemId, // Preserve the ticket item ID
                 price: updatedItem.price || updatedItem.price_estimates?.retail || 0,
                 paymentMethod: prevItems[itemIndex].paymentMethod || ''
               };
@@ -789,10 +798,10 @@ const CustomerTicket = () => {
               // Item not found - might have been deleted while in editor
               showSnackbar('Could not find item to update', 'error');
             }
-            
+
             // Save to localStorage
             saveTicketItems('sale', updatedItems);
-            
+
             return updatedItems;
           });
           break;
@@ -2706,32 +2715,33 @@ const CustomerTicket = () => {
         
         // If the item came from the jewelry estimator, include all jewelry-specific fields
         if (item.sourceEstimator === 'jewelry') {
-          // Use long_desc or short_desc from originalData if available, otherwise use current description
-          const jewelryDescription = item.originalData?.long_desc ||
+          // Use long_desc or short_desc from item level first, then originalData
+          const jewelryDescription = item.long_desc ||
+                                     item.short_desc ||
+                                     item.originalData?.long_desc ||
                                      item.originalData?.short_desc ||
                                      item.description;
 
-          // Preserve all jewelry fields from the original data or directly from the item if available
+          // Preserve ALL jewelry fields by spreading originalData first, then current item
+          // This ensures that ALL fields including vintage, stamps, brand, designer, etc. are preserved
           return {
             ...baseItem,
-            // Update description with jewelry item short or long description
+            // Spread all fields from originalData (includes ALL jewelry fields)
+            ...(item.originalData || {}),
+            // Then spread current item to override with any updates
+            ...item,
+            // Ensure these specific fields are always set correctly
+            transaction_type: transaction_type,
+            buyTicketId: buyTicketId,
+            customer: baseItem.customer,
+            employee: baseItem.employee,
             description: jewelryDescription,
-            // Indicate this is a jewelry item for the cart and checkout
             sourceEstimator: 'jewelry',
-            // Include all jewelry-specific fields that may be present
-            metal_type: item.metal_type || item.precious_metal_type || (item.originalData?.precious_metal_type),
-            metal_purity: item.metal_purity || (item.originalData?.metal_purity),
-            metal_weight: item.metal_weight || (item.originalData?.metal_weight),
-            metal_category: item.metal_category || (item.originalData?.metal_category),
-            gems: item.gems || (item.originalData?.gems),
-            stones: item.stones || (item.originalData?.stones),
-            free_text: item.free_text || (item.originalData?.free_text),
-            price_estimates: item.price_estimates || (item.originalData?.price_estimates),
-            // Store both short and long descriptions for future reference
-            short_desc: item.originalData?.short_desc,
-            long_desc: item.originalData?.long_desc,
+            // Store both short and long descriptions explicitly
+            short_desc: item.short_desc || item.originalData?.short_desc,
+            long_desc: item.long_desc || item.originalData?.long_desc,
             // Pass along the complete original data from the estimator
-         //   originalData: item.originalData || null,
+            originalData: item.originalData || null,
             // Ensure images are properly passed
             images: item.images || (item.image ? [item.image] : []),
             // Include timestamp for when the item was added to cart

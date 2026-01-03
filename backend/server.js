@@ -7002,7 +7002,6 @@ app.post('/api/payments', async (req, res) => {
     await client.query('BEGIN');
     
     const { transaction_id, amount, payment_method } = req.body;
-    console.log(req.body);
     
     // Validate payment method
     if (!['CASH', 'CREDIT_CARD', 'DEBIT_CARD', 'BANK_TRANSFER', 'CHECK'].includes(payment_method)) {

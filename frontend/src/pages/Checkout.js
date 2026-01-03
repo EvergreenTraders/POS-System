@@ -773,18 +773,21 @@ function Checkout() {
               });
 
               // Check if we have any jewelry items from the gem estimator
-              // If items have originalData, use that for full jewelry information
+              // If items have originalData, merge it with current item data
               const jewelryItemsToPost = jewelryItems.map(item => {
-                if (item.originalData) {
-                  // Merge originalData with current item to ensure we have all jewelry fields
-                  return {
-                    ...item.originalData,
-                    price: item.price,
-                    transaction_type: item.transaction_type,
-                    images: item.images || item.originalData.images
-                  };
-                }
-                return item;
+                // Spread originalData first for base jewelry fields
+                // Then spread the current item to override with any updates (vintage, notes, brand, etc.)
+                // This ensures ALL fields including manual additions are preserved
+                const mergedItem = {
+                  ...(item.originalData || {}),
+                  ...item,
+                  // Ensure price and transaction_type are always set
+                  price: item.price || item.originalData?.price,
+                  transaction_type: item.transaction_type || item.originalData?.transaction_type,
+                  images: item.images || item.originalData?.images
+                };
+
+                return mergedItem;
               });
               itemsToPost = jewelryItems.length > 0 ? jewelryItemsToPost : processedItems;
 
@@ -826,18 +829,21 @@ function Checkout() {
               });
 
               // Check if we have any jewelry items from the gem estimator
-              // If items have originalData, use that for full jewelry information
+              // If items have originalData, merge it with current item data
               const jewelryItemsToPost = jewelryItems.map(item => {
-                if (item.originalData) {
-                  // Merge originalData with current item to ensure we have all jewelry fields
-                  return {
-                    ...item.originalData,
-                    price: item.price,
-                    transaction_type: item.transaction_type,
-                    images: item.images || item.originalData.images
-                  };
-                }
-                return item;
+                // Spread originalData first for base jewelry fields
+                // Then spread the current item to override with any updates (vintage, notes, brand, etc.)
+                // This ensures ALL fields including manual additions are preserved
+                const mergedItem = {
+                  ...(item.originalData || {}),
+                  ...item,
+                  // Ensure price and transaction_type are always set
+                  price: item.price || item.originalData?.price,
+                  transaction_type: item.transaction_type || item.originalData?.transaction_type,
+                  images: item.images || item.originalData?.images
+                };
+
+                return mergedItem;
               });
               itemsToPost = jewelryItems.length > 0 ? jewelryItemsToPost : processedItems;
 
