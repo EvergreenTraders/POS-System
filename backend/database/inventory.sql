@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS inventory_status (
 --     ('SOLD', 'Sold', 'Item has been sold')
 -- ON CONFLICT (status_code) DO NOTHING;
 
+-- Drop change_notes column if it exists (migration)
+ALTER TABLE jewelry DROP COLUMN IF EXISTS change_notes;
+
 -- Create jewelry table for inventory
 CREATE TABLE IF NOT EXISTS jewelry (
     item_id VARCHAR(10) PRIMARY KEY,
@@ -118,7 +121,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for updated_at
-DROP TRIGGER IF EXISTS update_jewelry_timestamp ON jewelry;
+-- DROP TRIGGER IF EXISTS update_jewelry_timestamp ON jewelry;
 CREATE TRIGGER update_jewelry_timestamp
     BEFORE UPDATE ON jewelry
     FOR EACH ROW
@@ -157,7 +160,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for secondary_gems updated_at
-DROP TRIGGER IF EXISTS update_jewelry_secondary_gems_timestamp ON jewelry_secondary_gems;
+-- DROP TRIGGER IF EXISTS update_jewelry_secondary_gems_timestamp ON jewelry_secondary_gems;
 CREATE TRIGGER update_jewelry_secondary_gems_timestamp
     BEFORE UPDATE ON jewelry_secondary_gems
     FOR EACH ROW
@@ -179,3 +182,57 @@ COMMENT ON COLUMN jewelry_secondary_gems.secondary_gem_value IS 'Estimated value
 UPDATE jewelry
 SET item_price = ROUND((RANDOM() * 949.99 + 50.00)::numeric, 2)
 WHERE item_price IS NULL;
+
+-- Create storage_location table for inventory locations (cases)
+CREATE TABLE IF NOT EXISTS storage_location (
+    location_id SERIAL PRIMARY KEY,
+    location VARCHAR(255) NOT NULL UNIQUE,
+    is_occupied BOOLEAN DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+-- Create index for faster lookups
+CREATE INDEX IF NOT EXISTS idx_storage_location_name ON storage_location(location);
+CREATE INDEX IF NOT EXISTS idx_storage_location_occupied ON storage_location(is_occupied);
+
+-- Create trigger function for storage_location updated_at
+CREATE OR REPLACE FUNCTION update_storage_location_timestamp() RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger for storage_location updated_at
+CREATE TRIGGER update_storage_location_timestamp
+    BEFORE UPDATE ON storage_location
+    FOR EACH ROW
+    EXECUTE FUNCTION update_storage_location_timestamp();
+
+-- Add table and column comments
+COMMENT ON TABLE storage_location IS 'Stores physical storage locations for inventory items';
+COMMENT ON COLUMN storage_location.location_id IS 'Unique identifier for the storage location';
+COMMENT ON COLUMN storage_location.location IS 'Full location path (e.g., Main Inventory/Main Warehouse/Case 1)';
+COMMENT ON COLUMN storage_location.is_occupied IS 'Whether this location currently has items stored';
+
+-- Create cases_config table (similar to drawer_config)
+CREATE TABLE IF NOT EXISTS cases_config (
+    id SERIAL PRIMARY KEY,
+    number_of_cases INTEGER NOT NULL DEFAULT 0 CHECK (number_of_cases >= 0 AND number_of_cases <= 100),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+-- Insert default cases config if not exists
+INSERT INTO cases_config (number_of_cases)
+VALUES (0)
+ON CONFLICT DO NOTHING;
+
+-- Insert default storage locations (Inventory and Warehouse)
+INSERT INTO storage_location (location, is_occupied)
+VALUES ('Inventory', FALSE), ('Warehouse', FALSE)
+ON CONFLICT (location) DO NOTHING;
+
+COMMENT ON TABLE cases_config IS 'Configuration for number of storage cases';
+COMMENT ON COLUMN cases_config.number_of_cases IS 'Total number of storage cases configured (0-100)';

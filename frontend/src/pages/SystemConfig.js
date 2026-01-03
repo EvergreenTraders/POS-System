@@ -147,6 +147,8 @@ function SystemConfig() {
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
   const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
   const [drawers, setDrawers] = useState([]);
+  const [numberOfCases, setNumberOfCases] = useState({ count: 0, id: null });
+  const [cases, setCases] = useState([]);
   const [isBlindCount, setIsBlindCount] = useState(true);
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState({ amount: 0.00, id: null });
   const [minClose, setMinClose] = useState(0);
@@ -185,6 +187,33 @@ function SystemConfig() {
     } catch (error) {
       console.error('Error fetching drawers:', error);
       setDrawers([]);
+    }
+  };
+
+  const fetchCasesConfig = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/cases-config`);
+      if (response.data) {
+        setNumberOfCases({
+          count: response.data.number_of_cases,
+          id: response.data.id || null,
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching cases config:', error);
+      setNumberOfCases({ count: 0, id: null });
+    }
+  };
+
+  const fetchCases = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/cases`);
+      if (response.data) {
+        setCases(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching cases:', error);
+      setCases([]);
     }
   };
 
@@ -577,6 +606,8 @@ function SystemConfig() {
     fetchInventoryHoldPeriod();
     fetchDrawerConfig();
     fetchDrawers();
+    fetchCasesConfig();
+    fetchCases();
     fetchBlindCountPreference();
     fetchDiscrepancyThreshold();
     fetchTaxConfig();
@@ -1119,6 +1150,58 @@ function SystemConfig() {
       setSnackbar({
         open: true,
         message: 'Failed to update number of drawers configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleNumberOfCasesChange = async (event) => {
+    const newCount = parseInt(event.target.value);
+    if (newCount < 0) {
+      setSnackbar({
+        open: true,
+        message: 'Number of cases cannot be negative',
+        severity: 'error'
+      });
+      return;
+    }
+
+    if (newCount > 100) {
+      setSnackbar({
+        open: true,
+        message: 'Number of cases cannot exceed 100',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.put(`${API_BASE_URL}/cases-config`, {
+        number_of_cases: newCount
+      });
+
+      setNumberOfCases({
+        count: response.data.number_of_cases,
+        id: response.data.id
+      });
+
+      // Refresh the cases list
+      await fetchCases();
+
+      const caseMessage = newCount === 0
+        ? 'No storage cases configured.'
+        : `${newCount} storage case${newCount > 1 ? 's' : ''} created (Case 1${newCount > 1 ? ` to Case ${newCount}` : ''}).`;
+
+      setSnackbar({
+        open: true,
+        message: `Storage cases configuration updated. ${caseMessage}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating number of cases:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update number of cases configuration',
         severity: 'error'
       });
     }
@@ -1724,6 +1807,61 @@ function SystemConfig() {
                               <Typography color="success.main" variant="body2">Active</Typography>
                             ) : (
                               <Typography color="error.main" variant="body2">Inactive</Typography>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            )}
+
+            {/* Storage Cases Configuration */}
+            <Box sx={{ mt: 4 }}>
+              <Typography variant="h6" gutterBottom fontWeight="bold">
+                Storage Cases Configuration
+              </Typography>
+              <Box display="flex" alignItems="center" gap={2} sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider', flexWrap: 'wrap' }}>
+                <TextField
+                  label="Number of Cases"
+                  type="number"
+                  value={numberOfCases.count}
+                  onChange={(e) => setNumberOfCases(prev => ({ ...prev, count: e.target.value }))}
+                  onBlur={(e) => handleNumberOfCasesChange(e)}
+                  size="small"
+                  sx={{ width: 180 }}
+                  InputProps={{
+                    endAdornment: <InputAdornment position="end">cases</InputAdornment>,
+                  }}
+                  inputProps={{ min: 0, max: 100 }}
+                  helperText="Number of cases (0-100)"
+                />
+              </Box>
+            </Box>
+
+            {cases.length > 0 && (
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                  Configured Storage Cases:
+                </Typography>
+                <TableContainer component={Paper} sx={{ mt: 1 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Location</TableCell>
+                        <TableCell align="center">Status</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {cases.map((caseItem) => (
+                        <TableRow key={caseItem.location_id}>
+                          <TableCell>{caseItem.location}</TableCell>
+                          <TableCell align="center">
+                            {caseItem.is_occupied ? (
+                              <Typography color="warning.main" variant="body2">Occupied</Typography>
+                            ) : (
+                              <Typography color="success.main" variant="body2">Available</Typography>
                             )}
                           </TableCell>
                         </TableRow>

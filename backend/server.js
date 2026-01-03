@@ -925,19 +925,31 @@ app.put('/api/drawer-config', async (req, res) => {
         `, [`Drawer ${i}`, i]);
       }
     } else if (number_of_drawers < currentCount) {
-      // Remove excess drawers (only if they have no sessions)
+      // Remove excess drawers - delete drawers beyond the new count
       for (let i = currentCount; i > number_of_drawers; i--) {
         const drawerName = `Drawer ${i}`;
-        // Check if drawer has any sessions
-        const sessionCheck = await pool.query(`
-          SELECT COUNT(*) as count FROM cash_drawer_sessions
-          WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
-        `, [drawerName]);
 
-        if (parseInt(sessionCheck.rows[0].count) === 0) {
+        try {
+          // First, try to delete the drawer and all related data
+          // Delete cash drawer sessions first (cascade)
+          await pool.query(`
+            DELETE FROM cash_drawer_adjustments
+            WHERE session_id IN (
+              SELECT session_id FROM cash_drawer_sessions
+              WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
+            )
+          `, [drawerName]);
+
+          await pool.query(`
+            DELETE FROM cash_drawer_sessions
+            WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
+          `, [drawerName]);
+
+          // Then delete the drawer itself
           await pool.query('DELETE FROM drawers WHERE drawer_name = $1', [drawerName]);
-        } else {
-          // Mark as inactive instead of deleting
+        } catch (deleteError) {
+          console.error(`Error deleting ${drawerName}:`, deleteError);
+          // If deletion fails due to constraints, mark as inactive
           await pool.query(
             'UPDATE drawers SET is_active = FALSE WHERE drawer_name = $1',
             [drawerName]
@@ -964,6 +976,118 @@ app.get('/api/drawers', async (req, res) => {
   } catch (error) {
     console.error('Error fetching drawers:', error);
     res.status(500).json({ error: 'Failed to fetch drawers' });
+  }
+});
+
+// Cases Configuration Routes
+// GET /api/cases-config - Get cases configuration
+app.get('/api/cases-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM cases_config LIMIT 1');
+    if (result.rows.length === 0) {
+      // Insert default if doesn't exist
+      const insertResult = await pool.query(
+        'INSERT INTO cases_config (number_of_cases) VALUES (0) RETURNING *'
+      );
+      res.json(insertResult.rows[0]);
+    } else {
+      res.json(result.rows[0]);
+    }
+  } catch (error) {
+    console.error('Error fetching cases config:', error);
+    res.status(500).json({ error: 'Failed to fetch cases configuration' });
+  }
+});
+
+// PUT /api/cases-config - Update cases configuration
+app.put('/api/cases-config', async (req, res) => {
+  const { number_of_cases } = req.body;
+
+  if (number_of_cases === undefined || number_of_cases < 0 || number_of_cases > 100) {
+    return res.status(400).json({ error: 'number_of_cases must be between 0 and 100' });
+  }
+
+  try {
+    // Ensure Inventory and Warehouse default entries exist
+    await pool.query(`
+      INSERT INTO storage_location (location, is_occupied)
+      VALUES ('Inventory', FALSE), ('Warehouse', FALSE)
+      ON CONFLICT (location) DO NOTHING
+    `);
+
+    // Update the config
+    const configResult = await pool.query(`
+      UPDATE cases_config
+      SET number_of_cases = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT id FROM cases_config LIMIT 1)
+      RETURNING *
+    `, [number_of_cases]);
+
+    let config;
+    if (configResult.rows.length === 0) {
+      // Insert if doesn't exist
+      const insertResult = await pool.query(
+        'INSERT INTO cases_config (number_of_cases) VALUES ($1) RETURNING *',
+        [number_of_cases]
+      );
+      config = insertResult.rows[0];
+    } else {
+      config = configResult.rows[0];
+    }
+
+    // Get current cases (excluding Inventory and Warehouse)
+    const currentCases = await pool.query(`
+      SELECT location_id, location FROM storage_location
+      WHERE location LIKE 'Case %'
+      ORDER BY location_id
+    `);
+
+    const currentCount = currentCases.rows.length;
+
+    if (number_of_cases > currentCount) {
+      // Add new cases
+      for (let i = currentCount + 1; i <= number_of_cases; i++) {
+        await pool.query(`
+          INSERT INTO storage_location (location, is_occupied)
+          VALUES ($1, FALSE)
+          ON CONFLICT (location) DO NOTHING
+        `, [`Case ${i}`]);
+      }
+    } else if (number_of_cases < currentCount) {
+      // Remove excess cases - delete cases beyond the new count
+      for (let i = currentCount; i > number_of_cases; i--) {
+        const caseName = `Case ${i}`;
+
+        try {
+          // Delete the case
+          await pool.query(
+            'DELETE FROM storage_location WHERE location = $1',
+            [caseName]
+          );
+        } catch (deleteError) {
+          console.error(`Error deleting ${caseName}:`, deleteError);
+        }
+      }
+    }
+
+    res.json(config);
+  } catch (error) {
+    console.error('Error updating cases config:', error);
+    res.status(500).json({ error: 'Failed to update cases configuration' });
+  }
+});
+
+// GET /api/cases - Get all storage cases
+app.get('/api/cases', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM storage_location
+      ORDER BY location_id
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching cases:', error);
+    res.status(500).json({ error: 'Failed to fetch cases' });
   }
 });
 
@@ -2101,7 +2225,6 @@ app.put('/api/jewelry/:id', async (req, res) => {
     const checkResult = await client.query(checkQuery, [id]);
 
     if (checkResult.rows.length === 0) {
-      console.log('Item not found:', id);
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Jewelry item not found' });
     }
