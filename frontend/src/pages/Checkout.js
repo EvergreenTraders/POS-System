@@ -1090,12 +1090,15 @@ function Checkout() {
           const pawnTicketIds = new Set();
 
           // Collect items with pawnTicketId or transaction_type='pawn'
+          // Note: CustomerTicket.js stores pawn ticket IDs in buyTicketId field
           checkoutItems.forEach((item, index) => {
             const transactionType = item.transaction_type?.toLowerCase() || '';
-            if (item.pawnTicketId || transactionType === 'pawn') {
-              // Generate pawn ticket ID if not present
-              const ticketId = item.pawnTicketId || `PT${realTransactionId}`;
-              pawnTicketIds.add(ticketId);
+            if (transactionType === 'pawn') {
+              // Use buyTicketId as pawnTicketId (CustomerTicket.js stores it in buyTicketId)
+              const ticketId = item.pawnTicketId || item.buyTicketId;
+              if (ticketId) {
+                pawnTicketIds.add(ticketId);
+              }
             }
           });
 
@@ -1104,8 +1107,9 @@ function Checkout() {
               .map((item, index) => ({ ...item, index }))
               .filter(item => {
                 const transactionType = item.transaction_type?.toLowerCase() || '';
-                return item.pawnTicketId === pawnTicketId ||
-                       (transactionType === 'pawn' && (!item.pawnTicketId || item.pawnTicketId === pawnTicketId));
+                if (transactionType !== 'pawn') return false;
+                // Match by pawnTicketId or buyTicketId (CustomerTicket stores in buyTicketId)
+                return item.pawnTicketId === pawnTicketId || item.buyTicketId === pawnTicketId;
               });
 
             for (const item of itemsForTicket) {

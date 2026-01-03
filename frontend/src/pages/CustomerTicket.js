@@ -662,6 +662,15 @@ const CustomerTicket = () => {
     return loadTicketItems('refund') || [{ id: 1, amount: '', method: '', reference: '', reason: '' }];
   });
 
+  // Helper functions to create empty items for each tab type
+  const createEmptyPawnItem = () => ({ id: Date.now(), description: '', category: '', value: '' });
+  const createEmptyBuyItem = () => ({ id: Date.now(), description: '', category: '', price: '' });
+  const createEmptyTradeItem = () => ({ id: Date.now(), tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' });
+  const createEmptySaleItem = () => ({ id: Date.now(), description: '', category: '', price: '', paymentMethod: '' });
+  const createEmptyRepairItem = () => ({ id: Date.now(), description: '', issue: '', fee: '', completion: '' });
+  const createEmptyPaymentItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', notes: '' });
+  const createEmptyRefundItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', reason: '' });
+
   // Clean up expired ticket items on component mount
   React.useEffect(() => {
     cleanupExpiredTickets();
@@ -2758,9 +2767,26 @@ const CustomerTicket = () => {
         sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
       }
 
-      // Show success message - items remain in ticket for further editing
-      showSnackbar('Items added to cart. Ticket saved for further editing.', 'success');
-      
+      // Show success message
+      showSnackbar('Items added to cart successfully.', 'success');
+
+      // Clear items from the current tab after adding to cart
+      if (activeTab === 0) { // Pawn tab
+        setPawnItems([createEmptyPawnItem()]);
+      } else if (activeTab === 1) { // Buy tab
+        setBuyItems([createEmptyBuyItem()]);
+      } else if (activeTab === 2) { // Trade tab
+        setTradeItems([createEmptyTradeItem()]);
+      } else if (activeTab === 3) { // Sale tab
+        setSaleItems([createEmptySaleItem()]);
+      } else if (activeTab === 4) { // Repair tab
+        setRepairItems([createEmptyRepairItem()]);
+      } else if (activeTab === 5) { // Payment tab
+        setPaymentItems([createEmptyPaymentItem()]);
+      } else if (activeTab === 6) { // Refund tab
+        setRefundItems([createEmptyRefundItem()]);
+      }
+
     } catch (error) {
       console.error('Error adding items to cart:', error);
       alert('There was an error adding items to cart. Please try again.');
