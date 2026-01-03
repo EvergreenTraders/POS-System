@@ -226,8 +226,6 @@ app.post('/api/auth/login', async (req, res) => {
     const query = 'SELECT * FROM employees WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)';
     const userQuery = await pool.query(query, [identifier]);
     
-    console.log('Query result rows:', userQuery.rows.length);
-
     if (userQuery.rows.length === 0) {
       console.log('No user found with identifier:', identifier);
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -237,7 +235,6 @@ app.post('/api/auth/login', async (req, res) => {
 
     // For debugging: Log password comparison
     const isValidPassword = password === user.password;
-    console.log('Password match result:', isValidPassword);
 
     if (isValidPassword) {
       const token = jwt.sign(
@@ -3541,6 +3538,68 @@ app.get('/api/customer-preferences/required-fields/:transactionType', async (req
   } catch (err) {
     console.error('Error fetching required fields:', err);
     res.status(500).json({ error: 'Failed to fetch required fields' });
+  }
+});
+
+// Get pawn configuration
+app.get('/api/pawn-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM pawn_config LIMIT 1');
+
+    if (result.rows.length === 0) {
+      // Return default values if no config exists
+      return res.json({
+        interest_rate: 0.00,
+        term_days: 30,
+        frequency_days: 30
+      });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching pawn config:', err);
+    res.status(500).json({ error: 'Failed to fetch pawn configuration' });
+  }
+});
+
+// Update pawn configuration
+app.put('/api/pawn-config', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { interest_rate, term_days, frequency_days } = req.body;
+
+    await client.query('BEGIN');
+
+    // Check if config exists
+    const checkResult = await client.query('SELECT id FROM pawn_config LIMIT 1');
+
+    let result;
+    if (checkResult.rows.length === 0) {
+      // Insert new config
+      result = await client.query(
+        'INSERT INTO pawn_config (interest_rate, term_days, frequency_days) VALUES ($1, $2, $3) RETURNING *',
+        [interest_rate, term_days, frequency_days]
+      );
+    } else {
+      // Update existing config
+      result = await client.query(
+        'UPDATE pawn_config SET interest_rate = $1, term_days = $2, frequency_days = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *',
+        [interest_rate, term_days, frequency_days, checkResult.rows[0].id]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    // Verify the data was actually saved by reading it back
+    const verifyResult = await client.query('SELECT * FROM pawn_config WHERE id = $1', [result.rows[0].id]);
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating pawn config:', err);
+    res.status(500).json({ error: 'Failed to update pawn configuration' });
+  } finally {
+    client.release();
   }
 });
 

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
@@ -38,7 +39,8 @@ const MIGRATION_FILES = [
   'tax_config.sql',
   'cash_drawer.sql',
   'add_performance_indexes.sql',
-  'customer_headers_preferences.sql'
+  'customer_headers_preferences.sql',
+  'pawn.sql'
 ];
 
 async function runMigrations() {

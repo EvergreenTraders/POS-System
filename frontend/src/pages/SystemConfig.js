@@ -134,6 +134,11 @@ function SystemConfig() {
   const [isPerTransaction, setIsPerTransaction] = useState(false);
   const [updateMethod, setUpdateMethod] = useState(null);
   const [spotPrices, setSpotPrices] = useState({});
+  const [pawnConfig, setPawnConfig] = useState({
+    interest_rate: 0.00,
+    term_days: 30,
+    frequency_days: 30
+  });
   const [caratConversion, setCaratConversion] = useState(null);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [isInventoryHoldPeriodEnabled, setIsInventoryHoldPeriodEnabled] = useState(false);
@@ -544,6 +549,21 @@ function SystemConfig() {
       }
     };
 
+    const fetchPawnConfig = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/pawn-config`);
+        if (response.data) {
+          setPawnConfig({
+            interest_rate: parseFloat(response.data.interest_rate) || 0.00,
+            term_days: parseInt(response.data.term_days) || 30,
+            frequency_days: parseInt(response.data.frequency_days) || 30
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching pawn config:', error);
+      }
+    };
+
     // Fetch data on component mount
     fetchCustomerHeaderPreferences();
     fetchTransactionTypes();
@@ -562,6 +582,7 @@ function SystemConfig() {
     fetchTaxConfig();
     fetchAuthorizationTemplate();
     fetchReceiptConfig();
+    fetchPawnConfig();
   }, []);
   
   const handleTabChange = (event, newValue) => {
@@ -854,6 +875,17 @@ function SystemConfig() {
         console.error('Error saving customer header preferences:', headerError);
       }
 
+      // Save pawn configuration
+      try {
+        await axios.put(`${API_BASE_URL}/pawn-config`, {
+          interest_rate: parseFloat(pawnConfig.interest_rate),
+          term_days: parseInt(pawnConfig.term_days),
+          frequency_days: parseInt(pawnConfig.frequency_days)
+        });
+      } catch (pawnError) {
+        console.error('Error saving pawn config:', pawnError);
+      }
+
       setSnackbar({
         open: true,
         message: 'Settings updated successfully',
@@ -1004,6 +1036,38 @@ function SystemConfig() {
         open: true,
         message: 'Failed to update inventory hold period configuration',
         severity: 'error'
+      });
+    }
+  };
+
+  const handlePawnConfigChange = async (field, value) => {
+    // Update state
+    const updatedConfig = {
+      ...pawnConfig,
+      [field]: value
+    };
+    setPawnConfig(updatedConfig);
+
+    // Auto-save to database
+    try {
+      const response = await axios.put(`${API_BASE_URL}/pawn-config`, {
+        interest_rate: parseFloat(updatedConfig.interest_rate),
+        term_days: parseInt(updatedConfig.term_days),
+        frequency_days: parseInt(updatedConfig.frequency_days)
+      });
+
+      setSnackbar({
+        open: true,
+        message: 'Pawn configuration saved',
+        severity: 'success',
+      });
+    } catch (error) {
+      console.error('Error saving pawn config:', error);
+      console.error('Error details:', error.response?.data);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save pawn configuration',
+        severity: 'error',
       });
     }
   };
@@ -1846,18 +1910,64 @@ function SystemConfig() {
                 </div>
               </div>
             ) : (
-              <Grid container spacing={2}>
-                {Object.keys(preciousMetalNames).map((metal) => (
-                  <Grid item xs={12} sm={3} key={metal}>
+              <Box>
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 3 }}>
+                  {Object.keys(preciousMetalNames).map((metal) => (
                     <TextField
+                      key={metal}
                       label={`${preciousMetalNames[metal]} Spot Price`}
                       value={spotPrices[metal]}
                       onChange={(e) => handleSpotPriceChange(e, metal)}
+                      sx={{ minWidth: '150px', flex: '1 1 auto' }}
+                    />
+                  ))}
+                </Box>
+                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+                  Pawn Configuration
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={4}>
+                    <TextField
+                      label="Interest Rate (%)"
+                      type="number"
+                      value={pawnConfig.interest_rate}
+                      onChange={(e) => handlePawnConfigChange('interest_rate', e.target.value)}
                       fullWidth
+                      inputProps={{ min: 0, max: 100, step: 0.01 }}
                     />
                   </Grid>
-                ))}
-              </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <TextField
+                      select
+                      label="Term (Days)"
+                      value={pawnConfig.term_days}
+                      onChange={(e) => handlePawnConfigChange('term_days', e.target.value)}
+                      fullWidth
+                    >
+                      {[15, 30, 45, 60, 90, 120, 180].map((days) => (
+                        <MenuItem key={days} value={days}>
+                          {days}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <TextField
+                      select
+                      label="Frequency (Days)"
+                      value={pawnConfig.frequency_days}
+                      onChange={(e) => handlePawnConfigChange('frequency_days', e.target.value)}
+                      fullWidth
+                    >
+                      {[15, 30, 45, 60, 90, 120, 180].map((days) => (
+                        <MenuItem key={days} value={days}>
+                          {days}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  </Grid>
+                </Grid>
+              </Box>
             )}
             <Box mt={2}>
               <Typography variant="h6" gutterBottom>
