@@ -2784,7 +2784,7 @@ app.post('/api/jewelry', async (req, res) => {
 
       const result = await client.query(jewelryQuery, jewelryValues);
       results.push(result.rows[0]);
-
+      
       if(quote_id) {
         const itemQuery = `
           INSERT INTO quote_items (
@@ -3114,6 +3114,71 @@ app.post('/api/sale-ticket', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error creating sale ticket:', error);
     res.status(500).json({ error: 'Failed to create sale ticket' });
+  } finally {
+    client.release();
+  }
+});
+
+// Pawn Ticket API Endpoints
+app.get('/api/pawn-ticket', async (req, res) => {
+  try {
+    const { pawn_ticket_id, transaction_id } = req.query;
+
+    let query = 'SELECT * FROM pawn_ticket';
+    const params = [];
+
+    if (pawn_ticket_id) {
+      query += ' WHERE pawn_ticket_id = $1';
+      params.push(pawn_ticket_id);
+    } else if (transaction_id) {
+      query += ' WHERE transaction_id = $1';
+      params.push(transaction_id);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching pawn tickets:', error);
+    res.status(500).json({ error: 'Failed to fetch pawn tickets' });
+  }
+});
+
+app.post('/api/pawn-ticket', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { pawn_ticket_id, transaction_id, item_id } = req.body;
+
+    // Validate required fields
+    if (!pawn_ticket_id) {
+      console.error('❌ pawn_ticket_id required');
+      return res.status(400).json({ error: 'pawn_ticket_id is required' });
+    }
+
+    await client.query('BEGIN');
+
+    // Insert new pawn_ticket record
+    const insertQuery = `
+      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `;
+
+    const result = await client.query(insertQuery, [
+      pawn_ticket_id,
+      transaction_id || null,
+      item_id || null
+    ]);
+
+    await client.query('COMMIT');
+    console.log(`✓ Pawn ticket: ticket_id=${pawn_ticket_id}, transaction_id=${transaction_id}, item_id=${item_id}`);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('❌ Pawn ticket error:', error.message);
+    res.status(500).json({ error: 'Failed to create pawn ticket' });
   } finally {
     client.release();
   }
@@ -4451,6 +4516,53 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
           FROM sale_ticket st
           LEFT JOIN jewelry j ON st.item_id = j.item_id
           WHERE st.transaction_id = $1
+
+          UNION ALL
+
+          -- Get pawn ticket items
+          SELECT
+            pt.id,
+            pt.transaction_id,
+            pt.item_id,
+            pt.pawn_ticket_id as ticket_id,
+            pt.created_at,
+            j.updated_at,
+            'pawn' as transaction_type,
+            j.item_id as jewelry_item_id,
+            j.long_desc,
+            j.short_desc,
+            j.category,
+            j.metal_weight,
+            j.precious_metal_type,
+            j.non_precious_metal_type,
+            j.metal_purity,
+            j.purity_value,
+            j.jewelry_color,
+            j.metal_spot_price,
+            j.est_metal_value,
+            j.item_price,
+            j.images,
+            j.status as item_status,
+            j.primary_gem_type,
+            j.primary_gem_category,
+            j.primary_gem_size,
+            j.primary_gem_weight,
+            j.primary_gem_quantity,
+            j.primary_gem_shape,
+            j.primary_gem_color,
+            j.primary_gem_exact_color,
+            j.primary_gem_clarity,
+            j.primary_gem_cut,
+            j.primary_gem_lab_grown,
+            j.primary_gem_authentic,
+            j.primary_gem_value,
+            EXISTS (
+              SELECT * FROM jewelry_secondary_gems jsg
+              WHERE jsg.item_id = pt.item_id
+            ) as has_secondary_gems
+          FROM pawn_ticket pt
+          LEFT JOIN jewelry j ON pt.item_id = j.item_id
+          WHERE pt.transaction_id = $1
         )
         SELECT
           il.*,

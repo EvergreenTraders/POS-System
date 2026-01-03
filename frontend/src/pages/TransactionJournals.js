@@ -51,12 +51,14 @@ function TransactionJournals() {
   const [editedPayments, setEditedPayments] = useState([]);
   const [buyTickets, setBuyTickets] = useState([]);
   const [saleTickets, setSaleTickets] = useState([]);
+  const [pawnTickets, setPawnTickets] = useState([]);
   const API_BASE_URL = config.apiUrl;
 
   const [transactions, setTransactions] = useState([]);
   const [transactionItemsMap, setTransactionItemsMap] = useState({});
   const [buyTicketsMap, setBuyTicketsMap] = useState({}); // Map of transaction_id to buy_tickets
   const [saleTicketsMap, setSaleTicketsMap] = useState({}); // Map of transaction_id to sale_tickets
+  const [pawnTicketsMap, setPawnTicketsMap] = useState({}); // Map of transaction_id to pawn_tickets
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stores, setStores] = useState([]);
@@ -157,6 +159,14 @@ function TransactionJournals() {
         console.error('Error fetching sale tickets:', saleTicketError);
         setSaleTickets([]);
       }
+
+      try {
+        const pawnTicketResponse = await axios.get(`${API_BASE_URL}/pawn-ticket?transaction_id=${transaction.transaction_id}`);
+        setPawnTickets(pawnTicketResponse.data || []);
+      } catch (pawnTicketError) {
+        console.error('Error fetching pawn tickets:', pawnTicketError);
+        setPawnTickets([]);
+      }
     } catch (error) {
       console.error('Error fetching transaction details:', error);
       // Initialize with empty data if there's an error
@@ -164,6 +174,7 @@ function TransactionJournals() {
       setPaymentDetails({ payments: [], total_paid: 0 });
       setBuyTickets([]);
       setSaleTickets([]);
+      setPawnTickets([]);
     } finally {
       setLoadingItems(false);
       setLoadingPayments(false);
@@ -177,6 +188,7 @@ function TransactionJournals() {
     setPaymentDetails({ payments: [], total_paid: 0 });
     setBuyTickets([]);
     setSaleTickets([]);
+    setPawnTickets([]);
     // Don't clear transaction items to keep them in memory
   };
 
@@ -199,9 +211,10 @@ function TransactionJournals() {
 
   // Handle double click on ticket_id to show receipt in new tab
   const handleBuyTicketClick = async (ticketId) => {
-    // Determine if this is a sale or buy ticket by checking which ticket list contains it
+    // Determine if this is a sale, buy, or pawn ticket by checking which ticket list contains it
     const isSaleTicket = saleTickets.some(st => st.sale_ticket_id === ticketId);
     const isBuyTicket = buyTickets.some(bt => bt.buy_ticket_id === ticketId);
+    const isPawnTicket = pawnTickets.some(pt => pt.pawn_ticket_id === ticketId);
 
     // Get items for this ticket
     let ticketItems = [];
@@ -214,6 +227,11 @@ function TransactionJournals() {
       ticketItems = transactionItems.filter(item => {
         const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
         return buyTicket?.buy_ticket_id === ticketId;
+      });
+    } else if (isPawnTicket) {
+      ticketItems = transactionItems.filter(item => {
+        const pawnTicket = pawnTickets.find(pt => pt.item_id === item.item_id);
+        return pawnTicket?.pawn_ticket_id === ticketId;
       });
     }
 
