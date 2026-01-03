@@ -226,8 +226,6 @@ app.post('/api/auth/login', async (req, res) => {
     const query = 'SELECT * FROM employees WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)';
     const userQuery = await pool.query(query, [identifier]);
     
-    console.log('Query result rows:', userQuery.rows.length);
-
     if (userQuery.rows.length === 0) {
       console.log('No user found with identifier:', identifier);
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -237,7 +235,6 @@ app.post('/api/auth/login', async (req, res) => {
 
     // For debugging: Log password comparison
     const isValidPassword = password === user.password;
-    console.log('Password match result:', isValidPassword);
 
     if (isValidPassword) {
       const token = jwt.sign(
@@ -928,19 +925,31 @@ app.put('/api/drawer-config', async (req, res) => {
         `, [`Drawer ${i}`, i]);
       }
     } else if (number_of_drawers < currentCount) {
-      // Remove excess drawers (only if they have no sessions)
+      // Remove excess drawers - delete drawers beyond the new count
       for (let i = currentCount; i > number_of_drawers; i--) {
         const drawerName = `Drawer ${i}`;
-        // Check if drawer has any sessions
-        const sessionCheck = await pool.query(`
-          SELECT COUNT(*) as count FROM cash_drawer_sessions
-          WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
-        `, [drawerName]);
 
-        if (parseInt(sessionCheck.rows[0].count) === 0) {
+        try {
+          // First, try to delete the drawer and all related data
+          // Delete cash drawer sessions first (cascade)
+          await pool.query(`
+            DELETE FROM cash_drawer_adjustments
+            WHERE session_id IN (
+              SELECT session_id FROM cash_drawer_sessions
+              WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
+            )
+          `, [drawerName]);
+
+          await pool.query(`
+            DELETE FROM cash_drawer_sessions
+            WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
+          `, [drawerName]);
+
+          // Then delete the drawer itself
           await pool.query('DELETE FROM drawers WHERE drawer_name = $1', [drawerName]);
-        } else {
-          // Mark as inactive instead of deleting
+        } catch (deleteError) {
+          console.error(`Error deleting ${drawerName}:`, deleteError);
+          // If deletion fails due to constraints, mark as inactive
           await pool.query(
             'UPDATE drawers SET is_active = FALSE WHERE drawer_name = $1',
             [drawerName]
@@ -967,6 +976,118 @@ app.get('/api/drawers', async (req, res) => {
   } catch (error) {
     console.error('Error fetching drawers:', error);
     res.status(500).json({ error: 'Failed to fetch drawers' });
+  }
+});
+
+// Cases Configuration Routes
+// GET /api/cases-config - Get cases configuration
+app.get('/api/cases-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM cases_config LIMIT 1');
+    if (result.rows.length === 0) {
+      // Insert default if doesn't exist
+      const insertResult = await pool.query(
+        'INSERT INTO cases_config (number_of_cases) VALUES (0) RETURNING *'
+      );
+      res.json(insertResult.rows[0]);
+    } else {
+      res.json(result.rows[0]);
+    }
+  } catch (error) {
+    console.error('Error fetching cases config:', error);
+    res.status(500).json({ error: 'Failed to fetch cases configuration' });
+  }
+});
+
+// PUT /api/cases-config - Update cases configuration
+app.put('/api/cases-config', async (req, res) => {
+  const { number_of_cases } = req.body;
+
+  if (number_of_cases === undefined || number_of_cases < 0 || number_of_cases > 100) {
+    return res.status(400).json({ error: 'number_of_cases must be between 0 and 100' });
+  }
+
+  try {
+    // Ensure Inventory and Warehouse default entries exist
+    await pool.query(`
+      INSERT INTO storage_location (location, is_occupied)
+      VALUES ('Inventory', FALSE), ('Warehouse', FALSE)
+      ON CONFLICT (location) DO NOTHING
+    `);
+
+    // Update the config
+    const configResult = await pool.query(`
+      UPDATE cases_config
+      SET number_of_cases = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT id FROM cases_config LIMIT 1)
+      RETURNING *
+    `, [number_of_cases]);
+
+    let config;
+    if (configResult.rows.length === 0) {
+      // Insert if doesn't exist
+      const insertResult = await pool.query(
+        'INSERT INTO cases_config (number_of_cases) VALUES ($1) RETURNING *',
+        [number_of_cases]
+      );
+      config = insertResult.rows[0];
+    } else {
+      config = configResult.rows[0];
+    }
+
+    // Get current cases (excluding Inventory and Warehouse)
+    const currentCases = await pool.query(`
+      SELECT location_id, location FROM storage_location
+      WHERE location LIKE 'Case %'
+      ORDER BY location_id
+    `);
+
+    const currentCount = currentCases.rows.length;
+
+    if (number_of_cases > currentCount) {
+      // Add new cases
+      for (let i = currentCount + 1; i <= number_of_cases; i++) {
+        await pool.query(`
+          INSERT INTO storage_location (location, is_occupied)
+          VALUES ($1, FALSE)
+          ON CONFLICT (location) DO NOTHING
+        `, [`Case ${i}`]);
+      }
+    } else if (number_of_cases < currentCount) {
+      // Remove excess cases - delete cases beyond the new count
+      for (let i = currentCount; i > number_of_cases; i--) {
+        const caseName = `Case ${i}`;
+
+        try {
+          // Delete the case
+          await pool.query(
+            'DELETE FROM storage_location WHERE location = $1',
+            [caseName]
+          );
+        } catch (deleteError) {
+          console.error(`Error deleting ${caseName}:`, deleteError);
+        }
+      }
+    }
+
+    res.json(config);
+  } catch (error) {
+    console.error('Error updating cases config:', error);
+    res.status(500).json({ error: 'Failed to update cases configuration' });
+  }
+});
+
+// GET /api/cases - Get all storage cases
+app.get('/api/cases', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM storage_location
+      ORDER BY location_id
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching cases:', error);
+    res.status(500).json({ error: 'Failed to fetch cases' });
   }
 });
 
@@ -2104,7 +2225,6 @@ app.put('/api/jewelry/:id', async (req, res) => {
     const checkResult = await client.query(checkQuery, [id]);
 
     if (checkResult.rows.length === 0) {
-      console.log('Item not found:', id);
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Jewelry item not found' });
     }
@@ -2787,7 +2907,7 @@ app.post('/api/jewelry', async (req, res) => {
 
       const result = await client.query(jewelryQuery, jewelryValues);
       results.push(result.rows[0]);
-
+      
       if(quote_id) {
         const itemQuery = `
           INSERT INTO quote_items (
@@ -3122,6 +3242,71 @@ app.post('/api/sale-ticket', async (req, res) => {
   }
 });
 
+// Pawn Ticket API Endpoints
+app.get('/api/pawn-ticket', async (req, res) => {
+  try {
+    const { pawn_ticket_id, transaction_id } = req.query;
+
+    let query = 'SELECT * FROM pawn_ticket';
+    const params = [];
+
+    if (pawn_ticket_id) {
+      query += ' WHERE pawn_ticket_id = $1';
+      params.push(pawn_ticket_id);
+    } else if (transaction_id) {
+      query += ' WHERE transaction_id = $1';
+      params.push(transaction_id);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching pawn tickets:', error);
+    res.status(500).json({ error: 'Failed to fetch pawn tickets' });
+  }
+});
+
+app.post('/api/pawn-ticket', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { pawn_ticket_id, transaction_id, item_id } = req.body;
+
+    // Validate required fields
+    if (!pawn_ticket_id) {
+      console.error('❌ pawn_ticket_id required');
+      return res.status(400).json({ error: 'pawn_ticket_id is required' });
+    }
+
+    await client.query('BEGIN');
+
+    // Insert new pawn_ticket record
+    const insertQuery = `
+      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `;
+
+    const result = await client.query(insertQuery, [
+      pawn_ticket_id,
+      transaction_id || null,
+      item_id || null
+    ]);
+
+    await client.query('COMMIT');
+    console.log(`✓ Pawn ticket: ticket_id=${pawn_ticket_id}, transaction_id=${transaction_id}, item_id=${item_id}`);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('❌ Pawn ticket error:', error.message);
+    res.status(500).json({ error: 'Failed to create pawn ticket' });
+  } finally {
+    client.release();
+  }
+});
+
 // Quote Expiration Configuration API Endpoints
 app.get('/api/quote-expiration/config', async (req, res) => {
   try {
@@ -3311,15 +3496,39 @@ app.put('/api/receipt-config', async (req, res) => {
 });
 
 // Customer Preferences Configuration API Endpoints
+// Get all customer header preferences (all contexts)
+app.get('/api/customer-preferences/all', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM customer_headers_preferences
+      ORDER BY
+        CASE
+          WHEN header_preferences = 'customers' THEN 0
+          ELSE 1
+        END,
+        header_preferences
+    `);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No customer preferences found' });
+    }
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching all customer preferences:', err);
+    res.status(500).json({ error: 'Failed to fetch customer preferences' });
+  }
+});
+
 app.get('/api/customer-preferences/config', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT *
-      FROM customer_headers_preferences 
-      ORDER BY created_at DESC
+      FROM customer_headers_preferences
+      WHERE header_preferences = 'customers'
       LIMIT 1
     `);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'No customer preferences configuration found' });
     }
@@ -3415,6 +3624,168 @@ app.put('/api/customer-preferences/config', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error updating customer preferences config:', err);
     res.status(500).json({ error: 'Failed to update customer preferences configuration' });
+  } finally {
+    client.release();
+  }
+});
+
+// Update customer header preferences by header_preferences (context)
+app.put('/api/customer-preferences/update-by-context', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { header_preferences, preferences } = req.body;
+
+    if (!header_preferences || !preferences) {
+      return res.status(400).json({ error: 'header_preferences and preferences are required' });
+    }
+
+    await client.query('BEGIN');
+
+    // Build dynamic UPDATE query based on the preferences object
+    const setColumns = [];
+    const values = [];
+    let valueIndex = 1;
+
+    // Add all show_* fields from preferences
+    Object.keys(preferences).forEach(key => {
+      if (key.startsWith('show_')) {
+        setColumns.push(`${key} = $${valueIndex}`);
+        values.push(preferences[key]);
+        valueIndex++;
+      }
+    });
+
+    if (setColumns.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No valid preferences to update' });
+    }
+
+    // Add updated_at
+    setColumns.push(`updated_at = CURRENT_TIMESTAMP`);
+
+    // Add header_preferences as the WHERE condition parameter
+    values.push(header_preferences);
+
+    const updateQuery = `
+      UPDATE customer_headers_preferences
+      SET ${setColumns.join(', ')}
+      WHERE header_preferences = $${valueIndex}
+      RETURNING *
+    `;
+
+    const result = await client.query(updateQuery, values);
+
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: `No record found with header_preferences = '${header_preferences}'` });
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating customer preferences by context:', err);
+    res.status(500).json({ error: 'Failed to update customer preferences' });
+  } finally {
+    client.release();
+  }
+});
+
+// Get required customer fields for a specific transaction type
+app.get('/api/customer-preferences/required-fields/:transactionType', async (req, res) => {
+  try {
+    const { transactionType } = req.params;
+
+    const result = await pool.query(`
+      SELECT *
+      FROM customer_headers_preferences
+      WHERE header_preferences = $1
+      LIMIT 1
+    `, [transactionType]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: `No preferences found for transaction type: ${transactionType}` });
+    }
+
+    const preferences = result.rows[0];
+
+    // Extract required fields (fields where show_* = true)
+    const requiredFields = [];
+    Object.keys(preferences).forEach(key => {
+      if (key.startsWith('show_') && preferences[key] === true) {
+        const fieldName = key.replace('show_', '');
+        requiredFields.push(fieldName);
+      }
+    });
+
+    res.json({
+      transactionType: transactionType,
+      requiredFields: requiredFields,
+      preferences: preferences
+    });
+  } catch (err) {
+    console.error('Error fetching required fields:', err);
+    res.status(500).json({ error: 'Failed to fetch required fields' });
+  }
+});
+
+// Get pawn configuration
+app.get('/api/pawn-config', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM pawn_config LIMIT 1');
+
+    if (result.rows.length === 0) {
+      // Return default values if no config exists
+      return res.json({
+        interest_rate: 0.00,
+        term_days: 30,
+        frequency_days: 30
+      });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching pawn config:', err);
+    res.status(500).json({ error: 'Failed to fetch pawn configuration' });
+  }
+});
+
+// Update pawn configuration
+app.put('/api/pawn-config', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { interest_rate, term_days, frequency_days } = req.body;
+
+    await client.query('BEGIN');
+
+    // Check if config exists
+    const checkResult = await client.query('SELECT id FROM pawn_config LIMIT 1');
+
+    let result;
+    if (checkResult.rows.length === 0) {
+      // Insert new config
+      result = await client.query(
+        'INSERT INTO pawn_config (interest_rate, term_days, frequency_days) VALUES ($1, $2, $3) RETURNING *',
+        [interest_rate, term_days, frequency_days]
+      );
+    } else {
+      // Update existing config
+      result = await client.query(
+        'UPDATE pawn_config SET interest_rate = $1, term_days = $2, frequency_days = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *',
+        [interest_rate, term_days, frequency_days, checkResult.rows[0].id]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    // Verify the data was actually saved by reading it back
+    const verifyResult = await client.query('SELECT * FROM pawn_config WHERE id = $1', [result.rows[0].id]);
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating pawn config:', err);
+    res.status(500).json({ error: 'Failed to update pawn configuration' });
   } finally {
     client.release();
   }
@@ -4268,6 +4639,53 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
           FROM sale_ticket st
           LEFT JOIN jewelry j ON st.item_id = j.item_id
           WHERE st.transaction_id = $1
+
+          UNION ALL
+
+          -- Get pawn ticket items
+          SELECT
+            pt.id,
+            pt.transaction_id,
+            pt.item_id,
+            pt.pawn_ticket_id as ticket_id,
+            pt.created_at,
+            j.updated_at,
+            'pawn' as transaction_type,
+            j.item_id as jewelry_item_id,
+            j.long_desc,
+            j.short_desc,
+            j.category,
+            j.metal_weight,
+            j.precious_metal_type,
+            j.non_precious_metal_type,
+            j.metal_purity,
+            j.purity_value,
+            j.jewelry_color,
+            j.metal_spot_price,
+            j.est_metal_value,
+            j.item_price,
+            j.images,
+            j.status as item_status,
+            j.primary_gem_type,
+            j.primary_gem_category,
+            j.primary_gem_size,
+            j.primary_gem_weight,
+            j.primary_gem_quantity,
+            j.primary_gem_shape,
+            j.primary_gem_color,
+            j.primary_gem_exact_color,
+            j.primary_gem_clarity,
+            j.primary_gem_cut,
+            j.primary_gem_lab_grown,
+            j.primary_gem_authentic,
+            j.primary_gem_value,
+            EXISTS (
+              SELECT * FROM jewelry_secondary_gems jsg
+              WHERE jsg.item_id = pt.item_id
+            ) as has_secondary_gems
+          FROM pawn_ticket pt
+          LEFT JOIN jewelry j ON pt.item_id = j.item_id
+          WHERE pt.transaction_id = $1
         )
         SELECT
           il.*,
@@ -6707,7 +7125,6 @@ app.post('/api/payments', async (req, res) => {
     await client.query('BEGIN');
     
     const { transaction_id, amount, payment_method } = req.body;
-    console.log(req.body);
     
     // Validate payment method
     if (!['CASH', 'CREDIT_CARD', 'DEBIT_CARD', 'BANK_TRANSFER', 'CHECK'].includes(payment_method)) {

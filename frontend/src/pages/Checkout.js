@@ -773,18 +773,21 @@ function Checkout() {
               });
 
               // Check if we have any jewelry items from the gem estimator
-              // If items have originalData, use that for full jewelry information
+              // If items have originalData, merge it with current item data
               const jewelryItemsToPost = jewelryItems.map(item => {
-                if (item.originalData) {
-                  // Merge originalData with current item to ensure we have all jewelry fields
-                  return {
-                    ...item.originalData,
-                    price: item.price,
-                    transaction_type: item.transaction_type,
-                    images: item.images || item.originalData.images
-                  };
-                }
-                return item;
+                // Spread originalData first for base jewelry fields
+                // Then spread the current item to override with any updates (vintage, notes, brand, etc.)
+                // This ensures ALL fields including manual additions are preserved
+                const mergedItem = {
+                  ...(item.originalData || {}),
+                  ...item,
+                  // Ensure price and transaction_type are always set
+                  price: item.price || item.originalData?.price,
+                  transaction_type: item.transaction_type || item.originalData?.transaction_type,
+                  images: item.images || item.originalData?.images
+                };
+
+                return mergedItem;
               });
               itemsToPost = jewelryItems.length > 0 ? jewelryItemsToPost : processedItems;
 
@@ -826,18 +829,21 @@ function Checkout() {
               });
 
               // Check if we have any jewelry items from the gem estimator
-              // If items have originalData, use that for full jewelry information
+              // If items have originalData, merge it with current item data
               const jewelryItemsToPost = jewelryItems.map(item => {
-                if (item.originalData) {
-                  // Merge originalData with current item to ensure we have all jewelry fields
-                  return {
-                    ...item.originalData,
-                    price: item.price,
-                    transaction_type: item.transaction_type,
-                    images: item.images || item.originalData.images
-                  };
-                }
-                return item;
+                // Spread originalData first for base jewelry fields
+                // Then spread the current item to override with any updates (vintage, notes, brand, etc.)
+                // This ensures ALL fields including manual additions are preserved
+                const mergedItem = {
+                  ...(item.originalData || {}),
+                  ...item,
+                  // Ensure price and transaction_type are always set
+                  price: item.price || item.originalData?.price,
+                  transaction_type: item.transaction_type || item.originalData?.transaction_type,
+                  images: item.images || item.originalData?.images
+                };
+
+                return mergedItem;
               });
               itemsToPost = jewelryItems.length > 0 ? jewelryItemsToPost : processedItems;
 
@@ -1086,18 +1092,31 @@ function Checkout() {
             }
           }
 
-          // Step 2.6: Post pawn_ticket records for each unique pawn_ticket_id
+          // Step 2.6: Post pawn_ticket records for pawn transactions
           const pawnTicketIds = new Set();
-          checkoutItems.forEach(item => {
-            if (item.pawnTicketId) {
-              pawnTicketIds.add(item.pawnTicketId);
+
+          // Collect items with pawnTicketId or transaction_type='pawn'
+          // Note: CustomerTicket.js stores pawn ticket IDs in buyTicketId field
+          checkoutItems.forEach((item, index) => {
+            const transactionType = item.transaction_type?.toLowerCase() || '';
+            if (transactionType === 'pawn') {
+              // Use buyTicketId as pawnTicketId (CustomerTicket.js stores it in buyTicketId)
+              const ticketId = item.pawnTicketId || item.buyTicketId;
+              if (ticketId) {
+                pawnTicketIds.add(ticketId);
+              }
             }
           });
 
           for (const pawnTicketId of pawnTicketIds) {
             const itemsForTicket = checkoutItems
               .map((item, index) => ({ ...item, index }))
-              .filter(item => item.pawnTicketId === pawnTicketId);
+              .filter(item => {
+                const transactionType = item.transaction_type?.toLowerCase() || '';
+                if (transactionType !== 'pawn') return false;
+                // Match by pawnTicketId or buyTicketId (CustomerTicket stores in buyTicketId)
+                return item.pawnTicketId === pawnTicketId || item.buyTicketId === pawnTicketId;
+              });
 
             for (const item of itemsForTicket) {
               try {
@@ -1120,7 +1139,8 @@ function Checkout() {
                   }
                 );
               } catch (pawnTicketError) {
-                console.error('Error posting pawn_ticket:', pawnTicketError);
+                console.error('❌ Error posting pawn_ticket:', pawnTicketError);
+                console.error('Error details:', pawnTicketError.response?.data);
               }
             }
           }
@@ -1182,12 +1202,7 @@ function Checkout() {
           // Step 3.5: Update jewelry inventory status to SOLD for sale transactions
           for (const item of checkoutItems) {
             const transactionType = item.transaction_type?.toLowerCase() || '';
-            console.log(`Checking item for status update:`, {
-              item_id: item.item_id,
-              transactionType,
-              fromInventory: item.fromInventory,
-              shouldUpdate: transactionType === 'sale' && item.item_id && item.fromInventory
-            });
+
 
             // Only update status for sale transactions with inventory items
             if (transactionType === 'sale' && item.item_id && item.fromInventory) {
@@ -1201,7 +1216,6 @@ function Checkout() {
                 const taxAmount = selectedCustomer?.tax_exempt ? 0 : subtotal * taxRate;
                 const totalItemPrice = subtotal + taxAmount;
 
-                console.log(`Updating item ${item.item_id} status to SOLD with item price ${totalItemPrice} (base: ${basePrice}, protection: ${protectionPlanAmount}, tax: ${taxAmount})...`);
                 const response = await axios.put(
                   `${config.apiUrl}/jewelry/${item.item_id}/status`,
                   {

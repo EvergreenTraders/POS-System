@@ -469,6 +469,18 @@ const CustomerTicket = () => {
   const estimatedItems = location.state?.estimatedItems || [];
   const from = location.state?.from || '';
 
+  // State for customer validation - required fields per transaction type
+  const [requiredFieldsMap, setRequiredFieldsMap] = React.useState({
+    pawn: [],
+    buy: [],
+    retail: [],
+    sale: [],
+    refund: [],
+    return: []
+  });
+  const [customerValidationErrors, setCustomerValidationErrors] = React.useState([]);
+  const [isValidatingCustomer, setIsValidatingCustomer] = React.useState(false);
+
   // Restore active tab from sessionStorage if available
   const [activeTab, setActiveTab] = React.useState(() => {
     const savedTab = sessionStorage.getItem('activeTicketTab');
@@ -487,6 +499,40 @@ const CustomerTicket = () => {
     }
   }, [customer]);
 
+  // Reload customer data when returning from customer editor
+  React.useEffect(() => {
+    const reloadCustomer = async () => {
+      if (location.state?.customerUpdated && customer?.id) {
+        try {
+          const response = await fetch(`${config.apiUrl}/customers/${customer.id}`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          });
+
+          if (response.ok) {
+            const updatedCustomer = await response.json();
+
+            // Format the customer data
+            const formattedCustomer = {
+              ...updatedCustomer,
+              name: `${updatedCustomer.first_name || ''} ${updatedCustomer.last_name || ''}`.trim(),
+              image: updatedCustomer.image && typeof updatedCustomer.image === 'object' && updatedCustomer.image.type === 'Buffer'
+                ? bufferToDataUrl(updatedCustomer.image)
+                : updatedCustomer.image
+            };
+
+            setCustomer(formattedCustomer);
+            sessionStorage.setItem('selectedCustomer', JSON.stringify(formattedCustomer));
+            showSnackbar('Customer information updated', 'success');
+          }
+        } catch (error) {
+          console.error('Error reloading customer:', error);
+        }
+      }
+    };
+
+    reloadCustomer();
+  }, [location.state?.customerUpdated]);
+
   // State for convert dropdown menu
   const [convertMenuAnchor, setConvertMenuAnchor] = React.useState(null);
   const [convertItemId, setConvertItemId] = React.useState(null);
@@ -494,25 +540,50 @@ const CustomerTicket = () => {
   // Store buyTicketId when editing from cart to preserve ticket grouping
   const [preservedBuyTicketId, setPreservedBuyTicketId] = React.useState(null);
   
-  // Helper function to save ticket items in localStorage
+  // Helper function to save ticket items in localStorage with timestamp
   const saveTicketItems = (type, items) => {
     try {
       // Save with customer ID if available, otherwise save globally
       const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
-      localStorage.setItem(key, JSON.stringify(items));
+      const data = {
+        items: items,
+        timestamp: Date.now()
+      };
+      localStorage.setItem(key, JSON.stringify(data));
     } catch (error) {
       console.error(`Error saving ${type} items to localStorage:`, error);
     }
   };
 
-  // Helper function to load ticket items from localStorage
+  // Helper function to load ticket items from localStorage (checks 24hr expiry)
   const loadTicketItems = (type) => {
     try {
       // Load with customer ID if available, otherwise load globally
       const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
-      const savedItems = localStorage.getItem(key);
-      const parsed = savedItems ? JSON.parse(savedItems) : null;
-      return parsed;
+      const savedData = localStorage.getItem(key);
+
+      if (!savedData) return null;
+
+      const parsed = JSON.parse(savedData);
+
+      // Check if data has new format with timestamp
+      if (parsed && typeof parsed === 'object' && parsed.timestamp) {
+        const now = Date.now();
+        const age = now - parsed.timestamp;
+        const twentyFourHours = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+        // If data is older than 24 hours, remove it and return null
+        if (age > twentyFourHours) {
+          localStorage.removeItem(key);
+          return null;
+        }
+
+        return parsed.items;
+      }
+
+      // Handle old format (data without timestamp) - return as is for backward compatibility
+      // But it will be re-saved with timestamp on next save
+      return Array.isArray(parsed) ? parsed : null;
     } catch (error) {
       console.error(`Error loading ${type} items from localStorage:`, error);
       return null;
@@ -523,6 +594,43 @@ const CustomerTicket = () => {
   const clearTicketItems = (type) => {
     const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
     localStorage.removeItem(key);
+  };
+
+  // Helper function to clean up all expired ticket items from localStorage
+  const cleanupExpiredTickets = () => {
+    try {
+      const twentyFourHours = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      let removedCount = 0;
+
+      // Get all localStorage keys
+      const keys = Object.keys(localStorage);
+
+      // Filter keys that match ticket pattern
+      const ticketKeys = keys.filter(key =>
+        key.startsWith('ticket_') || key.startsWith('cart_')
+      );
+
+      ticketKeys.forEach(key => {
+        try {
+          const data = localStorage.getItem(key);
+          const parsed = JSON.parse(data);
+
+          // Check if it has timestamp and is expired
+          if (parsed && typeof parsed === 'object' && parsed.timestamp) {
+            const age = now - parsed.timestamp;
+            if (age > twentyFourHours) {
+              localStorage.removeItem(key);
+              removedCount++;
+            }
+          }
+        } catch (e) {
+          // Skip invalid entries
+        }
+      });
+    } catch (error) {
+      console.error('Error cleaning up expired tickets:', error);
+    }
   };
   
   // State for managing items in each tab - initialize from localStorage if available
@@ -553,7 +661,21 @@ const CustomerTicket = () => {
   const [refundItems, setRefundItems] = React.useState(() => {
     return loadTicketItems('refund') || [{ id: 1, amount: '', method: '', reference: '', reason: '' }];
   });
-  
+
+  // Helper functions to create empty items for each tab type
+  const createEmptyPawnItem = () => ({ id: Date.now(), description: '', category: '', value: '' });
+  const createEmptyBuyItem = () => ({ id: Date.now(), description: '', category: '', price: '' });
+  const createEmptyTradeItem = () => ({ id: Date.now(), tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' });
+  const createEmptySaleItem = () => ({ id: Date.now(), description: '', category: '', price: '', paymentMethod: '' });
+  const createEmptyRepairItem = () => ({ id: Date.now(), description: '', issue: '', fee: '', completion: '' });
+  const createEmptyPaymentItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', notes: '' });
+  const createEmptyRefundItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', reason: '' });
+
+  // Clean up expired ticket items on component mount
+  React.useEffect(() => {
+    cleanupExpiredTickets();
+  }, []);
+
   // Process estimated items when component mounts - use a ref to track if the current navigation state has been processed
   const processedStateRef = React.useRef(null);
   
@@ -565,27 +687,27 @@ const CustomerTicket = () => {
       const isDuplicate = location.state?.isDuplicate || false;
   
       // Create a base item with common properties from the updated item
-      
-      // Extract gem shape - using optional chaining for cleaner code
-      const gemShape = updatedItem?.primary_gem_shape || 
-                      updatedItem?.diamonds?.[0]?.shape || 
-                      updatedItem?.stones?.[0]?.shape || 
-                      updatedItem?.originalData?.primary_gem_shape || 
-                      'Round';
-      
-      // Create gem description component
-      const gemDescription = gemShape ? ` ${gemShape}` : '';
-      
+
       // Extract metal category with optional chaining for cleaner code
-      const metalCategory = updatedItem?.metal_category || 
-                           updatedItem?.category || 
-                           updatedItem?.originalData?.metal_category || 
+      const metalCategory = updatedItem?.metal_category ||
+                           updatedItem?.category ||
+                           updatedItem?.originalData?.metal_category ||
                            'Jewelry';
-      
+
+      // Use the long_desc or short_desc from the estimator if available
+      // This preserves all manual additions like vintage, stamps, brand, designer, etc.
+      const description = updatedItem?.long_desc ||
+                         updatedItem?.short_desc ||
+                         updatedItem?.description ||
+                         `${updatedItem.metal_weight || '0'}g ${updatedItem.metal_purity || ''} ${updatedItem.precious_metal_type || ''} ${metalCategory}`;
+
       const baseItem = {
         id: ticketItemId,
-        description: `${updatedItem.metal_weight || '0'}g ${updatedItem.metal_purity || ''} ${updatedItem.precious_metal_type || ''} ${metalCategory}${gemDescription}${updatedItem.free_text ? ` - ${updatedItem.free_text}` : ''}`,
+        description: description,
         category: metalCategory,
+        // Store both short and long descriptions
+        short_desc: updatedItem?.short_desc,
+        long_desc: updatedItem?.long_desc,
         // Store the original estimator data for editing
         originalData: { ...updatedItem },
         sourceEstimator: 'jewelry'
@@ -605,10 +727,13 @@ const CustomerTicket = () => {
           setPawnItems(prevItems => {
             const updatedItems = [...prevItems];
             const itemIndex = updatedItems.findIndex(item => item.id === ticketItemId);
-            
+
             if (itemIndex !== -1) {
+              // Spread ALL fields from updatedItem to preserve vintage, stamps, brand, etc.
               updatedItems[itemIndex] = {
-                ...baseItem,
+                ...updatedItem, // Spread all fields from estimator first
+                ...baseItem, // Then overlay baseItem fields (description, category, etc.)
+                id: ticketItemId, // Preserve the ticket item ID
                 value: updatedItem.price || updatedItem.price_estimates?.pawn || 0
               };
               // Show success message
@@ -617,22 +742,25 @@ const CustomerTicket = () => {
               // Item not found - might have been deleted while in editor
               showSnackbar('Could not find item to update', 'error');
             }
-            
+
             // Save to localStorage
             saveTicketItems('pawn', updatedItems);
-            
+
             return updatedItems;
           });
           break;
-          
+
         case 'buy':
           setBuyItems(prevItems => {
             const updatedItems = [...prevItems];
             const itemIndex = updatedItems.findIndex(item => item.id === ticketItemId);
-            
+
             if (itemIndex !== -1) {
+              // Spread ALL fields from updatedItem to preserve vintage, stamps, brand, etc.
               updatedItems[itemIndex] = {
-                ...baseItem,
+                ...updatedItem, // Spread all fields from estimator first
+                ...baseItem, // Then overlay baseItem fields (description, category, etc.)
+                id: ticketItemId, // Preserve the ticket item ID
                 price: updatedItem.price || updatedItem.price_estimates?.buy || 0
               };
               // Show success message
@@ -641,23 +769,26 @@ const CustomerTicket = () => {
               // Item not found - might have been deleted while in editor
               showSnackbar('Could not find item to update', 'error');
             }
-            
+
             // Save to localStorage
             saveTicketItems('buy', updatedItems);
-            
+
             return updatedItems;
           });
           break;
-          
+
         case 'sale':
         case 'retail': // Handle both 'sale' and 'retail' the same way
           setSaleItems(prevItems => {
             const updatedItems = [...prevItems];
             const itemIndex = updatedItems.findIndex(item => item.id === ticketItemId);
-            
+
             if (itemIndex !== -1) {
+              // Spread ALL fields from updatedItem to preserve vintage, stamps, brand, etc.
               updatedItems[itemIndex] = {
-                ...baseItem,
+                ...updatedItem, // Spread all fields from estimator first
+                ...baseItem, // Then overlay baseItem fields (description, category, etc.)
+                id: ticketItemId, // Preserve the ticket item ID
                 price: updatedItem.price || updatedItem.price_estimates?.retail || 0,
                 paymentMethod: prevItems[itemIndex].paymentMethod || ''
               };
@@ -667,10 +798,10 @@ const CustomerTicket = () => {
               // Item not found - might have been deleted while in editor
               showSnackbar('Could not find item to update', 'error');
             }
-            
+
             // Save to localStorage
             saveTicketItems('sale', updatedItems);
-            
+
             return updatedItems;
           });
           break;
@@ -1024,6 +1155,48 @@ const CustomerTicket = () => {
       const hasEstimatorData = location.state?.updatedItem || location.state?.estimatedItems || location.state?.editItem || location.state?.selectedInventoryItem || location.state?.addedItems;
 
       if (!hasEstimatorData) {
+        // Helper function to merge current items with saved items
+        const mergeItems = (currentItems, savedItems, defaultItem) => {
+          if (!savedItems || savedItems.length === 0) {
+            // No saved items - keep current items
+            return currentItems;
+          }
+
+          // Check if current items have actual data (not just empty placeholders)
+          const hasCurrentData = currentItems.some(item => {
+            // Check if any field has a value (excluding id)
+            return Object.keys(item).some(key => {
+              if (key === 'id') return false;
+              const value = item[key];
+              return value !== null && value !== undefined && value !== '';
+            });
+          });
+
+          if (!hasCurrentData) {
+            // Current items are empty - use saved items
+            return savedItems;
+          }
+
+          // Both have data - merge them
+          // Remove empty placeholder from saved items if it exists
+          const filteredSaved = savedItems.filter(item => {
+            return Object.keys(item).some(key => {
+              if (key === 'id') return false;
+              const value = item[key];
+              return value !== null && value !== undefined && value !== '';
+            });
+          });
+
+          // Combine current items with saved items, removing duplicates by id
+          const itemMap = new Map();
+          [...currentItems, ...filteredSaved].forEach(item => {
+            itemMap.set(item.id, item);
+          });
+
+          const merged = Array.from(itemMap.values());
+          return merged.length > 0 ? merged : [defaultItem];
+        };
+
         // Load saved items (will use customer ID if available, otherwise load global)
         const savedPawn = loadTicketItems('pawn');
         const savedBuy = loadTicketItems('buy');
@@ -1033,14 +1206,14 @@ const CustomerTicket = () => {
         const savedPayment = loadTicketItems('payment');
         const savedRefund = loadTicketItems('refund');
 
-        // Update items - use saved items if available, otherwise use default empty item
-        setPawnItems(savedPawn || [{ id: 1, description: '', category: '', value: '' }]);
-        setBuyItems(savedBuy || [{ id: 1, description: '', category: '', price: '' }]);
-        setTradeItems(savedTrade || [{ id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }]);
-        setSaleItems(savedSale || [{ id: 1, description: '', category: '', price: '', paymentMethod: '' }]);
-        setRepairItems(savedRepair || [{ id: 1, description: '', issue: '', fee: '', completion: '' }]);
-        setPaymentItems(savedPayment || [{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
-        setRefundItems(savedRefund || [{ id: 1, amount: '', method: '', reference: '', reason: '' }]);
+        // Merge current items with saved items
+        setPawnItems(mergeItems(pawnItems, savedPawn, { id: 1, description: '', category: '', value: '' }));
+        setBuyItems(mergeItems(buyItems, savedBuy, { id: 1, description: '', category: '', price: '' }));
+        setTradeItems(mergeItems(tradeItems, savedTrade, { id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }));
+        setSaleItems(mergeItems(saleItems, savedSale, { id: 1, description: '', category: '', price: '', paymentMethod: '' }));
+        setRepairItems(mergeItems(repairItems, savedRepair, { id: 1, description: '', issue: '', fee: '', completion: '' }));
+        setPaymentItems(mergeItems(paymentItems, savedPayment, { id: 1, amount: '', method: '', reference: '', notes: '' }));
+        setRefundItems(mergeItems(refundItems, savedRefund, { id: 1, amount: '', method: '', reference: '', reason: '' }));
       }
 
       // Mark initial load as complete after a short delay to ensure state updates are processed
@@ -1049,7 +1222,7 @@ const CustomerTicket = () => {
         customerIdRef.current = customer?.id;
       }, 100);
     }
-  }, [customer, location.state]);
+  }, [customer, location.state, pawnItems, buyItems, tradeItems, saleItems, repairItems, paymentItems, refundItems]);
 
   // Auto-save ticket items to localStorage whenever they change (only after initial load)
   React.useEffect(() => {
@@ -2198,7 +2371,99 @@ const CustomerTicket = () => {
       default: return 0;
     }
   };
-  
+
+  // Fetch required fields for each transaction type on component mount
+  React.useEffect(() => {
+    const fetchRequiredFields = async () => {
+      try {
+        // Fetch transaction types from database
+        const txTypesResponse = await fetch(`${config.apiUrl}/transaction-types`);
+        let transactionTypes = ['pawn', 'buy', 'retail', 'sale', 'refund', 'return'];
+
+        if (txTypesResponse.ok) {
+          const txTypesData = await txTypesResponse.json();
+          transactionTypes = txTypesData.map(tx => tx.type);
+        }
+
+        const fieldsMap = {};
+
+        // Fetch required fields for each transaction type
+        await Promise.all(
+          transactionTypes.map(async (txType) => {
+            try {
+              const response = await fetch(`${config.apiUrl}/customer-preferences/required-fields/${txType}`);
+              if (response.ok) {
+                const data = await response.json();
+                fieldsMap[txType] = data.requiredFields || [];
+              } else {
+                fieldsMap[txType] = [];
+              }
+            } catch (error) {
+              console.error(`Error fetching required fields for ${txType}:`, error);
+              fieldsMap[txType] = [];
+            }
+          })
+        );
+
+        setRequiredFieldsMap(fieldsMap);
+      } catch (error) {
+        console.error('Error fetching required fields:', error);
+      }
+    };
+
+    fetchRequiredFields();
+  }, []);
+
+  // Validate customer against required fields for current transaction type
+  const validateCustomerFields = React.useCallback(() => {
+    if (!customer) {
+      setCustomerValidationErrors(['No customer selected']);
+      return false;
+    }
+
+    // Get transaction type based on active tab
+    const transactionTypeMap = {
+      0: 'pawn',
+      1: 'buy',
+      2: 'buy', // trade uses buy
+      3: 'retail', // sale is retail
+      4: 'buy', // repair uses buy
+      5: 'buy', // payment uses buy
+      6: 'refund'
+    };
+
+    const currentTransactionType = transactionTypeMap[activeTab] || 'pawn';
+    const requiredFields = requiredFieldsMap[currentTransactionType] || [];
+
+    // Check which required fields are missing or empty
+    const missingFields = [];
+    requiredFields.forEach(field => {
+      const value = customer[field];
+      if (value === null || value === undefined || value === '') {
+        // Convert field name to readable format
+        const fieldLabel = field
+          .split('_')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+        missingFields.push(fieldLabel);
+      }
+    });
+
+    setCustomerValidationErrors(missingFields);
+    return missingFields.length === 0;
+  }, [customer, activeTab, requiredFieldsMap]);
+
+  // Validate customer whenever customer or active tab changes
+  React.useEffect(() => {
+    if (customer) {
+      setIsValidatingCustomer(true);
+      validateCustomerFields();
+      setIsValidatingCustomer(false);
+    } else {
+      setCustomerValidationErrors(['No customer selected']);
+    }
+  }, [customer, activeTab, validateCustomerFields]);
+
   const calculateTotal = () => {
     const { items } = getCurrentItems();
     let total = 0;
@@ -2328,10 +2593,29 @@ const CustomerTicket = () => {
 
   const handleAddToCart = () => {
     if (!customer) {
-      alert('Please select a customer before adding items to cart');
+      setSnackbarMessage({
+        open: true,
+        message: 'Please select a customer before adding items to cart',
+        severity: 'error'
+      });
       return;
     }
-    
+
+    // Validate customer has all required fields
+    const isValid = validateCustomerFields();
+    if (!isValid) {
+      const errorMessage = customerValidationErrors.length > 0
+        ? `Missing required customer fields: ${customerValidationErrors.join(', ')}`
+        : 'Customer is missing required fields';
+
+      setSnackbarMessage({
+        open: true,
+        message: errorMessage,
+        severity: 'error'
+      });
+      return;
+    }
+
     // Get items from current tab
     const { items, type } = getCurrentItems();
     
@@ -2431,32 +2715,33 @@ const CustomerTicket = () => {
         
         // If the item came from the jewelry estimator, include all jewelry-specific fields
         if (item.sourceEstimator === 'jewelry') {
-          // Use long_desc or short_desc from originalData if available, otherwise use current description
-          const jewelryDescription = item.originalData?.long_desc ||
+          // Use long_desc or short_desc from item level first, then originalData
+          const jewelryDescription = item.long_desc ||
+                                     item.short_desc ||
+                                     item.originalData?.long_desc ||
                                      item.originalData?.short_desc ||
                                      item.description;
 
-          // Preserve all jewelry fields from the original data or directly from the item if available
+          // Preserve ALL jewelry fields by spreading originalData first, then current item
+          // This ensures that ALL fields including vintage, stamps, brand, designer, etc. are preserved
           return {
             ...baseItem,
-            // Update description with jewelry item short or long description
+            // Spread all fields from originalData (includes ALL jewelry fields)
+            ...(item.originalData || {}),
+            // Then spread current item to override with any updates
+            ...item,
+            // Ensure these specific fields are always set correctly
+            transaction_type: transaction_type,
+            buyTicketId: buyTicketId,
+            customer: baseItem.customer,
+            employee: baseItem.employee,
             description: jewelryDescription,
-            // Indicate this is a jewelry item for the cart and checkout
             sourceEstimator: 'jewelry',
-            // Include all jewelry-specific fields that may be present
-            metal_type: item.metal_type || item.precious_metal_type || (item.originalData?.precious_metal_type),
-            metal_purity: item.metal_purity || (item.originalData?.metal_purity),
-            metal_weight: item.metal_weight || (item.originalData?.metal_weight),
-            metal_category: item.metal_category || (item.originalData?.metal_category),
-            gems: item.gems || (item.originalData?.gems),
-            stones: item.stones || (item.originalData?.stones),
-            free_text: item.free_text || (item.originalData?.free_text),
-            price_estimates: item.price_estimates || (item.originalData?.price_estimates),
-            // Store both short and long descriptions for future reference
-            short_desc: item.originalData?.short_desc,
-            long_desc: item.originalData?.long_desc,
+            // Store both short and long descriptions explicitly
+            short_desc: item.short_desc || item.originalData?.short_desc,
+            long_desc: item.long_desc || item.originalData?.long_desc,
             // Pass along the complete original data from the estimator
-         //   originalData: item.originalData || null,
+            originalData: item.originalData || null,
             // Ensure images are properly passed
             images: item.images || (item.image ? [item.image] : []),
             // Include timestamp for when the item was added to cart
@@ -2492,9 +2777,26 @@ const CustomerTicket = () => {
         sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
       }
 
-      // Show success message - items remain in ticket for further editing
-      showSnackbar('Items added to cart. Ticket saved for further editing.', 'success');
-      
+      // Show success message
+      showSnackbar('Items added to cart successfully.', 'success');
+
+      // Clear items from the current tab after adding to cart
+      if (activeTab === 0) { // Pawn tab
+        setPawnItems([createEmptyPawnItem()]);
+      } else if (activeTab === 1) { // Buy tab
+        setBuyItems([createEmptyBuyItem()]);
+      } else if (activeTab === 2) { // Trade tab
+        setTradeItems([createEmptyTradeItem()]);
+      } else if (activeTab === 3) { // Sale tab
+        setSaleItems([createEmptySaleItem()]);
+      } else if (activeTab === 4) { // Repair tab
+        setRepairItems([createEmptyRepairItem()]);
+      } else if (activeTab === 5) { // Payment tab
+        setPaymentItems([createEmptyPaymentItem()]);
+      } else if (activeTab === 6) { // Refund tab
+        setRefundItems([createEmptyRefundItem()]);
+      }
+
     } catch (error) {
       console.error('Error adding items to cart:', error);
       alert('There was an error adding items to cart. Please try again.');
@@ -2800,10 +3102,27 @@ return (
         justifyContent: 'space-between'
       }}>
           {/* Left side - Customer Info or Lookup */}
-          <Box sx={{ 
-            display: 'flex', 
-            width: '40%', 
-            borderRight: '1px solid #e0e0e0'
+          <Box sx={{
+            display: 'flex',
+            width: '40%',
+            borderRight: '1px solid #e0e0e0',
+            maxHeight: '400px',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            '&::-webkit-scrollbar': {
+              width: '8px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: '#f1f1f1',
+              borderRadius: '4px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: '#888',
+              borderRadius: '4px',
+              '&:hover': {
+                backgroundColor: '#555',
+              },
+            },
           }}>
             {!showLookupForm ? (
               /* Customer info view */
@@ -2859,14 +3178,33 @@ return (
                     </Typography>
                     <Typography variant="body2">
                       <strong>Address:</strong> {customer ? (
-                        customer.address_line1 ? 
-                          `${customer.address_line1}${customer.address_line2 ? ', ' + customer.address_line2 : ''}, 
-                          ${customer.city || ''} ${customer.state || ''} ${customer.postal_code || ''}`.replace(/\s+/g, ' ').trim() 
-                          : 
+                        customer.address_line1 ?
+                          `${customer.address_line1}${customer.address_line2 ? ', ' + customer.address_line2 : ''},
+                          ${customer.city || ''} ${customer.state || ''} ${customer.postal_code || ''}`.replace(/\s+/g, ' ').trim()
+                          :
                           'Not provided'
                         ) : 'N/A'
                       }
                     </Typography>
+
+                    {/* Customer Validation Errors Display */}
+                    {customerValidationErrors.length > 0 && (
+                      <Alert severity="error" sx={{ mt: 2 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                          Missing Required Fields:
+                        </Typography>
+                        <Typography variant="body2" component="div">
+                          <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                            {customerValidationErrors.map((field, index) => (
+                              <li key={index}>{field}</li>
+                            ))}
+                          </ul>
+                        </Typography>
+                        <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
+                          Please edit the customer to add these fields before adding items to cart.
+                        </Typography>
+                      </Alert>
+                    )}
                   </Box>
                 </Grid>
               </Grid>
@@ -4026,7 +4364,7 @@ return (
                     variant="contained"
                     color="primary"
                     onClick={handleAddToCart}
-                    disabled={!customer}
+                    disabled={!customer || customerValidationErrors.length > 0}
                     startIcon={<ShoppingCartIcon />}
                   >
                     Add to Cart
