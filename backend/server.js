@@ -3739,7 +3739,8 @@ app.get('/api/pawn-config', async (req, res) => {
       return res.json({
         interest_rate: 0.00,
         term_days: 30,
-        frequency_days: 30
+        frequency_days: 30,
+        forfeiture_mode: 'manual'
       });
     }
 
@@ -3754,7 +3755,7 @@ app.get('/api/pawn-config', async (req, res) => {
 app.put('/api/pawn-config', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { interest_rate, term_days, frequency_days } = req.body;
+    const { interest_rate, term_days, frequency_days, forfeiture_mode } = req.body;
 
     await client.query('BEGIN');
 
@@ -3765,14 +3766,14 @@ app.put('/api/pawn-config', async (req, res) => {
     if (checkResult.rows.length === 0) {
       // Insert new config
       result = await client.query(
-        'INSERT INTO pawn_config (interest_rate, term_days, frequency_days) VALUES ($1, $2, $3) RETURNING *',
-        [interest_rate, term_days, frequency_days]
+        'INSERT INTO pawn_config (interest_rate, term_days, frequency_days, forfeiture_mode) VALUES ($1, $2, $3, $4) RETURNING *',
+        [interest_rate, term_days, frequency_days, forfeiture_mode || 'manual']
       );
     } else {
       // Update existing config
       result = await client.query(
-        'UPDATE pawn_config SET interest_rate = $1, term_days = $2, frequency_days = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *',
-        [interest_rate, term_days, frequency_days, checkResult.rows[0].id]
+        'UPDATE pawn_config SET interest_rate = $1, term_days = $2, frequency_days = $3, forfeiture_mode = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5 RETURNING *',
+        [interest_rate, term_days, frequency_days, forfeiture_mode || 'manual', checkResult.rows[0].id]
       );
     }
 

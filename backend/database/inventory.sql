@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS inventory_status (
 --     ('SCRAP', 'Scrap', 'Item is scrap and not available for sale'),
 --     ('RESERVED', 'Reserved', 'Item is reserved for a customer'),
 --     ('SOLD', 'Sold', 'Item has been sold')
+--     ('PAWN', 'Pawn', 'Item is pawned to a customer')
+--     ('REDEEMED', 'Redeemed', 'Item has been redeemed by customer')
 -- ON CONFLICT (status_code) DO NOTHING;
 
 -- Drop change_notes column if it exists (migration)

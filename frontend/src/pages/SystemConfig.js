@@ -137,7 +137,8 @@ function SystemConfig() {
   const [pawnConfig, setPawnConfig] = useState({
     interest_rate: 0.00,
     term_days: 30,
-    frequency_days: 30
+    frequency_days: 30,
+    forfeiture_mode: 'manual'
   });
   const [caratConversion, setCaratConversion] = useState(null);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
@@ -585,7 +586,8 @@ function SystemConfig() {
           setPawnConfig({
             interest_rate: parseFloat(response.data.interest_rate) || 0.00,
             term_days: parseInt(response.data.term_days) || 30,
-            frequency_days: parseInt(response.data.frequency_days) || 30
+            frequency_days: parseInt(response.data.frequency_days) || 30,
+            forfeiture_mode: response.data.forfeiture_mode || 'manual'
           });
         }
       } catch (error) {
@@ -908,11 +910,13 @@ function SystemConfig() {
 
       // Save pawn configuration
       try {
-        await axios.put(`${API_BASE_URL}/pawn-config`, {
+        const pawnConfigPayload = {
           interest_rate: parseFloat(pawnConfig.interest_rate),
           term_days: parseInt(pawnConfig.term_days),
-          frequency_days: parseInt(pawnConfig.frequency_days)
-        });
+          frequency_days: parseInt(pawnConfig.frequency_days),
+          forfeiture_mode: pawnConfig.forfeiture_mode
+        };
+        await axios.put(`${API_BASE_URL}/pawn-config`, pawnConfigPayload);
       } catch (pawnError) {
         console.error('Error saving pawn config:', pawnError);
       }
@@ -1084,7 +1088,8 @@ function SystemConfig() {
       const response = await axios.put(`${API_BASE_URL}/pawn-config`, {
         interest_rate: parseFloat(updatedConfig.interest_rate),
         term_days: parseInt(updatedConfig.term_days),
-        frequency_days: parseInt(updatedConfig.frequency_days)
+        frequency_days: parseInt(updatedConfig.frequency_days),
+        forfeiture_mode: updatedConfig.forfeiture_mode
       });
 
       setSnackbar({
@@ -2064,7 +2069,7 @@ function SystemConfig() {
                   Pawn Configuration
                 </Typography>
                 <Grid container spacing={2}>
-                  <Grid item xs={12} sm={4}>
+                  <Grid item xs={12} sm={3}>
                     <TextField
                       label="Interest Rate (%)"
                       type="number"
@@ -2074,7 +2079,7 @@ function SystemConfig() {
                       inputProps={{ min: 0, max: 100, step: 0.01 }}
                     />
                   </Grid>
-                  <Grid item xs={12} sm={4}>
+                  <Grid item xs={12} sm={3}>
                     <TextField
                       select
                       label="Term (Days)"
@@ -2089,7 +2094,7 @@ function SystemConfig() {
                       ))}
                     </TextField>
                   </Grid>
-                  <Grid item xs={12} sm={4}>
+                  <Grid item xs={12} sm={3}>
                     <TextField
                       select
                       label="Frequency (Days)"
@@ -2102,6 +2107,19 @@ function SystemConfig() {
                           {days}
                         </MenuItem>
                       ))}
+                    </TextField>
+                  </Grid>
+                  <Grid item xs={12} sm={3}>
+                    <TextField
+                      select
+                      label="Forfeiture Mode"
+                      value={pawnConfig.forfeiture_mode}
+                      onChange={(e) => handlePawnConfigChange('forfeiture_mode', e.target.value)}
+                      fullWidth
+                      helperText="Manual or Auto"
+                    >
+                      <MenuItem value="manual">Manual</MenuItem>
+                      <MenuItem value="automatic">Automatic</MenuItem>
                     </TextField>
                   </Grid>
                 </Grid>
