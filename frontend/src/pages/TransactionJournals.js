@@ -29,6 +29,8 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Avatar } from '@mui/material';
+import { pdf } from '@react-pdf/renderer';
+import PawnTicketTemplate from '../components/PawnTicketTemplate';
 import config from '../config';
 
 function TransactionJournals() {
@@ -68,7 +70,8 @@ function TransactionJournals() {
   const [receiptConfig, setReceiptConfig] = useState({
     transaction_receipt: 'Thank you for shopping with us',
     buy_receipt: 'Thank you for shopping with us',
-    sales_receipt: 'Thank you for shopping with us'
+    sales_receipt: 'Thank you for shopping with us',
+    pawn_receipt: ''
   });
 
   // Fetch receipt config from API
@@ -80,7 +83,8 @@ function TransactionJournals() {
           setReceiptConfig({
             transaction_receipt: response.data.transaction_receipt || 'Thank you for shopping with us',
             buy_receipt: response.data.buy_receipt || 'Thank you for shopping with us',
-            sales_receipt: response.data.sales_receipt || 'Thank you for shopping with us'
+            sales_receipt: response.data.sales_receipt || 'Thank you for shopping with us',
+            pawn_receipt: response.data.pawn_receipt || ''
           });
         }
       } catch (error) {
@@ -209,7 +213,7 @@ function TransactionJournals() {
     return grouped;
   };
 
-  // Handle double click on ticket_id to show receipt in new tab
+  // Handle double click on ticket_id to show receipt using PDF template
   const handleBuyTicketClick = async (ticketId) => {
     // Determine if this is a sale, buy, or pawn ticket by checking which ticket list contains it
     const isSaleTicket = saleTickets.some(st => st.sale_ticket_id === ticketId);
@@ -248,6 +252,7 @@ function TransactionJournals() {
     // Fetch business info
     let businessName = 'PAWNALL NEW MOBILE';
     let businessAddress = '';
+    let businessPhone = '';
     let businessLogo = '';
     let businessLogoMimetype = '';
 
@@ -258,6 +263,7 @@ function TransactionJournals() {
       });
       businessName = response.data.business_name || businessName;
       businessAddress = response.data.address || '';
+      businessPhone = response.data.phone || '';
       if (response.data.logo && response.data.logo_mimetype) {
         businessLogo = response.data.logo;
         businessLogoMimetype = response.data.logo_mimetype;
@@ -266,7 +272,7 @@ function TransactionJournals() {
       console.error('Error fetching business info:', error);
     }
 
-    // Calculate total
+    // Calculate total and due date
     const totalAmount = ticketItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0)), 0);
     const transactionDate = selectedTransaction ? new Date(selectedTransaction.created_at) : new Date();
     const formattedDate = transactionDate.toLocaleDateString('en-US', {
@@ -279,159 +285,65 @@ function TransactionJournals() {
       minute: '2-digit'
     });
 
-    // Open receipt in new tab
-    const receiptWindow = window.open('', '_blank');
-    receiptWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Ticket ${ticketId}</title>
-          <style>
-            @page { size: portrait; margin: 0.5in; }
-            body {
-              font-family: 'Courier New', monospace;
-              font-size: 9pt;
-              margin: 0;
-              padding: 20px;
-              line-height: 1.4;
-            }
-            .receipt-container {
-              border: 2px solid black;
-              padding: 20px;
-              max-width: 600px;
-              margin: 0 auto;
-            }
-            .header {
-              text-align: center;
-              border-bottom: 1px solid black;
-              padding-bottom: 10px;
-              margin-bottom: 15px;
-            }
-            .header h1 {
-              margin: 0;
-              font-size: 12pt;
-              font-weight: bold;
-            }
-            .header p {
-              margin: 3px 0;
-              font-size: 8pt;
-            }
-            .section {
-              margin-bottom: 15px;
-            }
-            .bordered-section {
-              border-top: 1px solid black;
-              border-bottom: 1px solid black;
-              padding: 10px 0;
-              margin: 15px 0;
-            }
-            .row {
-              display: flex;
-              justify-content: space-between;
-              margin: 5px 0;
-            }
-            .bold {
-              font-weight: bold;
-            }
-            .small {
-              font-size: 7pt;
-            }
-            .signature-line {
-              border-top: 1px solid black;
-              margin-top: 30px;
-              padding-top: 5px;
-              width: 45%;
-              display: inline-block;
-              text-align: center;
-              font-size: 8pt;
-            }
-            .terms {
-              font-size: 7pt;
-              border-top: 1px solid black;
-              padding-top: 10px;
-              margin-top: 15px;
-            }
-            @media print {
-              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              .no-print { display: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="receipt-container">
-            <!-- Business Header with Logo -->
-            <div class="header" style="position: relative; min-height: 80px;">
-              ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Logo" style="position: absolute; top: 0; right: 0; max-width: 70px; max-height: 70px; object-fit: contain;" />` : ''}
-              <div style="padding-right: 80px;">
-                <h1>${businessName}</h1>
-                ${businessAddress ? `<p>${businessAddress}</p>` : ''}
-              </div>
-            </div>
+    // Calculate due date (62 days from transaction date)
+    const dueDateObj = new Date(transactionDate);
+    dueDateObj.setDate(dueDateObj.getDate() + 62);
+    const dueDate = dueDateObj.toLocaleDateString('en-US', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
 
-            <!-- Customer Info (Left) and Ticket ID (Right) -->
-            <div class="section" style="display: flex; justify-content: space-between; margin-top: 15px;">
-              <div style="flex: 1;">
-                <p style="margin: 2px 0;"><strong>Customer:</strong> ${selectedTransaction?.customer_name || 'N/A'}</p>
-                <p style="margin: 2px 0;"><strong>Employee:</strong> ${selectedTransaction?.employee_name || 'N/A'}</p>
-                <p style="margin: 2px 0;"><strong>Transaction:</strong> ${selectedTransaction?.transaction_id || 'N/A'}</p>
-                <p style="margin: 2px 0;"><strong>Date/Time:</strong> ${formattedDate} ${formattedTime}</p>
-              </div>
-              <div style="text-align: right;">
-                <p class="bold" style="font-size: 12pt; margin: 0;">${ticketId}</p>
-              </div>
-            </div>
+    // Get pawn ticket details if this is a pawn ticket
+    const pawnTicketData = isPawnTicket ? pawnTickets.find(pt => pt.pawn_ticket_id === ticketId) : null;
 
-            <!-- Items Table -->
-            <div class="bordered-section">
-              <table style="width: 100%; border-collapse: collapse; font-family: 'Courier New', monospace;">
-                <thead>
-                  <tr style="border-bottom: 1px solid black;">
-                    <th style="text-align: left; padding: 5px 0; font-size: 8pt;">DESCRIPTION</th>
-                    <th style="text-align: right; padding: 5px 0; font-size: 8pt;">PRICE</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${ticketItems.map((item, idx) => `
-                    <tr>
-                      <td style="padding: 5px; font-size: 8pt; vertical-align: top;">
-                        ${item.item_details?.long_desc || item.item_details?.description || item.description || `Item ${idx + 1}`}
-                      </td>
-                      <td style="padding: 5px 0 5px 5px; font-size: 8pt; text-align: right; vertical-align: top;">
-                        $${parseFloat(item.item_price || 0).toFixed(2)}
-                      </td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
+    // Calculate fees (these should come from pawn_ticket table in reality)
+    const principalAmount = pawnTicketData?.principal_amount || totalAmount;
+    const appraisalFee = pawnTicketData?.appraisal_fee || 0;
+    const interestRate = pawnTicketData?.interest_rate || 2.9;
+    const interestAmount = pawnTicketData?.interest_amount || (principalAmount * 0.029);
+    const insuranceCost = pawnTicketData?.insurance_cost || (principalAmount * 0.01);
+    const storageFee = pawnTicketData?.storage_fee || 0;
+    const totalCostOfBorrowing = appraisalFee + interestAmount + insuranceCost + storageFee;
+    const extensionCost = interestAmount + insuranceCost + storageFee;
 
-            <!-- Payment Details -->
-              <div class="row">
-                <span class="bold">TOTAL</span>
-                <span class="bold">$${totalAmount.toFixed(2)}</span>
-              </div>
+    // Get legal terms based on ticket type
+    const legalTerms = isPawnTicket ? receiptConfig.pawn_receipt : (isSaleTransaction ? receiptConfig.sales_receipt : receiptConfig.buy_receipt);
 
-            <!-- Footer Text -->
-            <div class="terms">
-              <p style="white-space: pre-wrap;">${isSaleTransaction ? receiptConfig.sales_receipt : receiptConfig.buy_receipt}</p>
-            </div>
+    // Generate PDF using template
+    const pdfDocument = (
+      <PawnTicketTemplate
+        businessName={businessName}
+        businessAddress={businessAddress}
+        businessPhone={businessPhone}
+        businessLogo={businessLogo}
+        businessLogoMimetype={businessLogoMimetype}
+        customerName={selectedTransaction?.customer_name}
+        customerAddress={selectedTransaction?.customer_address}
+        customerPhone={selectedTransaction?.customer_phone}
+        customerID={selectedTransaction?.customer_id}
+        employeeName={selectedTransaction?.employee_name}
+        ticketId={ticketId}
+        formattedDate={formattedDate}
+        formattedTime={formattedTime}
+        dueDate={dueDate}
+        ticketItems={ticketItems}
+        principalAmount={principalAmount}
+        appraisalFee={appraisalFee}
+        interestRate={interestRate}
+        interestAmount={interestAmount}
+        insuranceCost={insuranceCost}
+        storageFee={storageFee}
+        extensionCost={extensionCost}
+        totalCostOfBorrowing={totalCostOfBorrowing}
+        legalTerms={legalTerms}
+      />
+    );
 
-            <!-- Signature Lines -->
-            <div style="margin-top: 30px;">
-              <div class="signature-line" style="margin-right: 10%;">
-                Seller Signature
-              </div>
-            </div>
-          </div>
-
-          <div class="no-print" style="text-align: center; margin-top: 20px;">
-            <button onclick="window.print()" style="padding: 10px 20px; font-size: 12pt;">Print Receipt</button>
-            <button onclick="window.close()" style="padding: 10px 20px; font-size: 12pt; margin-left: 10px;">Close</button>
-          </div>
-        </body>
-      </html>
-    `);
-    receiptWindow.document.close();
+    // Generate PDF blob and open in new tab
+    const blob = await pdf(pdfDocument).toBlob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
   };
 
   const handlePrintTransaction = async () => {
