@@ -6337,30 +6337,32 @@ app.use((err, req, res, next) => {
 app.post('/api/jewelry/history', async (req, res) => {
   const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+
     const { item_id, changed_by, action, changed_fields, notes } = req.body;
     if (!item_id || !changed_by || !action || !changed_fields) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-    
+
     // Get the next version number
     const versionResult = await client.query(
       'SELECT COALESCE(MAX(version_number), 0) + 1 as next_version FROM jewelry_item_history WHERE item_id = $1',
       [item_id]
     );
     const version_number = versionResult.rows[0].next_version;
-    
+
     const query = `
       INSERT INTO jewelry_item_history (
-        item_id, 
+        item_id,
         version_number,
-        changed_by, 
-        action_type, 
-        changed_fields, 
+        changed_by,
+        action_type,
+        changed_fields,
         change_notes
       ) VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *
     `;
-    
+
     const result = await client.query(query, [
       item_id,
       version_number,
@@ -6369,11 +6371,60 @@ app.post('/api/jewelry/history', async (req, res) => {
       JSON.stringify(changed_fields),
       notes || 'Item details updated'
     ]);
-    
+
+    // Update the jewelry table with the changed fields
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    // Map of changed_fields keys to jewelry table columns
+    const fieldMapping = {
+      location: 'location',
+      condition: 'condition',
+      brand: 'brand',
+      vintage: 'vintage',
+      stamps: 'stamps',
+      notes: 'notes',
+      short_desc: 'short_desc',
+      long_desc: 'long_desc',
+      retail_price: 'retail_price',
+      // Add more field mappings as needed
+    };
+
+    Object.keys(changed_fields).forEach(field => {
+      const dbField = fieldMapping[field];
+
+      if (dbField && changed_fields[field].to !== undefined) {
+        updates.push(`${dbField} = $${paramIndex}`);
+        values.push(changed_fields[field].to);
+        paramIndex++;
+      } 
+    });
+
+    // Only update if there are fields to update
+    if (updates.length > 0) {
+      updates.push(`updated_at = CURRENT_TIMESTAMP`);
+      values.push(item_id);
+
+      const updateQuery = `
+        UPDATE jewelry
+        SET ${updates.join(', ')}
+        WHERE item_id = $${paramIndex}
+      `;
+
+      const updateResult = await client.query(updateQuery, values);
+    } 
+
+    await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
   } catch (error) {
-    console.error('Error logging history:', error);
-    res.status(500).json({ error: 'Failed to log history' });
+    await client.query('ROLLBACK');
+    console.error('❌ Error logging history:', error);
+    res.status(500).json({
+      error: 'Failed to log history',
+      details: error.message,
+      code: error.code
+    });
   } finally {
     client.release();
   }
