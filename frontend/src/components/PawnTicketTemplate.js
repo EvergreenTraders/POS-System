@@ -291,10 +291,11 @@ const PawnTicketTemplate = ({
   storageFee,
   extensionCost,
   totalCostOfBorrowing,
-  legalTerms
+  legalTerms,
+  termDays
 }) => {
-  // Calculate term (assuming 62 days default)
-  const term = 62;
+  // Use termDays from props, default to 62 if not provided
+  const term = termDays || 62;
 
   // Parse formatted date and time for agreement text
   const transactionDateObj = formattedDate ? new Date(formattedDate) : new Date();

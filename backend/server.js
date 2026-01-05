@@ -2582,7 +2582,8 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
       } else {
         const usedIds = new Set();
         item_id = await generateItemId(item.metal_category, client, usedIds);
-        status = 'HOLD';
+        // Check if this is a pawn transaction
+        status = (item.transaction_type && item.transaction_type.toLowerCase() === 'pawn') ? 'PAWN' : 'HOLD';
       }
 
       // Now save images with meaningful filenames using item_id
@@ -2816,7 +2817,8 @@ app.post('/api/jewelry', async (req, res) => {
         // Generate unique item ID for non-quote items
         const usedIds = new Set();
         item_id = await generateItemId(item.metal_category, client, usedIds);
-        status = 'HOLD';
+        // Check if this is a pawn transaction
+        status = (item.transaction_type && item.transaction_type.toLowerCase() === 'pawn') ? 'PAWN' : 'HOLD';
       }
       // Insert jewelry record
       const jewelryQuery = `

@@ -272,6 +272,18 @@ function TransactionJournals() {
       console.error('Error fetching business info:', error);
     }
 
+    // Fetch pawn config to get term_days
+    let termDays = 62; // Default value
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/pawn-config`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      termDays = parseInt(response.data.term_days) || 62;
+    } catch (error) {
+      console.error('Error fetching pawn config:', error);
+    }
+
     // Calculate total and due date
     const totalAmount = ticketItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0)), 0);
     const transactionDate = selectedTransaction ? new Date(selectedTransaction.created_at) : new Date();
@@ -285,9 +297,9 @@ function TransactionJournals() {
       minute: '2-digit'
     });
 
-    // Calculate due date (62 days from transaction date)
+    // Calculate due date using term_days from pawn_config
     const dueDateObj = new Date(transactionDate);
-    dueDateObj.setDate(dueDateObj.getDate() + 62);
+    dueDateObj.setDate(dueDateObj.getDate() + termDays);
     const dueDate = dueDateObj.toLocaleDateString('en-US', {
       day: 'numeric',
       month: 'long',
@@ -337,6 +349,7 @@ function TransactionJournals() {
         extensionCost={extensionCost}
         totalCostOfBorrowing={totalCostOfBorrowing}
         legalTerms={legalTerms}
+        termDays={termDays}
       />
     );
 
