@@ -108,10 +108,14 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   itemNumberCol: {
-    width: '25%',
+    width: '15%',
   },
   descriptionCol: {
-    width: '75%',
+    width: '60%',
+  },
+  priceCol: {
+    width: '25%',
+    textAlign: 'right',
   },
   itemRow: {
     flexDirection: 'row',
@@ -288,14 +292,16 @@ const PawnTicketTemplate = ({
   interestRate,
   interestAmount,
   insuranceCost,
-  storageFee,
   extensionCost,
   totalCostOfBorrowing,
+  totalRedemptionAmount,
   legalTerms,
-  termDays
+  termDays,
+  frequencyDays
 }) => {
   // Use termDays from props, default to 62 if not provided
   const term = termDays || 62;
+  const frequency = frequencyDays || 30;
 
   // Parse formatted date and time for agreement text
   const transactionDateObj = formattedDate ? new Date(formattedDate) : new Date();
@@ -371,8 +377,9 @@ const PawnTicketTemplate = ({
               </View>
 
               <View style={styles.itemsHeader}>
-                <Text style={styles.itemNumberCol}>Item Number</Text>
-                <Text style={styles.descriptionCol}>Description:</Text>
+                <Text style={styles.itemNumberCol}>Item #</Text>
+                <Text style={styles.descriptionCol}>Description</Text>
+                <Text style={styles.priceCol}>Price</Text>
               </View>
 
               {ticketItems && ticketItems.length > 0 ? (
@@ -382,12 +389,14 @@ const PawnTicketTemplate = ({
                     <Text style={styles.descriptionCol}>
                       {item.item_details?.long_desc || item.item_details?.description || item.description || ''}
                     </Text>
+                    <Text style={styles.priceCol}>${parseFloat(item.item_price || item.item_details?.item_price || 0).toFixed(2)}</Text>
                   </View>
                 ))
               ) : (
                 <View style={styles.itemRow}>
                   <Text style={styles.itemNumberCol}></Text>
                   <Text style={styles.descriptionCol}></Text>
+                  <Text style={styles.priceCol}></Text>
                 </View>
               )}
             </View>
@@ -422,27 +431,27 @@ const PawnTicketTemplate = ({
             <View style={styles.feeRow}>
               <View style={styles.feeLabel}>
                 <Text style={styles.bold}>Interest:</Text>
-                <Text style={styles.feeSubtext}>({interestRate || '2.9'}% per 31 days, 34.1% APR)</Text>
+                <Text style={styles.feeSubtext}>({interestRate || '2.9'}% per {frequency} days)</Text>
               </View>
               <Text style={styles.feeAmount}>${(interestAmount || 0).toFixed(2)}</Text>
             </View>
 
-            {/* Insurance Recovery Costs */}
+            {/* Insurance */}
             <View style={styles.feeRow}>
               <View style={styles.feeLabel}>
-                <Text style={styles.bold}>Insurance Recovery Costs:</Text>
-                <Text style={styles.feeSubtext}>(1% of item value every 31 days)</Text>
+                <Text style={styles.bold}>Insurance:</Text>
+                <Text style={styles.feeSubtext}>(1% per {frequency} days)</Text>
               </View>
               <Text style={styles.feeAmount}>${(insuranceCost || 0).toFixed(2)}</Text>
             </View>
 
-            {/* Storage & Handling */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 6 }}>
-              <View style={styles.feeLabel}>
-                <Text style={styles.bold}>Storage & Handling:</Text>
-                <Text style={styles.feeSubtext}>($0.10 per cubic foot plus $1 per additional cubic foot per 31 days)</Text>
+            {/* Total to Redeem */}
+            <View style={{ borderTop: '2pt solid black', padding: 6, backgroundColor: '#f9f9f9' }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 8, fontWeight: 'bold' }}>TOTAL TO REDEEM:</Text>
+                <Text style={{ fontSize: 10, fontWeight: 'bold' }}>${(totalRedemptionAmount || 0).toFixed(2)}</Text>
               </View>
-              <Text style={styles.feeAmount}>${(storageFee || 0).toFixed(2)}</Text>
+              <Text style={{ fontSize: 5, marginTop: 2, fontStyle: 'italic' }}>(Principal + All Fees)</Text>
             </View>
 
             </View>
@@ -511,7 +520,7 @@ const PawnTicketTemplate = ({
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                     <View>
                       <Text style={{ fontSize: 6, fontWeight: 'bold' }}>Extension Cost:</Text>
-                      <Text style={{ fontSize: 4, fontStyle: 'italic' }}>(For an additional 31 days)</Text>
+                      <Text style={{ fontSize: 4, fontStyle: 'italic' }}>(For an additional {frequency} days)</Text>
                     </View>
                     <Text style={{ fontSize: 8, fontWeight: 'bold' }}>${(extensionCost || 0).toFixed(2)}</Text>
                   </View>

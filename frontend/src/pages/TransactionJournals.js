@@ -272,14 +272,18 @@ function TransactionJournals() {
       console.error('Error fetching business info:', error);
     }
 
-    // Fetch pawn config to get term_days
+    // Fetch pawn config to get term_days, interest_rate, and frequency_days
     let termDays = 62; // Default value
+    let configInterestRate = 2.9; // Default value
+    let frequencyDays = 30; // Default value
     try {
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API_BASE_URL}/pawn-config`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       termDays = parseInt(response.data.term_days) || 62;
+      configInterestRate = parseFloat(response.data.interest_rate) || 2.9;
+      frequencyDays = parseInt(response.data.frequency_days) || 30;
     } catch (error) {
       console.error('Error fetching pawn config:', error);
     }
@@ -309,15 +313,27 @@ function TransactionJournals() {
     // Get pawn ticket details if this is a pawn ticket
     const pawnTicketData = isPawnTicket ? pawnTickets.find(pt => pt.pawn_ticket_id === ticketId) : null;
 
-    // Calculate fees (these should come from pawn_ticket table in reality)
-    const principalAmount = pawnTicketData?.principal_amount || totalAmount;
-    const appraisalFee = pawnTicketData?.appraisal_fee || 0;
-    const interestRate = pawnTicketData?.interest_rate || 2.9;
-    const interestAmount = pawnTicketData?.interest_amount || (principalAmount * 0.029);
-    const insuranceCost = pawnTicketData?.insurance_cost || (principalAmount * 0.01);
-    const storageFee = pawnTicketData?.storage_fee || 0;
-    const totalCostOfBorrowing = appraisalFee + interestAmount + insuranceCost + storageFee;
-    const extensionCost = interestAmount + insuranceCost + storageFee;
+    // Calculate fees based on pawn_config values
+    // Principal amount is the sum of all item prices from jewelry table
+    const principalAmount = totalAmount;
+    const appraisalFee = 0;
+
+    // Calculate number of interest periods (how many frequency_days periods fit in term_days)
+    const interestPeriods = Math.ceil(termDays / frequencyDays);
+
+    // Calculate interest: principal × (interest_rate / 100) × periods
+    const interestAmount = principalAmount * (configInterestRate / 100) * interestPeriods;
+
+    // Calculate insurance: principal × 1% × periods
+    const insuranceCost = principalAmount * 0.01 * interestPeriods;
+
+    const totalCostOfBorrowing = appraisalFee + interestAmount + insuranceCost;
+
+    // Extension cost for one additional frequency period (interest + insurance)
+    const extensionCost = principalAmount * (configInterestRate / 100) + (principalAmount * 0.01);
+
+    // Total amount to redeem (principal + all fees)
+    const totalRedemptionAmount = principalAmount + totalCostOfBorrowing;
 
     // Get legal terms based on ticket type
     const legalTerms = isPawnTicket ? receiptConfig.pawn_receipt : (isSaleTransaction ? receiptConfig.sales_receipt : receiptConfig.buy_receipt);
@@ -342,14 +358,15 @@ function TransactionJournals() {
         ticketItems={ticketItems}
         principalAmount={principalAmount}
         appraisalFee={appraisalFee}
-        interestRate={interestRate}
+        interestRate={configInterestRate}
         interestAmount={interestAmount}
         insuranceCost={insuranceCost}
-        storageFee={storageFee}
         extensionCost={extensionCost}
         totalCostOfBorrowing={totalCostOfBorrowing}
+        totalRedemptionAmount={totalRedemptionAmount}
         legalTerms={legalTerms}
         termDays={termDays}
+        frequencyDays={frequencyDays}
       />
     );
 
