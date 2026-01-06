@@ -3309,6 +3309,76 @@ app.post('/api/pawn-ticket', async (req, res) => {
   }
 });
 
+// Get all pawn transactions with details
+app.get('/api/pawn-transactions', async (req, res) => {
+  try {
+    const query = `
+      SELECT
+        pt.pawn_ticket_id,
+        pt.transaction_id,
+        pt.item_id,
+        pt.created_at as pawn_created_at,
+        t.transaction_date,
+        t.customer_id,
+        CONCAT(c.first_name, ' ', c.last_name) as customer_name,
+        CONCAT(c.address_line1, COALESCE(', ' || c.address_line2, ''), ', ', c.city, ', ', c.state, ' ', c.postal_code) as customer_address,
+        c.phone as customer_phone,
+        j.long_desc as item_description,
+        j.short_desc as item_short_desc,
+        j.item_price,
+        j.status as item_status,
+        j.category,
+        j.metal_weight,
+        j.precious_metal_type
+      FROM pawn_ticket pt
+      LEFT JOIN transactions t ON pt.transaction_id = t.transaction_id
+      LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN jewelry j ON pt.item_id = j.item_id
+      ORDER BY pt.created_at DESC
+    `;
+
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching pawn transactions:', error);
+    res.status(500).json({ error: 'Failed to fetch pawn transactions' });
+  }
+});
+
+// Redeem pawn item
+app.post('/api/redeem-pawn', async (req, res) => {
+  const { pawn_ticket_id, item_id } = req.body;
+
+  try {
+    // Start transaction
+    await pool.query('BEGIN');
+
+    // Update jewelry item status to REDEEMED
+    await pool.query(
+      'UPDATE jewelry SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE item_id = $2',
+      ['REDEEMED', item_id]
+    );
+
+    // Log the redemption (you can add additional logging here if needed)
+    console.log(`Item ${item_id} from pawn ticket ${pawn_ticket_id} has been redeemed`);
+
+    // Commit transaction
+    await pool.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: 'Item successfully redeemed',
+      pawn_ticket_id,
+      item_id
+    });
+  } catch (error) {
+    // Rollback on error
+    await pool.query('ROLLBACK');
+    console.error('Error redeeming pawn:', error);
+    res.status(500).json({ error: 'Failed to redeem pawn item' });
+  }
+});
+
 // Quote Expiration Configuration API Endpoints
 app.get('/api/quote-expiration/config', async (req, res) => {
   try {
