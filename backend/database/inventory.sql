@@ -124,7 +124,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for updated_at
--- DROP TRIGGER IF EXISTS update_jewelry_timestamp ON jewelry;
+DROP TRIGGER IF EXISTS update_jewelry_timestamp ON jewelry;
 CREATE TRIGGER update_jewelry_timestamp
     BEFORE UPDATE ON jewelry
     FOR EACH ROW
@@ -163,7 +163,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for secondary_gems updated_at
--- DROP TRIGGER IF EXISTS update_jewelry_secondary_gems_timestamp ON jewelry_secondary_gems;
+DROP TRIGGER IF EXISTS update_jewelry_secondary_gems_timestamp ON jewelry_secondary_gems;
 CREATE TRIGGER update_jewelry_secondary_gems_timestamp
     BEFORE UPDATE ON jewelry_secondary_gems
     FOR EACH ROW
@@ -208,6 +208,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for storage_location updated_at
+DROP TRIGGER IF EXISTS update_storage_location_timestamp ON storage_location;
 CREATE TRIGGER update_storage_location_timestamp
     BEFORE UPDATE ON storage_location
     FOR EACH ROW
