@@ -134,6 +134,12 @@ function SystemConfig() {
   const [isPerTransaction, setIsPerTransaction] = useState(false);
   const [updateMethod, setUpdateMethod] = useState(null);
   const [spotPrices, setSpotPrices] = useState({});
+  const [pawnConfig, setPawnConfig] = useState({
+    interest_rate: 0.00,
+    term_days: 30,
+    frequency_days: 30,
+    forfeiture_mode: 'manual'
+  });
   const [caratConversion, setCaratConversion] = useState(null);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
   const [isInventoryHoldPeriodEnabled, setIsInventoryHoldPeriodEnabled] = useState(false);
@@ -142,6 +148,8 @@ function SystemConfig() {
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
   const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
   const [drawers, setDrawers] = useState([]);
+  const [numberOfCases, setNumberOfCases] = useState({ count: 0, id: null });
+  const [cases, setCases] = useState([]);
   const [isBlindCount, setIsBlindCount] = useState(true);
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState({ amount: 0.00, id: null });
   const [minClose, setMinClose] = useState(0);
@@ -153,6 +161,8 @@ function SystemConfig() {
   const [newAttributeType, setNewAttributeType] = useState('dropdown');
   const [newAttributeValue, setNewAttributeValue] = useState({});
   const [selectedCustomerColumns, setSelectedCustomerColumns] = useState({});
+  const [transactionTypes, setTransactionTypes] = useState([]);
+  const [customerColumnPreferences, setCustomerColumnPreferences] = useState({});
 
   const fetchDrawerConfig = async () => {
     try {
@@ -178,6 +188,33 @@ function SystemConfig() {
     } catch (error) {
       console.error('Error fetching drawers:', error);
       setDrawers([]);
+    }
+  };
+
+  const fetchCasesConfig = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/cases-config`);
+      if (response.data) {
+        setNumberOfCases({
+          count: response.data.number_of_cases,
+          id: response.data.id || null,
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching cases config:', error);
+      setNumberOfCases({ count: 0, id: null });
+    }
+  };
+
+  const fetchCases = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/cases`);
+      if (response.data) {
+        setCases(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching cases:', error);
+      setCases([]);
     }
   };
 
@@ -246,56 +283,66 @@ function SystemConfig() {
   const fetchCustomerHeaderPreferences = async () => {
     try {
       setLoading(true);
-      
-      // Fetch the customer preferences directly
-      const prefsResponse = await axios.get(`${API_BASE_URL}/customer-preferences/config`);
-      const preferences = prefsResponse.data || {};
-      
-      // Extract all fields that start with 'show_' from the preferences object
-      const showFields = Object.keys(preferences).filter(field => field.startsWith('show_'));
-      
-      // Create mappings between database fields and UI fields
-      const dbToUiMapping = {};
-      const uiToDbMapping = {};
-      
-      showFields.forEach(dbField => {
-        // Convert show_field_name to field_name for UI
-        const uiField = dbField.replace('show_', '');
-        dbToUiMapping[dbField] = uiField;
-        uiToDbMapping[uiField] = dbField;
-      });
-      
-      // Create preferences object for UI state
-      const columnPreferences = {};
-      
-      // Map database preferences to UI fields
-      Object.keys(dbToUiMapping).forEach(dbField => {
-        if (preferences[dbField] !== undefined) {
-          const uiField = dbToUiMapping[dbField];
-          columnPreferences[uiField] = preferences[dbField];
+
+      // Fetch all customer preferences (customers + transaction types)
+      const allPrefsResponse = await axios.get(`${API_BASE_URL}/customer-preferences/all`);
+      const allPreferences = allPrefsResponse.data || [];
+
+      // Find the 'customers' preferences
+      const customersRow = allPreferences.find(row => row.header_preferences === 'customers');
+
+      if (customersRow) {
+        // Extract all fields that start with 'show_' from the preferences object
+        const showFields = Object.keys(customersRow).filter(field => field.startsWith('show_'));
+
+        // Create preferences object for UI state (header preferences)
+        const columnPreferences = {};
+
+        showFields.forEach(dbField => {
+          const uiField = dbField.replace('show_', '');
+          columnPreferences[uiField] = customersRow[dbField];
+        });
+
+        // Update selected columns state for header preferences
+        setSelectedCustomerColumns(columnPreferences);
+
+        // Generate columns array for the UI (if still needed)
+        const uiColumns = showFields.map(dbField => {
+          const uiField = dbField.replace('show_', '');
+          return {
+            name: uiField,
+            label: uiField.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+            type: getColumnType(uiField),
+            selected: customersRow[dbField] || false
+          };
+        });
+
+        setCustomerColumns(uiColumns);
+      }
+
+      // Load transaction type preferences
+      const txTypePrefs = {};
+      allPreferences.forEach(row => {
+        if (row.header_preferences !== 'customers') {
+          const txType = row.header_preferences;
+
+          // Extract show_* fields
+          Object.keys(row).forEach(key => {
+            if (key.startsWith('show_')) {
+              const field = key.replace('show_', '');
+              const prefKey = `${txType}_${field}`;
+              txTypePrefs[prefKey] = row[key];
+            }
+          });
         }
       });
 
-      // Update selected columns state
-      setSelectedCustomerColumns(columnPreferences);
-      
-      // Generate columns array for the UI
-      const uiColumns = Object.keys(dbToUiMapping).map(dbField => {
-        const uiField = dbToUiMapping[dbField];
-        return {
-          name: uiField,
-          label: uiField.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
-          type: getColumnType(uiField),
-          selected: preferences[dbField] || false
-        };
-      });
-      
-      // Update customer columns state for UI display
-      setCustomerColumns(uiColumns);
-      
+      // Update transaction type preferences state
+      setCustomerColumnPreferences(txTypePrefs);
+
     } catch (error) {
       console.error('Error fetching customer header preferences:', error);
-      
+
 
     } finally {
       setLoading(false);
@@ -312,6 +359,44 @@ function SystemConfig() {
       return 'string';
     }
   };
+
+  // Fetch transaction types from the database
+  const fetchTransactionTypes = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/transaction-types`);
+      setTransactionTypes(response.data);
+    } catch (error) {
+      console.error('Error fetching transaction types:', error);
+    }
+  };
+
+  // Define available customer columns
+  const availableCustomerColumns = [
+    { field: 'first_name', label: 'First Name' },
+    { field: 'last_name', label: 'Last Name' },
+    { field: 'email', label: 'Email' },
+    { field: 'phone', label: 'Phone' },
+    { field: 'address_line1', label: 'Address Line 1' },
+    { field: 'address_line2', label: 'Address Line 2' },
+    { field: 'city', label: 'City' },
+    { field: 'state', label: 'State' },
+    { field: 'postal_code', label: 'Postal Code' },
+    { field: 'country', label: 'Country' },
+    { field: 'id_type', label: 'ID Type' },
+    { field: 'id_number', label: 'ID Number' },
+    { field: 'id_expiry_date', label: 'ID Expiry Date' },
+    { field: 'date_of_birth', label: 'Date of Birth' },
+    { field: 'gender', label: 'Gender' },
+    { field: 'height', label: 'Height' },
+    { field: 'weight', label: 'Weight' },
+    { field: 'status', label: 'Status' },
+    { field: 'risk_level', label: 'Risk Level' },
+    { field: 'tax_exempt', label: 'Tax Exempt' },
+    { field: 'image', label: 'Customer Image' },
+    { field: 'id_image_front', label: 'ID Image Front' },
+    { field: 'id_image_back', label: 'ID Image Back' },
+    { field: 'notes', label: 'Notes' }
+  ];
 
   useEffect(() => {
     const fetchPreciousMetalNames = async () => {
@@ -494,8 +579,25 @@ function SystemConfig() {
       }
     };
 
+    const fetchPawnConfig = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/pawn-config`);
+        if (response.data) {
+          setPawnConfig({
+            interest_rate: parseFloat(response.data.interest_rate) || 0.00,
+            term_days: parseInt(response.data.term_days) || 30,
+            frequency_days: parseInt(response.data.frequency_days) || 30,
+            forfeiture_mode: response.data.forfeiture_mode || 'manual'
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching pawn config:', error);
+      }
+    };
+
     // Fetch data on component mount
     fetchCustomerHeaderPreferences();
+    fetchTransactionTypes();
     fetchPreciousMetalNames();
     fetchLivePricing();
     fetchSpotPrices();
@@ -506,11 +608,14 @@ function SystemConfig() {
     fetchInventoryHoldPeriod();
     fetchDrawerConfig();
     fetchDrawers();
+    fetchCasesConfig();
+    fetchCases();
     fetchBlindCountPreference();
     fetchDiscrepancyThreshold();
     fetchTaxConfig();
     fetchAuthorizationTemplate();
     fetchReceiptConfig();
+    fetchPawnConfig();
   }, []);
   
   const handleTabChange = (event, newValue) => {
@@ -762,21 +867,58 @@ function SystemConfig() {
       
       // Save customer header preferences
       try {
-        // Convert the selectedCustomerColumns object to the format expected by the API
-        const headerPreferences = {
-          display_header: true,
-          header_style: 'standard'
-        };
-        
-        // Map UI fields to database fields
+        // 1. Save header preferences for 'customers' context
+        const customersPreferences = {};
         Object.keys(selectedCustomerColumns).forEach(uiField => {
-          const dbField = 'show_' + uiField; // Correct mapping from UI field to database field
-          headerPreferences[dbField] = selectedCustomerColumns[uiField];
+          const dbField = 'show_' + uiField;
+          customersPreferences[dbField] = selectedCustomerColumns[uiField];
         });
-        
-        await axios.put(`${API_BASE_URL}/customer-preferences/config`, headerPreferences);
+
+        await axios.put(`${API_BASE_URL}/customer-preferences/update-by-context`, {
+          header_preferences: 'customers',
+          preferences: customersPreferences
+        });
+
+        // 2. Save preferences for each transaction type
+        const transactionTypeUpdates = transactionTypes.map(async (txType) => {
+          const txPreferences = {};
+
+          // Extract preferences for this transaction type from customerColumnPreferences
+          Object.keys(customerColumnPreferences).forEach(key => {
+            // Key format: ${type}_${field}
+            if (key.startsWith(`${txType.type}_`)) {
+              const field = key.substring(txType.type.length + 1); // Remove "${type}_" prefix
+              const dbField = 'show_' + field;
+              txPreferences[dbField] = customerColumnPreferences[key];
+            }
+          });
+
+          // Only update if there are preferences to save
+          if (Object.keys(txPreferences).length > 0) {
+            return axios.put(`${API_BASE_URL}/customer-preferences/update-by-context`, {
+              header_preferences: txType.type,
+              preferences: txPreferences
+            });
+          }
+        });
+
+        // Wait for all transaction type updates to complete
+        await Promise.all(transactionTypeUpdates.filter(Boolean));
       } catch (headerError) {
         console.error('Error saving customer header preferences:', headerError);
+      }
+
+      // Save pawn configuration
+      try {
+        const pawnConfigPayload = {
+          interest_rate: parseFloat(pawnConfig.interest_rate),
+          term_days: parseInt(pawnConfig.term_days),
+          frequency_days: parseInt(pawnConfig.frequency_days),
+          forfeiture_mode: pawnConfig.forfeiture_mode
+        };
+        await axios.put(`${API_BASE_URL}/pawn-config`, pawnConfigPayload);
+      } catch (pawnError) {
+        console.error('Error saving pawn config:', pawnError);
       }
 
       setSnackbar({
@@ -933,6 +1075,39 @@ function SystemConfig() {
     }
   };
 
+  const handlePawnConfigChange = async (field, value) => {
+    // Update state
+    const updatedConfig = {
+      ...pawnConfig,
+      [field]: value
+    };
+    setPawnConfig(updatedConfig);
+
+    // Auto-save to database
+    try {
+      const response = await axios.put(`${API_BASE_URL}/pawn-config`, {
+        interest_rate: parseFloat(updatedConfig.interest_rate),
+        term_days: parseInt(updatedConfig.term_days),
+        frequency_days: parseInt(updatedConfig.frequency_days),
+        forfeiture_mode: updatedConfig.forfeiture_mode
+      });
+
+      setSnackbar({
+        open: true,
+        message: 'Pawn configuration saved',
+        severity: 'success',
+      });
+    } catch (error) {
+      console.error('Error saving pawn config:', error);
+      console.error('Error details:', error.response?.data);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save pawn configuration',
+        severity: 'error',
+      });
+    }
+  };
+
   const handleNumberOfDrawersChange = async (event) => {
     const newCount = parseInt(event.target.value);
     if (newCount < 0) {
@@ -980,6 +1155,58 @@ function SystemConfig() {
       setSnackbar({
         open: true,
         message: 'Failed to update number of drawers configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleNumberOfCasesChange = async (event) => {
+    const newCount = parseInt(event.target.value);
+    if (newCount < 0) {
+      setSnackbar({
+        open: true,
+        message: 'Number of cases cannot be negative',
+        severity: 'error'
+      });
+      return;
+    }
+
+    if (newCount > 100) {
+      setSnackbar({
+        open: true,
+        message: 'Number of cases cannot exceed 100',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.put(`${API_BASE_URL}/cases-config`, {
+        number_of_cases: newCount
+      });
+
+      setNumberOfCases({
+        count: response.data.number_of_cases,
+        id: response.data.id
+      });
+
+      // Refresh the cases list
+      await fetchCases();
+
+      const caseMessage = newCount === 0
+        ? 'No storage cases configured.'
+        : `${newCount} storage case${newCount > 1 ? 's' : ''} created (Case 1${newCount > 1 ? ` to Case ${newCount}` : ''}).`;
+
+      setSnackbar({
+        open: true,
+        message: `Storage cases configuration updated. ${caseMessage}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating number of cases:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update number of cases configuration',
         severity: 'error'
       });
     }
@@ -1594,6 +1821,61 @@ function SystemConfig() {
                 </TableContainer>
               </Box>
             )}
+
+            {/* Storage Cases Configuration */}
+            <Box sx={{ mt: 4 }}>
+              <Typography variant="h6" gutterBottom fontWeight="bold">
+                Storage Cases Configuration
+              </Typography>
+              <Box display="flex" alignItems="center" gap={2} sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider', flexWrap: 'wrap' }}>
+                <TextField
+                  label="Number of Cases"
+                  type="number"
+                  value={numberOfCases.count}
+                  onChange={(e) => setNumberOfCases(prev => ({ ...prev, count: e.target.value }))}
+                  onBlur={(e) => handleNumberOfCasesChange(e)}
+                  size="small"
+                  sx={{ width: 180 }}
+                  InputProps={{
+                    endAdornment: <InputAdornment position="end">cases</InputAdornment>,
+                  }}
+                  inputProps={{ min: 0, max: 100 }}
+                  helperText="Number of cases (0-100)"
+                />
+              </Box>
+            </Box>
+
+            {cases.length > 0 && (
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                  Configured Storage Cases:
+                </Typography>
+                <TableContainer component={Paper} sx={{ mt: 1 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Location</TableCell>
+                        <TableCell align="center">Status</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {cases.map((caseItem) => (
+                        <TableRow key={caseItem.location_id}>
+                          <TableCell>{caseItem.location}</TableCell>
+                          <TableCell align="center">
+                            {caseItem.is_occupied ? (
+                              <Typography color="warning.main" variant="body2">Occupied</Typography>
+                            ) : (
+                              <Typography color="success.main" variant="body2">Available</Typography>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            )}
           </ConfigSection>
 
           <ConfigSection>
@@ -1602,47 +1884,64 @@ function SystemConfig() {
             </Typography>
             <Box sx={{ mb: 3 }}>
               <Typography variant="body2" color="textSecondary" paragraph>
-                Select which columns should be displayed as headers in the customer table:
+                Select which customer columns should be displayed for each transaction type:
               </Typography>
-              <TableContainer component={Paper} sx={{ mt: 2 }}>
-                <Table size="small">
+              <TableContainer component={Paper} sx={{ mt: 2, maxHeight: 600 }}>
+                <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Select</TableCell>
-                      <TableCell>Column Name</TableCell>
-                      <TableCell>Display Label</TableCell>
-                      <TableCell>Data Type</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 150 }}>Customer Field</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 120, bgcolor: '#f5f5f5' }}>
+                        Header Preferences
+                      </TableCell>
+                      {transactionTypes.map((txType) => (
+                        <TableCell key={txType.id} align="center" sx={{ fontWeight: 'bold', minWidth: 100 }}>
+                          {txType.type.charAt(0).toUpperCase() + txType.type.slice(1)}
+                        </TableCell>
+                      ))}
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {customerColumns.map((column) => (
-                      <TableRow key={column.name}>
-                        <TableCell padding="checkbox">
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={selectedCustomerColumns[column.name] || false}
-                                onChange={(e) => {
-                                  setSelectedCustomerColumns(prev => ({
-                                    ...prev,
-                                    [column.name]: e.target.checked
-                                  }));
-                                }}
-                                color="primary"
-                                size="small"
-                              />
-                            }
-                            label=""                           
+                    {availableCustomerColumns.map((column) => (
+                      <TableRow key={column.field} hover>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {column.label}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center" padding="checkbox" sx={{ bgcolor: '#fafafa' }}>
+                          <Checkbox
+                            checked={selectedCustomerColumns[column.field] || false}
+                            onChange={(e) => {
+                              setSelectedCustomerColumns(prev => ({
+                                ...prev,
+                                [column.field]: e.target.checked
+                              }));
+                            }}
+                            color="primary"
+                            size="small"
                           />
                         </TableCell>
-                        <TableCell><code>{column.name}</code></TableCell>
-                        <TableCell>{column.label}</TableCell>
-                        <TableCell>{column.type}</TableCell>
+                        {transactionTypes.map((txType) => (
+                          <TableCell key={txType.id} align="center" padding="checkbox">
+                            <Checkbox
+                              checked={customerColumnPreferences[`${txType.type}_${column.field}`] || false}
+                              onChange={(e) => {
+                                setCustomerColumnPreferences(prev => ({
+                                  ...prev,
+                                  [`${txType.type}_${column.field}`]: e.target.checked
+                                }));
+                              }}
+                              color="primary"
+                              size="small"
+                            />
+                          </TableCell>
+                        ))}
                       </TableRow>
                     ))}
-                    {customerColumns.length === 0 && (
+                    {availableCustomerColumns.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={4} align="center">
+                        <TableCell colSpan={transactionTypes.length + 1} align="center">
                           {loading ? 'Loading...' : 'No columns found'}
                         </TableCell>
                       </TableRow>
@@ -1651,9 +1950,9 @@ function SystemConfig() {
                 </Table>
               </TableContainer>
               <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-                <Button 
-                  variant="contained" 
-                  color="primary" 
+                <Button
+                  variant="contained"
+                  color="primary"
                   onClick={handleSaveSettings}
                   disabled={loading}
                 >
@@ -1754,18 +2053,77 @@ function SystemConfig() {
                 </div>
               </div>
             ) : (
-              <Grid container spacing={2}>
-                {Object.keys(preciousMetalNames).map((metal) => (
-                  <Grid item xs={12} sm={3} key={metal}>
+              <Box>
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 3 }}>
+                  {Object.keys(preciousMetalNames).map((metal) => (
                     <TextField
+                      key={metal}
                       label={`${preciousMetalNames[metal]} Spot Price`}
                       value={spotPrices[metal]}
                       onChange={(e) => handleSpotPriceChange(e, metal)}
+                      sx={{ minWidth: '150px', flex: '1 1 auto' }}
+                    />
+                  ))}
+                </Box>
+                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+                  Pawn Configuration
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={3}>
+                    <TextField
+                      label="Interest Rate (%)"
+                      type="number"
+                      value={pawnConfig.interest_rate}
+                      onChange={(e) => handlePawnConfigChange('interest_rate', e.target.value)}
                       fullWidth
+                      inputProps={{ min: 0, max: 100, step: 0.01 }}
                     />
                   </Grid>
-                ))}
-              </Grid>
+                  <Grid item xs={12} sm={3}>
+                    <TextField
+                      select
+                      label="Term (Days)"
+                      value={pawnConfig.term_days}
+                      onChange={(e) => handlePawnConfigChange('term_days', e.target.value)}
+                      fullWidth
+                    >
+                      {[15, 30, 45, 60, 90, 120, 180].map((days) => (
+                        <MenuItem key={days} value={days}>
+                          {days}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  </Grid>
+                  <Grid item xs={12} sm={3}>
+                    <TextField
+                      select
+                      label="Frequency (Days)"
+                      value={pawnConfig.frequency_days}
+                      onChange={(e) => handlePawnConfigChange('frequency_days', e.target.value)}
+                      fullWidth
+                    >
+                      {[15, 30, 45, 60, 90, 120, 180].map((days) => (
+                        <MenuItem key={days} value={days}>
+                          {days}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  </Grid>
+                  <Grid item xs={12} sm={3}>
+                    <TextField
+                      select
+                      label="Forfeiture Mode"
+                      value={pawnConfig.forfeiture_mode}
+                      onChange={(e) => handlePawnConfigChange('forfeiture_mode', e.target.value)}
+                      fullWidth
+                      helperText="Manual or Auto"
+                    >
+                      <MenuItem value="manual">Manual</MenuItem>
+                      <MenuItem value="automatic">Automatic</MenuItem>
+                    </TextField>
+                  </Grid>
+                </Grid>
+              </Box>
             )}
             <Box mt={2}>
               <Typography variant="h6" gutterBottom>
