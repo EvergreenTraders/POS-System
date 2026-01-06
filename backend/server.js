@@ -7194,7 +7194,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Database migration endpoint (protected)
+// Database migration endpoint (protected) - with data import
 app.post('/api/migrate', async (req, res) => {
   try {
     // Simple authentication - require a migration key
@@ -7204,14 +7204,14 @@ app.post('/api/migrate', async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
-    console.log('Running database migrations...');
-    const { runMigrations } = require('./migrate');
+    console.log('Running database migrations with data import...');
+    const { runMigrationsWithData } = require('./migrate-with-data');
 
-    const results = await runMigrations();
+    const results = await runMigrationsWithData();
 
     res.json({
       success: true,
-      message: 'Migrations completed successfully',
+      message: 'Migrations and data import completed successfully',
       results
     });
   } catch (error) {

@@ -20,25 +20,34 @@ const TABLES = [
   'employees',
   'customers',
   'business_info',
-  'inventory',
+  'system_config',
+  'pawn_config',
+  'tax_config',
+  'cases_config',
+  'cash_drawer_sessions',
+  'storage_location',
   'metal_estimator',
   'gem_estimator',
-  'system_config',
+  'jewelry',
+  'jewelry_secondary_gems',
+  'transactions',
+  'transaction_items',
+  'transaction_types',
+  'payment_methods',
+  'payments',
+  'pawn_ticket',
+  'buy_ticket',
+  'sale_ticket',
+  'layaway',
+  'layaway_payments',
+  'scrap_buckets',
+  'scrap_items',
+  'quotes',
+  'quote_items',
+  'jewelry_item_history',
   'linked_account_authorization',
   'customer_account_links',
-  'item_attributes',
-  'item_history',
-  'transactions',
-  'customer_ticket',
-  'layaway',
-  'scrap',
-  'scrap_history',
-  'quotes',
-  'tax_config',
-  'drawers',
-  'drawer_config',
-  'discrepancy_threshold',
-  'cash_drawer_sessions'
+  'customer_headers_preferences'
 ];
 
 async function exportTableData(tableName) {
@@ -162,6 +171,18 @@ async function exportAllData() {
   console.log(`Total: ${exportData.tables.length} tables, ${totalRows} rows`);
   console.log(`Export file: ${exportFile}`);
   console.log('='.repeat(60));
+
+  // Also create a simple data-export.json for deployment
+  const deploymentExportFile = path.join(__dirname, 'data-export.json');
+  console.log(`\nCreating deployment export file: ${deploymentExportFile}`);
+
+  try {
+    // Copy the timestamped file to data-export.json for deployment
+    fs.copyFileSync(exportFile, deploymentExportFile);
+    console.log('✓ Deployment export file created successfully');
+  } catch (error) {
+    console.error('⚠ Warning: Could not create deployment export file:', error.message);
+  }
 
   return exportFile;
 }

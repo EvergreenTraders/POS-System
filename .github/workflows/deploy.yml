@@ -42,9 +42,32 @@ jobs:
           cd backend
           npm ci --production
 
+      - name: Export local database data
+        if: ${{ github.event.inputs.run_migrations == 'true' }}
+        env:
+          DB_HOST: ${{ secrets.LOCAL_DB_HOST }}
+          DB_USER: ${{ secrets.LOCAL_DB_USER }}
+          DB_PASSWORD: ${{ secrets.LOCAL_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.LOCAL_DB_NAME }}
+          DB_PORT: ${{ secrets.LOCAL_DB_PORT }}
+        run: |
+          cd backend
+          echo "Exporting local database data..."
+          node export-data.js
+          if [ -f "data-export.json" ]; then
+            echo "✓ Data export completed"
+            ls -lh data-export.json
+          else
+            echo "⚠ Warning: Data export file not created, deployment will continue without data import"
+          fi
+
       - name: Generate deployment package
         run: |
-          zip -r deploy.zip backend/ Procfile .platform/ -x "backend/uploads/*" "*.git*" "*.env*"
+          if [ -f "backend/data-export.json" ]; then
+            zip -r deploy.zip backend/ Procfile .platform/ -x "backend/uploads/*" "*.git*" "*.env*" "backend/data-exports/*"
+          else
+            zip -r deploy.zip backend/ Procfile .platform/ -x "backend/uploads/*" "*.git*" "*.env*" "backend/data-exports/*" "backend/data-export.json"
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
