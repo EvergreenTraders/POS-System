@@ -132,13 +132,16 @@ async function importData() {
       let skippedCount = 0;
 
       for (const tableName of importOrder) {
-        const tableData = dataExport.tables[tableName];
+        // Find table in export by name
+        const tableExport = dataExport.tables.find(t => t.table === tableName);
 
-        if (!tableData || tableData.length === 0) {
+        if (!tableExport || !tableExport.rows || tableExport.rows.length === 0) {
           console.log(`  ⊘ ${tableName}: No data to import`);
           skippedCount++;
           continue;
         }
+
+        const tableData = tableExport.rows;
 
         console.log(`  Importing ${tableName} (${tableData.length} rows)...`);
 
@@ -147,13 +150,16 @@ async function importData() {
         const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
         const columnNames = columns.join(', ');
 
-        // Clear existing data (optional - comment out if you want to preserve existing data)
-        // await client.query(`TRUNCATE TABLE ${tableName} CASCADE`);
+        // Clear existing data to ensure fresh import
+        try {
+          await client.query(`TRUNCATE TABLE ${tableName} RESTART IDENTITY CASCADE`);
+        } catch (error) {
+        }
 
         // Insert data
         for (const row of tableData) {
           const values = columns.map(col => row[col]);
-          const query = `INSERT INTO ${tableName} (${columnNames}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`;
+          const query = `INSERT INTO ${tableName} (${columnNames}) VALUES (${placeholders})`;
 
           try {
             await client.query(query, values);
