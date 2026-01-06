@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS inventory_status (
 --     ('SOLD', 'Sold', 'Item has been sold')
 --     ('PAWN', 'Pawn', 'Item is pawned to a customer')
 --     ('REDEEMED', 'Redeemed', 'Item has been redeemed by customer')
+--     ('FORFEITED', 'Forfeited', 'Item has been forfeited and ready to be moved to active inventory')
 -- ON CONFLICT (status_code) DO NOTHING;
 
 -- Drop change_notes column if it exists (migration)

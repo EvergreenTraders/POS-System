@@ -7154,6 +7154,154 @@ app.post('/api/migrate', async (req, res) => {
   }
 });
 
+// Pawn Forfeiture Check Endpoint
+app.post('/api/pawn/check-forfeitures', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Get pawn config to determine forfeiture mode and term_days
+    const configResult = await client.query('SELECT term_days, forfeiture_mode FROM pawn_config LIMIT 1');
+
+    if (configResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Pawn configuration not found' });
+    }
+
+    const { term_days, forfeiture_mode } = configResult.rows[0];
+
+    // Find all pawn items that have passed their due date
+    // Query jewelry items with status 'PAWN' and check if transaction_date + term_days < current_date
+    const forfeitedItemsQuery = `
+      SELECT
+        j.item_id,
+        pt.pawn_ticket_id,
+        t.transaction_date,
+        t.transaction_date + INTERVAL '1 day' * $1 as due_date
+      FROM jewelry j
+      INNER JOIN pawn_ticket pt ON j.item_id = pt.item_id
+      INNER JOIN transactions t ON pt.transaction_id = t.transaction_id
+      WHERE j.status = 'PAWN'
+        AND t.transaction_date + INTERVAL '1 day' * $1 < CURRENT_DATE
+    `;
+
+    const forfeitedItems = await client.query(forfeitedItemsQuery, [term_days]);
+
+    if (forfeitedItems.rows.length === 0) {
+      await client.query('COMMIT');
+      return res.json({
+        message: 'No items to forfeit',
+        count: 0,
+        forfeiture_mode
+      });
+    }
+
+    // Determine target status based on forfeiture_mode
+    const targetStatus = forfeiture_mode === 'automatic' ? 'ACTIVE' : 'FORFEITED';
+
+    // Update all forfeited items to the target status
+    const itemIds = forfeitedItems.rows.map(item => item.item_id);
+
+    const updateQuery = `
+      UPDATE jewelry
+      SET status = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = ANY($2)
+      RETURNING item_id, status
+    `;
+
+    const updateResult = await client.query(updateQuery, [targetStatus, itemIds]);
+
+    await client.query('COMMIT');
+
+    console.log(`✓ Forfeiture check: ${updateResult.rows.length} items moved to ${targetStatus} status`);
+
+    res.json({
+      message: `Successfully processed ${updateResult.rows.length} forfeited items`,
+      count: updateResult.rows.length,
+      forfeiture_mode,
+      target_status: targetStatus,
+      items: updateResult.rows
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error processing forfeitures:', error);
+    res.status(500).json({ error: 'Failed to process forfeitures', details: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Forfeiture check function that runs periodically
+async function checkPawnForfeitures() {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Get pawn config
+    const configResult = await client.query('SELECT term_days, forfeiture_mode FROM pawn_config LIMIT 1');
+
+    if (configResult.rows.length === 0) {
+      console.log('⚠ Pawn configuration not found, skipping forfeiture check');
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    const { term_days, forfeiture_mode } = configResult.rows[0];
+
+    // Find all pawn items that have passed their due date
+    const forfeitedItemsQuery = `
+      SELECT
+        j.item_id,
+        pt.pawn_ticket_id,
+        t.transaction_date,
+        t.transaction_date + INTERVAL '1 day' * $1 as due_date
+      FROM jewelry j
+      INNER JOIN pawn_ticket pt ON j.item_id = pt.item_id
+      INNER JOIN transactions t ON pt.transaction_id = t.transaction_id
+      WHERE j.status = 'PAWN'
+        AND t.transaction_date + INTERVAL '1 day' * $1 < CURRENT_DATE
+    `;
+
+    const forfeitedItems = await client.query(forfeitedItemsQuery, [term_days]);
+
+    if (forfeitedItems.rows.length === 0) {
+      await client.query('COMMIT');
+      return;
+    }
+
+    // Determine target status based on forfeiture_mode
+    const targetStatus = forfeiture_mode === 'automatic' ? 'ACTIVE' : 'FORFEITED';
+
+    // Update all forfeited items to the target status
+    const itemIds = forfeitedItems.rows.map(item => item.item_id);
+
+    const updateQuery = `
+      UPDATE jewelry
+      SET status = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = ANY($2)
+      RETURNING item_id, status
+    `;
+
+    const updateResult = await client.query(updateQuery, [targetStatus, itemIds]);
+
+    await client.query('COMMIT');
+
+    console.log(`✓ Forfeiture check: ${updateResult.rows.length} items moved to ${targetStatus} status`);
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('❌ Error in forfeiture check:', error.message);
+  } finally {
+    client.release();
+  }
+}
+
+// Run forfeiture check every 6 hours (21600000 ms)
+setInterval(checkPawnForfeitures, 21600000);
+
+// Run forfeiture check on startup
+checkPawnForfeitures();
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);
