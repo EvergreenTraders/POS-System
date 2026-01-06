@@ -1,5 +1,5 @@
 -- Drop old pawn_ticket table if it exists with old structure
--- DROP TABLE IF EXISTS pawn_ticket CASCADE;
+DROP TABLE IF EXISTS pawn_ticket CASCADE;
 
 -- Create pawn_ticket table matching buy_ticket and sale_ticket structure
 CREATE TABLE IF NOT EXISTS pawn_ticket (
