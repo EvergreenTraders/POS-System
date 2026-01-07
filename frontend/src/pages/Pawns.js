@@ -30,7 +30,7 @@ import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import axios from 'axios';
 import config from '../config';
 
-const API_BASE_URL = config.API_BASE_URL || 'http://localhost:5000';
+const API_BASE_URL = config.apiUrl;
 
 const Pawns = () => {
   const [itemsPerPage, setItemsPerPage] = useState(10);

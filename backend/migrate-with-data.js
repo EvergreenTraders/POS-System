@@ -115,12 +115,11 @@ async function importData() {
     const client = await pool.connect();
 
     try {
-      // Import tables in dependency order
+      // Import tables in dependency order (only tables that exist in export)
       const importOrder = [
         'employees',
         'customers',
         'business_info',
-        'system_config',
         'pawn_config',
         'tax_config',
         'cases_config',
@@ -137,8 +136,6 @@ async function importData() {
         'sale_ticket',
         'layaway',
         'layaway_payments',
-        'scrap_buckets',
-        'scrap_items',
         'quotes',
         'quote_items',
         'jewelry_item_history',
