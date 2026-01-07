@@ -7238,13 +7238,33 @@ app.post('/api/migrate', async (req, res) => {
     }
 
     console.log('Running database migrations with data import...');
+
+    // Check if data export file exists
+    const fs = require('fs');
+    const path = require('path');
+    const dataExportPath = path.join(__dirname, 'data-export.json');
+    const fileExists = fs.existsSync(dataExportPath);
+    const fileSize = fileExists ? fs.statSync(dataExportPath).size : 0;
+
     const { runMigrationsWithData } = require('./migrate-with-data');
 
     const results = await runMigrationsWithData();
 
+    // Verify data after migration
+    const verifyQuery = await pool.query('SELECT COUNT(*) as count FROM transactions');
+    const transactionCount = parseInt(verifyQuery.rows[0].count);
+
     res.json({
       success: true,
       message: 'Migrations and data import completed successfully',
+      dataExportFile: {
+        exists: fileExists,
+        path: dataExportPath,
+        sizeMB: (fileSize / 1024 / 1024).toFixed(2)
+      },
+      verification: {
+        transactionsAfterImport: transactionCount
+      },
       results
     });
   } catch (error) {
