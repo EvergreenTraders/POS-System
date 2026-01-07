@@ -146,6 +146,9 @@ async function importData() {
       let importedCount = 0;
       let skippedCount = 0;
 
+      // Start transaction BEFORE truncating
+      await client.query('BEGIN');
+
       // First, truncate all tables in reverse order to handle foreign keys
       console.log('  Clearing existing data...\n');
       for (let i = importOrder.length - 1; i >= 0; i--) {
@@ -159,9 +162,6 @@ async function importData() {
       }
 
       console.log('\n  Starting data import...\n');
-
-      // Now import data
-      await client.query('BEGIN');
 
       for (const tableName of importOrder) {
         // Find table in export by name
