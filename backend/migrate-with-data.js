@@ -146,15 +146,12 @@ async function importData() {
       let importedCount = 0;
       let skippedCount = 0;
 
-      // Start transaction FIRST
-      await client.query('BEGIN');
-
-      // Truncate tables in reverse order (inside transaction so it can rollback)
+      // Clear tables OUTSIDE transaction (so failures don't abort everything)
       console.log('  Clearing existing data...\n');
       for (let i = importOrder.length - 1; i >= 0; i--) {
         const tableName = importOrder[i];
         try {
-          await client.query(`TRUNCATE TABLE ${tableName} RESTART IDENTITY CASCADE`);
+          await client.query(`DELETE FROM ${tableName}`);
           console.log(`    Cleared ${tableName}`);
         } catch (error) {
           console.log(`    ⚠ Could not clear ${tableName}: ${error.message}`);
@@ -194,7 +191,15 @@ async function importData() {
         let errorCount = 0;
 
         for (const row of tableData) {
-          const values = columns.map(col => row[col]);
+          // Handle special column types (JSON, JSONB, arrays)
+          const values = columns.map(col => {
+            const value = row[col];
+            // Convert objects/arrays to JSON strings for JSONB columns
+            if (value !== null && typeof value === 'object') {
+              return JSON.stringify(value);
+            }
+            return value;
+          });
           const query = `INSERT INTO ${tableName} (${columnNames}) VALUES (${placeholders})`;
 
           try {
@@ -202,13 +207,14 @@ async function importData() {
             successCount++;
           } catch (error) {
             errorCount++;
-            // Log ALL errors, not just first 3
-            console.log(`    ⚠ Row ${errorCount} failed for ${tableName}: ${error.message}`);
+            // Only log first 3 errors to avoid spam
+            if (errorCount <= 3) {
+              console.log(`    ⚠ Row ${errorCount} failed for ${tableName}: ${error.message}`);
+            }
             if (errorCount === 1) {
               // Log full error details for first failure
-              console.log(`    First error details:`, error);
-              console.log(`    Failed query:`, query);
-              console.log(`    Failed values:`, values.slice(0, 5)); // First 5 values
+              console.log(`    First error query:`, query);
+              console.log(`    First error values (first 5):`, values.slice(0, 5));
             }
           }
         }
@@ -222,8 +228,6 @@ async function importData() {
         console.log(`  ✓ ${tableName} imported successfully`);
         importedCount++;
       }
-
-      await client.query('COMMIT');
 
       console.log(`\n✓ Data import completed!`);
       console.log(`  Imported: ${importedCount} tables`);
