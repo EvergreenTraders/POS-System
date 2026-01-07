@@ -83,9 +83,23 @@ async function importData() {
   // Check if data export file exists
   const dataExportPath = path.join(__dirname, 'data-export.json');
 
+  console.log(`Current directory: ${__dirname}`);
+  console.log(`Looking for data export at: ${dataExportPath}`);
+  console.log(`File exists: ${fs.existsSync(dataExportPath)}`);
+
   if (!fs.existsSync(dataExportPath)) {
     console.log('⚠ No data-export.json file found, skipping data import');
     console.log('  To include data in migrations, create backend/data-export.json');
+
+    // List files in current directory for debugging
+    console.log('\nFiles in current directory:');
+    try {
+      const files = fs.readdirSync(__dirname);
+      files.slice(0, 20).forEach(f => console.log(`  - ${f}`));
+    } catch (e) {
+      console.log('  Could not list files');
+    }
+
     return { skipped: true, message: 'No data export file found' };
   }
 
