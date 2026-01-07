@@ -50,7 +50,7 @@ const Pawns = () => {
     const fetchPawnConfig = async () => {
       try {
         const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_BASE_URL}/api/pawn-config`, {
+        const response = await axios.get(`${API_BASE_URL}/pawn-config`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setTermDays(parseInt(response.data.term_days) || 62);
@@ -69,7 +69,7 @@ const Pawns = () => {
       try {
         setLoading(true);
         const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_BASE_URL}/api/pawn-transactions`, {
+        const response = await axios.get(`${API_BASE_URL}/pawn-transactions`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setPawns(response.data);
@@ -188,7 +188,7 @@ const Pawns = () => {
     try {
       const token = localStorage.getItem('token');
       const response = await axios.post(
-        `${API_BASE_URL}/api/redeem-pawn`,
+        `${API_BASE_URL}/redeem-pawn`,
         {
           pawn_ticket_id: selectedPawn.pawn_ticket_id,
           item_id: selectedPawn.item_id,
@@ -204,7 +204,7 @@ const Pawns = () => {
         setSelectedPawn(null);
 
         // Refresh the pawn transactions list
-        const pawnsResponse = await axios.get(`${API_BASE_URL}/api/pawn-transactions`, {
+        const pawnsResponse = await axios.get(`${API_BASE_URL}/pawn-transactions`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setPawns(pawnsResponse.data);
