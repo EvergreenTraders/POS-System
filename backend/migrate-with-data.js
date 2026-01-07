@@ -130,6 +130,7 @@ async function importData() {
         'jewelry_secondary_gems',
         'transactions',
         'transaction_items',
+        'payment_methods',
         'payments',
         'pawn_ticket',
         'buy_ticket',
@@ -140,16 +141,18 @@ async function importData() {
         'scrap_items',
         'quotes',
         'quote_items',
-        'jewelry_item_history'
+        'jewelry_item_history',
+        'customer_account_links',
+        'customer_headers_preferences'
       ];
 
       let importedCount = 0;
       let skippedCount = 0;
 
-      // Start transaction BEFORE truncating
+      // Start transaction FIRST
       await client.query('BEGIN');
 
-      // First, truncate all tables in reverse order to handle foreign keys
+      // Truncate tables in reverse order (inside transaction so it can rollback)
       console.log('  Clearing existing data...\n');
       for (let i = importOrder.length - 1; i >= 0; i--) {
         const tableName = importOrder[i];
@@ -177,8 +180,15 @@ async function importData() {
 
         console.log(`  Importing ${tableName} (${tableData.length} rows)...`);
 
-        // Get column names from first row
-        const columns = Object.keys(tableData[0]);
+        // Get column names from first row, but exclude BYTEA columns that need special handling
+        const allColumns = Object.keys(tableData[0]);
+        const columns = allColumns.filter(col => {
+          // Skip image columns for now - they need base64 decoding
+          if (col === 'image' && tableData[0][col] && typeof tableData[0][col] === 'string' && tableData[0][col].length > 1000) {
+            return false;
+          }
+          return true;
+        });
         const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
         const columnNames = columns.join(', ');
 
@@ -195,8 +205,13 @@ async function importData() {
             successCount++;
           } catch (error) {
             errorCount++;
-            if (errorCount <= 3) {
-              console.log(`    ⚠ Warning: Could not insert row into ${tableName}: ${error.message}`);
+            // Log ALL errors, not just first 3
+            console.log(`    ⚠ Row ${errorCount} failed for ${tableName}: ${error.message}`);
+            if (errorCount === 1) {
+              // Log full error details for first failure
+              console.log(`    First error details:`, error);
+              console.log(`    Failed query:`, query);
+              console.log(`    Failed values:`, values.slice(0, 5)); // First 5 values
             }
           }
         }
