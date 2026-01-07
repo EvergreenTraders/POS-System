@@ -7194,6 +7194,39 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Database stats endpoint (for verification)
+app.get('/api/db-stats', async (req, res) => {
+  try {
+    const transactionCount = await pool.query('SELECT COUNT(*) FROM transactions');
+    const maxTransaction = await pool.query('SELECT transaction_id FROM transactions ORDER BY transaction_id DESC LIMIT 1');
+    const casesConfig = await pool.query('SELECT number_of_cases FROM cases_config ORDER BY id DESC LIMIT 1');
+    const customerCount = await pool.query('SELECT COUNT(*) FROM customers');
+    const jewelryCount = await pool.query('SELECT COUNT(*) FROM jewelry');
+
+    res.json({
+      status: 'ok',
+      database: process.env.DB_NAME,
+      host: process.env.DB_HOST,
+      stats: {
+        transactions: {
+          count: parseInt(transactionCount.rows[0].count),
+          latest: maxTransaction.rows[0]?.transaction_id || 'none'
+        },
+        customers: parseInt(customerCount.rows[0].count),
+        jewelry: parseInt(jewelryCount.rows[0].count),
+        storageCases: casesConfig.rows[0]?.number_of_cases || 0
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Database migration endpoint (protected) - with data import
 app.post('/api/migrate', async (req, res) => {
   try {

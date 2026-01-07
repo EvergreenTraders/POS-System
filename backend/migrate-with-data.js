@@ -94,13 +94,13 @@ async function importData() {
     const dataExport = JSON.parse(fs.readFileSync(dataExportPath, 'utf8'));
 
     console.log(`Found export from: ${dataExport.exportDate}`);
-    console.log(`Database: ${dataExport.database}\n`);
+    console.log(`Database: ${dataExport.database}`);
+    console.log(`Tables in export: ${dataExport.tables.length}`);
+    console.log(`Connecting to database: ${process.env.DB_HOST}/${process.env.DB_NAME}\n`);
 
     const client = await pool.connect();
 
     try {
-      await client.query('BEGIN');
-
       // Import tables in dependency order
       const importOrder = [
         'employees',
@@ -121,6 +121,7 @@ async function importData() {
         'buy_ticket',
         'sale_ticket',
         'layaway',
+        'layaway_payments',
         'scrap_buckets',
         'scrap_items',
         'quotes',
@@ -130,6 +131,23 @@ async function importData() {
 
       let importedCount = 0;
       let skippedCount = 0;
+
+      // First, truncate all tables in reverse order to handle foreign keys
+      console.log('  Clearing existing data...\n');
+      for (let i = importOrder.length - 1; i >= 0; i--) {
+        const tableName = importOrder[i];
+        try {
+          await client.query(`TRUNCATE TABLE ${tableName} RESTART IDENTITY CASCADE`);
+          console.log(`    Cleared ${tableName}`);
+        } catch (error) {
+          console.log(`    ⚠ Could not clear ${tableName}: ${error.message}`);
+        }
+      }
+
+      console.log('\n  Starting data import...\n');
+
+      // Now import data
+      await client.query('BEGIN');
 
       for (const tableName of importOrder) {
         // Find table in export by name
@@ -150,22 +168,29 @@ async function importData() {
         const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
         const columnNames = columns.join(', ');
 
-        // Clear existing data to ensure fresh import
-        try {
-          await client.query(`TRUNCATE TABLE ${tableName} RESTART IDENTITY CASCADE`);
-        } catch (error) {
-        }
-
         // Insert data
+        let successCount = 0;
+        let errorCount = 0;
+
         for (const row of tableData) {
           const values = columns.map(col => row[col]);
           const query = `INSERT INTO ${tableName} (${columnNames}) VALUES (${placeholders})`;
 
           try {
             await client.query(query, values);
+            successCount++;
           } catch (error) {
-            console.log(`    ⚠ Warning: Could not insert row into ${tableName}: ${error.message}`);
+            errorCount++;
+            if (errorCount <= 3) {
+              console.log(`    ⚠ Warning: Could not insert row into ${tableName}: ${error.message}`);
+            }
           }
+        }
+
+        if (errorCount > 0) {
+          console.log(`  ✓ ${tableName}: ${successCount} rows inserted, ${errorCount} errors`);
+        } else {
+          console.log(`  ✓ ${tableName}: ${successCount} rows inserted`);
         }
 
         console.log(`  ✓ ${tableName} imported successfully`);
@@ -177,6 +202,20 @@ async function importData() {
       console.log(`\n✓ Data import completed!`);
       console.log(`  Imported: ${importedCount} tables`);
       console.log(`  Skipped: ${skippedCount} tables (no data)\n`);
+
+      // Verify import by checking key tables
+      console.log('Verifying import...\n');
+      try {
+        const transactionCount = await client.query('SELECT COUNT(*) FROM transactions');
+        const casesConfig = await client.query('SELECT number_of_cases FROM cases_config ORDER BY id DESC LIMIT 1');
+        const maxTransaction = await client.query('SELECT transaction_id FROM transactions ORDER BY transaction_id DESC LIMIT 1');
+
+        console.log(`  ✓ Transactions in database: ${transactionCount.rows[0].count}`);
+        console.log(`  ✓ Latest transaction ID: ${maxTransaction.rows[0]?.transaction_id || 'none'}`);
+        console.log(`  ✓ Storage cases config: ${casesConfig.rows[0]?.number_of_cases || 'none'}\n`);
+      } catch (error) {
+        console.log(`  ⚠ Could not verify: ${error.message}\n`);
+      }
 
       return {
         success: true,
