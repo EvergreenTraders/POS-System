@@ -125,6 +125,7 @@ async function importData() {
         'cases_config',
         'cash_drawer_sessions',
         'storage_location',
+        'inventory_status',
         'jewelry',
         'jewelry_secondary_gems',
         'transactions',

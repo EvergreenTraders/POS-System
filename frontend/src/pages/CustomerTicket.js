@@ -3807,8 +3807,8 @@ return (
                                           <img
                                             src={
                                               typeof item.images[0] === 'string'
-                                                ? (item.images[0].startsWith('http') ? item.images[0] : `http://localhost:5000${item.images[0]}`)
-                                                : (item.images[0].url?.startsWith('http') ? item.images[0].url : `http://localhost:5000${item.images[0].url}`)
+                                                ? (item.images[0].startsWith('http') ? item.images[0] : `${config.apiUrl.replace('/api', '')}${item.images[0]}`)
+                                                : (item.images[0].url?.startsWith('http') ? item.images[0].url : `${config.apiUrl.replace('/api', '')}${item.images[0].url}`)
                                             }
                                             alt="Item"
                                             style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}

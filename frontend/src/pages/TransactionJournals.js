@@ -1151,7 +1151,11 @@ function TransactionJournals() {
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                                 {item.item_details?.images?.[0] ? (
                                   <Avatar
-                                    src={item.item_details.images[0].url}
+                                    src={
+                                      item.item_details.images[0].url?.startsWith('http')
+                                        ? item.item_details.images[0].url
+                                        : `${API_BASE_URL.replace('/api', '')}${item.item_details.images[0].url}`
+                                    }
                                     alt="Item"
                                     variant="rounded"
                                     sx={{ width: 50, height: 50, objectFit: 'cover' }}
