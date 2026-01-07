@@ -7248,7 +7248,7 @@ app.post('/api/migrate', async (req, res) => {
 
     const { runMigrationsWithData } = require('./migrate-with-data');
 
-    const results = await runMigrationsWithData();
+    const results = await runMigrationsWithData(false); // Don't close pool when called from API
 
     // Verify data after migration
     const verifyQuery = await pool.query('SELECT COUNT(*) as count FROM transactions');

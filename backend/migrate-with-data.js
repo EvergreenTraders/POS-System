@@ -250,7 +250,7 @@ async function importData() {
   }
 }
 
-async function runMigrationsWithData() {
+async function runMigrationsWithData(closePool = true) {
   console.log('Starting database migrations with data import...\n');
 
   try {
@@ -272,7 +272,10 @@ async function runMigrationsWithData() {
     console.error('\n✗ Migration with data failed:', error.message);
     throw error;
   } finally {
-    await pool.end();
+    // Only close pool if running standalone (not as module)
+    if (closePool) {
+      await pool.end();
+    }
   }
 }
 
