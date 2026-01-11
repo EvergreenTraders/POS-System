@@ -2683,7 +2683,14 @@ const CustomerTicket = () => {
         }
 
         // Generate a unique ticket ID for this batch of items with sequential 8-digit number
-        const storageKey = `last${ticketPrefix}TicketNumber`;
+        // Buy and Sale transactions share the same sequence number
+        let storageKey;
+        if (transaction_type === 'buy' || transaction_type === 'sale') {
+          storageKey = 'lastBuySaleTicketNumber'; // Shared sequence for buy and sale
+        } else {
+          storageKey = `last${ticketPrefix}TicketNumber`; // Separate sequence for other types
+        }
+
         let lastTicketNumber = parseInt(localStorage.getItem(storageKey) || '0');
         lastTicketNumber += 1;
         localStorage.setItem(storageKey, lastTicketNumber.toString());

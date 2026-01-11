@@ -631,7 +631,8 @@ function Jewelry() {
     let saleTicketId = sessionStorage.getItem('inventorySaleTicketId');
     if (!saleTicketId) {
       // Generate a new sale ticket ID (format: ST-00000001)
-      const storageKey = 'lastSTTicketNumber';
+      // Buy and Sale transactions share the same sequence number
+      const storageKey = 'lastBuySaleTicketNumber';
       let lastTicketNumber = parseInt(localStorage.getItem(storageKey) || '0');
       lastTicketNumber += 1;
       localStorage.setItem(storageKey, lastTicketNumber.toString());
