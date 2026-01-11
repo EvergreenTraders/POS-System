@@ -324,7 +324,8 @@ function CashDrawer() {
       );
 
       const discrepancy = response.data.discrepancy;
-      let message = 'Cash drawer closed successfully';
+      const transactionCount = response.data.transaction_count || 0;
+      let message = `Cash drawer closed successfully - ${transactionCount} transaction${transactionCount !== 1 ? 's' : ''}`;
 
       if (discrepancy > 0) {
         message += ` (Overage: $${discrepancy.toFixed(2)})`;
@@ -720,6 +721,8 @@ function CashDrawer() {
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Alert severity="info">
               Expected Balance: {formatCurrency(activeSession?.current_expected_balance)}
+              <br />
+              Transaction Count: {activeSession?.transaction_count || 0}
             </Alert>
 
             {isBlindCount ? (
@@ -801,6 +804,9 @@ function CashDrawer() {
               The discrepancy amount exceeds the acceptable threshold of ${Number(discrepancyThreshold || 0).toFixed(2)}.
             </Alert>
             <Box>
+              <Typography variant="body1" gutterBottom>
+                <strong>Transaction Count:</strong> {activeSession?.transaction_count || 0}
+              </Typography>
               <Typography variant="body1" gutterBottom>
                 <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
               </Typography>

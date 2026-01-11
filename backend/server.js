@@ -710,7 +710,8 @@ app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
           closing_notes = $2
       WHERE session_id = $3 AND status = 'open'
       RETURNING *,
-        calculate_expected_balance(session_id) AS calculated_expected
+        calculate_expected_balance(session_id) AS calculated_expected,
+        (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = $3) AS transaction_count
     `, [actual_balance, closing_notes || null, sessionId]);
 
     if (result.rows.length === 0) {
@@ -7448,32 +7449,32 @@ app.post('/api/payments', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    
+
     const { transaction_id, amount, payment_method } = req.body;
-    
+
     // Validate payment method
     if (!['CASH', 'CREDIT_CARD', 'DEBIT_CARD', 'BANK_TRANSFER', 'CHECK'].includes(payment_method)) {
       throw new Error('Invalid payment method');
     }
-    
+
     // Get transaction and validate amount
     const transactionResult = await client.query(
       'SELECT * FROM transactions WHERE transaction_id = $1 FOR UPDATE',
       [transaction_id]
     );
-    
+
     if (transactionResult.rows.length === 0) {
       throw new Error('Transaction not found');
     }
-    
+
     const transaction = transactionResult.rows[0];
-    
+
     // Get total payments made so far
     const paymentsResult = await client.query(
       'SELECT COALESCE(SUM(amount), 0) as paid_amount FROM payments WHERE transaction_id = $1',
       [transaction_id]
     );
-    
+
     const paidAmount = parseFloat(paymentsResult.rows[0].paid_amount);
     const newTotalPaid = paidAmount + parseFloat(amount);
 
@@ -7482,7 +7483,7 @@ app.post('/api/payments', async (req, res) => {
     if (newTotalPaid > transaction.total_amount + EPSILON) {
       throw new Error('Payment amount exceeds remaining balance');
     }
-    
+
     // Create payment record
     const paymentResult = await client.query(
       `INSERT INTO payments (
@@ -7490,6 +7491,46 @@ app.post('/api/payments', async (req, res) => {
       ) VALUES ($1, $2, $3) RETURNING *`,
       [transaction_id, amount, payment_method]
     );
+
+    // If this is a CASH payment, link it to the employee's active cash drawer session
+    if (payment_method === 'CASH') {
+      // Get the employee's active cash drawer session
+      const sessionResult = await client.query(
+        `SELECT session_id FROM cash_drawer_sessions
+         WHERE employee_id = $1 AND status = 'open'
+         ORDER BY opened_at DESC LIMIT 1`,
+        [transaction.employee_id]
+      );
+
+      if (sessionResult.rows.length > 0) {
+        const session_id = sessionResult.rows[0].session_id;
+
+        // Determine if this is a payable or receivable transaction
+        // Payable: total_amount < 0 (business owes customer - buy/pawn transactions)
+        // Receivable: total_amount > 0 (customer owes business - sale transactions)
+        const isPayable = parseFloat(transaction.total_amount) < 0;
+
+        // For payable transactions (negative total), cash payment should subtract from drawer
+        // For receivable transactions (positive total), cash payment should add to drawer
+        const drawerAmount = isPayable ? -Math.abs(parseFloat(amount)) : Math.abs(parseFloat(amount));
+        const transactionType = isPayable ? 'payout' : 'sale';
+
+        // Insert cash drawer transaction record
+        await client.query(
+          `INSERT INTO cash_drawer_transactions
+           (session_id, transaction_id, amount, transaction_type, payment_id, notes)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            session_id,
+            transaction_id,
+            drawerAmount,
+            transactionType,
+            paymentResult.rows[0].payment_id,
+            `Cash ${isPayable ? 'payout' : 'payment'} for transaction ${transaction_id}`
+          ]
+        );
+      }
+    }
 
     await client.query('COMMIT');
     res.status(201).json(paymentResult.rows[0]);
