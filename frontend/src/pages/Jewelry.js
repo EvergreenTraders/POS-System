@@ -50,6 +50,19 @@ function Jewelry() {
   const { enqueueSnackbar } = useSnackbar();
   const { cartItems, addToCart } = useCart();
 
+  // Update expired HOLD items to ON_PROCESS when component mounts
+  useEffect(() => {
+    const updateHoldStatus = async () => {
+      try {
+        await axios.get(`${config.apiUrl}/inventory/update-hold-status`);
+      } catch (error) {
+        console.error('Error updating hold status:', error);
+        // Fail silently - this is a background task
+      }
+    };
+    updateHoldStatus();
+  }, []); // Run only once on mount
+
   const handleViewHistory = async (itemId) => {
     console.log('View History clicked for item:', itemId);
     if (!itemId) {

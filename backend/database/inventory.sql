@@ -207,6 +207,36 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Function to automatically transition items from HOLD to ON_PROCESS after hold period expires
+CREATE OR REPLACE FUNCTION update_expired_hold_items()
+RETURNS void AS $$
+DECLARE
+    hold_period_days INTEGER;
+BEGIN
+    -- Get the hold period from inventory_hold_period table
+    SELECT COALESCE(
+        (SELECT days
+         FROM inventory_hold_period
+         LIMIT 1),
+        5  -- Default to 5 days if not configured
+    ) INTO hold_period_days;
+
+    -- Update items from HOLD to ON_PROCESS if hold period has expired
+    UPDATE jewelry
+    SET status = 'ON_PROCESS',
+        updated_at = CURRENT_TIMESTAMP
+    WHERE status = 'HOLD'
+      AND created_at <= (CURRENT_TIMESTAMP - (hold_period_days || ' days')::INTERVAL);
+
+END;
+$$ LANGUAGE plpgsql;
+
+-- NOTE: The automatic trigger caused infinite recursion and has been removed.
+-- Instead, call update_expired_hold_items() via:
+-- 1. Manual API endpoint: GET /api/inventory/update-hold-status
+-- 2. Scheduled job (cron/task scheduler)
+-- 3. On-demand via: SELECT update_expired_hold_items();
+
 -- Create trigger for storage_location updated_at
 DROP TRIGGER IF EXISTS update_storage_location_timestamp ON storage_location;
 CREATE TRIGGER update_storage_location_timestamp
@@ -228,15 +258,6 @@ CREATE TABLE IF NOT EXISTS cases_config (
     updated_at TIMESTAMP
 );
 
--- Insert default cases config if not exists
-INSERT INTO cases_config (number_of_cases)
-VALUES (0)
-ON CONFLICT DO NOTHING;
-
--- Insert default storage locations (Inventory and Warehouse)
-INSERT INTO storage_location (location, is_occupied)
-VALUES ('Inventory', FALSE), ('Warehouse', FALSE)
-ON CONFLICT (location) DO NOTHING;
 
 COMMENT ON TABLE cases_config IS 'Configuration for number of storage cases';
 COMMENT ON COLUMN cases_config.number_of_cases IS 'Total number of storage cases configured (0-100)';

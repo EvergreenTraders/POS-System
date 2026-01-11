@@ -2959,15 +2959,42 @@ app.get('/api/inventory-status/:id', async (req, res) => {
     const { id } = req.params;
     const query = 'SELECT * FROM inventory_status WHERE status_id = $1';
     const result = await pool.query(query, [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Inventory status not found' });
     }
-    
+
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error fetching inventory status:', error);
     res.status(500).json({ error: 'Failed to fetch inventory status' });
+  }
+});
+
+// Endpoint to update expired HOLD items to ON_PROCESS status
+app.get('/api/inventory/update-hold-status', async (req, res) => {
+  try {
+    // Call the database function to update expired hold items
+    await pool.query('SELECT update_expired_hold_items()');
+
+    // Get count of items now in ON_PROCESS status
+    const countResult = await pool.query(
+      `SELECT COUNT(*) as updated_count
+       FROM jewelry
+       WHERE status = 'ON_PROCESS'
+       AND updated_at > CURRENT_TIMESTAMP - INTERVAL '1 minute'`
+    );
+
+    const updatedCount = parseInt(countResult.rows[0].updated_count);
+
+    res.json({
+      success: true,
+      message: `Successfully updated ${updatedCount} item(s) from HOLD to ON_PROCESS`,
+      updatedCount
+    });
+  } catch (error) {
+    console.error('Error updating hold status:', error);
+    res.status(500).json({ error: 'Failed to update hold status' });
   }
 });
 
