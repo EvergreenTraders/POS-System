@@ -440,7 +440,7 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
       SELECT
         s.*,
         calculate_expected_balance(s.session_id) AS current_expected_balance,
-        (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS transaction_count,
+        (SELECT COUNT(*) FROM transactions WHERE session_id = s.session_id) AS transaction_count,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments
       FROM cash_drawer_sessions s
@@ -711,7 +711,7 @@ app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
       WHERE session_id = $3 AND status = 'open'
       RETURNING *,
         calculate_expected_balance(session_id) AS calculated_expected,
-        (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = $3) AS transaction_count
+        (SELECT COUNT(*) FROM transactions WHERE session_id = $3) AS transaction_count
     `, [actual_balance, closing_notes || null, sessionId]);
 
     if (result.rows.length === 0) {
@@ -5079,13 +5079,23 @@ app.post('/api/transactions', async (req, res) => {
         // Generate unique transaction ID
         const transactionId = await generateTransactionId();
 
+        // Get employee's active cash drawer session
+        const sessionResult = await client.query(
+            `SELECT session_id FROM cash_drawer_sessions
+             WHERE employee_id = $1 AND status = 'open'
+             ORDER BY opened_at DESC LIMIT 1`,
+            [employee_id]
+        );
+
+        const sessionId = sessionResult.rows.length > 0 ? sessionResult.rows[0].session_id : null;
+
         // Insert main transaction record
         const transactionQuery = `
             INSERT INTO transactions (
-                transaction_id, customer_id, employee_id,
+                transaction_id, customer_id, employee_id, session_id,
                 total_amount, transaction_date
             )
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
         `;
 
@@ -5093,6 +5103,7 @@ app.post('/api/transactions', async (req, res) => {
             transactionId,
             customer_id,
             employee_id,
+            sessionId,
             total_amount,
             transaction_date
         ]);

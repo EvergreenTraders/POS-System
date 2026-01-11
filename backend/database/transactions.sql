@@ -57,13 +57,15 @@ CREATE TABLE IF NOT EXISTS transactions (
     transaction_id VARCHAR(50) NOT NULL,
     customer_id INTEGER NOT NULL,
     employee_id INTEGER NOT NULL,
+    session_id INTEGER,
     total_amount DECIMAL(10,2) NOT NULL,
     transaction_date DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT unique_transaction_id UNIQUE (transaction_id),
     FOREIGN KEY (customer_id) REFERENCES customers(id),
-    FOREIGN KEY (employee_id) REFERENCES employees(employee_id)
+    FOREIGN KEY (employee_id) REFERENCES employees(employee_id),
+    FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id)
 );
 
 -- Create transaction_items table to link transactions with items
@@ -159,3 +161,19 @@ CREATE TRIGGER update_payment_methods_timestamp
     BEFORE UPDATE ON payment_methods
     FOR EACH ROW
     EXECUTE FUNCTION update_timestamp();
+
+-- Add session_id column to transactions table if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'transactions'
+        AND column_name = 'session_id'
+    ) THEN
+        ALTER TABLE transactions ADD COLUMN session_id INTEGER;
+        ALTER TABLE transactions ADD CONSTRAINT fk_transactions_session
+            FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id);
+        CREATE INDEX IF NOT EXISTS idx_transactions_session_id ON transactions(session_id);
+    END IF;
+END $$;
