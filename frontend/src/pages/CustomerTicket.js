@@ -1461,17 +1461,11 @@ const CustomerTicket = () => {
   // Handle deleting an item
   const handleDeleteItem = (id) => {
     const { items, setItems } = getCurrentItems();
-    
-    // Find the item to be deleted
-    const itemToDelete = items.find(item => item.id === id);
-    
-    // If we're deleting the only item and it's from an estimator (has originalItem or sourceEstimator property)
-    // then allow deletion; otherwise keep at least one row (legacy behavior)
-    const isFromEstimator = itemToDelete && (itemToDelete.originalItem || itemToDelete.sourceEstimator);
-    if (items.length <= 1 && !isFromEstimator) return; // Keep at least one row if not from estimator
-    
-    // If we're deleting the last estimator item, add an empty row to maintain UI consistency
+
+    // Always allow deletion - filter out the item to delete
     const remainingItems = items.filter(item => item.id !== id);
+
+    // If no items remain after deletion, add an empty row to maintain UI consistency
     if (remainingItems.length === 0) {
       // Add an empty item with a new ID
       const emptyItem = { id: Date.now(), description: '', category: '' };
