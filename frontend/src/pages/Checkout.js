@@ -106,11 +106,6 @@ function Checkout() {
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
-    // Only run initialization logic if we haven't initialized yet
-    if (isInitialized) {
-      return;
-    }
-
     // Check if data is in location.state or sessionStorage
     let itemsToCheckout = null;
     let customerData = null;
@@ -131,13 +126,18 @@ function Checkout() {
       if (sessionItems) {
         itemsToCheckout = JSON.parse(sessionItems);
         fromSource = 'cart'; // CustomerTicket uses cart-like structure
-        // Clear sessionStorage after reading
-        sessionStorage.removeItem('checkoutItems');
+        // Don't clear sessionStorage here - it will be cleared after successful transaction
+        // This preserves the data if user needs to navigate to cash drawer and back
       }
 
       if (sessionCustomer) {
         customerData = JSON.parse(sessionCustomer);
       }
+    }
+
+    // Only skip initialization if already initialized AND NOT coming from cash-drawer
+    if (isInitialized && fromSource !== 'cash-drawer') {
+      return;
     }
 
     if (itemsToCheckout && itemsToCheckout.length > 0) {
@@ -160,6 +160,33 @@ function Checkout() {
         if (customerData) {
           setCustomer(customerData);
         }
+        setIsInitialized(true);
+      }
+      else if (fromSource === 'cash-drawer') {
+        // Extract jewelry-specific items
+        const filteredJewelryItems = itemsToCheckout.filter(item => item.sourceEstimator === 'jewelry');
+        setJewelryItems(filteredJewelryItems);
+
+        // Normalize price field
+        const normalizedItems = itemsToCheckout.map(item => {
+          const normalizedItem = { ...item };
+          if (normalizedItem.price === undefined) {
+            if (normalizedItem.value !== undefined) normalizedItem.price = normalizedItem.value;
+            else if (normalizedItem.fee !== undefined) normalizedItem.price = normalizedItem.fee;
+            else if (normalizedItem.amount !== undefined) normalizedItem.price = normalizedItem.amount;
+            else normalizedItem.price = 0;
+          }
+          return normalizedItem;
+        });
+
+        setCheckoutItems(normalizedItems);
+        setAllCartItems(allCartItemsData || itemsToCheckout);
+
+        // Restore the customer
+        if (customerData) {
+          setCustomer(customerData);
+        }
+
         setIsInitialized(true);
       }
       else if (fromSource === 'cart') {
@@ -212,6 +239,23 @@ function Checkout() {
             message: 'You must open a cash drawer before processing transactions',
             severity: 'warning'
           });
+
+          // Save current checkout state to sessionStorage before navigating
+          // Save checkoutItems if available, otherwise save cartItems as checkoutItems
+          const itemsToSave = checkoutItems.length > 0 ? checkoutItems : cartItems;
+          if (itemsToSave && itemsToSave.length > 0) {
+            sessionStorage.setItem('checkoutItems', JSON.stringify(itemsToSave));
+          }
+
+          if (selectedCustomer) {
+            sessionStorage.setItem('selectedCustomer', JSON.stringify(selectedCustomer));
+          }
+
+          // Always save allCartItems if available, otherwise use cartItems from context
+          const allItemsToSave = allCartItems.length > 0 ? allCartItems : cartItems;
+          if (allItemsToSave && allItemsToSave.length > 0) {
+            sessionStorage.setItem('cartItems', JSON.stringify(allItemsToSave));
+          }
 
           // Delay navigation slightly to show the snackbar
           setTimeout(() => {
@@ -1283,6 +1327,10 @@ function Checkout() {
               // Fallback to clearing everything on error
               clearCart();
             }
+
+            // Clear checkout items from sessionStorage after successful transaction
+            sessionStorage.removeItem('checkoutItems');
+            sessionStorage.removeItem('selectedCustomer');
 
             setTransactionCreated(false);
             setCurrentTransactionId(null);

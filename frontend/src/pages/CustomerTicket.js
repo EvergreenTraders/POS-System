@@ -676,6 +676,76 @@ const CustomerTicket = () => {
     cleanupExpiredTickets();
   }, []);
 
+  // Check and remove sold items from inventory on component mount and when location changes
+  React.useEffect(() => {
+    const checkAndRemoveSoldItems = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          return;
+        }
+
+        // Check all tabs for items with fromInventory flag
+        const tabsToCheck = [
+          { items: saleItems, setItems: setSaleItems, type: 'sale' },
+          { items: buyItems, setItems: setBuyItems, type: 'buy' },
+          { items: pawnItems, setItems: setPawnItems, type: 'pawn' }
+        ];
+
+        let totalRemoved = 0;
+        for (const tab of tabsToCheck) {
+          const inventoryItems = tab.items.filter(item => item.fromInventory && item.item_id);
+
+          if (inventoryItems.length === 0) continue;
+
+          // Check each inventory item's status
+          const itemsToRemove = [];
+          for (const item of inventoryItems) {
+            try {
+              const response = await fetch(`${config.apiUrl}/jewelry/${item.item_id}`, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+
+              if (response.ok) {
+                const data = await response.json();
+                // If item is SOLD, mark it for removal
+                if (data.status === 'SOLD') {
+                  itemsToRemove.push(item.item_id);
+                }
+              }
+            } catch (error) {
+              console.error(`Error checking status for item ${item.item_id}:`, error);
+            }
+          }
+
+          // Remove sold items from the tab
+          if (itemsToRemove.length > 0) {
+            const updatedItems = tab.items.filter(item => !itemsToRemove.includes(item.item_id));
+            // Ensure at least one empty item exists
+            const finalItems = updatedItems.length === 0
+              ? [tab.type === 'sale' ? createEmptySaleItem() :
+                 tab.type === 'buy' ? createEmptyBuyItem() :
+                 createEmptyPawnItem()]
+              : updatedItems;
+
+            tab.setItems(finalItems);
+            saveTicketItems(tab.type, finalItems);
+            totalRemoved += itemsToRemove.length;
+          }
+        }
+
+        // Show notification if items were removed
+        if (totalRemoved > 0) {
+          showSnackbar(`${totalRemoved} sold item${totalRemoved > 1 ? 's' : ''} removed from ticket`, 'info');
+        }
+      } catch (error) {
+        console.error('Error checking sold items:', error);
+      }
+    };
+
+    checkAndRemoveSoldItems();
+  }, [location.pathname]); // Run on mount and when navigating back to this page
+
   // Process estimated items when component mounts - use a ref to track if the current navigation state has been processed
   const processedStateRef = React.useRef(null);
   
