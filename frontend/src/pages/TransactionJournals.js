@@ -335,45 +335,233 @@ function TransactionJournals() {
     // Total amount to redeem (principal + all fees)
     const totalRedemptionAmount = principalAmount + totalCostOfBorrowing;
 
-    // Get legal terms based on ticket type
-    const legalTerms = isPawnTicket ? receiptConfig.pawn_receipt : (isSaleTransaction ? receiptConfig.sales_receipt : receiptConfig.buy_receipt);
+    // For pawn tickets, generate PDF using template
+    // For buy/sale tickets, use simple HTML receipt
+    if (isPawnTicket) {
+      // Get legal terms for pawn
+      const legalTerms = receiptConfig.pawn_receipt;
 
-    // Generate PDF using template
-    const pdfDocument = (
-      <PawnTicketTemplate
-        businessName={businessName}
-        businessAddress={businessAddress}
-        businessPhone={businessPhone}
-        businessLogo={businessLogo}
-        businessLogoMimetype={businessLogoMimetype}
-        customerName={selectedTransaction?.customer_name}
-        customerAddress={selectedTransaction?.customer_address}
-        customerPhone={selectedTransaction?.customer_phone}
-        customerID={selectedTransaction?.customer_id}
-        employeeName={selectedTransaction?.employee_name}
-        ticketId={ticketId}
-        formattedDate={formattedDate}
-        formattedTime={formattedTime}
-        dueDate={dueDate}
-        ticketItems={ticketItems}
-        principalAmount={principalAmount}
-        appraisalFee={appraisalFee}
-        interestRate={configInterestRate}
-        interestAmount={interestAmount}
-        insuranceCost={insuranceCost}
-        extensionCost={extensionCost}
-        totalCostOfBorrowing={totalCostOfBorrowing}
-        totalRedemptionAmount={totalRedemptionAmount}
-        legalTerms={legalTerms}
-        termDays={termDays}
-        frequencyDays={frequencyDays}
-      />
-    );
+      // Generate PDF using template (only for pawn)
+      const pdfDocument = (
+        <PawnTicketTemplate
+          ticketType="pawn"
+          businessName={businessName}
+          businessAddress={businessAddress}
+          businessPhone={businessPhone}
+          businessLogo={businessLogo}
+          businessLogoMimetype={businessLogoMimetype}
+          customerName={selectedTransaction?.customer_name}
+          customerAddress={selectedTransaction?.customer_address}
+          customerPhone={selectedTransaction?.customer_phone}
+          customerID={selectedTransaction?.customer_id}
+          employeeName={selectedTransaction?.employee_name}
+          ticketId={ticketId}
+          formattedDate={formattedDate}
+          formattedTime={formattedTime}
+          dueDate={dueDate}
+          ticketItems={ticketItems}
+          principalAmount={principalAmount}
+          appraisalFee={appraisalFee}
+          interestRate={configInterestRate}
+          interestAmount={interestAmount}
+          insuranceCost={insuranceCost}
+          extensionCost={extensionCost}
+          totalCostOfBorrowing={totalCostOfBorrowing}
+          totalRedemptionAmount={totalRedemptionAmount}
+          legalTerms={legalTerms}
+          termDays={termDays}
+          frequencyDays={frequencyDays}
+        />
+      );
 
-    // Generate PDF blob and open in new tab
-    const blob = await pdf(pdfDocument).toBlob();
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
+      // Generate PDF blob and open in new tab
+      const blob = await pdf(pdfDocument).toBlob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } else {
+      // For buy/sale tickets, use simple HTML receipt
+      const receiptHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>${ticketId}</title>
+          <style>
+            body {
+              font-family: 'Courier New', monospace;
+              max-width: 400px;
+              margin: 10px auto;
+              padding: 15px;
+              font-size: 12px;
+            }
+            .header {
+              position: relative;
+              margin-bottom: 15px;
+              border-bottom: 2px dashed #333;
+              padding-bottom: 15px;
+              min-height: 75px;
+            }
+            .header-content {
+              padding-right: 80px;
+            }
+            .header h1 {
+              margin: 0 0 5px 0;
+              color: #333;
+              font-size: 18px;
+              font-weight: bold;
+            }
+            .header p {
+              margin: 3px 0;
+              font-size: 11px;
+            }
+            .header img {
+              position: absolute;
+              top: 0;
+              right: 0;
+              max-width: 70px;
+              max-height: 70px;
+              object-fit: contain;
+            }
+            .ticket-info {
+              margin-bottom: 15px;
+            }
+            .info-row {
+              display: flex;
+              justify-content: space-between;
+              padding: 4px 0;
+              font-size: 11px;
+            }
+            .info-label {
+              font-weight: bold;
+            }
+            .items-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 15px 0;
+              font-size: 11px;
+            }
+            .items-table th {
+              padding: 6px 4px;
+              text-align: left;
+              border-bottom: 1px dashed #333;
+              font-weight: bold;
+            }
+            .items-table td {
+              padding: 6px 4px;
+              border-bottom: 1px dotted #ccc;
+            }
+            .items-table tr:last-child td {
+              border-bottom: none;
+            }
+            .total-row {
+              font-weight: bold;
+              border-top: 2px dashed #333;
+              border-bottom: 2px dashed #333;
+              padding-top: 10px;
+              margin-top: 10px;
+              font-size: 12px;
+            }
+            .footer {
+              margin-top: 20px;
+              text-align: center;
+              font-size: 10px;
+              border-top: 1px dashed #333;
+              padding-top: 10px;
+            }
+            @media print {
+              body { margin: 0; padding: 10px; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Business Logo" />` : ''}
+            <div class="header-content">
+              <h1>${businessName}</h1>
+              ${businessAddress ? `<p>${businessAddress}</p>` : ''}
+              ${businessPhone ? `<p>${businessPhone}</p>` : ''}
+            </div>
+          </div>
+
+          <div class="ticket-info">
+            <div class="info-row">
+              <span class="info-label">${isSaleTransaction ? 'Sale' : 'Buy'} Ticket #:</span>
+              <span>${ticketId}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Date & Time:</span>
+              <span>${formattedDate} ${formattedTime}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Customer:</span>
+              <span>${selectedTransaction?.customer_name || 'N/A'}</span>
+            </div>
+            ${selectedTransaction?.customer_phone ? `
+            <div class="info-row">
+              <span class="info-label">Phone:</span>
+              <span>${selectedTransaction.customer_phone}</span>
+            </div>
+            ` : ''}
+            ${selectedTransaction?.customer_address ? `
+            <div class="info-row">
+              <span class="info-label">Address:</span>
+              <span>${selectedTransaction.customer_address}</span>
+            </div>
+            ` : ''}
+            <div class="info-row">
+              <span class="info-label">Employee:</span>
+              <span>${selectedTransaction?.employee_name || 'N/A'}</span>
+            </div>
+          </div>
+
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th>Item Description</th>
+                <th style="text-align: right;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${ticketItems.map((item, index) => {
+                const price = parseFloat(item.item_price || 0);
+                return `
+                  <tr>
+                    <td>
+                      ${item.item_details?.description || item.description || `Item ${index + 1}`}
+                    </td>
+                    <td style="text-align: right;">
+                      $${price.toFixed(2)}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+
+          <div class="total-row">
+            <div class="info-row">
+              <span>Total Amount:</span>
+              <span>$${totalAmount.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div class="footer">
+            <p style="white-space: pre-wrap;">${isSaleTransaction ? receiptConfig.sales_receipt : receiptConfig.buy_receipt}</p>
+          </div>
+
+          <div class="no-print" style="text-align: center; margin-top: 30px;">
+            <button onclick="window.print()" style="padding: 10px 30px; font-size: 16px; cursor: pointer;">Print</button>
+            <button onclick="window.close()" style="padding: 10px 30px; font-size: 16px; margin-left: 10px; cursor: pointer;">Close</button>
+          </div>
+        </body>
+        </html>
+      `;
+
+      // Open in new tab
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(receiptHTML);
+      printWindow.document.close();
+    }
   };
 
   const handlePrintTransaction = async () => {
@@ -412,8 +600,20 @@ function TransactionJournals() {
     // Group items by ticket ID
     const allTicketGroups = {};
     transactionItems.forEach(item => {
+      // Check all three ticket types based on the transaction type
+      let ticketId = 'no-ticket';
+
+      const pawnTicket = pawnTickets.find(pt => pt.item_id === item.item_id);
       const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
-      const ticketId = buyTicket?.buy_ticket_id || 'no-ticket';
+      const saleTicket = saleTickets.find(st => st.item_id === item.item_id);
+
+      if (pawnTicket?.pawn_ticket_id) {
+        ticketId = pawnTicket.pawn_ticket_id;
+      } else if (buyTicket?.buy_ticket_id) {
+        ticketId = buyTicket.buy_ticket_id;
+      } else if (saleTicket?.sale_ticket_id) {
+        ticketId = saleTicket.sale_ticket_id;
+      }
 
       if (!allTicketGroups[ticketId]) {
         allTicketGroups[ticketId] = [];

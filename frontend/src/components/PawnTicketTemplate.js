@@ -272,6 +272,7 @@ const styles = StyleSheet.create({
 });
 
 const PawnTicketTemplate = ({
+  ticketType = 'pawn', // 'pawn', 'buy', or 'sale'
   businessName,
   businessAddress,
   businessPhone,
@@ -309,6 +310,13 @@ const PawnTicketTemplate = ({
   const month = transactionDateObj.toLocaleDateString('en-US', { month: 'long' });
   const year = transactionDateObj.getFullYear();
 
+  // Define text based on ticket type
+  const agreementType = ticketType === 'pawn' ? 'Pawn' : ticketType === 'buy' ? 'Buy' : 'Sale';
+  const agreementAction = ticketType === 'pawn' ? 'PAWN' : ticketType === 'buy' ? 'SELL' : 'PURCHASE';
+  const itemAction = ticketType === 'pawn' ? 'pledged' : ticketType === 'buy' ? 'sold' : 'purchased';
+  const itemActionUpper = ticketType === 'pawn' ? 'PLEDGED' : ticketType === 'buy' ? 'SOLD' : 'PURCHASED';
+  const redeemText = ticketType === 'pawn' ? 'REDEEM PAWNED' : ticketType === 'buy' ? 'RECEIVE PAYMENT FOR SOLD' : 'RECEIVE PURCHASED';
+
   return (
     <Document>
       <Page size="LETTER" style={styles.page}>
@@ -319,7 +327,7 @@ const PawnTicketTemplate = ({
             <View style={styles.leftHeader}>
               <View style={{ width: '100%' }}>
                 <Text style={styles.agreementText}>
-                  This Pawn Agreement is made on {day} {month}, {year} at {formattedTime || '[time]'} between the following two parties:
+                  This {agreementType} Agreement is made on {day} {month}, {year} at {formattedTime || '[time]'} between the following two parties:
                 </Text>
 
                 {/* Business and Client on same line with AND + Logo in middle */}
@@ -357,7 +365,7 @@ const PawnTicketTemplate = ({
 
             {/* Right side - Ticket Info */}
             <View style={styles.rightHeader}>
-              <Text style={styles.ticketNumber}>Pawn trx#</Text>
+              <Text style={styles.ticketNumber}>{agreementType} trx#</Text>
               <Text style={styles.ticketNumber}>{ticketId || 'LT-TSD000000'}</Text>
               <Text style={styles.barcode}>|||| |||| |||| ||||</Text>
               <Text style={styles.clerkLabel}>Clerk:</Text>
@@ -445,13 +453,13 @@ const PawnTicketTemplate = ({
               <Text style={styles.feeAmount}>${(insuranceCost || 0).toFixed(2)}</Text>
             </View>
 
-            {/* Total to Redeem */}
+            {/* Total Amount */}
             <View style={{ borderTop: '2pt solid black', padding: 6, backgroundColor: '#f9f9f9' }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 8, fontWeight: 'bold' }}>TOTAL TO REDEEM:</Text>
-                <Text style={{ fontSize: 10, fontWeight: 'bold' }}>${(totalRedemptionAmount || 0).toFixed(2)}</Text>
+                <Text style={{ fontSize: 8, fontWeight: 'bold' }}>{ticketType === 'pawn' ? 'TOTAL TO REDEEM:' : 'TOTAL AMOUNT:'}</Text>
+                <Text style={{ fontSize: 10, fontWeight: 'bold' }}>${ticketType === 'pawn' ? (totalRedemptionAmount || 0).toFixed(2) : (principalAmount || 0).toFixed(2)}</Text>
               </View>
-              <Text style={{ fontSize: 5, marginTop: 2, fontStyle: 'italic' }}>(Principal + All Fees)</Text>
+              <Text style={{ fontSize: 5, marginTop: 2, fontStyle: 'italic' }}>{ticketType === 'pawn' ? '(Principal + All Fees)' : '(Total Transaction Amount)'}</Text>
             </View>
 
             </View>
@@ -461,13 +469,13 @@ const PawnTicketTemplate = ({
           <View style={{ flexDirection: 'row', borderTop: '2pt solid black' }}>
             {/* Left side - Signature boxes */}
             <View style={{ width: '65%', borderRight: '2pt solid black', flexDirection: 'row' }}>
-              {/* Sign to Pawn */}
+              {/* Sign to Complete Transaction */}
               <View style={{ width: '50%', padding: 6, borderRight: '2pt solid black' }}>
                 <View style={{ backgroundColor: '#d0d0d0', padding: 3, marginBottom: 4 }}>
-                  <Text style={{ fontSize: 6, fontWeight: 'bold', textAlign: 'center' }}>SIGN BELOW TO PAWN ITEM(S)</Text>
+                  <Text style={{ fontSize: 6, fontWeight: 'bold', textAlign: 'center' }}>SIGN BELOW TO {agreementAction} ITEM(S)</Text>
                 </View>
                 <Text style={{ fontSize: 5, lineHeight: 1.3, marginBottom: 12 }}>
-                  The text above correctly describes the pledged item(s). I have read the front and back of this Agreement and understand the Terms and Conditions. I warrant that all declarations are true and correct. I acknowledge receipt of a true copy of this Agreement. By signing below I enter into this Agreement and accept the terms as described.
+                  The text above correctly describes the {itemAction} item(s). I have read the front and back of this Agreement and understand the Terms and Conditions. I warrant that all declarations are true and correct. I acknowledge receipt of a true copy of this Agreement. By signing below I enter into this Agreement and accept the terms as described.
                 </Text>
                 <View style={{ marginTop: 'auto' }}>
                   <Text style={{ fontSize: 6, marginBottom: 2 }}>Date Signed:</Text>
@@ -478,13 +486,13 @@ const PawnTicketTemplate = ({
                 </View>
               </View>
 
-              {/* Sign to Redeem */}
+              {/* Sign to Complete Second Part of Transaction */}
               <View style={{ width: '50%', padding: 6 }}>
                 <View style={{ backgroundColor: '#d0d0d0', padding: 3, marginBottom: 4 }}>
-                  <Text style={{ fontSize: 6, fontWeight: 'bold', textAlign: 'center' }}>SIGN BELOW TO REDEEM PAWNED ITEM(S)</Text>
+                  <Text style={{ fontSize: 6, fontWeight: 'bold', textAlign: 'center' }}>SIGN BELOW TO {redeemText} ITEM(S)</Text>
                 </View>
                 <Text style={{ fontSize: 5, lineHeight: 1.3, marginBottom: 12 }}>
-                  I hereby acknowledge receipt of the item(s) pledged in this Agreement. I have carefully examined the item(s) and have found them to be in satisfactory condition. Evergreen has fulfilled their obligations pursuant to the terms of this agreement and I release them from any claim or liability related to the item(s).
+                  I hereby acknowledge receipt of the item(s) {itemAction} in this Agreement. I have carefully examined the item(s) and have found them to be in satisfactory condition. {businessName} has fulfilled their obligations pursuant to the terms of this agreement and I release them from any claim or liability related to the item(s).
                 </Text>
                 <View style={{ marginTop: 'auto' }}>
                   <Text style={{ fontSize: 6, marginBottom: 2 }}>Date Signed:</Text>
@@ -496,69 +504,95 @@ const PawnTicketTemplate = ({
               </View>
             </View>
 
-            {/* Right side - Total Cost and Extension */}
+            {/* Right side - Total Cost and Extension (Pawn) or Summary (Buy/Sale) */}
             <View style={{ width: '35%', padding: 6 }}>
-              {/* Total Cost of Borrowing Header */}
-              <View style={{ backgroundColor: '#d0d0d0', padding: 3, marginBottom: 4 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ fontSize: 6, fontWeight: 'bold' }}>Total Cost of Borrowing:</Text>
-                  <Text style={{ fontSize: 8, fontWeight: 'bold' }}>${(totalCostOfBorrowing || 0).toFixed(2)}</Text>
-                </View>
-              </View>
-
-              {/* Description text */}
-              <Text style={{ fontSize: 5, lineHeight: 1.3, marginBottom: 6 }}>
-                You are not obligated to redeem pledged item(s).
-              </Text>
-              <Text style={{ fontSize: 5, lineHeight: 1.3, marginBottom: 8 }}>
-                If you need more time, you can extend the due date by paying the amount below. This is a payment of outstanding interest and fees only and does not reduce the principal.
-              </Text>
-
-              {/* Extension Cost */}
-              <View style={{ marginTop: 'auto' }}>
-                <View style={{ backgroundColor: '#d0d0d0', padding: 3, marginBottom: 2 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <View>
-                      <Text style={{ fontSize: 6, fontWeight: 'bold' }}>Extension Cost:</Text>
-                      <Text style={{ fontSize: 4, fontStyle: 'italic' }}>(For an additional {frequency} days)</Text>
+              {ticketType === 'pawn' ? (
+                <>
+                  {/* Total Cost of Borrowing Header */}
+                  <View style={{ backgroundColor: '#d0d0d0', padding: 3, marginBottom: 4 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 6, fontWeight: 'bold' }}>Total Cost of Borrowing:</Text>
+                      <Text style={{ fontSize: 8, fontWeight: 'bold' }}>${(totalCostOfBorrowing || 0).toFixed(2)}</Text>
                     </View>
-                    <Text style={{ fontSize: 8, fontWeight: 'bold' }}>${(extensionCost || 0).toFixed(2)}</Text>
                   </View>
-                </View>
-              </View>
+
+                  {/* Description text */}
+                  <Text style={{ fontSize: 5, lineHeight: 1.3, marginBottom: 6 }}>
+                    You are not obligated to redeem {itemAction} item(s).
+                  </Text>
+                  <Text style={{ fontSize: 5, lineHeight: 1.3, marginBottom: 8 }}>
+                    If you need more time, you can extend the due date by paying the amount below. This is a payment of outstanding interest and fees only and does not reduce the principal.
+                  </Text>
+
+                  {/* Extension Cost */}
+                  <View style={{ marginTop: 'auto' }}>
+                    <View style={{ backgroundColor: '#d0d0d0', padding: 3, marginBottom: 2 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <View>
+                          <Text style={{ fontSize: 6, fontWeight: 'bold' }}>Extension Cost:</Text>
+                          <Text style={{ fontSize: 4, fontStyle: 'italic' }}>(For an additional {frequency} days)</Text>
+                        </View>
+                        <Text style={{ fontSize: 8, fontWeight: 'bold' }}>${(extensionCost || 0).toFixed(2)}</Text>
+                      </View>
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <>
+                  {/* Transaction Summary for Buy/Sale */}
+                  <View style={{ backgroundColor: '#d0d0d0', padding: 3, marginBottom: 4 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 6, fontWeight: 'bold' }}>Total Amount:</Text>
+                      <Text style={{ fontSize: 8, fontWeight: 'bold' }}>${(principalAmount || 0).toFixed(2)}</Text>
+                    </View>
+                  </View>
+
+                  {/* Thank you message */}
+                  <Text style={{ fontSize: 5, lineHeight: 1.3, marginBottom: 6 }}>
+                    Thank you for your business.
+                  </Text>
+                  <Text style={{ fontSize: 5, lineHeight: 1.3, marginBottom: 8 }}>
+                    Please contact us if you have any questions or concerns about this transaction.
+                  </Text>
+                </>
+              )}
             </View>
           </View>
 
           {/* Terms and Conditions Section */}
           <View style={{ borderTop: '2pt solid black', padding: 10 }}>
-            <Text style={{ fontSize: 8, fontWeight: 'bold', textAlign: 'center', marginBottom: 6 }}>PAWN AGREEMENT - TERMS AND CONDITIONS</Text>
+            <Text style={{ fontSize: 8, fontWeight: 'bold', textAlign: 'center', marginBottom: 6 }}>{agreementAction} AGREEMENT - TERMS AND CONDITIONS</Text>
 
         <View style={styles.termsNumberedList}>
           {/* Term 1 */}
           <View style={styles.termsItem}>
             <Text style={styles.termsNumber}>1.</Text>
             <View style={styles.termsContent}>
-              <Text>To secure the principal of the loan, the Client hereby deposits the item(s) described on the reverse with Evergreen and grants a security interest in said item(s). The Client declares that they:</Text>
+              <Text>{ticketType === 'pawn'
+                ? `To secure the principal of the loan, the Client hereby deposits the item(s) described on the reverse with ${businessName} and grants a security interest in said item(s). The Client declares that they:`
+                : `The Client hereby ${ticketType === 'buy' ? 'sells' : 'purchases'} the item(s) described in this agreement to/from ${businessName}. The Client declares that they:`}</Text>
               <View style={styles.termsSubList}>
                 <View style={styles.termsSubItem}>
                   <Text style={styles.termsSubNumber}>a.</Text>
                   <Text style={{ flex: 1 }}>legally own the item(s) and they are free of any lien, are not rented, leased or otherwise encumbered.</Text>
                 </View>
+                {ticketType === 'pawn' && (
+                  <View style={styles.termsSubItem}>
+                    <Text style={styles.termsSubNumber}>b.</Text>
+                    <Text style={{ flex: 1 }}>will repay all outstanding loan principal in the case of any dispute of ownership.</Text>
+                  </View>
+                )}
                 <View style={styles.termsSubItem}>
-                  <Text style={styles.termsSubNumber}>b.</Text>
-                  <Text style={{ flex: 1 }}>will repay all outstanding loan principal in the case of any dispute of ownership.</Text>
-                </View>
-                <View style={styles.termsSubItem}>
-                  <Text style={styles.termsSubNumber}>c.</Text>
+                  <Text style={styles.termsSubNumber}>{ticketType === 'pawn' ? 'c' : 'b'}.</Text>
                   <Text style={{ flex: 1 }}>are not in bankruptcy or planning to declare it.</Text>
                 </View>
                 <View style={styles.termsSubItem}>
-                  <Text style={styles.termsSubNumber}>d.</Text>
-                  <Text style={{ flex: 1 }}>are not an HST registrant and no input tax credit or rebate will be claimed on any personal or sensitive information from all electronic devices prior to pledging them.</Text>
+                  <Text style={styles.termsSubNumber}>{ticketType === 'pawn' ? 'd' : 'c'}.</Text>
+                  <Text style={{ flex: 1 }}>are not an HST registrant and no input tax credit or rebate will be claimed on this transaction.</Text>
                 </View>
                 <View style={styles.termsSubItem}>
-                  <Text style={styles.termsSubNumber}>e.</Text>
-                  <Text style={{ flex: 1 }}>have backed up and securely removed any personal or sensitive information from all electronic devices prior to pledging them. Evergreen Trader's guarantee that they be based outside of Canada.</Text>
+                  <Text style={styles.termsSubNumber}>{ticketType === 'pawn' ? 'e' : 'd'}.</Text>
+                  <Text style={{ flex: 1 }}>have backed up and securely removed any personal or sensitive information from all electronic devices prior to {ticketType === 'pawn' ? 'pledging' : ticketType === 'buy' ? 'selling' : 'purchasing'} them.</Text>
                 </View>
               </View>
             </View>
@@ -567,13 +601,13 @@ const PawnTicketTemplate = ({
           {/* Term 2 */}
           <View style={styles.termsItem}>
             <Text style={styles.termsNumber}>2.</Text>
-            <Text style={styles.termsContent}>Item descriptions are based on a visual assessment only. Item condition and appraisals are not guaranteed to be 100% accurate. Items must be held in secure storage at the expense of the Client. Under the terms of this Agreement, the amount advanced is paid to Evergreen for the Principal Amount advanced to the Client.</Text>
+            <Text style={styles.termsContent}>Item descriptions are based on a visual assessment only. Item condition and appraisals are not guaranteed to be 100% accurate. {ticketType === 'pawn' ? `Items must be held in secure storage at the expense of the Client. Under the terms of this Agreement, the amount advanced is paid to ${businessName} for the Principal Amount advanced to the Client.` : `All items are sold/purchased as-is without warranty unless otherwise stated in writing.`}</Text>
           </View>
 
           {/* Term 3 */}
           <View style={styles.termsItem}>
             <Text style={styles.termsNumber}>3.</Text>
-            <Text style={styles.termsContent}>The option to redeem pledged item(s) expires at store closing on the Due Date after which they are considered forfeited.</Text>
+            <Text style={styles.termsContent}>{ticketType === 'pawn' ? `The option to redeem ${itemAction} item(s) expires at store closing on the Due Date after which they are considered forfeited.` : `All sales are final unless otherwise agreed upon in writing.`}</Text>
           </View>
 
           {/* Term 4 */}
