@@ -3024,6 +3024,29 @@ const CustomerTicket = () => {
       sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
     }
 
+    // Clear all tabs that had valid items after proceeding to checkout
+    if (validPawnItems.length > 0) {
+      setPawnItems([createEmptyPawnItem()]);
+    }
+    if (validBuyItems.length > 0) {
+      setBuyItems([createEmptyBuyItem()]);
+    }
+    if (validTradeItems.length > 0) {
+      setTradeItems([createEmptyTradeItem()]);
+    }
+    if (validSaleItems.length > 0) {
+      setSaleItems([createEmptySaleItem()]);
+    }
+    if (validRepairItems.length > 0) {
+      setRepairItems([createEmptyRepairItem()]);
+    }
+    if (validPaymentItems.length > 0) {
+      setPaymentItems([createEmptyPaymentItem()]);
+    }
+    if (validRefundItems.length > 0) {
+      setRefundItems([createEmptyRefundItem()]);
+    }
+
     // Navigate to checkout
     navigate('/checkout');
   };
