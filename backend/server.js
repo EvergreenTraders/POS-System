@@ -3741,23 +3741,41 @@ app.put('/api/customer-preferences/update-by-context', async (req, res) => {
 
     await client.query('BEGIN');
 
+    // Get valid columns from the table
+    const columnsResult = await client.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = 'customer_headers_preferences'
+      AND column_name LIKE 'show_%'
+    `);
+
+    const validColumns = new Set(columnsResult.rows.map(row => row.column_name));
+
     // Build dynamic UPDATE query based on the preferences object
     const setColumns = [];
     const values = [];
+    const skippedColumns = [];
     let valueIndex = 1;
 
-    // Add all show_* fields from preferences
+    // Add all show_* fields from preferences that exist in the table
     Object.keys(preferences).forEach(key => {
       if (key.startsWith('show_')) {
-        setColumns.push(`${key} = $${valueIndex}`);
-        values.push(preferences[key]);
-        valueIndex++;
+        if (validColumns.has(key)) {
+          setColumns.push(`${key} = $${valueIndex}`);
+          values.push(preferences[key]);
+          valueIndex++;
+        } else {
+          skippedColumns.push(key);
+        }
       }
     });
 
     if (setColumns.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'No valid preferences to update' });
+      return res.status(400).json({
+        error: 'No valid preferences to update',
+        skippedColumns: skippedColumns
+      });
     }
 
     // Add updated_at
@@ -3809,14 +3827,19 @@ app.get('/api/customer-preferences/required-fields/:transactionType', async (req
 
     const preferences = result.rows[0];
 
-    // Extract required fields (fields where show_* = true)
-    const requiredFields = [];
-    Object.keys(preferences).forEach(key => {
-      if (key.startsWith('show_') && preferences[key] === true) {
-        const fieldName = key.replace('show_', '');
-        requiredFields.push(fieldName);
-      }
-    });
+    // Define truly required fields per transaction type
+    // Only essential fields that MUST be filled for legal/business reasons
+    const requiredFieldsByType = {
+      'pawn': ['first_name', 'last_name', 'id_type', 'id_number', 'phone', 'address_line1', 'city', 'state'],
+      'buy': ['first_name', 'last_name', 'id_type', 'id_number', 'phone'],
+      'retail': [], // Sale/retail transactions don't require customer details to be mandatory
+      'sale': [],   // Sale transactions don't require customer details to be mandatory
+      'refund': ['first_name', 'last_name'],
+      'return': ['first_name', 'last_name']
+    };
+
+    // Get required fields for this transaction type
+    const requiredFields = requiredFieldsByType[transactionType] || [];
 
     res.json({
       transactionType: transactionType,
