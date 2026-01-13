@@ -1669,11 +1669,90 @@ const CustomerTicket = () => {
   };
   
   // Handle updating an item
-  const handleItemChange = (id, field, value) => {
+  const handleItemChange = async (id, field, value) => {
     const { items, setItems, type } = getCurrentItems();
 
     // For payment items, auto-calculate when days or interest/fee changes
     if (type === 'payment') {
+      // If pawnTicketId changed, fetch pawn data and auto-fill fields
+      if (field === 'pawnTicketId' && value) {
+        try {
+          const token = localStorage.getItem('token');
+          const response = await fetch(`${config.apiUrl}/pawn-transactions`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          if (response.ok) {
+            const pawnTransactions = await response.json();
+            const pawnData = pawnTransactions.find(p => p.pawn_ticket_id === value);
+
+            if (pawnData) {
+              // Found matching pawn ticket, auto-fill all fields
+              const principalAmount = parseFloat(pawnData.item_price) || 0;
+              const frequency = frequencyDays || 30;
+              const rate = interestRate || 2.9;
+              const days = frequency;
+              const term = 1;
+
+              const today = new Date();
+              const futureDate = new Date(today);
+              futureDate.setDate(today.getDate() + days);
+              const date = futureDate.toISOString().split('T')[0];
+
+              const interestAmount = principalAmount * (rate / 100) * term;
+              const insuranceFee = principalAmount * 0.01 * term;
+              const amount = interestAmount + insuranceFee;
+
+              // Fetch customer if available
+              if (pawnData.customer_id) {
+                try {
+                  const customerResponse = await fetch(`${config.apiUrl}/customers/${pawnData.customer_id}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                  });
+                  if (customerResponse.ok) {
+                    const customerData = await customerResponse.json();
+                    setCustomer(customerData);
+                    sessionStorage.setItem('selectedCustomer', JSON.stringify(customerData));
+                  }
+                } catch (error) {
+                  console.error('Error fetching customer:', error);
+                }
+              }
+
+              setItems(items.map(item => {
+                if (item.id === id) {
+                  return {
+                    ...item,
+                    pawnTicketId: value,
+                    description: pawnData.item_description || pawnData.item_id || '',
+                    principal: principalAmount.toFixed(2),
+                    days: days.toString(),
+                    term: term.toString(),
+                    date: date,
+                    interest: interestAmount.toFixed(2),
+                    fee: insuranceFee.toFixed(2),
+                    amount: amount.toFixed(2)
+                  };
+                }
+                return item;
+              }));
+
+              showSnackbar('Pawn ticket found and fields auto-filled', 'success');
+              return;
+            } else {
+              showSnackbar('Pawn ticket not found', 'warning');
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching pawn data:', error);
+          showSnackbar('Error fetching pawn data', 'error');
+        }
+
+        // If pawn not found or error, just update the field
+        setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
+        return;
+      }
+
       setItems(items.map(item => {
         if (item.id === id) {
           const updatedItem = { ...item, [field]: value };
@@ -4624,10 +4703,7 @@ return (
                                     fullWidth
                                     value={item.pawnTicketId}
                                     onChange={(e) => handleItemChange(item.id, 'pawnTicketId', e.target.value)}
-                                    InputProps={{
-                                      readOnly: true,
-                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
-                                    }}
+                                    placeholder="Enter Pawn Ticket ID"
                                   />
                                 </TableCell>
                                 <TableCell>
