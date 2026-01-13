@@ -1002,7 +1002,7 @@ app.get('/api/cases-config', async (req, res) => {
 
 // PUT /api/cases-config - Update cases configuration
 app.put('/api/cases-config', async (req, res) => {
-  const { number_of_cases } = req.body;
+  const { number_of_cases, label } = req.body;
 
   if (number_of_cases === undefined || number_of_cases < 0 || number_of_cases > 100) {
     return res.status(400).json({ error: 'number_of_cases must be between 0 and 100' });
@@ -1016,7 +1016,7 @@ app.put('/api/cases-config', async (req, res) => {
       ON CONFLICT (location) DO NOTHING
     `);
 
-    // Update the config
+    // Update only the number_of_cases (label is not stored in database)
     const configResult = await pool.query(`
       UPDATE cases_config
       SET number_of_cases = $1, updated_at = CURRENT_TIMESTAMP
@@ -1036,38 +1036,22 @@ app.put('/api/cases-config', async (req, res) => {
       config = configResult.rows[0];
     }
 
-    // Get current cases (excluding Inventory and Warehouse)
-    const currentCases = await pool.query(`
-      SELECT location_id, location FROM storage_location
-      WHERE location LIKE 'Case %'
-      ORDER BY location_id
+    // Delete all existing cases (excluding Inventory and Warehouse)
+    // This ensures we regenerate with the new label
+    await pool.query(`
+      DELETE FROM storage_location
+      WHERE location LIKE '%Case %'
+      AND location NOT IN ('Inventory', 'Warehouse')
     `);
 
-    const currentCount = currentCases.rows.length;
-
-    if (number_of_cases > currentCount) {
-      // Add new cases
-      for (let i = currentCount + 1; i <= number_of_cases; i++) {
+    // Generate new cases with the label (label is only used here, not saved)
+    if (number_of_cases > 0) {
+      const casePrefix = label ? `${label} Case` : 'Case';
+      for (let i = 1; i <= number_of_cases; i++) {
         await pool.query(`
           INSERT INTO storage_location (location, is_occupied)
           VALUES ($1, FALSE)
-          ON CONFLICT (location) DO NOTHING
-        `, [`Case ${i}`]);
-      }
-    } else if (number_of_cases < currentCount) {
-      // Remove excess cases - delete cases beyond the new count
-      for (let i = currentCount; i > number_of_cases; i--) {
-        const caseName = `Case ${i}`;
-
-        try {
-          // Delete the case
-          await pool.query(
-            'DELETE FROM storage_location WHERE location = $1',
-            [caseName]
-          );
-        } catch (deleteError) {
-          console.error(`Error deleting ${caseName}:`, deleteError);
-        }
+        `, [`${casePrefix} ${i}`]);
       }
     }
 
@@ -1075,6 +1059,79 @@ app.put('/api/cases-config', async (req, res) => {
   } catch (error) {
     console.error('Error updating cases config:', error);
     res.status(500).json({ error: 'Failed to update cases configuration' });
+  }
+});
+
+// Add cases to existing storage locations
+app.post('/api/cases-config/add', async (req, res) => {
+  const { cases_to_add, label } = req.body;
+
+  if (cases_to_add === undefined || cases_to_add <= 0 || cases_to_add > 100) {
+    return res.status(400).json({ error: 'cases_to_add must be between 1 and 100' });
+  }
+
+  try {
+    // Ensure Inventory and Warehouse default entries exist
+    await pool.query(`
+      INSERT INTO storage_location (location, is_occupied)
+      VALUES ('Inventory', FALSE), ('Warehouse', FALSE)
+      ON CONFLICT (location) DO NOTHING
+    `);
+
+    // Get or create config
+    let configResult = await pool.query('SELECT * FROM cases_config LIMIT 1');
+    let config;
+
+    if (configResult.rows.length === 0) {
+      const insertResult = await pool.query(
+        'INSERT INTO cases_config (number_of_cases) VALUES (0) RETURNING *'
+      );
+      config = insertResult.rows[0];
+    } else {
+      config = configResult.rows[0];
+    }
+
+    // Find the highest existing case number with this label
+    const labelPattern = label ? `${label} Case %` : 'Case %';
+    const existingCasesResult = await pool.query(`
+      SELECT location FROM storage_location
+      WHERE location LIKE $1
+      AND location NOT IN ('Inventory', 'Warehouse')
+      ORDER BY location
+    `, [labelPattern]);
+
+    let startNumber = 1;
+    if (existingCasesResult.rows.length > 0) {
+      // Extract numbers from existing case names and find the max
+      const caseNumbers = existingCasesResult.rows.map(row => {
+        const match = row.location.match(/Case (\d+)$/);
+        return match ? parseInt(match[1]) : 0;
+      });
+      startNumber = Math.max(...caseNumbers) + 1;
+    }
+
+    // Add new cases starting from the next available number
+    const casePrefix = label ? `${label} Case` : 'Case';
+    for (let i = 0; i < cases_to_add; i++) {
+      await pool.query(`
+        INSERT INTO storage_location (location, is_occupied)
+        VALUES ($1, FALSE)
+      `, [`${casePrefix} ${startNumber + i}`]);
+    }
+
+    // Update the total count in config (this is just for tracking, not used for generation)
+    const newTotalCount = config.number_of_cases + cases_to_add;
+    await pool.query(`
+      UPDATE cases_config
+      SET number_of_cases = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+    `, [newTotalCount, config.id]);
+
+    const updatedConfig = await pool.query('SELECT * FROM cases_config LIMIT 1');
+    res.json(updatedConfig.rows[0]);
+  } catch (error) {
+    console.error('Error adding cases:', error);
+    res.status(500).json({ error: 'Failed to add cases' });
   }
 });
 

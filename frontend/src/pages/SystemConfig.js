@@ -148,7 +148,7 @@ function SystemConfig() {
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
   const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
   const [drawers, setDrawers] = useState([]);
-  const [numberOfCases, setNumberOfCases] = useState({ count: 0, id: null });
+  const [numberOfCases, setNumberOfCases] = useState({ count: 0, id: null, label: '' });
   const [cases, setCases] = useState([]);
   const [isBlindCount, setIsBlindCount] = useState(true);
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState({ amount: 0.00, id: null });
@@ -198,11 +198,12 @@ function SystemConfig() {
         setNumberOfCases({
           count: response.data.number_of_cases,
           id: response.data.id || null,
+          label: '', // Label is not persisted, always start with empty
         });
       }
     } catch (error) {
       console.error('Error fetching cases config:', error);
-      setNumberOfCases({ count: 0, id: null });
+      setNumberOfCases({ count: 0, id: null, label: '' });
     }
   };
 
@@ -1161,8 +1162,9 @@ function SystemConfig() {
   };
 
   const handleNumberOfCasesChange = async (event) => {
-    const newCount = parseInt(event.target.value);
-    if (newCount < 0) {
+    const casesToAdd = parseInt(event.target.value);
+
+    if (casesToAdd < 0) {
       setSnackbar({
         open: true,
         message: 'Number of cases cannot be negative',
@@ -1171,35 +1173,45 @@ function SystemConfig() {
       return;
     }
 
-    if (newCount > 100) {
+    if (casesToAdd === 0) {
+      // Reset the input field
+      setNumberOfCases(prev => ({ ...prev, count: 0 }));
+      return;
+    }
+
+    if (casesToAdd > 100) {
       setSnackbar({
         open: true,
-        message: 'Number of cases cannot exceed 100',
+        message: 'Cannot add more than 100 cases at once',
         severity: 'error'
       });
       return;
     }
 
     try {
-      const response = await axios.put(`${API_BASE_URL}/cases-config`, {
-        number_of_cases: newCount
+      const response = await axios.post(`${API_BASE_URL}/cases-config/add`, {
+        cases_to_add: casesToAdd,
+        label: numberOfCases.label || ''
       });
 
+      // Reset the count input to 0 after adding cases
       setNumberOfCases({
-        count: response.data.number_of_cases,
-        id: response.data.id
+        count: 0,
+        id: response.data.id,
+        label: numberOfCases.label || '' // Keep the label for next time
       });
 
       // Refresh the cases list
       await fetchCases();
 
-      const caseMessage = newCount === 0
-        ? 'No storage cases configured.'
-        : `${newCount} storage case${newCount > 1 ? 's' : ''} created (Case 1${newCount > 1 ? ` to Case ${newCount}` : ''}).`;
+      const label = numberOfCases.label ? numberOfCases.label.trim() : '';
+      const caseMessage = label
+        ? `${casesToAdd} storage case${casesToAdd > 1 ? 's' : ''} added with label "${label}".`
+        : `${casesToAdd} storage case${casesToAdd > 1 ? 's' : ''} added.`;
 
       setSnackbar({
         open: true,
-        message: `Storage cases configuration updated. ${caseMessage}`,
+        message: caseMessage,
         severity: 'success'
       });
     } catch (error) {
@@ -1826,55 +1838,82 @@ function SystemConfig() {
               <Typography variant="h6" gutterBottom fontWeight="bold">
                 Storage Cases Configuration
               </Typography>
-              <Box display="flex" alignItems="center" gap={2} sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider', flexWrap: 'wrap' }}>
-                <TextField
-                  label="Number of Cases"
-                  type="number"
-                  value={numberOfCases.count}
-                  onChange={(e) => setNumberOfCases(prev => ({ ...prev, count: e.target.value }))}
-                  onBlur={(e) => handleNumberOfCasesChange(e)}
-                  size="small"
-                  sx={{ width: 180 }}
-                  InputProps={{
-                    endAdornment: <InputAdornment position="end">cases</InputAdornment>,
-                  }}
-                  inputProps={{ min: 0, max: 100 }}
-                  helperText="Number of cases (0-100)"
-                />
-              </Box>
-            </Box>
+              <Grid container spacing={2}>
+                {/* Left side: Configuration controls */}
+                <Grid item xs={12} md={4}>
+                  <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                    <TextField
+                      label="Case Label"
+                      type="text"
+                      value={numberOfCases.label}
+                      onChange={(e) => setNumberOfCases(prev => ({ ...prev, label: e.target.value }))}
+                      size="small"
+                      fullWidth
+                      placeholder="e.g., Jewelry, Silver"
+                      helperText="Label for cases (optional)"
+                      sx={{ mb: 2 }}
+                    />
+                    <TextField
+                      label="Number of Cases to Add"
+                      type="number"
+                      value={numberOfCases.count}
+                      onChange={(e) => setNumberOfCases(prev => ({ ...prev, count: e.target.value }))}
+                      onBlur={(e) => handleNumberOfCasesChange(e)}
+                      size="small"
+                      fullWidth
+                      InputProps={{
+                        endAdornment: <InputAdornment position="end">cases</InputAdornment>,
+                      }}
+                      inputProps={{ min: 0, max: 100 }}
+                      helperText="Number of cases (0-100)"
+                    />
+                  </Box>
+                </Grid>
 
-            {cases.length > 0 && (
-              <Box sx={{ mt: 3 }}>
-                <Typography variant="subtitle1" gutterBottom fontWeight="bold">
-                  Configured Storage Cases:
-                </Typography>
-                <TableContainer component={Paper} sx={{ mt: 1 }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Location</TableCell>
-                        <TableCell align="center">Status</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {cases.map((caseItem) => (
-                        <TableRow key={caseItem.location_id}>
-                          <TableCell>{caseItem.location}</TableCell>
-                          <TableCell align="center">
-                            {caseItem.is_occupied ? (
-                              <Typography color="warning.main" variant="body2">Occupied</Typography>
-                            ) : (
-                              <Typography color="success.main" variant="body2">Available</Typography>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Box>
-            )}
+                {/* Right side: Configured cases list */}
+                <Grid item xs={12} md={8}>
+                  <Box sx={{ bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                    <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        Configured Storage Cases ({cases.length})
+                      </Typography>
+                    </Box>
+                    {cases.length === 0 ? (
+                      <Box sx={{ p: 3, textAlign: 'center' }}>
+                        <Typography variant="body2" color="text.secondary">
+                          No storage cases configured yet. Add cases using the form on the left.
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <TableContainer sx={{ maxHeight: 300 }}>
+                        <Table size="small" stickyHeader>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Location</TableCell>
+                              <TableCell align="center">Status</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {cases.map((caseItem) => (
+                              <TableRow key={caseItem.location_id} hover>
+                                <TableCell>{caseItem.location}</TableCell>
+                                <TableCell align="center">
+                                  {caseItem.is_occupied ? (
+                                    <Typography color="warning.main" variant="body2">Occupied</Typography>
+                                  ) : (
+                                    <Typography color="success.main" variant="body2">Available</Typography>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
+                  </Box>
+                </Grid>
+              </Grid>
+            </Box>
           </ConfigSection>
 
           <ConfigSection>
