@@ -454,6 +454,9 @@ const CustomerTicket = () => {
   const [interestRate, setInterestRate] = React.useState(2.9);
   const [frequencyDays, setFrequencyDays] = React.useState(30);
 
+  // Customer's pawn transactions (loans)
+  const [customerLoans, setCustomerLoans] = React.useState([]);
+
   // Get customer from location state or session storage
   const [customer, setCustomer] = React.useState(() => {
     // First try to get customer from navigation state
@@ -1243,6 +1246,37 @@ const CustomerTicket = () => {
     };
     fetchPawnConfig();
   }, []);
+
+  // Fetch customer's pawn transactions when customer changes
+  React.useEffect(() => {
+    const fetchCustomerLoans = async () => {
+      if (!customer || !customer.id) {
+        setCustomerLoans([]);
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${config.apiUrl}/pawn-transactions`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (response.ok) {
+          const allPawns = await response.json();
+          // Filter pawns for this customer only
+          const customerPawns = allPawns.filter(pawn =>
+            pawn.customer_id === customer.id
+          );
+          setCustomerLoans(customerPawns);
+        }
+      } catch (error) {
+        console.error('Error fetching customer loans:', error);
+        setCustomerLoans([]);
+      }
+    };
+
+    fetchCustomerLoans();
+  }, [customer]);
 
   // Handle redeem data from Pawns.js
   React.useEffect(() => {
@@ -3815,39 +3849,82 @@ return (
               </Box>
             )}
           </Box>
-          {/* Right side - Portfolio KPI */}
-          <Box sx={{ 
-            display: 'flex', 
+          {/* Right side - Loan List for Payment/Redeem tabs, KPI for others */}
+          <Box sx={{
+            display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             width: '58%',
             pl: 2
           }}>
-            <Grid container spacing={2}>
-              <Grid item xs={4}>
-                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
-                  <AttachMoneyIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>${portfolioData.totalValue}</Typography>
-                  <Typography variant="body2" color="text.secondary" align="center">Total Value</Typography>
-                </Card>
+            {(activeTab === 5 || activeTab === 7) ? (
+              // Show loan list for Payment and Redeem tabs
+              <Box sx={{ width: '100%', maxHeight: '200px', overflowY: 'auto' }}>
+                {customerLoans.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    {customer ? 'No active loans found' : 'Select a customer to view loans'}
+                  </Typography>
+                ) : (
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Ticket ID</TableCell>
+                        <TableCell>Description</TableCell>
+                        <TableCell align="right">Principal</TableCell>
+                        <TableCell>Status</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {customerLoans.map((loan) => (
+                        <TableRow key={loan.pawn_ticket_id} hover>
+                          <TableCell>{loan.pawn_ticket_id}</TableCell>
+                          <TableCell>{loan.item_description || loan.item_id || 'N/A'}</TableCell>
+                          <TableCell align="right">${parseFloat(loan.item_price || 0).toFixed(2)}</TableCell>
+                          <TableCell>
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                color: loan.item_status === 'PAWN' ? '#1a8d48' : '#1976d2',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              {loan.item_status || 'N/A'}
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </Box>
+            ) : (
+              // Show KPI for other tabs
+              <Grid container spacing={2}>
+                <Grid item xs={4}>
+                  <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
+                    <AttachMoneyIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
+                    <Typography variant="h6" sx={{ fontWeight: 'bold' }}>${portfolioData.totalValue}</Typography>
+                    <Typography variant="body2" color="text.secondary" align="center">Total Value</Typography>
+                  </Card>
+                </Grid>
+
+                <Grid item xs={4}>
+                  <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
+                    <AccountBalanceWalletIcon color="secondary" sx={{ fontSize: 40, mb: 1 }} />
+                    <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{portfolioData.transactions}</Typography>
+                    <Typography variant="body2" color="text.secondary" align="center">Transactions</Typography>
+                  </Card>
+                </Grid>
+
+                <Grid item xs={4}>
+                  <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
+                    <InventoryIcon color="success" sx={{ fontSize: 40, mb: 1 }} />
+                    <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{portfolioData.itemsCount}</Typography>
+                    <Typography variant="body2" color="text.secondary" align="center">Items</Typography>
+                  </Card>
+                </Grid>
               </Grid>
-              
-              <Grid item xs={4}>
-                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
-                  <AccountBalanceWalletIcon color="secondary" sx={{ fontSize: 40, mb: 1 }} />
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{portfolioData.transactions}</Typography>
-                  <Typography variant="body2" color="text.secondary" align="center">Transactions</Typography>
-                </Card>
-              </Grid>
-              
-              <Grid item xs={4}>
-                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
-                  <InventoryIcon color="success" sx={{ fontSize: 40, mb: 1 }} />
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{portfolioData.itemsCount}</Typography>
-                  <Typography variant="body2" color="text.secondary" align="center">Items</Typography>
-                </Card>
-              </Grid>
-            </Grid>
+            )}
           </Box>
         </Box>
 
