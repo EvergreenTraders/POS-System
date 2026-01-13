@@ -440,7 +440,7 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
       SELECT
         s.*,
         calculate_expected_balance(s.session_id) AS current_expected_balance,
-        (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS transaction_count,
+        (SELECT COUNT(*) FROM transactions WHERE session_id = s.session_id) AS transaction_count,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments
       FROM cash_drawer_sessions s
@@ -710,7 +710,8 @@ app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
           closing_notes = $2
       WHERE session_id = $3 AND status = 'open'
       RETURNING *,
-        calculate_expected_balance(session_id) AS calculated_expected
+        calculate_expected_balance(session_id) AS calculated_expected,
+        (SELECT COUNT(*) FROM transactions WHERE session_id = $3) AS transaction_count
     `, [actual_balance, closing_notes || null, sessionId]);
 
     if (result.rows.length === 0) {
@@ -2535,9 +2536,18 @@ app.get('/api/jewelry', async (req, res) => {
     const query = `
       SELECT
         j.*,
+        ROUND(CAST(j.item_price AS NUMERIC), 2) as item_price,
         TO_CHAR(j.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
-        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at
+        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at,
+        TO_CHAR(st.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as sold_date
       FROM jewelry j
+      LEFT JOIN LATERAL (
+        SELECT created_at
+        FROM sale_ticket
+        WHERE sale_ticket.item_id = j.item_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) st ON true
       ${whereClause}
       ORDER BY j.created_at DESC
     `;
@@ -2958,15 +2968,42 @@ app.get('/api/inventory-status/:id', async (req, res) => {
     const { id } = req.params;
     const query = 'SELECT * FROM inventory_status WHERE status_id = $1';
     const result = await pool.query(query, [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Inventory status not found' });
     }
-    
+
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error fetching inventory status:', error);
     res.status(500).json({ error: 'Failed to fetch inventory status' });
+  }
+});
+
+// Endpoint to update expired HOLD items to ON_PROCESS status
+app.get('/api/inventory/update-hold-status', async (req, res) => {
+  try {
+    // Call the database function to update expired hold items
+    await pool.query('SELECT update_expired_hold_items()');
+
+    // Get count of items now in ON_PROCESS status
+    const countResult = await pool.query(
+      `SELECT COUNT(*) as updated_count
+       FROM jewelry
+       WHERE status = 'ON_PROCESS'
+       AND updated_at > CURRENT_TIMESTAMP - INTERVAL '1 minute'`
+    );
+
+    const updatedCount = parseInt(countResult.rows[0].updated_count);
+
+    res.json({
+      success: true,
+      message: `Successfully updated ${updatedCount} item(s) from HOLD to ON_PROCESS`,
+      updatedCount
+    });
+  } catch (error) {
+    console.error('Error updating hold status:', error);
+    res.status(500).json({ error: 'Failed to update hold status' });
   }
 });
 
@@ -3713,23 +3750,41 @@ app.put('/api/customer-preferences/update-by-context', async (req, res) => {
 
     await client.query('BEGIN');
 
+    // Get valid columns from the table
+    const columnsResult = await client.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = 'customer_headers_preferences'
+      AND column_name LIKE 'show_%'
+    `);
+
+    const validColumns = new Set(columnsResult.rows.map(row => row.column_name));
+
     // Build dynamic UPDATE query based on the preferences object
     const setColumns = [];
     const values = [];
+    const skippedColumns = [];
     let valueIndex = 1;
 
-    // Add all show_* fields from preferences
+    // Add all show_* fields from preferences that exist in the table
     Object.keys(preferences).forEach(key => {
       if (key.startsWith('show_')) {
-        setColumns.push(`${key} = $${valueIndex}`);
-        values.push(preferences[key]);
-        valueIndex++;
+        if (validColumns.has(key)) {
+          setColumns.push(`${key} = $${valueIndex}`);
+          values.push(preferences[key]);
+          valueIndex++;
+        } else {
+          skippedColumns.push(key);
+        }
       }
     });
 
     if (setColumns.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'No valid preferences to update' });
+      return res.status(400).json({
+        error: 'No valid preferences to update',
+        skippedColumns: skippedColumns
+      });
     }
 
     // Add updated_at
@@ -3781,14 +3836,19 @@ app.get('/api/customer-preferences/required-fields/:transactionType', async (req
 
     const preferences = result.rows[0];
 
-    // Extract required fields (fields where show_* = true)
-    const requiredFields = [];
-    Object.keys(preferences).forEach(key => {
-      if (key.startsWith('show_') && preferences[key] === true) {
-        const fieldName = key.replace('show_', '');
-        requiredFields.push(fieldName);
-      }
-    });
+    // Define truly required fields per transaction type
+    // Only essential fields that MUST be filled for legal/business reasons
+    const requiredFieldsByType = {
+      'pawn': ['first_name', 'last_name', 'id_type', 'id_number', 'phone', 'address_line1', 'city', 'state'],
+      'buy': ['first_name', 'last_name', 'id_type', 'id_number', 'phone'],
+      'retail': [], // Sale/retail transactions don't require customer details to be mandatory
+      'sale': [],   // Sale transactions don't require customer details to be mandatory
+      'refund': ['first_name', 'last_name'],
+      'return': ['first_name', 'last_name']
+    };
+
+    // Get required fields for this transaction type
+    const requiredFields = requiredFieldsByType[transactionType] || [];
 
     res.json({
       transactionType: transactionType,
@@ -5078,13 +5138,23 @@ app.post('/api/transactions', async (req, res) => {
         // Generate unique transaction ID
         const transactionId = await generateTransactionId();
 
+        // Get employee's active cash drawer session
+        const sessionResult = await client.query(
+            `SELECT session_id FROM cash_drawer_sessions
+             WHERE employee_id = $1 AND status = 'open'
+             ORDER BY opened_at DESC LIMIT 1`,
+            [employee_id]
+        );
+
+        const sessionId = sessionResult.rows.length > 0 ? sessionResult.rows[0].session_id : null;
+
         // Insert main transaction record
         const transactionQuery = `
             INSERT INTO transactions (
-                transaction_id, customer_id, employee_id,
+                transaction_id, customer_id, employee_id, session_id,
                 total_amount, transaction_date
             )
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
         `;
 
@@ -5092,6 +5162,7 @@ app.post('/api/transactions', async (req, res) => {
             transactionId,
             customer_id,
             employee_id,
+            sessionId,
             total_amount,
             transaction_date
         ]);
@@ -7448,32 +7519,32 @@ app.post('/api/payments', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    
+
     const { transaction_id, amount, payment_method } = req.body;
-    
+
     // Validate payment method
     if (!['CASH', 'CREDIT_CARD', 'DEBIT_CARD', 'BANK_TRANSFER', 'CHECK'].includes(payment_method)) {
       throw new Error('Invalid payment method');
     }
-    
+
     // Get transaction and validate amount
     const transactionResult = await client.query(
       'SELECT * FROM transactions WHERE transaction_id = $1 FOR UPDATE',
       [transaction_id]
     );
-    
+
     if (transactionResult.rows.length === 0) {
       throw new Error('Transaction not found');
     }
-    
+
     const transaction = transactionResult.rows[0];
-    
+
     // Get total payments made so far
     const paymentsResult = await client.query(
       'SELECT COALESCE(SUM(amount), 0) as paid_amount FROM payments WHERE transaction_id = $1',
       [transaction_id]
     );
-    
+
     const paidAmount = parseFloat(paymentsResult.rows[0].paid_amount);
     const newTotalPaid = paidAmount + parseFloat(amount);
 
@@ -7482,7 +7553,7 @@ app.post('/api/payments', async (req, res) => {
     if (newTotalPaid > transaction.total_amount + EPSILON) {
       throw new Error('Payment amount exceeds remaining balance');
     }
-    
+
     // Create payment record
     const paymentResult = await client.query(
       `INSERT INTO payments (
@@ -7490,6 +7561,46 @@ app.post('/api/payments', async (req, res) => {
       ) VALUES ($1, $2, $3) RETURNING *`,
       [transaction_id, amount, payment_method]
     );
+
+    // If this is a CASH payment, link it to the employee's active cash drawer session
+    if (payment_method === 'CASH') {
+      // Get the employee's active cash drawer session
+      const sessionResult = await client.query(
+        `SELECT session_id FROM cash_drawer_sessions
+         WHERE employee_id = $1 AND status = 'open'
+         ORDER BY opened_at DESC LIMIT 1`,
+        [transaction.employee_id]
+      );
+
+      if (sessionResult.rows.length > 0) {
+        const session_id = sessionResult.rows[0].session_id;
+
+        // Determine if this is a payable or receivable transaction
+        // Payable: total_amount < 0 (business owes customer - buy/pawn transactions)
+        // Receivable: total_amount > 0 (customer owes business - sale transactions)
+        const isPayable = parseFloat(transaction.total_amount) < 0;
+
+        // For payable transactions (negative total), cash payment should subtract from drawer
+        // For receivable transactions (positive total), cash payment should add to drawer
+        const drawerAmount = isPayable ? -Math.abs(parseFloat(amount)) : Math.abs(parseFloat(amount));
+        const transactionType = isPayable ? 'payout' : 'sale';
+
+        // Insert cash drawer transaction record
+        await client.query(
+          `INSERT INTO cash_drawer_transactions
+           (session_id, transaction_id, amount, transaction_type, payment_id, notes)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            session_id,
+            transaction_id,
+            drawerAmount,
+            transactionType,
+            paymentResult.rows[0].payment_id,
+            `Cash ${isPayable ? 'payout' : 'payment'} for transaction ${transaction_id}`
+          ]
+        );
+      }
+    }
 
     await client.query('COMMIT');
     res.status(201).json(paymentResult.rows[0]);

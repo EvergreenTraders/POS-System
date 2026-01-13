@@ -676,6 +676,76 @@ const CustomerTicket = () => {
     cleanupExpiredTickets();
   }, []);
 
+  // Check and remove sold items from inventory on component mount and when location changes
+  React.useEffect(() => {
+    const checkAndRemoveSoldItems = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          return;
+        }
+
+        // Check all tabs for items with fromInventory flag
+        const tabsToCheck = [
+          { items: saleItems, setItems: setSaleItems, type: 'sale' },
+          { items: buyItems, setItems: setBuyItems, type: 'buy' },
+          { items: pawnItems, setItems: setPawnItems, type: 'pawn' }
+        ];
+
+        let totalRemoved = 0;
+        for (const tab of tabsToCheck) {
+          const inventoryItems = tab.items.filter(item => item.fromInventory && item.item_id);
+
+          if (inventoryItems.length === 0) continue;
+
+          // Check each inventory item's status
+          const itemsToRemove = [];
+          for (const item of inventoryItems) {
+            try {
+              const response = await fetch(`${config.apiUrl}/jewelry/${item.item_id}`, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+
+              if (response.ok) {
+                const data = await response.json();
+                // If item is SOLD, mark it for removal
+                if (data.status === 'SOLD') {
+                  itemsToRemove.push(item.item_id);
+                }
+              }
+            } catch (error) {
+              console.error(`Error checking status for item ${item.item_id}:`, error);
+            }
+          }
+
+          // Remove sold items from the tab
+          if (itemsToRemove.length > 0) {
+            const updatedItems = tab.items.filter(item => !itemsToRemove.includes(item.item_id));
+            // Ensure at least one empty item exists
+            const finalItems = updatedItems.length === 0
+              ? [tab.type === 'sale' ? createEmptySaleItem() :
+                 tab.type === 'buy' ? createEmptyBuyItem() :
+                 createEmptyPawnItem()]
+              : updatedItems;
+
+            tab.setItems(finalItems);
+            saveTicketItems(tab.type, finalItems);
+            totalRemoved += itemsToRemove.length;
+          }
+        }
+
+        // Show notification if items were removed
+        if (totalRemoved > 0) {
+          showSnackbar(`${totalRemoved} sold item${totalRemoved > 1 ? 's' : ''} removed from ticket`, 'info');
+        }
+      } catch (error) {
+        console.error('Error checking sold items:', error);
+      }
+    };
+
+    checkAndRemoveSoldItems();
+  }, [location.pathname]); // Run on mount and when navigating back to this page
+
   // Process estimated items when component mounts - use a ref to track if the current navigation state has been processed
   const processedStateRef = React.useRef(null);
   
@@ -1461,17 +1531,11 @@ const CustomerTicket = () => {
   // Handle deleting an item
   const handleDeleteItem = (id) => {
     const { items, setItems } = getCurrentItems();
-    
-    // Find the item to be deleted
-    const itemToDelete = items.find(item => item.id === id);
-    
-    // If we're deleting the only item and it's from an estimator (has originalItem or sourceEstimator property)
-    // then allow deletion; otherwise keep at least one row (legacy behavior)
-    const isFromEstimator = itemToDelete && (itemToDelete.originalItem || itemToDelete.sourceEstimator);
-    if (items.length <= 1 && !isFromEstimator) return; // Keep at least one row if not from estimator
-    
-    // If we're deleting the last estimator item, add an empty row to maintain UI consistency
+
+    // Always allow deletion - filter out the item to delete
     const remainingItems = items.filter(item => item.id !== id);
+
+    // If no items remain after deletion, add an empty row to maintain UI consistency
     if (remainingItems.length === 0) {
       // Add an empty item with a new ID
       const emptyItem = { id: Date.now(), description: '', category: '' };
@@ -2683,7 +2747,14 @@ const CustomerTicket = () => {
         }
 
         // Generate a unique ticket ID for this batch of items with sequential 8-digit number
-        const storageKey = `last${ticketPrefix}TicketNumber`;
+        // Buy and Sale transactions share the same sequence number
+        let storageKey;
+        if (transaction_type === 'buy' || transaction_type === 'sale') {
+          storageKey = 'lastBuySaleTicketNumber'; // Shared sequence for buy and sale
+        } else {
+          storageKey = `last${ticketPrefix}TicketNumber`; // Separate sequence for other types
+        }
+
         let lastTicketNumber = parseInt(localStorage.getItem(storageKey) || '0');
         lastTicketNumber += 1;
         localStorage.setItem(storageKey, lastTicketNumber.toString());
@@ -3021,6 +3092,29 @@ const CustomerTicket = () => {
     // Save customer data to session storage
     if (customer) {
       sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
+    }
+
+    // Clear all tabs that had valid items after proceeding to checkout
+    if (validPawnItems.length > 0) {
+      setPawnItems([createEmptyPawnItem()]);
+    }
+    if (validBuyItems.length > 0) {
+      setBuyItems([createEmptyBuyItem()]);
+    }
+    if (validTradeItems.length > 0) {
+      setTradeItems([createEmptyTradeItem()]);
+    }
+    if (validSaleItems.length > 0) {
+      setSaleItems([createEmptySaleItem()]);
+    }
+    if (validRepairItems.length > 0) {
+      setRepairItems([createEmptyRepairItem()]);
+    }
+    if (validPaymentItems.length > 0) {
+      setPaymentItems([createEmptyPaymentItem()]);
+    }
+    if (validRefundItems.length > 0) {
+      setRefundItems([createEmptyRefundItem()]);
     }
 
     // Navigate to checkout

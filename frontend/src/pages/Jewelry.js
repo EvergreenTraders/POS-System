@@ -50,6 +50,19 @@ function Jewelry() {
   const { enqueueSnackbar } = useSnackbar();
   const { cartItems, addToCart } = useCart();
 
+  // Update expired HOLD items to ON_PROCESS when component mounts
+  useEffect(() => {
+    const updateHoldStatus = async () => {
+      try {
+        await axios.get(`${config.apiUrl}/inventory/update-hold-status`);
+      } catch (error) {
+        console.error('Error updating hold status:', error);
+        // Fail silently - this is a background task
+      }
+    };
+    updateHoldStatus();
+  }, []); // Run only once on mount
+
   const handleViewHistory = async (itemId) => {
     console.log('View History clicked for item:', itemId);
     if (!itemId) {
@@ -631,7 +644,8 @@ function Jewelry() {
     let saleTicketId = sessionStorage.getItem('inventorySaleTicketId');
     if (!saleTicketId) {
       // Generate a new sale ticket ID (format: ST-00000001)
-      const storageKey = 'lastSTTicketNumber';
+      // Buy and Sale transactions share the same sequence number
+      const storageKey = 'lastBuySaleTicketNumber';
       let lastTicketNumber = parseInt(localStorage.getItem(storageKey) || '0');
       lastTicketNumber += 1;
       localStorage.setItem(storageKey, lastTicketNumber.toString());
@@ -988,10 +1002,14 @@ function Jewelry() {
                           ? (item.category.category || item.category.value || item.category.name || '')
                           : (item.category || '')}
                       </TableCell>
-                      <TableCell>${item.item_price || 'N/A'}</TableCell>
+                      <TableCell>${formatPrice(item.item_price)}</TableCell>
                       <TableCell>{item.metal_weight}g</TableCell>
                       <TableCell>{item.inventory_status || item.status}</TableCell>
-                      <TableCell>{new Date(item.created_at).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        {(item.status === 'SOLD' || item.inventory_status === 'SOLD') && item.sold_date
+                          ? new Date(item.sold_date).toLocaleDateString()
+                          : new Date(item.created_at).toLocaleDateString()}
+                      </TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1 }}>
                           {/* Only show Edit button for IN_PROCESS status items */}
@@ -1140,7 +1158,7 @@ function Jewelry() {
                   </Typography>
 
                   <Typography variant="h6" sx={{ color: 'success.main', mb: 0.5 }}>
-                    ${selectedItem.item_price}
+                    ${formatPrice(selectedItem.item_price)}
                   </Typography>
                   <Typography
                     variant="body2"
@@ -1222,8 +1240,16 @@ function Jewelry() {
                     </Box>
                   )}
                   <Box>
-                    <Typography variant="caption" color="textSecondary">Created</Typography>
-                    <Typography variant="body2">{new Date(selectedItem.created_at).toLocaleDateString()}</Typography>
+                    <Typography variant="caption" color="textSecondary">
+                      {(selectedItem.status === 'SOLD' || selectedItem.inventory_status === 'SOLD') && selectedItem.sold_date
+                        ? 'Sold Date'
+                        : 'Created'}
+                    </Typography>
+                    <Typography variant="body2">
+                      {(selectedItem.status === 'SOLD' || selectedItem.inventory_status === 'SOLD') && selectedItem.sold_date
+                        ? new Date(selectedItem.sold_date).toLocaleDateString()
+                        : new Date(selectedItem.created_at).toLocaleDateString()}
+                    </Typography>
                   </Box>
                 </Box>
               </Paper>
