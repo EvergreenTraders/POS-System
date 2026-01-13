@@ -72,7 +72,7 @@ const CustomerTicket = () => {
   // Camera capture state
   const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
   const [currentCaptureItemId, setCurrentCaptureItemId] = useState(null);
-  const [currentCaptureItemType, setCurrentCaptureItemType] = useState(null); // 'pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund'
+  const [currentCaptureItemType, setCurrentCaptureItemType] = useState(null); // 'pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund', 'redeem'
   const [videoStream, setVideoStream] = useState(null);
   const videoRef = React.useRef(null);
   const canvasRef = React.useRef(null);
@@ -354,6 +354,9 @@ const CustomerTicket = () => {
         break;
       case 'refund':
         setRefundItems(updateItemImages);
+        break;
+      case 'redeem':
+        setRedeemItems(updateItemImages);
         break;
       default:
         break;
@@ -655,7 +658,7 @@ const CustomerTicket = () => {
   });
   
   const [paymentItems, setPaymentItems] = React.useState(() => {
-    return loadTicketItems('payment') || [{ id: 1, amount: '', method: '', reference: '', notes: '' }];
+    return loadTicketItems('payment') || [{ id: 1, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '', images: [] }];
   });
   
   const [refundItems, setRefundItems] = React.useState(() => {
@@ -663,7 +666,7 @@ const CustomerTicket = () => {
   });
 
   const [redeemItems, setRedeemItems] = React.useState(() => {
-    return loadTicketItems('redeem') || [{ id: 1, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '' }];
+    return loadTicketItems('redeem') || [{ id: 1, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '', images: [] }];
   });
 
   // Helper functions to create empty items for each tab type
@@ -672,7 +675,7 @@ const CustomerTicket = () => {
   const createEmptyTradeItem = () => ({ id: Date.now(), tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' });
   const createEmptySaleItem = () => ({ id: Date.now(), description: '', category: '', price: '', paymentMethod: '' });
   const createEmptyRepairItem = () => ({ id: Date.now(), description: '', issue: '', fee: '', completion: '' });
-  const createEmptyPaymentItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', notes: '' });
+  const createEmptyPaymentItem = () => ({ id: Date.now(), pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '', images: [] });
   const createEmptyRefundItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', reason: '' });
   const createEmptyRedeemItem = () => ({ id: Date.now(), pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '' });
 
@@ -1284,6 +1287,74 @@ const CustomerTicket = () => {
     }
   }, [location.state?.redeemData]);
 
+  // Handle extend data from Pawns.js
+  React.useEffect(() => {
+    if (location.state?.extendData) {
+      const stateHash = JSON.stringify({ extendData: location.state.extendData });
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+
+      const extendData = location.state.extendData;
+
+      // Fetch customer data if customerId is provided
+      const fetchAndSetCustomer = async () => {
+        let customerData = null;
+
+        if (extendData.customerId) {
+          try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${config.apiUrl}/customers/${extendData.customerId}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+
+            if (response.ok) {
+              customerData = await response.json();
+              setCustomer(customerData);
+              sessionStorage.setItem('selectedCustomer', JSON.stringify(customerData));
+            } else {
+              console.error('Failed to fetch customer:', response.status);
+              showSnackbar('Could not load customer details', 'warning');
+            }
+          } catch (error) {
+            console.error('Error fetching customer:', error);
+            showSnackbar('Could not load customer details', 'warning');
+          }
+        }
+
+        // Clear empty payment items if needed
+        const hasEmptyPaymentItems = paymentItems.length === 1 && !paymentItems[0].pawnTicketId;
+
+        // Create payment item from extend data
+        const newPaymentItem = {
+          id: Date.now(),
+          pawnTicketId: extendData.pawnTicketId || '',
+          description: extendData.description || '',
+          principal: '',
+          interest: extendData.amount || '',
+          totalAmount: extendData.amount || '',
+          images: []
+        };
+
+        // Update state with new item and save to localStorage
+        const updatedPaymentItems = hasEmptyPaymentItems ? [newPaymentItem] : [...paymentItems, newPaymentItem];
+        setPaymentItems(updatedPaymentItems);
+        saveTicketItems('payment', updatedPaymentItems);
+
+        // Switch to payment tab (index 5)
+        setActiveTab(5);
+
+        showSnackbar(`Extension payment added to payment tab${customerData ? ` for ${customerData.first_name} ${customerData.last_name}` : ''}`, 'success');
+
+        // Clear the location state
+        window.history.replaceState({}, document.title);
+      };
+
+      fetchAndSetCustomer();
+    }
+  }, [location.state?.extendData]);
+
   // Track whether initial load is complete to avoid overwriting saved data
   const initialLoadCompleteRef = React.useRef(false);
   const customerIdRef = React.useRef(customer?.id);
@@ -1354,7 +1425,7 @@ const CustomerTicket = () => {
         setTradeItems(mergeItems(tradeItems, savedTrade, { id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }));
         setSaleItems(mergeItems(saleItems, savedSale, { id: 1, description: '', category: '', price: '', paymentMethod: '' }));
         setRepairItems(mergeItems(repairItems, savedRepair, { id: 1, description: '', issue: '', fee: '', completion: '' }));
-        setPaymentItems(mergeItems(paymentItems, savedPayment, { id: 1, amount: '', method: '', reference: '', notes: '' }));
+        setPaymentItems(mergeItems(paymentItems, savedPayment, { id: 1, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '', images: [] }));
         setRefundItems(mergeItems(refundItems, savedRefund, { id: 1, amount: '', method: '', reference: '', reason: '' }));
       }
 
@@ -1790,7 +1861,7 @@ const CustomerTicket = () => {
       case 4: // Repair
         return repairItems.length > 0 && repairItems.some(item => item.description || item.issue || item.fee);
       case 5: // Payment
-        return paymentItems.length > 0 && paymentItems.some(item => item.amount || item.method);
+        return paymentItems.length > 0 && paymentItems.some(item => item.pawnTicketId || item.totalAmount);
       case 6: // Refund
         return refundItems.length > 0 && refundItems.some(item => item.amount || item.method || item.reason);
       case 7: // Redeem
@@ -3193,7 +3264,7 @@ const CustomerTicket = () => {
     }
 
     // Add payment items
-    const validPaymentItems = paymentItems.filter(item => item.amount || item.method);
+    const validPaymentItems = paymentItems.filter(item => item.pawnTicketId || item.totalAmount);
     if (validPaymentItems.length > 0) {
       const paymentTicketId = generateBuyTicketId('payment');
       validPaymentItems.forEach(item => {
@@ -4394,13 +4465,13 @@ return (
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="15%" align="center">Estimator</TableCell>
                               <TableCell width="10%" align="center">Image</TableCell>
-                              <TableCell width="10%">Amount</TableCell>
-                              <TableCell width="15%">Payment Method</TableCell>
-                              <TableCell width="15%">Reference</TableCell>
-                              <TableCell width="20%">Notes</TableCell>
-                              <TableCell width="20%" align="right" padding="none">
+                              <TableCell width="18%">Pawn Ticket ID</TableCell>
+                              <TableCell width="30%">Description</TableCell>
+                              <TableCell width="15%">Principal</TableCell>
+                              <TableCell width="15%">Interest</TableCell>
+                              <TableCell width="15%">Total Amount</TableCell>
+                              <TableCell width="7%" align="right" padding="none">
                                 <Tooltip title="Add Item">
                                   <IconButton size="small" color="primary" onClick={handleAddRow}>
                                     <AddIcon />
@@ -4412,45 +4483,17 @@ return (
                           <TableBody>
                             {paymentItems.map((item) => (
                               <TableRow key={item.id}>
-                                <TableCell align="center" padding="normal">
-                                  <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
-                                    <Tooltip title="Jewelry Estimator">
-                                      <IconButton
-                                        size="small"
-                                        color="secondary"
-                                        onClick={() => handleJewelryEstimatorClick(item.id, 'payment')}
-                                        sx={{
-                                          bgcolor: selectedJewelryEstimator[`payment-${item.id}`] ? 'secondary.main' : 'transparent',
-                                          color: selectedJewelryEstimator[`payment-${item.id}`] ? 'white' : 'inherit',
-                                          '&:hover': {
-                                            bgcolor: selectedJewelryEstimator[`payment-${item.id}`] ? 'secondary.dark' : 'action.hover'
-                                          }
-                                        }}
-                                      >
-                                        <DiamondIcon fontSize="small" />
-                                      </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="Bullion Estimator">
-                                      <IconButton size="small" color="primary" onClick={handleBullionEstimatorClick}>
-                                        <MonetizationOnIcon fontSize="small" />
-                                      </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="Misc Estimator">
-                                      <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
-                                        <WatchIcon fontSize="small" />
-                                      </IconButton>
-                                    </Tooltip>
-                                  </Box>
-                                </TableCell>
                                 <TableCell align="center">
                                   {(item.images && item.images.length > 0) || item.image ? (
                                     <img
                                       src={item.images?.[0]?.url || item.image}
                                       alt="Item"
-                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px', cursor: 'pointer' }}
+                                      onClick={() => handleOpenCamera(item.id, 'payment')}
                                     />
                                   ) : (
                                     <Box
+                                      onClick={() => handleOpenCamera(item.id, 'payment')}
                                       sx={{
                                         width: '50px',
                                         height: '50px',
@@ -4458,7 +4501,11 @@ return (
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
-                                        borderRadius: '4px'
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        '&:hover': {
+                                          bgcolor: 'grey.300'
+                                        }
                                       }}
                                     >
                                       <PhotoCamera sx={{ color: 'grey.400' }} />
@@ -4469,50 +4516,43 @@ return (
                                   <TextField
                                     variant="standard"
                                     fullWidth
-                                    value={item.amount}
-                                    onChange={(e) => handleItemChange(item.id, 'amount', e.target.value)}
+                                    value={item.pawnTicketId}
+                                    onChange={(e) => handleItemChange(item.id, 'pawnTicketId', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell>
                                   <TextField
                                     variant="standard"
                                     fullWidth
-                                    value={item.method}
-                                    onChange={(e) => handleItemChange(item.id, 'method', e.target.value)}
+                                    value={item.description}
+                                    onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell>
                                   <TextField
                                     variant="standard"
                                     fullWidth
-                                    value={item.reference}
-                                    onChange={(e) => handleItemChange(item.id, 'reference', e.target.value)}
+                                    value={item.principal}
+                                    onChange={(e) => handleItemChange(item.id, 'principal', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell>
                                   <TextField
                                     variant="standard"
                                     fullWidth
-                                    value={item.notes}
-                                    onChange={(e) => handleItemChange(item.id, 'notes', e.target.value)}
+                                    value={item.interest}
+                                    onChange={(e) => handleItemChange(item.id, 'interest', e.target.value)}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.totalAmount}
+                                    onChange={(e) => handleItemChange(item.id, 'totalAmount', e.target.value)}
                                   />
                                 </TableCell>
                                 <TableCell align="right">
-                                  <Tooltip title="Edit">
-                                    <IconButton size="small" onClick={() => handleEditItem(item.id)}>
-                                      <EditIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Convert">
-                                    <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
-                                      <SwapHorizIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Duplicate">
-                                    <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
-                                      <ContentCopyIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
                                   <Tooltip title="Delete">
                                     <IconButton size="small" onClick={() => handleDeleteItem(item.id)}>
                                       <DeleteIcon fontSize="small" />
@@ -4700,6 +4740,7 @@ return (
                         <Table size="small">
                           <TableHead>
                             <TableRow>
+                              <TableCell width="10%" align="center">Image</TableCell>
                               <TableCell width="18%">Pawn Ticket ID</TableCell>
                               <TableCell width="30%">Description</TableCell>
                               <TableCell width="15%">Principal</TableCell>
@@ -4717,6 +4758,35 @@ return (
                           <TableBody>
                             {redeemItems.map((item) => (
                               <TableRow key={item.id}>
+                                <TableCell align="center">
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px', cursor: 'pointer' }}
+                                      onClick={() => handleOpenCamera(item.id, 'redeem')}
+                                    />
+                                  ) : (
+                                    <Box
+                                      onClick={() => handleOpenCamera(item.id, 'redeem')}
+                                      sx={{
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        '&:hover': {
+                                          bgcolor: 'grey.300'
+                                        }
+                                      }}
+                                    >
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
+                                </TableCell>
                                 <TableCell>
                                   <TextField
                                     variant="standard"
