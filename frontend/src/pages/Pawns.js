@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -33,6 +34,7 @@ import config from '../config';
 const API_BASE_URL = config.apiUrl;
 
 const Pawns = () => {
+  const navigate = useNavigate();
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [pawns, setPawns] = useState([]);
@@ -178,8 +180,30 @@ const Pawns = () => {
   };
 
   const handleRedeemClick = (pawn) => {
-    setSelectedPawn(pawn);
-    setRedeemDialogOpen(true);
+    // Calculate redemption details
+    const principalAmount = parseFloat(pawn.item_price) || 0;
+    const term = termDays || 62;
+    const frequency = frequencyDays || 30;
+    const rate = interestRate || 2.9;
+    const interestPeriods = Math.ceil(term / frequency);
+    const interestAmount = principalAmount * (rate / 100) * interestPeriods;
+    const insuranceCost = principalAmount * 0.01 * interestPeriods;
+    const totalAmount = principalAmount + interestAmount + insuranceCost;
+
+    // Navigate to CustomerTicket with redeem data
+    navigate('/customer-ticket', {
+      state: {
+        redeemData: {
+          pawnTicketId: pawn.pawn_ticket_id,
+          description: pawn.item_description || pawn.item_id,
+          customerId: pawn.customer_id,
+          customerName: pawn.customer_name || '',
+          principal: principalAmount.toFixed(2),
+          interest: (interestAmount + insuranceCost).toFixed(2),
+          totalAmount: totalAmount.toFixed(2)
+        }
+      }
+    });
   };
 
   const handleRedeemConfirm = async () => {

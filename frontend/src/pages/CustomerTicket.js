@@ -662,6 +662,10 @@ const CustomerTicket = () => {
     return loadTicketItems('refund') || [{ id: 1, amount: '', method: '', reference: '', reason: '' }];
   });
 
+  const [redeemItems, setRedeemItems] = React.useState(() => {
+    return loadTicketItems('redeem') || [{ id: 1, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '' }];
+  });
+
   // Helper functions to create empty items for each tab type
   const createEmptyPawnItem = () => ({ id: Date.now(), description: '', category: '', value: '' });
   const createEmptyBuyItem = () => ({ id: Date.now(), description: '', category: '', price: '' });
@@ -670,6 +674,7 @@ const CustomerTicket = () => {
   const createEmptyRepairItem = () => ({ id: Date.now(), description: '', issue: '', fee: '', completion: '' });
   const createEmptyPaymentItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', notes: '' });
   const createEmptyRefundItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', reason: '' });
+  const createEmptyRedeemItem = () => ({ id: Date.now(), pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '' });
 
   // Clean up expired ticket items on component mount
   React.useEffect(() => {
@@ -1212,6 +1217,73 @@ const CustomerTicket = () => {
     }
   }, [location.state]);
 
+  // Handle redeem data from Pawns.js
+  React.useEffect(() => {
+    if (location.state?.redeemData) {
+      const stateHash = JSON.stringify({ redeemData: location.state.redeemData });
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+
+      const redeemData = location.state.redeemData;
+
+      // Fetch customer data if customerId is provided
+      const fetchAndSetCustomer = async () => {
+        let customerData = null;
+
+        if (redeemData.customerId) {
+          try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${config.apiUrl}/customers/${redeemData.customerId}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+
+            if (response.ok) {
+              customerData = await response.json();
+              setCustomer(customerData);
+              sessionStorage.setItem('selectedCustomer', JSON.stringify(customerData));
+            } else {
+              console.error('Failed to fetch customer:', response.status);
+              showSnackbar('Could not load customer details', 'warning');
+            }
+          } catch (error) {
+            console.error('Error fetching customer:', error);
+            showSnackbar('Could not load customer details', 'warning');
+          }
+        }
+
+        // Clear empty redeem items if needed
+        const hasEmptyRedeemItems = redeemItems.length === 1 && !redeemItems[0].pawnTicketId;
+
+        // Create redeem item from pawn data (without customer field)
+        const newRedeemItem = {
+          id: Date.now(),
+          pawnTicketId: redeemData.pawnTicketId || '',
+          description: redeemData.description || '',
+          principal: redeemData.principal || '',
+          interest: redeemData.interest || '',
+          totalAmount: redeemData.totalAmount || ''
+        };
+
+        // Update state with new item and save to localStorage
+        const updatedRedeemItems = hasEmptyRedeemItems ? [newRedeemItem] : [...redeemItems, newRedeemItem];
+        setRedeemItems(updatedRedeemItems);
+        saveTicketItems('redeem', updatedRedeemItems);
+
+        // Switch to redeem tab (index 7)
+        setActiveTab(7);
+
+        showSnackbar(`Pawn item added to redeem tab${customerData ? ` for ${customerData.first_name} ${customerData.last_name}` : ''}`, 'success');
+
+        // Clear the location state
+        window.history.replaceState({}, document.title);
+      };
+
+      fetchAndSetCustomer();
+    }
+  }, [location.state?.redeemData]);
+
   // Track whether initial load is complete to avoid overwriting saved data
   const initialLoadCompleteRef = React.useRef(false);
   const customerIdRef = React.useRef(customer?.id);
@@ -1338,11 +1410,14 @@ const CustomerTicket = () => {
   }, [refundItems, customer]);
 
   // Recalculate totals whenever any item array changes
+  // Note: These are SUBTOTALS (before tax). Tax is added in display functions.
   React.useEffect(() => {
     // Calculate totals for all tabs
-    const pawnTotal = pawnItems.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
-    const buyTotal = buyItems.reduce((sum, item) => sum + (parseFloat(item.price) || 0), 0);
+    // Pawn & Buy are negative (money going OUT to customer)
+    const pawnTotal = -1 * pawnItems.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
+    const buyTotal = -1 * buyItems.reduce((sum, item) => sum + (parseFloat(item.price) || 0), 0);
     const tradeTotal = tradeItems.reduce((sum, item) => sum + (parseFloat(item.priceDiff) || 0), 0);
+    // Sale & Redeem are positive (money coming IN from customer)
     const saleTotal = saleItems.reduce((sum, item) => {
       const itemPrice = parseFloat(item.price) || 0;
       const protectionPlanAmount = item.protectionPlan ? itemPrice * 0.15 : 0;
@@ -1351,6 +1426,7 @@ const CustomerTicket = () => {
     const repairTotal = repairItems.reduce((sum, item) => sum + (parseFloat(item.fee) || 0), 0);
     const paymentTotal = paymentItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
     const refundTotal = refundItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+    const redeemTotal = redeemItems.reduce((sum, item) => sum + (parseFloat(item.totalAmount) || 0), 0);
 
     setTotals({
       pawn: pawnTotal,
@@ -1359,9 +1435,10 @@ const CustomerTicket = () => {
       sale: saleTotal,
       repair: repairTotal,
       payment: paymentTotal,
-      refund: refundTotal
+      refund: refundTotal,
+      redeem: redeemTotal
     });
-  }, [pawnItems, buyItems, tradeItems, saleItems, repairItems, paymentItems, refundItems]);
+  }, [pawnItems, buyItems, tradeItems, saleItems, repairItems, paymentItems, refundItems, redeemItems]);
 
   // Function to get current items based on active tab and type name
   const getCurrentItems = () => {
@@ -1418,7 +1495,7 @@ const CustomerTicket = () => {
           saveTicketItems(type, newItems);
         };
         break;
-      case 6: 
+      case 6:
         type = 'refund';
         items = refundItems;
         setItems = (newItems) => {
@@ -1426,10 +1503,18 @@ const CustomerTicket = () => {
           saveTicketItems(type, newItems);
         };
         break;
-      default: 
+      case 7:
+        type = 'redeem';
+        items = redeemItems;
+        setItems = (newItems) => {
+          setRedeemItems(newItems);
+          saveTicketItems(type, newItems);
+        };
+        break;
+      default:
         return { items: [], setItems: () => {}, type: '' };
     }
-    
+
     return { items, setItems, type };
   };
   
@@ -1462,10 +1547,13 @@ const CustomerTicket = () => {
       case 6:
         newItem = { id: newId, amount: '', method: '', reference: '', reason: '' };
         break;
+      case 7:
+        newItem = { id: newId, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '' };
+        break;
       default:
         return;
     }
-    
+
     setItems([...items, newItem]);
   };
   
@@ -1705,13 +1793,15 @@ const CustomerTicket = () => {
         return paymentItems.length > 0 && paymentItems.some(item => item.amount || item.method);
       case 6: // Refund
         return refundItems.length > 0 && refundItems.some(item => item.amount || item.method || item.reason);
+      case 7: // Redeem
+        return redeemItems.length > 0 && redeemItems.some(item => item.pawnTicketId || item.totalAmount);
       default:
         return false;
     }
   };
 
   const getTabName = (tabIndex) => {
-    const tabNames = ['Pawn', 'Buy', 'Trade', 'Sale', 'Repair', 'Payment', 'Refund'];
+    const tabNames = ['Pawn', 'Buy', 'Trade', 'Sale', 'Repair', 'Payment', 'Refund', 'Redeem'];
     return tabNames[tabIndex] || 'Unknown';
   };
 
@@ -2419,7 +2509,8 @@ const CustomerTicket = () => {
     sale: 0,
     repair: 0,
     payment: 0,
-    refund: 0
+    refund: 0,
+    redeem: 0
   });
   
   // Helper function to get the current tab's total
@@ -2432,8 +2523,69 @@ const CustomerTicket = () => {
       case 4: return totals.repair;
       case 5: return totals.payment;
       case 6: return totals.refund;
+      case 7: return totals.redeem;
       default: return 0;
     }
+  };
+
+  // Helper function to format total with proper sign
+  const formatTotal = (amount) => {
+    const absAmount = Math.abs(amount);
+    if (amount < 0) {
+      return `-$${absAmount.toFixed(2)}`;
+    }
+    return `$${absAmount.toFixed(2)}`;
+  };
+
+  // Tax rate (13% default - Ontario)
+  const [taxRate] = React.useState(0.13);
+
+  // Helper function to calculate tax for current tab
+  const getCurrentTabTax = () => {
+    // Check if customer is tax exempt
+    if (customer?.tax_exempt) {
+      return 0;
+    }
+
+    // Only sale, repair, and redeem transactions are taxable (money coming IN)
+    const currentTotal = getCurrentTabTotal();
+
+    switch(activeTab) {
+      case 3: // Sale
+      case 4: // Repair
+      case 7: // Redeem
+        return Math.abs(currentTotal) * taxRate;
+      default:
+        return 0;
+    }
+  };
+
+  // Helper function to get subtotal (before tax)
+  const getCurrentTabSubtotal = () => {
+    return getCurrentTabTotal();
+  };
+
+  // Helper function to get total with tax
+  const getCurrentTabTotalWithTax = () => {
+    const subtotal = getCurrentTabSubtotal();
+    const tax = getCurrentTabTax();
+    return subtotal + (subtotal < 0 ? 0 : tax); // Only add tax for positive amounts
+  };
+
+  // Helper function to calculate grand total (All Tickets) with tax
+  const getAllTicketsTotal = () => {
+    const taxRate = 0.13;
+    const isTaxExempt = customer?.tax_exempt || false;
+
+    // Non-taxable items (use subtotal as-is)
+    const nonTaxableTotal = totals.pawn + totals.buy + totals.trade + totals.payment + totals.refund;
+
+    // Taxable items (add tax unless customer is tax exempt)
+    const saleTotalWithTax = isTaxExempt ? totals.sale : totals.sale * (1 + taxRate);
+    const repairTotalWithTax = isTaxExempt ? totals.repair : totals.repair * (1 + taxRate);
+    const redeemTotalWithTax = isTaxExempt ? totals.redeem : totals.redeem * (1 + taxRate);
+
+    return nonTaxableTotal + saleTotalWithTax + repairTotalWithTax + redeemTotalWithTax;
   };
 
   // Fetch required fields for each transaction type on component mount
@@ -2647,8 +2799,12 @@ const CustomerTicket = () => {
           emptyItem = { id: 1, amount: '', method: '', reference: '', reason: '' };
           setRefundItems([emptyItem]);
           break;
+        case 7: // Redeem
+          emptyItem = { id: 1, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '' };
+          setRedeemItems([emptyItem]);
+          break;
       }
-      
+
       // Clear from localStorage
       clearTicketItems(type);
       showSnackbar(`Cleared all items in ${getTabName(activeTab)} tab`, 'success');
@@ -2700,6 +2856,8 @@ const CustomerTicket = () => {
         return item.amount || item.method;
       } else if (activeTab === 6) { // Refund items
         return item.amount || item.method || item.reason;
+      } else if (activeTab === 7) { // Redeem items
+        return item.pawnTicketId || item.totalAmount;
       }
       return false;
     });
@@ -2719,6 +2877,7 @@ const CustomerTicket = () => {
       case 4: transaction_type = 'repair'; break;
       case 5: transaction_type = 'payment'; break;
       case 6: transaction_type = 'refund'; break;
+      case 7: transaction_type = 'redeem'; break;
       default: transaction_type = 'unknown';
     }
     
@@ -2743,6 +2902,7 @@ const CustomerTicket = () => {
           case 'repair': ticketPrefix = 'RT'; break;
           case 'payment': ticketPrefix = 'PMT'; break;
           case 'refund': ticketPrefix = 'RFT'; break;
+          case 'redeem': ticketPrefix = 'RDT'; break;
           default: ticketPrefix = 'TKT';
         }
 
@@ -2866,6 +3026,8 @@ const CustomerTicket = () => {
         setPaymentItems([createEmptyPaymentItem()]);
       } else if (activeTab === 6) { // Refund tab
         setRefundItems([createEmptyRefundItem()]);
+      } else if (activeTab === 7) { // Redeem tab
+        setRedeemItems([createEmptyRedeemItem()]);
       }
 
     } catch (error) {
@@ -2886,6 +3048,7 @@ const CustomerTicket = () => {
         case 'repair': ticketPrefix = 'RT'; break;
         case 'payment': ticketPrefix = 'PMT'; break;
         case 'refund': ticketPrefix = 'RFT'; break;
+        case 'redeem': ticketPrefix = 'RDT'; break;
         default: ticketPrefix = 'TKT';
       }
 
@@ -3081,6 +3244,32 @@ const CustomerTicket = () => {
       });
     }
 
+    // Add redeem items
+    const validRedeemItems = redeemItems.filter(item => item.pawnTicketId || item.totalAmount);
+    if (validRedeemItems.length > 0) {
+      const redeemTicketId = generateBuyTicketId('redeem');
+      validRedeemItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'redeem',
+          buyTicketId: redeemTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
+      });
+    }
+
     if (allItems.length === 0) {
       showSnackbar('No valid items to proceed to checkout', 'warning');
       return;
@@ -3115,6 +3304,9 @@ const CustomerTicket = () => {
     }
     if (validRefundItems.length > 0) {
       setRefundItems([createEmptyRefundItem()]);
+    }
+    if (validRedeemItems.length > 0) {
+      setRedeemItems([createEmptyRedeemItem()]);
     }
 
     // Navigate to checkout
@@ -3433,11 +3625,12 @@ return (
                         <Tab label={`Repair${hasActiveItems(4) ? ' *' : ''}`} />
                         <Tab label={`Payment${hasActiveItems(5) ? ' *' : ''}`} />
                         <Tab label={`Refund${hasActiveItems(6) ? ' *' : ''}`} />
+                        <Tab label={`Redeem${hasActiveItems(7) ? ' *' : ''}`} />
                       </Tabs>
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', pr: 2 }}>
                       <Typography variant="h6" color="primary" sx={{ ml: 2 }}>
-                        All Tickets: ${(totals.pawn + totals.buy + totals.trade + totals.sale + totals.repair + totals.payment + totals.refund).toFixed(2)}
+                        All Tickets: ${getAllTicketsTotal().toFixed(2)}
                       </Typography>
                     </Box>
                   </Box>
@@ -3563,9 +3756,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -3692,9 +3893,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -3837,9 +4046,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -4000,9 +4217,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -4147,9 +4372,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -4291,9 +4524,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -4436,9 +4677,129 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+
+                  {/* Redeem Tab */}
+                  {activeTab === 7 && (
+                    <Box sx={{ p: 1 }}>
+                      <TableContainer>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell width="18%">Pawn Ticket ID</TableCell>
+                              <TableCell width="30%">Description</TableCell>
+                              <TableCell width="15%">Principal</TableCell>
+                              <TableCell width="15%">Interest</TableCell>
+                              <TableCell width="15%">Total Amount</TableCell>
+                              <TableCell width="7%" align="right" padding="none">
+                                <Tooltip title="Add Item">
+                                  <IconButton size="small" color="primary" onClick={handleAddRow}>
+                                    <AddIcon />
+                                  </IconButton>
+                                </Tooltip>
+                              </TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {redeemItems.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.pawnTicketId}
+                                    onChange={(e) => handleItemChange(item.id, 'pawnTicketId', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.description}
+                                    onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.principal}
+                                    onChange={(e) => handleItemChange(item.id, 'principal', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.interest}
+                                    onChange={(e) => handleItemChange(item.id, 'interest', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.totalAmount}
+                                    onChange={(e) => handleItemChange(item.id, 'totalAmount', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Tooltip title="Delete">
+                                    <IconButton size="small" onClick={() => handleDeleteItem(item.id)}>
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
+                        <Typography variant="h6" color="primary">
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>

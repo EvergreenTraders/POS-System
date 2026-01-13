@@ -383,6 +383,7 @@ function Checkout() {
       else if (item.value !== undefined) itemValue = parseFloat(item.value) || 0;
       else if (item.fee !== undefined) itemValue = parseFloat(item.fee) || 0;
       else if (item.amount !== undefined) itemValue = parseFloat(item.amount) || 0;
+      else if (item.totalAmount !== undefined) itemValue = parseFloat(item.totalAmount) || 0;
 
       // Add protection plan (15% of item price) if enabled
       const protectionPlanAmount = item.protectionPlan ? itemValue * 0.15 : 0;
@@ -390,7 +391,7 @@ function Checkout() {
 
       // Apply sign based on transaction type
       // Money going OUT (buy/pawn) = negative values
-      // Money coming IN (sale/repair) = positive values
+      // Money coming IN (sale/repair/redeem) = positive values
       if (transactionType === 'buy' || transactionType === 'pawn') {
         itemValue = -Math.abs(itemValue);
       } else {
@@ -410,12 +411,14 @@ function Checkout() {
     const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
     const salesSubtotal = itemsToCalculate.reduce((total, item) => {
       const transactionType = item.transaction_type?.toLowerCase() || '';
-      // Only include sale/repair transactions
-      if (transactionType === 'sale' || transactionType === 'repair') {
+      // Only include sale/repair/redeem transactions (money coming in)
+      if (transactionType === 'sale' || transactionType === 'repair' || transactionType === 'redeem') {
         let itemValue = 0;
         if (item.price !== undefined) itemValue = parseFloat(item.price) || 0;
         else if (item.value !== undefined) itemValue = parseFloat(item.value) || 0;
         else if (item.fee !== undefined) itemValue = parseFloat(item.fee) || 0;
+        else if (item.amount !== undefined) itemValue = parseFloat(item.amount) || 0;
+        else if (item.totalAmount !== undefined) itemValue = parseFloat(item.totalAmount) || 0;
 
         // Add protection plan (15% of item price) if enabled
         const protectionPlanAmount = item.protectionPlan ? itemValue * 0.15 : 0;
