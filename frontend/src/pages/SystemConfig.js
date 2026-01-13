@@ -1563,8 +1563,7 @@ function SystemConfig() {
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         <Tabs value={activeTab} onChange={handleTabChange}>
           <Tab label="General" />
-          <Tab label="Security" />
-          <Tab label="Notifications" />
+          <Tab label="Pawn Configuration" />
           <Tab label="Tax Configuration" />
           <Tab label="Pricing Calculator" />
           <Tab label="Account Authorization" />
@@ -2065,64 +2064,6 @@ function SystemConfig() {
                     />
                   ))}
                 </Box>
-                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                  Pawn Configuration
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={3}>
-                    <TextField
-                      label="Interest Rate (%)"
-                      type="number"
-                      value={pawnConfig.interest_rate}
-                      onChange={(e) => handlePawnConfigChange('interest_rate', e.target.value)}
-                      fullWidth
-                      inputProps={{ min: 0, max: 100, step: 0.01 }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={3}>
-                    <TextField
-                      select
-                      label="Term (Days)"
-                      value={pawnConfig.term_days}
-                      onChange={(e) => handlePawnConfigChange('term_days', e.target.value)}
-                      fullWidth
-                    >
-                      {[15, 30, 45, 60, 90, 120, 180].map((days) => (
-                        <MenuItem key={days} value={days}>
-                          {days}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  </Grid>
-                  <Grid item xs={12} sm={3}>
-                    <TextField
-                      select
-                      label="Frequency (Days)"
-                      value={pawnConfig.frequency_days}
-                      onChange={(e) => handlePawnConfigChange('frequency_days', e.target.value)}
-                      fullWidth
-                    >
-                      {[15, 30, 45, 60, 90, 120, 180].map((days) => (
-                        <MenuItem key={days} value={days}>
-                          {days}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  </Grid>
-                  <Grid item xs={12} sm={3}>
-                    <TextField
-                      select
-                      label="Forfeiture Mode"
-                      value={pawnConfig.forfeiture_mode}
-                      onChange={(e) => handlePawnConfigChange('forfeiture_mode', e.target.value)}
-                      fullWidth
-                      helperText="Manual or Auto"
-                    >
-                      <MenuItem value="manual">Manual</MenuItem>
-                      <MenuItem value="automatic">Automatic</MenuItem>
-                    </TextField>
-                  </Grid>
-                </Grid>
               </Box>
             )}
             <Box mt={2}>
@@ -2259,56 +2200,69 @@ function SystemConfig() {
         </StyledPaper>
       </TabPanel>
 
+      {/* Pawn Configuration Tab */}
       <TabPanel value={activeTab} index={1}>
         <StyledPaper elevation={2}>
           <ConfigSection>
             <Typography variant="h6" gutterBottom>
-              Security Settings
+              Pawn Configuration
             </Typography>
-            <Grid container spacing={3}>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={securitySettings.requirePasswordChange}
-                      onChange={handleSecuritySettingsChange}
-                      name="requirePasswordChange"
-                    />
-                  }
-                  label="Require Password Change Every 90 Days"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={securitySettings.twoFactorAuth}
-                      onChange={handleSecuritySettingsChange}
-                      name="twoFactorAuth"
-                    />
-                  }
-                  label="Enable Two-Factor Authentication"
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={3}>
                 <TextField
-                  fullWidth
+                  label="Interest Rate (%)"
                   type="number"
-                  label="Session Timeout (minutes)"
-                  name="sessionTimeout"
-                  value={securitySettings.sessionTimeout}
-                  onChange={handleSecuritySettingsChange}
+                  value={pawnConfig.interest_rate}
+                  onChange={(e) => handlePawnConfigChange('interest_rate', e.target.value)}
+                  fullWidth
+                  inputProps={{ min: 0, max: 100, step: 0.01 }}
+                  helperText="Interest rate charged per period"
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={3}>
                 <TextField
+                  select
+                  label="Term (Days)"
+                  value={pawnConfig.term_days}
+                  onChange={(e) => handlePawnConfigChange('term_days', e.target.value)}
                   fullWidth
-                  type="number"
-                  label="Max Login Attempts"
-                  name="maxLoginAttempts"
-                  value={securitySettings.maxLoginAttempts}
-                  onChange={handleSecuritySettingsChange}
-                />
+                  helperText="Default pawn term length"
+                >
+                  {[15, 30, 45, 60, 90, 120, 180].map((days) => (
+                    <MenuItem key={days} value={days}>
+                      {days}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <TextField
+                  select
+                  label="Frequency (Days)"
+                  value={pawnConfig.frequency_days}
+                  onChange={(e) => handlePawnConfigChange('frequency_days', e.target.value)}
+                  fullWidth
+                  helperText="Interest calculation frequency"
+                >
+                  {[15, 30, 45, 60, 90, 120, 180].map((days) => (
+                    <MenuItem key={days} value={days}>
+                      {days}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <TextField
+                  select
+                  label="Forfeiture Mode"
+                  value={pawnConfig.forfeiture_mode}
+                  onChange={(e) => handlePawnConfigChange('forfeiture_mode', e.target.value)}
+                  fullWidth
+                  helperText="Manual or Auto"
+                >
+                  <MenuItem value="manual">Manual</MenuItem>
+                  <MenuItem value="automatic">Automatic</MenuItem>
+                </TextField>
               </Grid>
             </Grid>
           </ConfigSection>
@@ -2316,66 +2270,6 @@ function SystemConfig() {
       </TabPanel>
 
       <TabPanel value={activeTab} index={2}>
-        <StyledPaper elevation={2}>
-          <ConfigSection>
-            <Typography variant="h6" gutterBottom>
-              Notification Preferences
-            </Typography>
-            <Grid container spacing={3}>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={notificationSettings.emailNotifications}
-                      onChange={handleNotificationSettingsChange}
-                      name="emailNotifications"
-                    />
-                  }
-                  label="Enable Email Notifications"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={notificationSettings.lowStockAlerts}
-                      onChange={handleNotificationSettingsChange}
-                      name="lowStockAlerts"
-                    />
-                  }
-                  label="Low Stock Alerts"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={notificationSettings.orderConfirmations}
-                      onChange={handleNotificationSettingsChange}
-                      name="orderConfirmations"
-                    />
-                  }
-                  label="Order Confirmations"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={notificationSettings.dailyReports}
-                      onChange={handleNotificationSettingsChange}
-                      name="dailyReports"
-                    />
-                  }
-                  label="Daily Reports"
-                />
-              </Grid>
-            </Grid>
-          </ConfigSection>
-        </StyledPaper>
-      </TabPanel>
-
-      <TabPanel value={activeTab} index={3}>
         <StyledPaper elevation={2}>
           <ConfigSection>
             <Typography variant="h6" gutterBottom>
@@ -2537,7 +2431,7 @@ function SystemConfig() {
         </StyledPaper>
       </TabPanel>
 
-      <TabPanel value={activeTab} index={4}>
+      <TabPanel value={activeTab} index={3}>
         <StyledPaper elevation={2}>
           <Grid container spacing={3}>
             {/* Configuration Block - Left Side */}
@@ -2769,7 +2663,7 @@ function SystemConfig() {
       </TabPanel>
 
       {/* Account Authorization Tab */}
-      <TabPanel value={activeTab} index={5}>
+      <TabPanel value={activeTab} index={4}>
         <StyledPaper elevation={2}>
           <ConfigSection>
             <Typography variant="h6" gutterBottom>
@@ -2851,7 +2745,7 @@ function SystemConfig() {
       </TabPanel>
 
       {/* Item Attributes Tab */}
-      <TabPanel value={activeTab} index={6}>
+      <TabPanel value={activeTab} index={5}>
         <StyledPaper elevation={2}>
           <ConfigSection>
             <Typography variant="h6" gutterBottom>
