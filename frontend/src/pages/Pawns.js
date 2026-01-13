@@ -221,8 +221,8 @@ const Pawns = () => {
     const interestPeriods = Math.ceil(term / frequency);
     const interestAmount = principalAmount * (rate / 100) * interestPeriods;
     const insuranceCost = principalAmount * 0.01 * interestPeriods;
-    const fee = principalAmount; // Fee is the principal amount
-    const totalAmount = interestAmount + insuranceCost + fee; // Total = interest + fee
+    const interestAndFee = interestAmount + insuranceCost; // Combined interest + insurance
+    const totalAmount = principalAmount + interestAndFee; // Total = principal + interest + insurance
 
     // Navigate to CustomerTicket with redeem data
     navigate('/customer-ticket', {
@@ -232,8 +232,8 @@ const Pawns = () => {
           description: pawn.item_description || pawn.item_id,
           customerId: pawn.customer_id,
           customerName: pawn.customer_name || '',
-          fee: fee.toFixed(2),
-          interest: (interestAmount + insuranceCost).toFixed(2),
+          principal: principalAmount.toFixed(2),
+          interest: interestAndFee.toFixed(2), // Interest/Fee combined
           totalAmount: totalAmount.toFixed(2)
         }
       }
@@ -244,11 +244,15 @@ const Pawns = () => {
     // Calculate extension payment (interest for one period)
     const principalAmount = parseFloat(pawn.item_price) || 0;
     const rate = interestRate || 2.9;
-    
+    const frequency = frequencyDays || 30;
+
+    // Extension is for 1 period (1 frequency cycle)
+    const extensionPeriods = 1;
+
     // Extension payment is interest for one period + insurance for one period
-    const interestAmount = principalAmount * (rate / 100);
-    const insuranceCost = principalAmount * 0.01;
-    const extensionAmount = interestAmount + insuranceCost;
+    const interestAmount = principalAmount * (rate / 100) * extensionPeriods;
+    const insuranceFee = principalAmount * 0.01 * extensionPeriods;
+    const totalExtensionAmount = interestAmount + insuranceFee;
 
     // Navigate to CustomerTicket with extend data
     navigate('/customer-ticket', {
@@ -258,7 +262,9 @@ const Pawns = () => {
           description: pawn.item_description || pawn.item_id,
           customerId: pawn.customer_id,
           customerName: pawn.customer_name || '',
-          amount: extensionAmount.toFixed(2),
+          principal: principalAmount.toFixed(2),
+          interest: interestAmount.toFixed(2),
+          fee: insuranceFee.toFixed(2),
           notes: `Extension payment for Pawn Ticket #${pawn.pawn_ticket_id}`
         }
       }

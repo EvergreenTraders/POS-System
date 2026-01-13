@@ -449,7 +449,11 @@ const CustomerTicket = () => {
   };
 
   const { user } = useAuth(); // Get user at component level
-  
+
+  // Pawn configuration for calculations
+  const [interestRate, setInterestRate] = React.useState(2.9);
+  const [frequencyDays, setFrequencyDays] = React.useState(30);
+
   // Get customer from location state or session storage
   const [customer, setCustomer] = React.useState(() => {
     // First try to get customer from navigation state
@@ -458,13 +462,13 @@ const CustomerTicket = () => {
       sessionStorage.setItem('selectedCustomer', JSON.stringify(location.state.customer));
       return location.state.customer;
     }
-    
+
     // If not in navigation state, try session storage
     const savedCustomer = sessionStorage.getItem('selectedCustomer');
     if (savedCustomer) {
       return JSON.parse(savedCustomer);
     }
-    
+
     // No customer found
     return null;
   });
@@ -658,7 +662,7 @@ const CustomerTicket = () => {
   });
   
   const [paymentItems, setPaymentItems] = React.useState(() => {
-    return loadTicketItems('payment') || [{ id: 1, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '', images: [] }];
+    return loadTicketItems('payment') || [{ id: 1, pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] }];
   });
   
   const [refundItems, setRefundItems] = React.useState(() => {
@@ -675,7 +679,7 @@ const CustomerTicket = () => {
   const createEmptyTradeItem = () => ({ id: Date.now(), tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' });
   const createEmptySaleItem = () => ({ id: Date.now(), description: '', category: '', price: '', paymentMethod: '' });
   const createEmptyRepairItem = () => ({ id: Date.now(), description: '', issue: '', fee: '', completion: '' });
-  const createEmptyPaymentItem = () => ({ id: Date.now(), pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '', images: [] });
+  const createEmptyPaymentItem = () => ({ id: Date.now(), pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] });
   const createEmptyRefundItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', reason: '' });
   const createEmptyRedeemItem = () => ({ id: Date.now(), pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '' });
 
@@ -1220,6 +1224,26 @@ const CustomerTicket = () => {
     }
   }, [location.state]);
 
+  // Fetch pawn config for interest rate and frequency days
+  React.useEffect(() => {
+    const fetchPawnConfig = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${config.apiUrl}/pawn-config`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setInterestRate(parseFloat(data.interest_rate) || 2.9);
+          setFrequencyDays(parseInt(data.frequency_days) || 30);
+        }
+      } catch (error) {
+        console.error('Error fetching pawn config:', error);
+      }
+    };
+    fetchPawnConfig();
+  }, []);
+
   // Handle redeem data from Pawns.js
   React.useEffect(() => {
     if (location.state?.redeemData) {
@@ -1327,13 +1351,29 @@ const CustomerTicket = () => {
         const hasEmptyPaymentItems = paymentItems.length === 1 && !paymentItems[0].pawnTicketId;
 
         // Create payment item from extend data
+        const interest = parseFloat(extendData.interest) || 0;
+        const fee = parseFloat(extendData.fee) || 0;
+        const amount = (interest + fee).toFixed(2);
+
+        // Calculate days, term and date for default extension (1 period = frequencyDays)
+        const days = frequencyDays || 30;
+        const term = 1;
+        const today = new Date();
+        const futureDate = new Date(today);
+        futureDate.setDate(today.getDate() + days);
+        const date = futureDate.toISOString().split('T')[0];
+
         const newPaymentItem = {
           id: Date.now(),
           pawnTicketId: extendData.pawnTicketId || '',
           description: extendData.description || '',
-          principal: '',
-          interest: extendData.amount || '',
-          totalAmount: extendData.amount || '',
+          principal: extendData.principal || '',
+          days: days.toString(),
+          term: term.toString(),
+          date: date,
+          interest: extendData.interest || '',
+          fee: extendData.fee || '',
+          amount: amount,
           images: []
         };
 
@@ -1425,7 +1465,7 @@ const CustomerTicket = () => {
         setTradeItems(mergeItems(tradeItems, savedTrade, { id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }));
         setSaleItems(mergeItems(saleItems, savedSale, { id: 1, description: '', category: '', price: '', paymentMethod: '' }));
         setRepairItems(mergeItems(repairItems, savedRepair, { id: 1, description: '', issue: '', fee: '', completion: '' }));
-        setPaymentItems(mergeItems(paymentItems, savedPayment, { id: 1, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '', images: [] }));
+        setPaymentItems(mergeItems(paymentItems, savedPayment, { id: 1, pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] }));
         setRefundItems(mergeItems(refundItems, savedRefund, { id: 1, amount: '', method: '', reference: '', reason: '' }));
       }
 
@@ -1630,8 +1670,53 @@ const CustomerTicket = () => {
   
   // Handle updating an item
   const handleItemChange = (id, field, value) => {
-    const { items, setItems } = getCurrentItems();
-    setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
+    const { items, setItems, type } = getCurrentItems();
+
+    // For payment items, auto-calculate when days or interest/fee changes
+    if (type === 'payment') {
+      setItems(items.map(item => {
+        if (item.id === id) {
+          const updatedItem = { ...item, [field]: value };
+
+          // If days changed, calculate term, date, interest, and fee
+          if (field === 'days') {
+            const days = parseInt(value) || 0;
+            const principal = parseFloat(updatedItem.principal) || 0;
+            const frequency = frequencyDays || 30;
+            const rate = interestRate || 2.9;
+
+            // Calculate term (number of periods)
+            const term = Math.ceil(days / frequency);
+            updatedItem.term = term.toString();
+
+            // Calculate date (today + days)
+            const today = new Date();
+            const futureDate = new Date(today);
+            futureDate.setDate(today.getDate() + days);
+            updatedItem.date = futureDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+            // Calculate interest and fee
+            const interestAmount = principal * (rate / 100) * term;
+            const insuranceFee = principal * 0.01 * term;
+
+            updatedItem.interest = interestAmount.toFixed(2);
+            updatedItem.fee = insuranceFee.toFixed(2);
+            updatedItem.amount = (interestAmount + insuranceFee).toFixed(2);
+          }
+          // If interest or fee changed manually, recalculate amount
+          else if (field === 'interest' || field === 'fee') {
+            const interest = parseFloat(updatedItem.interest) || 0;
+            const fee = parseFloat(updatedItem.fee) || 0;
+            updatedItem.amount = (interest + fee).toFixed(2);
+          }
+
+          return updatedItem;
+        }
+        return item;
+      }));
+    } else {
+      setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
+    }
   };
   
   // Handle duplicating an item
@@ -1713,11 +1798,22 @@ const CustomerTicket = () => {
         emptyItem.fee = '';
         emptyItem.completion = '';
       }
-      if (type === 'payment' || type === 'refund') {
+      if (type === 'payment') {
+        emptyItem.pawnTicketId = '';
+        emptyItem.principal = '';
+        emptyItem.days = '';
+        emptyItem.term = '';
+        emptyItem.date = '';
+        emptyItem.interest = '';
+        emptyItem.fee = '';
+        emptyItem.amount = '';
+        emptyItem.images = [];
+      }
+      if (type === 'refund') {
         emptyItem.amount = '';
         emptyItem.method = '';
         emptyItem.reference = '';
-        type === 'payment' ? emptyItem.notes = '' : emptyItem.reason = '';
+        emptyItem.reason = '';
       }
 
       setItems([emptyItem]);
@@ -1820,10 +1916,16 @@ const CustomerTicket = () => {
       case 5: // Payment
         newItem = {
           id: Math.max(...paymentItems.map(i => i.id), 0) + 1,
+          pawnTicketId: '',
+          description: itemToConvert.description || '',
+          principal: '',
+          days: '',
+          term: '',
+          date: '',
+          interest: '',
+          fee: '',
           amount: itemToConvert.price || itemToConvert.value || '',
-          method: '',
-          reference: '',
-          notes: itemToConvert.description || ''
+          images: []
         };
         setPaymentItems([...paymentItems, newItem]);
         break;
@@ -1861,7 +1963,7 @@ const CustomerTicket = () => {
       case 4: // Repair
         return repairItems.length > 0 && repairItems.some(item => item.description || item.issue || item.fee);
       case 5: // Payment
-        return paymentItems.length > 0 && paymentItems.some(item => item.pawnTicketId || item.totalAmount);
+        return paymentItems.length > 0 && paymentItems.some(item => item.pawnTicketId || item.amount);
       case 6: // Refund
         return refundItems.length > 0 && refundItems.some(item => item.amount || item.method || item.reason);
       case 7: // Redeem
@@ -2816,7 +2918,7 @@ const CustomerTicket = () => {
         setItems([{ id: 1, description: '', issue: '', fee: '', completion: '' }]);
         break;
       case 5: // Payment items
-        setItems([{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
+        setItems([{ id: 1, pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] }]);
         break;
       case 6: // Refund items
         setItems([{ id: 1, amount: '', method: '', reference: '', reason: '' }]);
@@ -2863,7 +2965,7 @@ const CustomerTicket = () => {
           setRepairItems([emptyItem]);
           break;
         case 5: // Payment
-          emptyItem = { id: 1, amount: '', method: '', reference: '', notes: '' };
+          emptyItem = { id: 1, pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] };
           setPaymentItems([emptyItem]);
           break;
         case 6: // Refund
@@ -4465,13 +4567,17 @@ return (
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="10%" align="center">Image</TableCell>
-                              <TableCell width="18%">Pawn Ticket ID</TableCell>
-                              <TableCell width="30%">Description</TableCell>
-                              <TableCell width="15%">Principal</TableCell>
-                              <TableCell width="15%">Interest</TableCell>
-                              <TableCell width="15%">Total Amount</TableCell>
-                              <TableCell width="7%" align="right" padding="none">
+                              <TableCell width="8%" align="center">Image</TableCell>
+                              <TableCell width="10%">Pawn Ticket ID</TableCell>
+                              <TableCell width="18%">Description</TableCell>
+                              <TableCell width="9%">Principal</TableCell>
+                              <TableCell width="8%">Days</TableCell>
+                              <TableCell width="8%">Term</TableCell>
+                              <TableCell width="10%">Date</TableCell>
+                              <TableCell width="9%">Interest</TableCell>
+                              <TableCell width="9%">Insurance Fee</TableCell>
+                              <TableCell width="9%">Amount</TableCell>
+                              <TableCell width="5%" align="right" padding="none">
                                 <Tooltip title="Add Item">
                                   <IconButton size="small" color="primary" onClick={handleAddRow}>
                                     <AddIcon />
@@ -4518,6 +4624,10 @@ return (
                                     fullWidth
                                     value={item.pawnTicketId}
                                     onChange={(e) => handleItemChange(item.id, 'pawnTicketId', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -4526,6 +4636,10 @@ return (
                                     fullWidth
                                     value={item.description}
                                     onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -4534,6 +4648,43 @@ return (
                                     fullWidth
                                     value={item.principal}
                                     onChange={(e) => handleItemChange(item.id, 'principal', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    type="number"
+                                    value={item.days}
+                                    onChange={(e) => handleItemChange(item.id, 'days', e.target.value)}
+                                    placeholder="30"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.term}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    type="date"
+                                    value={item.date}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -4541,15 +4692,34 @@ return (
                                     variant="standard"
                                     fullWidth
                                     value={item.interest}
-                                    onChange={(e) => handleItemChange(item.id, 'interest', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
                                   />
                                 </TableCell>
                                 <TableCell>
                                   <TextField
                                     variant="standard"
                                     fullWidth
-                                    value={item.totalAmount}
-                                    onChange={(e) => handleItemChange(item.id, 'totalAmount', e.target.value)}
+                                    value={item.fee}
+                                    onChange={(e) => handleItemChange(item.id, 'fee', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.amount}
+                                    onChange={(e) => handleItemChange(item.id, 'amount', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
                                   />
                                 </TableCell>
                                 <TableCell align="right">
@@ -4744,7 +4914,7 @@ return (
                               <TableCell width="18%">Pawn Ticket ID</TableCell>
                               <TableCell width="30%">Description</TableCell>
                               <TableCell width="15%">Principal</TableCell>
-                              <TableCell width="15%">Interest</TableCell>
+                              <TableCell width="15%">Interest/Fee</TableCell>
                               <TableCell width="15%">Total Amount</TableCell>
                               <TableCell width="7%" align="right" padding="none">
                                 <Tooltip title="Add Item">
