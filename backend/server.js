@@ -2536,9 +2536,18 @@ app.get('/api/jewelry', async (req, res) => {
     const query = `
       SELECT
         j.*,
+        ROUND(CAST(j.item_price AS NUMERIC), 2) as item_price,
         TO_CHAR(j.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
-        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at
+        TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at,
+        TO_CHAR(st.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as sold_date
       FROM jewelry j
+      LEFT JOIN LATERAL (
+        SELECT created_at
+        FROM sale_ticket
+        WHERE sale_ticket.item_id = j.item_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) st ON true
       ${whereClause}
       ORDER BY j.created_at DESC
     `;
