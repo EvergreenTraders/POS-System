@@ -3097,7 +3097,7 @@ const CustomerTicket = () => {
     }
   };
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async () => {
     if (!customer) {
       setSnackbarMessage({
         open: true,
@@ -3152,7 +3152,7 @@ const CustomerTicket = () => {
       alert('No valid items to add to cart');
       return;
     }
-    
+
     // Determine item type based on active tab
     let transaction_type;
     switch(activeTab) {
@@ -3166,7 +3166,47 @@ const CustomerTicket = () => {
       case 7: transaction_type = 'redeem'; break;
       default: transaction_type = 'unknown';
     }
-    
+
+    // Special handling for redeem transactions
+    if (transaction_type === 'redeem') {
+      try {
+        const token = localStorage.getItem('token');
+
+        // Update pawn ticket status to REDEEMED for each item
+        for (const item of filteredItems) {
+          if (item.pawnTicketId) {
+            await fetch(`${config.apiUrl}/pawn-ticket/${item.pawnTicketId}/status`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ status: 'REDEEMED' })
+            });
+          }
+        }
+
+        setSnackbarMessage({
+          open: true,
+          message: 'Pawn ticket(s) successfully redeemed',
+          severity: 'success'
+        });
+
+        // Clear redeem items after successful redemption
+        setRedeemItems([createEmptyRedeemItem()]);
+
+        return;
+      } catch (error) {
+        console.error('Error redeeming pawn ticket:', error);
+        setSnackbarMessage({
+          open: true,
+          message: 'Failed to redeem pawn ticket',
+          severity: 'error'
+        });
+        return;
+      }
+    }
+
     // Instead of navigating, save to session storage first
     try {
       // Use preserved buyTicketId if editing from cart, otherwise generate new one

@@ -36,6 +36,7 @@ import ClearIcon from '@mui/icons-material/Clear';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import BlockIcon from '@mui/icons-material/Block';
 import axios from 'axios';
 import config from '../config';
 
@@ -212,27 +213,27 @@ const Pawns = () => {
     return principal + appraisalFee + interestAmount + insuranceCost;
   };
 
-  const handleRedeemClick = (pawn) => {
-    // Calculate redemption details
-    const principalAmount = parseFloat(pawn.item_price) || 0;
+  const handleRedeemClick = (ticket) => {
+    // Calculate redemption details for entire ticket
+    const totalPrincipal = ticket.items.reduce((sum, item) => sum + (parseFloat(item.item_price) || 0), 0);
     const term = termDays || 62;
     const frequency = frequencyDays || 30;
     const rate = interestRate || 2.9;
     const interestPeriods = Math.ceil(term / frequency);
-    const interestAmount = principalAmount * (rate / 100) * interestPeriods;
-    const insuranceCost = principalAmount * 0.01 * interestPeriods;
+    const interestAmount = totalPrincipal * (rate / 100) * interestPeriods;
+    const insuranceCost = totalPrincipal * 0.01 * interestPeriods;
     const interestAndFee = interestAmount + insuranceCost; // Combined interest + insurance
-    const totalAmount = principalAmount + interestAndFee; // Total = principal + interest + insurance
+    const totalAmount = totalPrincipal + interestAndFee; // Total = principal + interest + insurance
 
     // Navigate to CustomerTicket with redeem data
     navigate('/customer-ticket', {
       state: {
         redeemData: {
-          pawnTicketId: pawn.pawn_ticket_id,
-          description: pawn.item_description || pawn.item_id,
-          customerId: pawn.customer_id,
-          customerName: pawn.customer_name || '',
-          principal: principalAmount.toFixed(2),
+          pawnTicketId: ticket.pawn_ticket_id,
+          description: ticket.items.map(item => item.item_description || item.item_id).join(', '),
+          customerId: ticket.customer_id,
+          customerName: ticket.customer_name || '',
+          principal: totalPrincipal.toFixed(2),
           interest: interestAndFee.toFixed(2), // Interest/Fee combined
           totalAmount: totalAmount.toFixed(2)
         }
@@ -240,9 +241,9 @@ const Pawns = () => {
     });
   };
 
-  const handleExtendClick = (pawn) => {
-    // Calculate extension payment (interest for one period)
-    const principalAmount = parseFloat(pawn.item_price) || 0;
+  const handleExtendClick = (ticket) => {
+    // Calculate extension payment for entire ticket
+    const totalPrincipal = ticket.items.reduce((sum, item) => sum + (parseFloat(item.item_price) || 0), 0);
     const rate = interestRate || 2.9;
     const frequency = frequencyDays || 30;
 
@@ -250,25 +251,54 @@ const Pawns = () => {
     const extensionPeriods = 1;
 
     // Extension payment is interest for one period + insurance for one period
-    const interestAmount = principalAmount * (rate / 100) * extensionPeriods;
-    const insuranceFee = principalAmount * 0.01 * extensionPeriods;
-    const totalExtensionAmount = interestAmount + insuranceFee;
+    const interestAmount = totalPrincipal * (rate / 100) * extensionPeriods;
+    const insuranceFee = totalPrincipal * 0.01 * extensionPeriods;
 
     // Navigate to CustomerTicket with extend data
     navigate('/customer-ticket', {
       state: {
         extendData: {
-          pawnTicketId: pawn.pawn_ticket_id,
-          description: pawn.item_description || pawn.item_id,
-          customerId: pawn.customer_id,
-          customerName: pawn.customer_name || '',
-          principal: principalAmount.toFixed(2),
+          pawnTicketId: ticket.pawn_ticket_id,
+          description: ticket.items.map(item => item.item_description || item.item_id).join(', '),
+          customerId: ticket.customer_id,
+          customerName: ticket.customer_name || '',
+          principal: totalPrincipal.toFixed(2),
           interest: interestAmount.toFixed(2),
           fee: insuranceFee.toFixed(2),
-          notes: `Extension payment for Pawn Ticket #${pawn.pawn_ticket_id}`
+          notes: `Extension payment for Pawn Ticket #${ticket.pawn_ticket_id}`
         }
       }
     });
+  };
+
+  const handleForfeitClick = async (ticket) => {
+    if (!window.confirm(`Are you sure you want to forfeit Pawn Ticket #${ticket.pawn_ticket_id}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+
+      // Update all items in the ticket to FORFEITED status
+      for (const item of ticket.items) {
+        await axios.put(
+          `${API_BASE_URL}/pawn-transactions/${item.transaction_id}`,
+          { item_status: 'FORFEITED' },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+      }
+
+      // Refresh the pawn transactions list
+      const response = await axios.get(`${API_BASE_URL}/pawn-transactions`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setPawns(response.data);
+
+      alert(`Pawn Ticket #${ticket.pawn_ticket_id} has been forfeited successfully.`);
+    } catch (error) {
+      console.error('Error forfeiting pawn ticket:', error);
+      alert('Failed to forfeit pawn ticket. Please try again.');
+    }
   };
 
   const handleRedeemConfirm = async () => {
@@ -327,56 +357,66 @@ const Pawns = () => {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [pawns]);
 
-  // Filter pawns based on filter criteria
-  const filteredPawns = pawns.filter((pawn) => {
+  // Group pawns by pawn_ticket_id
+  const groupedTickets = useMemo(() => {
+    const ticketMap = new Map();
+
+    pawns.forEach(pawn => {
+      const ticketId = pawn.pawn_ticket_id;
+      if (!ticketMap.has(ticketId)) {
+        ticketMap.set(ticketId, {
+          pawn_ticket_id: ticketId,
+          customer_id: pawn.customer_id,
+          customer_name: pawn.customer_name,
+          transaction_date: pawn.transaction_date,
+          item_status: pawn.item_status,
+          items: []
+        });
+      }
+      ticketMap.get(ticketId).items.push(pawn);
+    });
+
+    return Array.from(ticketMap.values());
+  }, [pawns]);
+
+  // Filter tickets based on filter criteria
+  const filteredTickets = groupedTickets.filter((ticket) => {
     // Filter by customer name (exact match from dropdown)
     const matchesCustomer = !filters.customerName ||
-      (pawn.customer_id && pawn.customer_id.toString() === filters.customerName);
+      (ticket.customer_id && ticket.customer_id.toString() === filters.customerName);
 
     // Filter by ticket ID
     const matchesTicketId = !filters.ticketId ||
-      (pawn.pawn_ticket_id && pawn.pawn_ticket_id.toString().toLowerCase().includes(filters.ticketId.toLowerCase()));
+      (ticket.pawn_ticket_id && ticket.pawn_ticket_id.toString().toLowerCase().includes(filters.ticketId.toLowerCase()));
 
     // Filter by transaction date
     const matchesTransactionDate = !filters.transactionDate ||
-      (pawn.transaction_date && (() => {
+      (ticket.transaction_date && (() => {
         // Parse dates in a timezone-safe way
-        // The filter date is already in YYYY-MM-DD format from the date input
         const filterDateStr = filters.transactionDate;
-        
-        // Parse the transaction_date and extract date portion
-        // Handle both date strings and Date objects
-        let pawnDateStr;
-        if (typeof pawn.transaction_date === 'string') {
-          // If it's a string, extract the date portion (YYYY-MM-DD)
-          // Handle formats like "2026-01-04" or "2026-01-04T00:00:00.000Z" or "2026-01-04 00:00:00"
-          const dateMatch = pawn.transaction_date.match(/^(\d{4}-\d{2}-\d{2})/);
+
+        let ticketDateStr;
+        if (typeof ticket.transaction_date === 'string') {
+          const dateMatch = ticket.transaction_date.match(/^(\d{4}-\d{2}-\d{2})/);
           if (dateMatch) {
-            pawnDateStr = dateMatch[1];
+            ticketDateStr = dateMatch[1];
           } else {
-            // Fallback: create date and format it
-            const pawnDate = new Date(pawn.transaction_date);
-            pawnDateStr = `${pawnDate.getFullYear()}-${String(pawnDate.getMonth() + 1).padStart(2, '0')}-${String(pawnDate.getDate()).padStart(2, '0')}`;
+            const ticketDate = new Date(ticket.transaction_date);
+            ticketDateStr = `${ticketDate.getFullYear()}-${String(ticketDate.getMonth() + 1).padStart(2, '0')}-${String(ticketDate.getDate()).padStart(2, '0')}`;
           }
         } else {
-          // If it's a Date object or timestamp
-          const pawnDate = new Date(pawn.transaction_date);
-          pawnDateStr = `${pawnDate.getFullYear()}-${String(pawnDate.getMonth() + 1).padStart(2, '0')}-${String(pawnDate.getDate()).padStart(2, '0')}`;
+          const ticketDate = new Date(ticket.transaction_date);
+          ticketDateStr = `${ticketDate.getFullYear()}-${String(ticketDate.getMonth() + 1).padStart(2, '0')}-${String(ticketDate.getDate()).padStart(2, '0')}`;
         }
-        
-        return pawnDateStr === filterDateStr;
+
+        return ticketDateStr === filterDateStr;
       })());
 
     // Filter by due date
     const matchesDueDate = !filters.dueDate ||
-      (pawn.transaction_date && (() => {
-        // Calculate the due date for this pawn
-        const dueDate = calculateDueDate(pawn.transaction_date);
-        
-        // Format due date as YYYY-MM-DD for comparison
+      (ticket.transaction_date && (() => {
+        const dueDate = calculateDueDate(ticket.transaction_date);
         const dueDateStr = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}-${String(dueDate.getDate()).padStart(2, '0')}`;
-        
-        // Compare with filter date (already in YYYY-MM-DD format)
         return dueDateStr === filters.dueDate;
       })());
 
@@ -503,10 +543,10 @@ const Pawns = () => {
       )}
 
       {/* Alert */}
-      {filteredPawns.filter(p => isOverdue(p.transaction_date, p.item_status)).length > 0 && (
+      {filteredTickets.filter(p => isOverdue(p.transaction_date, p.item_status)).length > 0 && (
         <Alert severity="warning" sx={{ mb: 3 }}>
           <Typography variant="body2">
-            Attention: There are {filteredPawns.filter(p => isOverdue(p.transaction_date, p.item_status)).length} overdue pawns. Please review and contact customers.
+            Attention: There are {filteredTickets.filter(p => isOverdue(p.transaction_date, p.item_status)).length} overdue pawns. Please review and contact customers.
           </Typography>
         </Alert>
       )}
@@ -532,71 +572,71 @@ const Pawns = () => {
             <TableHead>
               <TableRow>
                 <TableCell>PAWN TICKET ID</TableCell>
-                <TableCell>ITEM</TableCell>
+                <TableCell>ITEMS</TableCell>
                 <TableCell>CUSTOMER</TableCell>
-                <TableCell>PRINCIPAL</TableCell>
+                <TableCell>TOTAL PRINCIPAL</TableCell>
                 <TableCell>REDEEM AMOUNT</TableCell>
                 <TableCell>TRANSACTION DATE</TableCell>
                 <TableCell>DUE DATE</TableCell>
                 <TableCell>STATUS</TableCell>
-                <TableCell>ACTION</TableCell>
+                <TableCell>ACTIONS</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {filteredPawns.length === 0 ? (
+              {filteredTickets.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={9} align="center">
                     <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
-                      {pawns.length === 0 
-                        ? 'No pawn transactions found'
-                        : 'No pawn transactions match the current filters'}
+                      {groupedTickets.length === 0
+                        ? 'No pawn tickets found'
+                        : 'No pawn tickets match the current filters'}
                     </Typography>
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredPawns
+                filteredTickets
                   .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-                  .map((pawn) => {
-                    const principalAmount = parseFloat(pawn.item_price) || 0;
-                    const redemptionAmount = calculateRedemptionAmount(principalAmount);
-                    const isPawnStatus = pawn.item_status === 'PAWN';
+                  .map((ticket) => {
+                    const totalPrincipal = ticket.items.reduce((sum, item) => sum + (parseFloat(item.item_price) || 0), 0);
+                    const redemptionAmount = calculateRedemptionAmount(totalPrincipal);
+                    const isPawnStatus = ticket.item_status === 'PAWN';
 
                     return (
-                      <TableRow key={pawn.pawn_ticket_id} hover>
-                        <TableCell>{pawn.pawn_ticket_id}</TableCell>
+                      <TableRow key={ticket.pawn_ticket_id} hover>
+                        <TableCell>{ticket.pawn_ticket_id}</TableCell>
                         <TableCell>
-                          {pawn.item_description || pawn.item_id}
+                          {ticket.items.map(item => item.item_description || item.item_id).join(', ')}
                         </TableCell>
-                        <TableCell>{pawn.customer_name || 'N/A'}</TableCell>
-                        <TableCell>{formatCurrency(principalAmount)}</TableCell>
+                        <TableCell>{ticket.customer_name || 'N/A'}</TableCell>
+                        <TableCell>{formatCurrency(totalPrincipal)}</TableCell>
                         <TableCell>
                           <Typography sx={{ fontWeight: 'bold', color: isPawnStatus ? '#1976d2' : 'inherit' }}>
                             {formatCurrency(redemptionAmount)}
                           </Typography>
                         </TableCell>
                         <TableCell>
-                          {new Date(pawn.transaction_date).toLocaleDateString('en-US', {
+                          {new Date(ticket.transaction_date).toLocaleDateString('en-US', {
                             month: 'short',
                             day: 'numeric',
                             year: 'numeric'
                           })}
                         </TableCell>
                         <TableCell>
-                          {calculateDueDate(pawn.transaction_date).toLocaleDateString('en-US', {
+                          {calculateDueDate(ticket.transaction_date).toLocaleDateString('en-US', {
                             month: 'short',
                             day: 'numeric',
                             year: 'numeric'
                           })}
                         </TableCell>
-                        <TableCell>{getStatusChip(getDisplayStatus(pawn))}</TableCell>
+                        <TableCell>{getStatusChip(getDisplayStatus(ticket))}</TableCell>
                         <TableCell>
                           {isPawnStatus && (
-                            <Box sx={{ display: 'flex', gap: 1 }}>
+                            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                               <Button
                                 variant="contained"
                                 size="small"
                                 startIcon={<AttachMoneyIcon />}
-                                onClick={() => handleRedeemClick(pawn)}
+                                onClick={() => handleRedeemClick(ticket)}
                                 sx={{
                                   backgroundColor: '#00a862',
                                   '&:hover': {
@@ -610,7 +650,7 @@ const Pawns = () => {
                                 variant="outlined"
                                 size="small"
                                 startIcon={<ScheduleIcon />}
-                                onClick={() => handleExtendClick(pawn)}
+                                onClick={() => handleExtendClick(ticket)}
                                 sx={{
                                   borderColor: '#1976d2',
                                   color: '#1976d2',
@@ -621,6 +661,22 @@ const Pawns = () => {
                                 }}
                               >
                                 Extend
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<BlockIcon />}
+                                onClick={() => handleForfeitClick(ticket)}
+                                sx={{
+                                  borderColor: '#f57c00',
+                                  color: '#f57c00',
+                                  '&:hover': {
+                                    borderColor: '#e65100',
+                                    backgroundColor: '#fff3e0'
+                                  }
+                                }}
+                              >
+                                Forfeit
                               </Button>
                             </Box>
                           )}
@@ -635,7 +691,7 @@ const Pawns = () => {
       )}
 
       {/* Pagination */}
-      {!loading && !error && filteredPawns.length > 0 && (
+      {!loading && !error && filteredTickets.length > 0 && (
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Select
@@ -656,7 +712,7 @@ const Pawns = () => {
             </Typography>
             {(filters.customerName || filters.ticketId || filters.transactionDate || filters.dueDate) && (
               <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>
-                ({filteredPawns.length} of {pawns.length} transactions)
+                ({filteredTickets.length} of {groupedTickets.length} tickets)
               </Typography>
             )}
           </Box>
@@ -668,11 +724,11 @@ const Pawns = () => {
               <ChevronLeftIcon />
             </IconButton>
             <Typography variant="body2" sx={{ mx: 2 }}>
-              Page {currentPage} of {Math.ceil(filteredPawns.length / itemsPerPage)}
+              Page {currentPage} of {Math.ceil(filteredTickets.length / itemsPerPage)}
             </Typography>
             <IconButton
               onClick={() => setCurrentPage(prev => prev + 1)}
-              disabled={currentPage >= Math.ceil(filteredPawns.length / itemsPerPage)}
+              disabled={currentPage >= Math.ceil(filteredTickets.length / itemsPerPage)}
             >
               <ChevronRightIcon />
             </IconButton>

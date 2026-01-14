@@ -3439,7 +3439,55 @@ app.get('/api/pawn-transactions', async (req, res) => {
   }
 });
 
-// Redeem pawn item
+// Update pawn ticket status
+app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
+  const { pawn_ticket_id } = req.params;
+  const { status } = req.body;
+
+  // Validate status
+  const validStatuses = ['PAWN', 'REDEEMED', 'FORFEITED'];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({ error: 'Invalid status. Must be one of: PAWN, REDEEMED, FORFEITED' });
+  }
+
+  try {
+    await pool.query('BEGIN');
+
+    // Update pawn_ticket status
+    await pool.query(
+      'UPDATE pawn_ticket SET status = $1 WHERE pawn_ticket_id = $2',
+      [status, pawn_ticket_id]
+    );
+
+    // Also update all jewelry items associated with this pawn ticket
+    const itemsResult = await pool.query(
+      'SELECT item_id FROM pawn_ticket WHERE pawn_ticket_id = $1',
+      [pawn_ticket_id]
+    );
+
+    for (const row of itemsResult.rows) {
+      await pool.query(
+        'UPDATE jewelry SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE item_id = $2',
+        [status, row.item_id]
+      );
+    }
+
+    await pool.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: `Pawn ticket ${pawn_ticket_id} status updated to ${status}`,
+      pawn_ticket_id,
+      status
+    });
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    console.error('Error updating pawn ticket status:', error);
+    res.status(500).json({ error: 'Failed to update pawn ticket status' });
+  }
+});
+
+// Redeem pawn item (legacy endpoint - keeping for backward compatibility)
 app.post('/api/redeem-pawn', async (req, res) => {
   const { pawn_ticket_id, item_id } = req.body;
 

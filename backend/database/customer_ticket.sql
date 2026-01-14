@@ -7,8 +7,11 @@ CREATE TABLE IF NOT EXISTS pawn_ticket (
   pawn_ticket_id VARCHAR(50),
   transaction_id VARCHAR(50),
   item_id VARCHAR(50),
+  status VARCHAR(20) DEFAULT 'PAWN',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+COMMENT ON COLUMN pawn_ticket.status IS 'Status of the pawn ticket: PAWN, REDEEMED, FORFEITED';
 
 CREATE TABLE IF NOT EXISTS buy_ticket (
   id SERIAL PRIMARY KEY,
