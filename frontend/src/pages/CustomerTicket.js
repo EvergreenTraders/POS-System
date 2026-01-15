@@ -3192,36 +3192,89 @@ const CustomerTicket = () => {
       default: transaction_type = 'unknown';
     }
 
-    // Special handling for redeem transactions - navigate to cart with pawn ticket ID
+    // Special handling for redeem transactions - fetch pawn ticket items and add to cart
     if (transaction_type === 'redeem') {
-      // Add redeem items to cart with customer and pawn ticket info
-      const itemsWithMetadata = filteredItems.map(item => ({
-        ...item,
-        transaction_type: 'redeem',
-        buyTicketId: item.pawnTicketId, // Use the pawn ticket ID as the ticket ID
-        customer: customer ? {
-          id: customer.id,
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
-          phone: customer.phone || 'N/A',
-          email: customer.email || 'N/A'
-        } : null,
-        employee: user ? {
-          id: user.id,
-          name: `${user.firstName} ${user.lastName}`,
-          role: user.role || 'Employee'
-        } : null
-      }));
+      try {
+        // Get the redeem data from the first redeem item
+        const redeemRow = filteredItems[0];
+        const pawnTicketId = redeemRow?.pawnTicketId;
 
-      // Save to session storage for cart
-      const existingCart = JSON.parse(sessionStorage.getItem('cartItems') || '[]');
-      const updatedCart = [...existingCart, ...itemsWithMetadata];
-      sessionStorage.setItem('cartItems', JSON.stringify(updatedCart));
+        if (!pawnTicketId) {
+          showSnackbar('No pawn ticket selected for redemption', 'error');
+          return;
+        }
 
-      // Navigate to cart
-      navigate('/cart');
-      return;
+        // Fetch all items for this pawn ticket from the backend
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${config.apiUrl}/pawn-transactions?pawn_ticket_id=${pawnTicketId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch pawn ticket items');
+        }
+
+        const pawnTicketItems = await response.json();
+
+        if (!pawnTicketItems || pawnTicketItems.length === 0) {
+          showSnackbar('No items found for this pawn ticket', 'error');
+          return;
+        }
+
+        // Extract redemption amounts from the redeem row
+        const totalRedemptionAmount = parseFloat(redeemRow.totalAmount || 0);
+        const principal = parseFloat(redeemRow.principal || 0);
+        const interest = parseFloat(redeemRow.interest || 0);
+
+        // Convert pawn ticket items to cart items with all necessary metadata
+        const itemsWithMetadata = pawnTicketItems.map(pawnItem => ({
+          id: pawnItem.item_id || Date.now(),
+          description: pawnItem.item_description || pawnItem.item_short_desc || 'Unknown item',
+          long_desc: pawnItem.item_description,
+          short_desc: pawnItem.item_short_desc,
+          price: parseFloat(pawnItem.item_price || 0), // This is the principal for each item
+          value: parseFloat(pawnItem.item_price || 0),
+          category: pawnItem.category || '',
+          images: pawnItem.images || [],
+          location: pawnItem.location || '',
+          item_id: pawnItem.item_id,
+          transaction_type: 'redeem',
+          buyTicketId: pawnTicketId, // Use the pawn ticket ID as the ticket ID
+          pawnTicketId: pawnTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null,
+          // Include the total redemption amount for reference
+          totalRedemptionAmount: totalRedemptionAmount,
+          principal: principal,
+          interest: interest
+        }));
+
+        // Save to session storage for cart
+        const existingCart = JSON.parse(sessionStorage.getItem('cartItems') || '[]');
+        const updatedCart = [...existingCart, ...itemsWithMetadata];
+        sessionStorage.setItem('cartItems', JSON.stringify(updatedCart));
+
+        showSnackbar(`Added ${itemsWithMetadata.length} items from pawn ticket ${pawnTicketId} to cart`, 'success');
+
+        // Navigate to cart
+        navigate('/cart');
+        return;
+      } catch (error) {
+        console.error('Error fetching pawn ticket items:', error);
+        showSnackbar('Failed to fetch pawn ticket items. Please try again.', 'error');
+        return;
+      }
     }
 
     // Instead of navigating, save to session storage first

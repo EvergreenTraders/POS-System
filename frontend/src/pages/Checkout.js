@@ -130,6 +130,8 @@ function Checkout() {
   const [taxRate, setTaxRate] = useState(0.13); // Default 13% tax rate
   const [selectedProvince, setSelectedProvince] = useState('ON');
   const [provinceName, setProvinceName] = useState('Ontario');
+  const [locationDialogOpen, setLocationDialogOpen] = useState(false);
+  const [redeemedLocations, setRedeemedLocations] = useState([]);
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
@@ -402,15 +404,39 @@ function Checkout() {
     // Always use checkoutItems if available, as it contains the items selected for checkout
     // Only fall back to cartItems if checkoutItems is empty (e.g., coming from estimator)
     const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
-    return itemsToCalculate.reduce((total, item) => {
+
+    return itemsToCalculate.reduce((total, item, index) => {
       let itemValue = 0;
       const transactionType = item.transaction_type?.toLowerCase() || '';
 
-      if (item.price !== undefined) itemValue = parseFloat(item.price) || 0;
-      else if (item.value !== undefined) itemValue = parseFloat(item.value) || 0;
-      else if (item.fee !== undefined) itemValue = parseFloat(item.fee) || 0;
-      else if (item.amount !== undefined) itemValue = parseFloat(item.amount) || 0;
-      else if (item.totalAmount !== undefined) itemValue = parseFloat(item.totalAmount) || 0;
+      // Special handling for redeem transactions
+      if (transactionType === 'redeem') {
+        // Only count the first item in each redeem ticket
+        const ticketId = item.pawnTicketId || item.buyTicketId;
+        const isFirstItemInTicket = itemsToCalculate.findIndex(i =>
+          (i.pawnTicketId || i.buyTicketId) === ticketId &&
+          (i.transaction_type || '').toLowerCase() === 'redeem'
+        ) === index;
+
+        if (isFirstItemInTicket) {
+          // Use totalRedemptionAmount for the first item
+          itemValue = parseFloat(item.totalRedemptionAmount || item.principal || 0);
+          // Add interest if available
+          if (item.interest) {
+            itemValue += parseFloat(item.interest || 0);
+          }
+        } else {
+          // Skip other items in the same redeem ticket
+          itemValue = 0;
+        }
+      } else {
+        // For non-redeem items, use standard price logic
+        if (item.price !== undefined) itemValue = parseFloat(item.price) || 0;
+        else if (item.value !== undefined) itemValue = parseFloat(item.value) || 0;
+        else if (item.fee !== undefined) itemValue = parseFloat(item.fee) || 0;
+        else if (item.amount !== undefined) itemValue = parseFloat(item.amount) || 0;
+        else if (item.totalAmount !== undefined) itemValue = parseFloat(item.totalAmount) || 0;
+      }
 
       // Add protection plan (15% of item price) if enabled
       const protectionPlanAmount = item.protectionPlan ? itemValue * 0.15 : 0;
@@ -430,39 +456,16 @@ function Checkout() {
   }, [checkoutItems, cartItems]);
 
   const calculateTax = useCallback(() => {
-    // Check if customer is tax exempt
-    if (selectedCustomer?.tax_exempt) {
-      return 0;
-    }
-    // Tax only applies to sales (positive values)
-    const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
-    const salesSubtotal = itemsToCalculate.reduce((total, item) => {
-      const transactionType = item.transaction_type?.toLowerCase() || '';
-      // Only include sale/repair/redeem transactions (money coming in)
-      if (transactionType === 'sale' || transactionType === 'repair' || transactionType === 'redeem') {
-        let itemValue = 0;
-        if (item.price !== undefined) itemValue = parseFloat(item.price) || 0;
-        else if (item.value !== undefined) itemValue = parseFloat(item.value) || 0;
-        else if (item.fee !== undefined) itemValue = parseFloat(item.fee) || 0;
-        else if (item.amount !== undefined) itemValue = parseFloat(item.amount) || 0;
-        else if (item.totalAmount !== undefined) itemValue = parseFloat(item.totalAmount) || 0;
-
-        // Add protection plan (15% of item price) if enabled
-        const protectionPlanAmount = item.protectionPlan ? itemValue * 0.15 : 0;
-        itemValue = itemValue + protectionPlanAmount;
-
-        return total + Math.abs(itemValue);
-      }
-      return total;
-    }, 0);
-    return salesSubtotal * taxRate;
-  }, [selectedCustomer, taxRate, checkoutItems, cartItems]);
+    // Tax is not calculated - all prices already include tax
+    return 0;
+  }, []);
 
   const calculateTotal = useCallback(() => {
-    const total = calculateSubtotal() + calculateTax();
+    // Total is just the subtotal (no tax added)
+    const total = calculateSubtotal();
     // Round to 2 decimal places to avoid floating-point precision issues
     return parseFloat(total.toFixed(2));
-  }, [calculateSubtotal, calculateTax]);
+  }, [calculateSubtotal]);
 
   const handlePaymentMethodChange = (event) => {
     setPaymentMethod(event.target.value);
@@ -1311,14 +1314,10 @@ function Checkout() {
             // Only update status for sale transactions with inventory items
             if (transactionType === 'sale' && item.item_id && item.fromInventory) {
               try {
-                // Calculate total price including protection plan and tax
+                // Calculate total price including protection plan (tax already included in price)
                 const basePrice = parseFloat(item.price) || 0;
                 const protectionPlanAmount = item.protectionPlan ? basePrice * 0.15 : 0;
-                const subtotal = basePrice + protectionPlanAmount;
-
-                // Calculate tax (check if customer is tax exempt)
-                const taxAmount = selectedCustomer?.tax_exempt ? 0 : subtotal * taxRate;
-                const totalItemPrice = subtotal + taxAmount;
+                const totalItemPrice = basePrice + protectionPlanAmount;
 
                 const response = await axios.put(
                   `${config.apiUrl}/jewelry/${item.item_id}/status`,
@@ -1332,6 +1331,45 @@ function Checkout() {
                 console.error(`Error updating item ${item.item_id} status:`, updateError);
                 console.error('Error details:', updateError.response?.data);
                 // Continue with checkout even if status update fails
+              }
+            }
+          }
+
+          // Step 3.6: Update pawn_ticket status to REDEEMED for redeem transactions
+          const redeemedTickets = new Set();
+          const redeemedItemLocations = []; // Collect locations for popup
+
+          for (const item of checkoutItems) {
+            const transactionType = item.transaction_type?.toLowerCase() || '';
+
+            if (transactionType === 'redeem') {
+              const pawnTicketId = item.pawnTicketId || item.buyTicketId;
+
+              if (pawnTicketId && !redeemedTickets.has(pawnTicketId)) {
+                redeemedTickets.add(pawnTicketId);
+
+                try {
+                  // Update pawn_ticket status to REDEEMED
+                  await axios.put(
+                    `${config.apiUrl}/pawn-ticket/${pawnTicketId}/status`,
+                    { status: 'REDEEMED' },
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+
+                } catch (updateError) {
+                  console.error(`Error updating pawn ticket ${pawnTicketId} status:`, updateError);
+                  console.error('Error details:', updateError.response?.data);
+                }
+              }
+
+              // Collect item location for popup
+              if (item.location) {
+                redeemedItemLocations.push({
+                  item_id: item.item_id,
+                  description: item.description || item.long_desc || item.short_desc || 'Item',
+                  location: item.location,
+                  pawnTicketId: pawnTicketId
+                });
               }
             }
           }
@@ -1403,10 +1441,17 @@ function Checkout() {
           setCurrentTransactionId(null);
           setPayments([]);
 
-          // Navigate after a brief delay to show success message
-          setTimeout(() => {
-            navigate('/jewel-estimator');
-          }, 1000);
+          // Check if there are redeemed items with locations to show
+          if (redeemedItemLocations.length > 0) {
+            setRedeemedLocations(redeemedItemLocations);
+            setLocationDialogOpen(true);
+            // Don't navigate yet - user will navigate after closing the dialog
+          } else {
+            // Navigate after a brief delay to show success message
+            setTimeout(() => {
+              navigate('/jewel-estimator');
+            }, 1000);
+          }
 
         } catch (paymentError) {
           console.error('Error processing payment:', paymentError);
@@ -1867,7 +1912,7 @@ function Checkout() {
                       <Grid item xs={12}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                           <Typography variant="subtitle1" sx={{ flexBasis: '30%' }}>
-                            <strong>N:</strong> {`${selectedCustomer.name || ''}`}
+                            <strong>N:</strong> {selectedCustomer.name || `${selectedCustomer.first_name || ''} ${selectedCustomer.last_name || ''}`.trim() || 'N/A'}
                           </Typography>
                           <Typography variant="subtitle1" sx={{ flexBasis: '40%', textAlign: 'center' }}>
                             {selectedCustomer.email && (
@@ -1887,26 +1932,6 @@ function Checkout() {
                           <Typography variant="subtitle1">
                             <strong>Address:</strong> {selectedCustomer.address}
                           </Typography>
-                        </Grid>
-                      )}
-
-                      {selectedCustomer.tax_exempt && (
-                        <Grid item xs={12}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography
-                              variant="subtitle2"
-                              sx={{
-                                color: '#4caf50',
-                                fontWeight: 'bold',
-                                backgroundColor: '#e8f5e9',
-                                padding: '4px 12px',
-                                borderRadius: '4px',
-                                display: 'inline-block'
-                              }}
-                            >
-                              ✓ TAX EXEMPT CUSTOMER
-                            </Typography>
-                          </Box>
                         </Grid>
                       )}
                     </Grid>
@@ -1936,10 +1961,11 @@ function Checkout() {
                   </TableHead>
                   <TableBody>
                     {checkoutItems.map((item, index) => {
-                    
+                      const itemTransactionType = (item.transaction_type || item.transactionType || '').toLowerCase();
+
                       // Determine the appropriate description to display
                       let displayDescription = '';
-                      
+
                       // Try to use description field first (most common)
                       if (item.long_desc || item.description) {
                         displayDescription = item.long_desc || item.description;
@@ -1960,7 +1986,7 @@ function Checkout() {
                       else {
                         displayDescription = 'Item';
                       }
-                      
+
                       // Determine transaction type to display
                       let transactionType = '';
                       if (item.transactionType) {
@@ -1981,13 +2007,37 @@ function Checkout() {
                           transactionType = 'Other';
                         }
                       }
-                      
+
                       // Determine price to display
                       let price = 0;
-                      if (item.price !== undefined) price = parseFloat(item.price) || 0;
-                      else if (item.value !== undefined) price = parseFloat(item.value) || 0;
-                      else if (item.fee !== undefined) price = parseFloat(item.fee) || 0;
-                      else if (item.amount !== undefined) price = parseFloat(item.amount) || 0;
+
+                      // Special handling for redeem transactions
+                      if (itemTransactionType === 'redeem') {
+                        // For redeem items, check if this is the first item in the ticket
+                        const ticketId = item.pawnTicketId || item.buyTicketId;
+                        const isFirstItemInTicket = checkoutItems.findIndex(i =>
+                          (i.pawnTicketId || i.buyTicketId) === ticketId &&
+                          (i.transaction_type || i.transactionType || '').toLowerCase() === 'redeem'
+                        ) === index;
+
+                        if (isFirstItemInTicket) {
+                          // Use totalRedemptionAmount for the first item
+                          price = parseFloat(item.totalRedemptionAmount || item.principal || 0);
+                          // Add interest if available
+                          if (item.interest) {
+                            price += parseFloat(item.interest || 0);
+                          }
+                        } else {
+                          // For other items in the same redeem ticket, price is 0
+                          price = 0;
+                        }
+                      } else {
+                        // For non-redeem items, use standard price logic
+                        if (item.price !== undefined) price = parseFloat(item.price) || 0;
+                        else if (item.value !== undefined) price = parseFloat(item.value) || 0;
+                        else if (item.fee !== undefined) price = parseFloat(item.fee) || 0;
+                        else if (item.amount !== undefined) price = parseFloat(item.amount) || 0;
+                      }
 
                       // Add protection plan (15% of item price) if enabled
                       const protectionPlanAmount = item.protectionPlan ? price * 0.15 : 0;
@@ -1996,7 +2046,6 @@ function Checkout() {
                       // Apply sign based on transaction type
                       // Money going OUT (buy/pawn) = negative values
                       // Money coming IN (sale/repair/other) = positive values
-                      const itemTransactionType = (item.transaction_type || item.transactionType || '').toLowerCase();
                       let displayPrice = totalPrice;
                       if (itemTransactionType === 'buy' || itemTransactionType === 'pawn') {
                         displayPrice = -Math.abs(totalPrice);
@@ -2038,7 +2087,7 @@ function Checkout() {
                             color: displayPrice < 0 ? 'error.main' : 'success.main',
                             fontWeight: 'bold'
                           }}>
-                            ${parseFloat(displayPrice).toFixed(2)}
+                            {displayPrice === 0 && itemTransactionType === 'redeem' ? '-' : `$${parseFloat(displayPrice).toFixed(2)}`}
                           </TableCell>
                         </TableRow>
                       );
@@ -2052,24 +2101,6 @@ function Checkout() {
               {/* Price Breakdown */}
               <Box sx={{ mt: 2 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body1">Subtotal:</Typography>
-                  <Typography variant="body1">${calculateSubtotal().toFixed(2)}</Typography>
-                </Box>
-
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body1">
-                    {selectedCustomer?.tax_exempt ? (
-                      <span style={{ color: '#4caf50', fontWeight: 'bold' }}>Tax (EXEMPT)</span>
-                    ) : (
-                      `Tax (${(taxRate * 100).toFixed(0)}%)`
-                    )}:
-                  </Typography>
-                  <Typography variant="body1">${calculateTax().toFixed(2)}</Typography>
-                </Box>
-
-                <Divider sx={{ my: 1 }} />
-
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant="h6" fontWeight="bold">Total:</Typography>
                   <Typography variant="h6" fontWeight="bold" color="primary">
                     ${calculateTotal().toFixed(2)}
@@ -2180,6 +2211,66 @@ function Checkout() {
         </Grid>
       </Box>
 
+      {/* Redeemed Items Location Dialog */}
+      <Dialog
+        open={locationDialogOpen}
+        onClose={() => {
+          setLocationDialogOpen(false);
+          navigate('/jewel-estimator');
+        }}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Typography variant="h5" fontWeight="bold">
+            Redeemed Items - Storage Locations
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Please retrieve the following items from storage:
+          </Typography>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell><strong>Pawn Ticket ID</strong></TableCell>
+                  <TableCell><strong>Item Description</strong></TableCell>
+                  <TableCell><strong>Storage Location</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {redeemedLocations.map((item, index) => (
+                  <TableRow key={index} hover>
+                    <TableCell>{item.pawnTicketId}</TableCell>
+                    <TableCell>{item.description}</TableCell>
+                    <TableCell>
+                      <Chip
+                        label={item.location}
+                        color="primary"
+                        sx={{ fontWeight: 'bold' }}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setLocationDialogOpen(false);
+              navigate('/jewel-estimator');
+            }}
+            variant="contained"
+            color="primary"
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Snackbar for notifications */}
       <Snackbar
         open={snackbar.open}
@@ -2187,7 +2278,7 @@ function Checkout() {
         onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert 
+        <Alert
           onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
           severity={snackbar.severity}
           sx={{ width: '100%' }}

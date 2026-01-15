@@ -3428,7 +3428,9 @@ app.post('/api/pawn-ticket', async (req, res) => {
 // Get all pawn transactions with details
 app.get('/api/pawn-transactions', async (req, res) => {
   try {
-    const query = `
+    const { pawn_ticket_id } = req.query;
+
+    let query = `
       SELECT
         pt.pawn_ticket_id,
         pt.transaction_id,
@@ -3453,10 +3455,18 @@ app.get('/api/pawn-transactions', async (req, res) => {
       LEFT JOIN transactions t ON pt.transaction_id = t.transaction_id
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN jewelry j ON pt.item_id = j.item_id
-      ORDER BY pt.created_at DESC
     `;
 
-    const result = await pool.query(query);
+    const queryParams = [];
+    if (pawn_ticket_id) {
+      query += ` WHERE pt.pawn_ticket_id = $1`;
+      queryParams.push(pawn_ticket_id);
+    }
+
+    query += ` ORDER BY pt.created_at DESC`;
+
+    const result = await pool.query(query, queryParams);
+
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching pawn transactions:', error);
