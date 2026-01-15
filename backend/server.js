@@ -227,7 +227,6 @@ app.post('/api/auth/login', async (req, res) => {
     const userQuery = await pool.query(query, [identifier]);
     
     if (userQuery.rows.length === 0) {
-      console.log('No user found with identifier:', identifier);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -1146,6 +1145,27 @@ app.get('/api/cases', async (req, res) => {
   } catch (error) {
     console.error('Error fetching cases:', error);
     res.status(500).json({ error: 'Failed to fetch cases' });
+  }
+});
+
+// GET /api/storage-locations - Get all storage locations
+app.get('/api/storage-locations', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT location_id, location, is_occupied
+      FROM storage_location
+      ORDER BY
+        CASE
+          WHEN location = 'Inventory' THEN 1
+          WHEN location = 'Warehouse' THEN 2
+          ELSE 3
+        END,
+        location
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching storage locations:', error);
+    res.status(500).json({ error: 'Failed to fetch storage locations' });
   }
 });
 
@@ -2314,7 +2334,6 @@ app.put('/api/jewelry/:id', async (req, res) => {
     }
 
     if (fields.length === 0) {
-      console.log('No valid fields to update');
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'No valid fields to update' });
     }
@@ -2656,16 +2675,21 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
       // Now save images with meaningful filenames using item_id
       const processedImages = [];
 
-      // Get the number of images for this item from imagesMeta or count files
-      const itemImageCount = item.imagesMeta ? item.imagesMeta.length : 0;
+      // Get images for this specific item from imageMetadata
+      const itemImagesMetadata = imageMetadata.filter(meta => meta.itemIndex === itemIdx);
+      const itemImageCount = itemImagesMetadata.length;
 
       if (uploadedFiles.length > 0 && itemImageCount > 0) {
 
         for (let i = 0; i < itemImageCount; i++) {
           const fileIndex = globalImageIndex + i;
-          if (fileIndex >= uploadedFiles.length) break;
+          if (fileIndex >= uploadedFiles.length) {
+            console.error(`File index ${fileIndex} out of range. Total files: ${uploadedFiles.length}`);
+            break;
+          }
 
           const file = uploadedFiles[fileIndex];
+          const imageMeta = itemImagesMetadata[i];
 
           // Get file extension from original filename
           const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
@@ -2678,10 +2702,8 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           // Save file to disk with meaningful name
           await fs.promises.writeFile(filepath, file.buffer);
 
-          // Get isPrimary from metadata if available, otherwise default to first image
-          const isPrimary = item.imagesMeta && item.imagesMeta[i]
-            ? item.imagesMeta[i].isPrimary
-            : i === 0;
+          // Get isPrimary from metadata
+          const isPrimary = imageMeta ? imageMeta.isPrimary : (i === 0);
 
           // Store relative path for database
           processedImages.push({
@@ -2766,7 +2788,7 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         item.primary_gem_authentic || false,
         parseFloat(item.primary_gem_value) || 0,
         status,
-        'SOUTH STORE',
+        item.location || 'SOUTH STORE',
         'GOOD',
         item.metal_spot_price,
         item.notes,
@@ -2960,7 +2982,7 @@ app.post('/api/jewelry', async (req, res) => {
         item.primary_gem_authentic || false,                     // 27
         parseFloat(item.primary_gem_value) || 0,                 // 28
         status,         // 29
-        'SOUTH STORE',          // 30
+        item.location || 'SOUTH STORE',          // 30
         'GOOD',          // 31
         item.metal_spot_price,  // 32
         item.notes,  // 33
@@ -3411,6 +3433,7 @@ app.get('/api/pawn-transactions', async (req, res) => {
         pt.pawn_ticket_id,
         pt.transaction_id,
         pt.item_id,
+        pt.status as ticket_status,
         pt.created_at as pawn_created_at,
         t.transaction_date,
         t.customer_id,
@@ -3423,7 +3446,9 @@ app.get('/api/pawn-transactions', async (req, res) => {
         j.status as item_status,
         j.category,
         j.metal_weight,
-        j.precious_metal_type
+        j.precious_metal_type,
+        j.images,
+        j.location
       FROM pawn_ticket pt
       LEFT JOIN transactions t ON pt.transaction_id = t.transaction_id
       LEFT JOIN customers c ON t.customer_id = c.id
@@ -3500,9 +3525,6 @@ app.post('/api/redeem-pawn', async (req, res) => {
       'UPDATE jewelry SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE item_id = $2',
       ['REDEEMED', item_id]
     );
-
-    // Log the redemption (you can add additional logging here if needed)
-    console.log(`Item ${item_id} from pawn ticket ${pawn_ticket_id} has been redeemed`);
 
     // Commit transaction
     await pool.query('COMMIT');
@@ -7413,8 +7435,6 @@ app.post('/api/migrate', async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
-    console.log('Running database migrations with data import...');
-
     // Check if data export file exists
     const fs = require('fs');
     const path = require('path');
@@ -7511,8 +7531,6 @@ app.post('/api/pawn/check-forfeitures', async (req, res) => {
 
     await client.query('COMMIT');
 
-    console.log(`✓ Forfeiture check: ${updateResult.rows.length} items moved to ${targetStatus} status`);
-
     res.json({
       message: `Successfully processed ${updateResult.rows.length} forfeited items`,
       count: updateResult.rows.length,
@@ -7540,7 +7558,6 @@ async function checkPawnForfeitures() {
     const configResult = await client.query('SELECT term_days, forfeiture_mode FROM pawn_config LIMIT 1');
 
     if (configResult.rows.length === 0) {
-      console.log('⚠ Pawn configuration not found, skipping forfeiture check');
       await client.query('ROLLBACK');
       return;
     }
@@ -7584,8 +7601,6 @@ async function checkPawnForfeitures() {
     const updateResult = await client.query(updateQuery, [targetStatus, itemIds]);
 
     await client.query('COMMIT');
-
-    console.log(`✓ Forfeiture check: ${updateResult.rows.length} items moved to ${targetStatus} status`);
 
   } catch (error) {
     await client.query('ROLLBACK');

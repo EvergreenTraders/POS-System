@@ -52,6 +52,33 @@ import CreditCardIcon from '@mui/icons-material/CreditCard';
 const API_BASE_URL = config.apiUrl;
 
 /**
+ * Convert a blob URL or data URL to a File object
+ */
+const blobUrlToFile = async (url, filename = 'image.jpg') => {
+  try {
+    // Handle data URLs (base64 encoded images)
+    if (url.startsWith('data:')) {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      return new File([blob], filename, { type: blob.type || 'image/jpeg' });
+    }
+
+    // Handle blob URLs
+    if (url.startsWith('blob:')) {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      return new File([blob], filename, { type: blob.type || 'image/jpeg' });
+    }
+
+    console.warn('URL is neither a blob nor a data URL:', url);
+    return null;
+  } catch (error) {
+    console.error('Error converting URL to file:', error);
+    return null;
+  }
+};
+
+/**
  * Checkout component manages the checkout process, which includes displaying
  * an order summary, handling payment details, and allowing users to save
  * transactions as quotes. It provides functionality for both cash and card
@@ -771,8 +798,61 @@ function Checkout() {
             // Filter out items from inventory as they already exist in the database
             const newJewelryItems = checkoutItems.filter(item => !item.fromInventory);
 
-            // Check if any items have actual file objects (not just blob URLs)
-            const hasImageFiles = newJewelryItems.some(item =>
+
+            // Convert any blob URLs to File objects before uploading
+            const itemsWithConvertedImages = await Promise.all(
+              newJewelryItems.map(async (item) => {
+                if (!item.images || !Array.isArray(item.images)) {
+                  return item;
+                }
+
+                if (item.images.length === 0) {
+                  return item;
+                }
+
+                const convertedImages = await Promise.all(
+                  item.images.map(async (img, index) => {
+                    // If it's already a File object, keep it
+                    if (img.file instanceof File) {
+                      return img;
+                    }
+
+                    // If the URL is a blob URL or data URL, convert it to a File object
+                    if (img.url && (img.url.startsWith('blob:') || img.url.startsWith('data:'))) {
+                      const file = await blobUrlToFile(img.url, `${item.item_id || 'item'}-${index + 1}.jpg`);
+                      if (file) {
+                        return {
+                          ...img,
+                          file: file,
+                          isPrimary: img.isPrimary !== undefined ? img.isPrimary : index === 0
+                        };
+                      } else {
+                        console.error('Failed to convert URL to file');
+                      }
+                    }
+
+                    // Otherwise, keep the image as-is (might be a server URL like /uploads/...)
+                    if (img.url && !img.url.startsWith('blob:') && !img.url.startsWith('data:')) {
+                      return img;
+                    }
+
+                    console.warn('Image has no valid URL:', img);
+                    return null;
+                  })
+                );
+
+                // Filter out null values from failed conversions
+                const validImages = convertedImages.filter(Boolean);
+
+                return {
+                  ...item,
+                  images: validImages
+                };
+              })
+            );
+
+            // Check if any items have actual file objects (after conversion)
+            const hasImageFiles = itemsWithConvertedImages.some(item =>
               item.images && Array.isArray(item.images) &&
               item.images.some(img => img.file instanceof File)
             );
@@ -787,7 +867,7 @@ function Checkout() {
 
               // Collect all image files from all items and track their metadata
               const imageMetadata = [];
-              newJewelryItems.forEach((item, itemIndex) => {
+              itemsWithConvertedImages.forEach((item, itemIndex) => {
                 if (item.images && Array.isArray(item.images)) {
                   item.images.forEach((img, imgIndex) => {
                     if (img.file instanceof File) {
@@ -804,7 +884,8 @@ function Checkout() {
               });
 
               // Process cart items to remove file objects but keep image metadata
-              const processedItems = newJewelryItems.map(item => {
+              // IMPORTANT: Use itemsWithConvertedImages which has the converted File objects
+              const processedItems = itemsWithConvertedImages.map(item => {
                 const { images, ...itemWithoutImages } = item;
 
                 // Keep image metadata (isPrimary flag) but remove file objects
@@ -819,24 +900,8 @@ function Checkout() {
                 };
               });
 
-              // Check if we have any jewelry items from the gem estimator
-              // If items have originalData, merge it with current item data
-              const jewelryItemsToPost = jewelryItems.map(item => {
-                // Spread originalData first for base jewelry fields
-                // Then spread the current item to override with any updates (vintage, notes, brand, etc.)
-                // This ensures ALL fields including manual additions are preserved
-                const mergedItem = {
-                  ...(item.originalData || {}),
-                  ...item,
-                  // Ensure price and transaction_type are always set
-                  price: item.price || item.originalData?.price,
-                  transaction_type: item.transaction_type || item.originalData?.transaction_type,
-                  images: item.images || item.originalData?.images
-                };
-
-                return mergedItem;
-              });
-              itemsToPost = jewelryItems.length > 0 ? jewelryItemsToPost : processedItems;
+              // Don't use the old jewelryItems state - use processedItems which has converted images
+              itemsToPost = processedItems;
 
               // Add cart items as JSON string in FormData
               formData.append('cartItems', JSON.stringify(itemsToPost));
@@ -856,17 +921,25 @@ function Checkout() {
               );
             } else {
               // No files, use regular JSON approach (for backward compatibility)
-              const processedItems = newJewelryItems.map(item => {
+              // Note: After blob URL conversion, we should always have files if there were blob URLs
+              // This else branch is only for items with server URLs or no images at all
+              const processedItems = itemsWithConvertedImages.map(item => {
                 const { images, ...itemWithoutImages } = item;
 
                 let processedImages = [];
                 if (images && Array.isArray(images)) {
                   processedImages = images.map(img => {
                     if (typeof img === 'object') {
-                      return { url: img.url || '' };
+                      // Only save server URLs, not blob or data URLs
+                      const url = img.url || '';
+                      if (url.startsWith('blob:') || url.startsWith('data:')) {
+                        console.warn('Blob/Data URL detected but not converted to file. Skipping image.');
+                        return null;
+                      }
+                      return { url };
                     }
                     return img;
-                  });
+                  }).filter(Boolean); // Remove null entries
                 }
 
                 return {
@@ -875,24 +948,8 @@ function Checkout() {
                 };
               });
 
-              // Check if we have any jewelry items from the gem estimator
-              // If items have originalData, merge it with current item data
-              const jewelryItemsToPost = jewelryItems.map(item => {
-                // Spread originalData first for base jewelry fields
-                // Then spread the current item to override with any updates (vintage, notes, brand, etc.)
-                // This ensures ALL fields including manual additions are preserved
-                const mergedItem = {
-                  ...(item.originalData || {}),
-                  ...item,
-                  // Ensure price and transaction_type are always set
-                  price: item.price || item.originalData?.price,
-                  transaction_type: item.transaction_type || item.originalData?.transaction_type,
-                  images: item.images || item.originalData?.images
-                };
-
-                return mergedItem;
-              });
-              itemsToPost = jewelryItems.length > 0 ? jewelryItemsToPost : processedItems;
+              // Don't use the old jewelryItems state - use processedItems which has converted images
+              itemsToPost = processedItems;
 
               jewelryResponse = await axios.post(
                 `${config.apiUrl}/jewelry`,
@@ -1271,7 +1328,6 @@ function Checkout() {
                   },
                   { headers: { Authorization: `Bearer ${token}` } }
                 );
-                console.log(`Successfully updated item ${item.item_id} status to SOLD with item price`, response.data);
               } catch (updateError) {
                 console.error(`Error updating item ${item.item_id} status:`, updateError);
                 console.error('Error details:', updateError.response?.data);
@@ -1280,7 +1336,62 @@ function Checkout() {
             }
           }
 
-          // Step 4: Display success message and navigate to home
+          // Step 4: Clear all storage IMMEDIATELY before any UI updates
+          // Clear all ticket items from localStorage FIRST
+          const ticketTypes = ['pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund', 'redeem'];
+          ticketTypes.forEach(type => {
+            // Clear both customer-specific and global ticket items
+            Object.keys(localStorage).forEach(key => {
+              if (key.startsWith(`ticket_`) && key.includes(`_${type}`)) {
+                localStorage.removeItem(key);
+              }
+            });
+          });
+
+          // Clear checkout items from sessionStorage
+          sessionStorage.removeItem('checkoutItems');
+          sessionStorage.removeItem('selectedCustomer');
+
+          // Remove only the checked out items from cart, keeping other items
+          try {
+            // Read current cart items from sessionStorage to get the most up-to-date state
+            const sessionCartItems = sessionStorage.getItem('cartItems');
+            let currentCartItems = [];
+
+            if (sessionCartItems) {
+              currentCartItems = JSON.parse(sessionCartItems);
+            }
+
+            // Create a set of ticket IDs from checkoutItems for efficient lookup
+            const checkedOutTicketIds = new Set(
+              checkoutItems
+                .filter(item => item.buyTicketId)
+                .map(item => item.buyTicketId)
+            );
+
+            // Filter out all items that belong to the checked out tickets
+            const remainingItems = currentCartItems.filter(item => {
+              // If item has a buyTicketId and it matches one of the checked out tickets, remove it
+              if (item.buyTicketId && checkedOutTicketIds.has(item.buyTicketId)) {
+                return false;
+              }
+              return true;
+            });
+
+            // Update sessionStorage directly to ensure persistence
+            sessionStorage.setItem('cartItems', JSON.stringify(remainingItems));
+
+            // If all items were checked out, clear the cart entirely
+            if (remainingItems.length === 0) {
+              clearCart();
+            }
+          } catch (error) {
+            console.error('Error removing checked out items from cart:', error);
+            // Fallback to clearing everything on error
+            clearCart();
+          }
+
+          // Display success message and navigate
           setLoading(false);
           setSnackbar({
             open: true,
@@ -1288,56 +1399,12 @@ function Checkout() {
             severity: 'success'
           });
 
-          // Remove only the checked out items from cart, keeping other items
-          // This allows multiple tickets to be managed independently
+          setTransactionCreated(false);
+          setCurrentTransactionId(null);
+          setPayments([]);
+
+          // Navigate after a brief delay to show success message
           setTimeout(() => {
-            try {
-              // Read current cart items from sessionStorage to get the most up-to-date state
-              const sessionCartItems = sessionStorage.getItem('cartItems');
-              let currentCartItems = [];
-
-              if (sessionCartItems) {
-                currentCartItems = JSON.parse(sessionCartItems);
-              }
-
-              // Create a set of ticket IDs from checkoutItems for efficient lookup
-              const checkedOutTicketIds = new Set(
-                checkoutItems
-                  .filter(item => item.buyTicketId)
-                  .map(item => item.buyTicketId)
-              );
-
-
-              // Filter out all items that belong to the checked out tickets
-              const remainingItems = currentCartItems.filter(item => {
-                // If item has a buyTicketId and it matches one of the checked out tickets, remove it
-                if (item.buyTicketId && checkedOutTicketIds.has(item.buyTicketId)) {
-                  return false;
-                }
-
-                return true;
-              });
-
-              // Update sessionStorage directly to ensure persistence
-              sessionStorage.setItem('cartItems', JSON.stringify(remainingItems));
-
-              // If all items were checked out, clear the cart entirely
-              if (remainingItems.length === 0) {
-                clearCart();
-              }
-            } catch (error) {
-              console.error('Error removing checked out items from cart:', error);
-              // Fallback to clearing everything on error
-              clearCart();
-            }
-
-            // Clear checkout items from sessionStorage after successful transaction
-            sessionStorage.removeItem('checkoutItems');
-            sessionStorage.removeItem('selectedCustomer');
-
-            setTransactionCreated(false);
-            setCurrentTransactionId(null);
-            setPayments([]);
             navigate('/jewel-estimator');
           }, 1000);
 

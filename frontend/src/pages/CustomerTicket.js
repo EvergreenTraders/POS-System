@@ -4,7 +4,7 @@ import {
   CardMedia, Divider, Chip, Button, Avatar, Stack, Tabs, Tab, TextField,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogActions, Snackbar, Alert, CircularProgress,
-  List, ListItem, ListItemText, ListItemAvatar, Menu, MenuItem, Checkbox
+  List, ListItem, ListItemText, ListItemAvatar, Menu, MenuItem, Checkbox, Select
 } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import config from '../config';
@@ -456,6 +456,10 @@ const CustomerTicket = () => {
 
   // Customer's pawn transactions (loans)
   const [customerLoans, setCustomerLoans] = React.useState([]);
+  const [storageLocations, setStorageLocations] = React.useState([]);
+  const [showLocationDialog, setShowLocationDialog] = React.useState(false);
+  const [selectedRedeemTicket, setSelectedRedeemTicket] = React.useState(null);
+  const [locationCheckStatus, setLocationCheckStatus] = React.useState({});
 
   // Get customer from location state or session storage
   const [customer, setCustomer] = React.useState(() => {
@@ -677,7 +681,7 @@ const CustomerTicket = () => {
   });
 
   // Helper functions to create empty items for each tab type
-  const createEmptyPawnItem = () => ({ id: Date.now(), description: '', category: '', value: '' });
+  const createEmptyPawnItem = () => ({ id: Date.now(), description: '', category: '', value: '', location: '' });
   const createEmptyBuyItem = () => ({ id: Date.now(), description: '', category: '', price: '' });
   const createEmptyTradeItem = () => ({ id: Date.now(), tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' });
   const createEmptySaleItem = () => ({ id: Date.now(), description: '', category: '', price: '', paymentMethod: '' });
@@ -1277,6 +1281,27 @@ const CustomerTicket = () => {
 
     fetchCustomerLoans();
   }, [customer]);
+
+  // Fetch storage locations
+  React.useEffect(() => {
+    const fetchStorageLocations = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${config.apiUrl}/storage-locations`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (response.ok) {
+          const locations = await response.json();
+          setStorageLocations(locations);
+        }
+      } catch (error) {
+        console.error('Error fetching storage locations:', error);
+      }
+    };
+
+    fetchStorageLocations();
+  }, []);
 
   // Handle redeem data from Pawns.js
   React.useEffect(() => {
@@ -3167,44 +3192,36 @@ const CustomerTicket = () => {
       default: transaction_type = 'unknown';
     }
 
-    // Special handling for redeem transactions
+    // Special handling for redeem transactions - navigate to cart with pawn ticket ID
     if (transaction_type === 'redeem') {
-      try {
-        const token = localStorage.getItem('token');
+      // Add redeem items to cart with customer and pawn ticket info
+      const itemsWithMetadata = filteredItems.map(item => ({
+        ...item,
+        transaction_type: 'redeem',
+        buyTicketId: item.pawnTicketId, // Use the pawn ticket ID as the ticket ID
+        customer: customer ? {
+          id: customer.id,
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+          phone: customer.phone || 'N/A',
+          email: customer.email || 'N/A'
+        } : null,
+        employee: user ? {
+          id: user.id,
+          name: `${user.firstName} ${user.lastName}`,
+          role: user.role || 'Employee'
+        } : null
+      }));
 
-        // Update pawn ticket status to REDEEMED for each item
-        for (const item of filteredItems) {
-          if (item.pawnTicketId) {
-            await fetch(`${config.apiUrl}/pawn-ticket/${item.pawnTicketId}/status`, {
-              method: 'PUT',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({ status: 'REDEEMED' })
-            });
-          }
-        }
+      // Save to session storage for cart
+      const existingCart = JSON.parse(sessionStorage.getItem('cartItems') || '[]');
+      const updatedCart = [...existingCart, ...itemsWithMetadata];
+      sessionStorage.setItem('cartItems', JSON.stringify(updatedCart));
 
-        setSnackbarMessage({
-          open: true,
-          message: 'Pawn ticket(s) successfully redeemed',
-          severity: 'success'
-        });
-
-        // Clear redeem items after successful redemption
-        setRedeemItems([createEmptyRedeemItem()]);
-
-        return;
-      } catch (error) {
-        console.error('Error redeeming pawn ticket:', error);
-        setSnackbarMessage({
-          open: true,
-          message: 'Failed to redeem pawn ticket',
-          severity: 'error'
-        });
-        return;
-      }
+      // Navigate to cart
+      navigate('/cart');
+      return;
     }
 
     // Instead of navigating, save to session storage first
@@ -3340,20 +3357,37 @@ const CustomerTicket = () => {
       // Clear items from the current tab after adding to cart
       if (activeTab === 0) { // Pawn tab
         setPawnItems([createEmptyPawnItem()]);
+        // Clear from localStorage
+        const key = customer && customer.id ? `ticket_${customer.id}_pawn` : `ticket_global_pawn`;
+        localStorage.removeItem(key);
       } else if (activeTab === 1) { // Buy tab
         setBuyItems([createEmptyBuyItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_buy` : `ticket_global_buy`;
+        localStorage.removeItem(key);
       } else if (activeTab === 2) { // Trade tab
         setTradeItems([createEmptyTradeItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_trade` : `ticket_global_trade`;
+        localStorage.removeItem(key);
       } else if (activeTab === 3) { // Sale tab
         setSaleItems([createEmptySaleItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_sale` : `ticket_global_sale`;
+        localStorage.removeItem(key);
       } else if (activeTab === 4) { // Repair tab
         setRepairItems([createEmptyRepairItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_repair` : `ticket_global_repair`;
+        localStorage.removeItem(key);
       } else if (activeTab === 5) { // Payment tab
         setPaymentItems([createEmptyPaymentItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_payment` : `ticket_global_payment`;
+        localStorage.removeItem(key);
       } else if (activeTab === 6) { // Refund tab
         setRefundItems([createEmptyRefundItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_refund` : `ticket_global_refund`;
+        localStorage.removeItem(key);
       } else if (activeTab === 7) { // Redeem tab
         setRedeemItems([createEmptyRedeemItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_redeem` : `ticket_global_redeem`;
+        localStorage.removeItem(key);
       }
 
     } catch (error) {
@@ -3612,27 +3646,43 @@ const CustomerTicket = () => {
     // Clear all tabs that had valid items after proceeding to checkout
     if (validPawnItems.length > 0) {
       setPawnItems([createEmptyPawnItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_pawn` : `ticket_global_pawn`;
+      localStorage.removeItem(key);
     }
     if (validBuyItems.length > 0) {
       setBuyItems([createEmptyBuyItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_buy` : `ticket_global_buy`;
+      localStorage.removeItem(key);
     }
     if (validTradeItems.length > 0) {
       setTradeItems([createEmptyTradeItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_trade` : `ticket_global_trade`;
+      localStorage.removeItem(key);
     }
     if (validSaleItems.length > 0) {
       setSaleItems([createEmptySaleItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_sale` : `ticket_global_sale`;
+      localStorage.removeItem(key);
     }
     if (validRepairItems.length > 0) {
       setRepairItems([createEmptyRepairItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_repair` : `ticket_global_repair`;
+      localStorage.removeItem(key);
     }
     if (validPaymentItems.length > 0) {
       setPaymentItems([createEmptyPaymentItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_payment` : `ticket_global_payment`;
+      localStorage.removeItem(key);
     }
     if (validRefundItems.length > 0) {
       setRefundItems([createEmptyRefundItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_refund` : `ticket_global_refund`;
+      localStorage.removeItem(key);
     }
     if (validRedeemItems.length > 0) {
       setRedeemItems([createEmptyRedeemItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_redeem` : `ticket_global_redeem`;
+      localStorage.removeItem(key);
     }
 
     // Navigate to checkout
@@ -4011,11 +4061,12 @@ return (
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="15%" align="center">Estimator</TableCell>
-                              <TableCell width="10%" align="center">Image</TableCell>
-                              <TableCell width="50%">Item Description</TableCell>
+                              <TableCell width="12%" align="center">Estimator</TableCell>
+                              <TableCell width="8%" align="center">Image</TableCell>
+                              <TableCell width="40%">Item Description</TableCell>
                               <TableCell width="10%">Est. Value</TableCell>
-                              <TableCell width="20%" align="right" padding="none">
+                              <TableCell width="15%">Location</TableCell>
+                              <TableCell width="15%" align="right" padding="none">
                                 <Tooltip title="Add Item">
                                   <IconButton size="small" color="primary" onClick={handleAddRow}>
                                     <AddIcon />
@@ -4091,12 +4142,30 @@ return (
                                   />
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.value}
                                     onChange={(e) => handleItemChange(item.id, 'value', e.target.value)}
                                   />
+                                </TableCell>
+                                <TableCell>
+                                  <Select
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.location || ''}
+                                    onChange={(e) => handleItemChange(item.id, 'location', e.target.value)}
+                                    displayEmpty
+                                  >
+                                    <MenuItem value="">
+                                      <em>Select Location</em>
+                                    </MenuItem>
+                                    {storageLocations.map((loc) => (
+                                      <MenuItem key={loc.location_id} value={loc.location}>
+                                        {loc.location}
+                                      </MenuItem>
+                                    ))}
+                                  </Select>
                                 </TableCell>
                                 <TableCell align="right">
                                   <Tooltip title="Edit">
