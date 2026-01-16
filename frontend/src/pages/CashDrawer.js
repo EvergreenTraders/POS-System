@@ -50,6 +50,8 @@ function CashDrawer() {
   const navigate = useNavigate();
 
   const [activeSession, setActiveSession] = useState(null);
+  const [activeSessions, setActiveSessions] = useState([]); // All active sessions (physical, safe, and master_safe)
+  const [selectedSessionType, setSelectedSessionType] = useState('physical'); // 'physical', 'safe', or 'master_safe'
   const [loading, setLoading] = useState(true);
   const [tabValue, setTabValue] = useState(0);
   const [employees, setEmployees] = useState([]);
@@ -59,6 +61,7 @@ function CashDrawer() {
 
   // Dialog states
   const [openDrawerDialog, setOpenDrawerDialog] = useState(false);
+  const [drawerTypeFilter, setDrawerTypeFilter] = useState(null); // 'physical', 'safe', or 'master_safe'
   const [closeDrawerDialog, setCloseDrawerDialog] = useState(false);
   const [adjustmentDialog, setAdjustmentDialog] = useState(false);
   const [detailsDialog, setDetailsDialog] = useState(false);
@@ -101,11 +104,20 @@ function CashDrawer() {
   useEffect(() => {
     fetchEmployees();
     fetchDrawers();
-    checkActiveSession();
-    fetchHistory();
     fetchDiscrepancyThreshold();
     fetchBlindCountPreference();
+    checkActiveSession();
+    fetchHistory();
   }, []);
+
+  // Update count mode when active session changes
+  useEffect(() => {
+    if (activeSession && activeSession.drawer_type && drawerBlindCountPrefs.drawers !== undefined) {
+      const isSafe = activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe';
+      setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
+      setSelectedDrawerType(activeSession.drawer_type);
+    }
+  }, [activeSession, drawerBlindCountPrefs]);
 
   // Show message if redirected from checkout
   useEffect(() => {
@@ -118,13 +130,32 @@ function CashDrawer() {
 
   // Auto-select current user when opening drawer dialog
   useEffect(() => {
-    if (openDrawerDialog && !selectedEmployee) {
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-      if (currentUser.id) {
-        setSelectedEmployee(currentUser.id);
+    if (openDrawerDialog) {
+      // Reset form when dialog opens
+      setSelectedDrawer('');
+      setOpeningBalance('');
+      setOpeningNotes('');
+      setOpeningDenominations({
+        bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+        coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+      });
+      
+      // Auto-select current user if not already selected
+      if (!selectedEmployee) {
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        if (currentUser.id) {
+          setSelectedEmployee(currentUser.id);
+        }
+      }
+      
+      // Set blind count mode based on drawer type filter
+      if (drawerTypeFilter === 'safe' || drawerTypeFilter === 'master_safe') {
+        setIsBlindCount(drawerBlindCountPrefs.safe);
+      } else if (drawerTypeFilter === 'physical') {
+        setIsBlindCount(drawerBlindCountPrefs.drawers);
       }
     }
-  }, [openDrawerDialog]);
+  }, [openDrawerDialog, drawerTypeFilter, drawerBlindCountPrefs]);
 
   const fetchEmployees = async () => {
     try {
@@ -202,14 +233,63 @@ function CashDrawer() {
           `${API_BASE_URL}/cash-drawer/employee/${currentUser.id}/active`
         );
 
-        // Only set active session if response.data is not null
-        setActiveSession(response.data || null);
+        // Response is now an array of all active sessions
+        const sessions = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
+        setActiveSessions(sessions);
+        
+        // Separate sessions by type
+        const physicalSession = sessions.find(s => s.drawer_type === 'physical');
+        const safeSession = sessions.find(s => s.drawer_type === 'safe');
+        const masterSafeSession = sessions.find(s => s.drawer_type === 'master_safe');
+        
+        // Set active session - always prioritize physical drawer by default (used for transactions)
+        let currentSession = null;
+        if (selectedSessionType === 'safe' && safeSession) {
+          // Show safe if user explicitly selected it via the button
+          currentSession = safeSession;
+        } else if (selectedSessionType === 'master_safe' && masterSafeSession) {
+          // Show master safe if user explicitly selected it via the button
+          currentSession = masterSafeSession;
+        } else if (physicalSession) {
+          // Always default to physical drawer when it exists (for transactions)
+          currentSession = physicalSession;
+          setSelectedSessionType('physical');
+        } else if (safeSession) {
+          // Show safe if no physical drawer exists
+          currentSession = safeSession;
+          setSelectedSessionType('safe');
+        } else if (masterSafeSession) {
+          // Show master safe if no physical or safe drawer exists
+          currentSession = masterSafeSession;
+          setSelectedSessionType('master_safe');
+        } else if (sessions.length > 0) {
+          // Fallback to first available session
+          currentSession = sessions[0];
+          if (currentSession.drawer_type === 'safe') {
+            setSelectedSessionType('safe');
+          } else if (currentSession.drawer_type === 'master_safe') {
+            setSelectedSessionType('master_safe');
+          } else {
+            setSelectedSessionType('physical');
+          }
+        }
+        
+        setActiveSession(currentSession);
+        
+        // Update count mode based on drawer type if session exists
+        if (currentSession && currentSession.drawer_type) {
+          setSelectedDrawerType(currentSession.drawer_type);
+          const isSafe = currentSession.drawer_type === 'safe' || currentSession.drawer_type === 'master_safe';
+          setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
+        }
       } else {
         setActiveSession(null);
+        setActiveSessions([]);
       }
     } catch (err) {
       console.error('Error checking active session:', err);
       setActiveSession(null);
+      setActiveSessions([]);
     } finally {
       setLoading(false);
     }
@@ -264,6 +344,35 @@ function CashDrawer() {
       return;
     }
 
+    // Find the selected drawer to check its type
+    const selectedDrawerInfo = allDrawers.find(d => d.drawer_id === selectedDrawer);
+    if (!selectedDrawerInfo) {
+      showSnackbar('Selected drawer not found', 'error');
+      return;
+    }
+
+    const drawerType = selectedDrawerInfo.drawer_type;
+    const isSafe = drawerType === 'safe' || drawerType === 'master_safe';
+
+    // Check if there's already an active session for this EXACT drawer type
+    // Each drawer type (physical, safe, master_safe) can have its own session
+    const existingSession = activeSessions.find(s => {
+      return s.drawer_type === drawerType;
+    });
+
+    if (existingSession) {
+      let drawerTypeName = 'drawer';
+      if (drawerType === 'safe') {
+        drawerTypeName = 'safe drawer';
+      } else if (drawerType === 'master_safe') {
+        drawerTypeName = 'master safe';
+      } else if (drawerType === 'physical') {
+        drawerTypeName = 'physical drawer';
+      }
+      showSnackbar(`You already have an active ${drawerTypeName} session. Please close it before opening a new one.`, 'warning');
+      return;
+    }
+
     try {
       // Open the drawer
       const openResponse = await axios.post(`${API_BASE_URL}/cash-drawer/open`, {
@@ -285,10 +394,21 @@ function CashDrawer() {
         });
       }
 
-      showSnackbar('Cash drawer opened successfully', 'success');
+      const drawerTypeName = isSafe ? 'Safe' : 'Cash drawer';
+      showSnackbar(`${drawerTypeName} opened successfully`, 'success');
       setOpenDrawerDialog(false);
+      setDrawerTypeFilter(null);
       resetOpenForm();
-      checkActiveSession();
+      
+      // Update selected session type and refresh sessions
+      if (drawerType === 'master_safe') {
+        setSelectedSessionType('master_safe');
+      } else if (drawerType === 'safe') {
+        setSelectedSessionType('safe');
+      } else {
+        setSelectedSessionType('physical');
+      }
+      await checkActiveSession();
     } catch (err) {
       console.error('Error opening drawer:', err);
       showSnackbar(err.response?.data?.error || 'Failed to open drawer', 'error');
@@ -407,6 +527,7 @@ function CashDrawer() {
     setSelectedEmployee('');
     setSelectedDrawer('');
     setSelectedDrawerType(null);
+    setDrawerTypeFilter(null);
     setOpeningBalance('');
     setOpeningNotes('');
     setOpeningDenominations({
@@ -590,29 +711,99 @@ function CashDrawer() {
       {/* Active Session Tab */}
       {tabValue === 0 && (
         <>
-          {activeSession ? (
+          {activeSessions.length > 0 ? (
             <Grid container spacing={3}>
-              {/* Current Session Card */}
-              <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                      <Typography variant="h6">
-                        Active Drawer Session
-                      </Typography>
-                      {getStatusChip(activeSession.status)}
+              {/* Session Type Selector - Show if multiple types exist */}
+              {(() => {
+                const hasPhysical = activeSessions.some(s => s.drawer_type === 'physical');
+                const hasSafe = activeSessions.some(s => s.drawer_type === 'safe');
+                const hasMasterSafe = activeSessions.some(s => s.drawer_type === 'master_safe');
+                const sessionTypeCount = [hasPhysical, hasSafe, hasMasterSafe].filter(Boolean).length;
+                
+                return sessionTypeCount > 1 ? (
+                  <Grid item xs={12}>
+                    <Box sx={{ mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                      {hasPhysical && (
+                        <Button
+                          variant={selectedSessionType === 'physical' ? 'contained' : 'outlined'}
+                          onClick={() => {
+                            const physicalSession = activeSessions.find(s => s.drawer_type === 'physical');
+                            if (physicalSession) {
+                              setSelectedSessionType('physical');
+                              setActiveSession(physicalSession);
+                              setIsBlindCount(drawerBlindCountPrefs.drawers);
+                            }
+                          }}
+                        >
+                          Physical Drawer Session
+                        </Button>
+                      )}
+                      {hasSafe && (
+                        <Button
+                          variant={selectedSessionType === 'safe' ? 'contained' : 'outlined'}
+                          onClick={() => {
+                            const safeSession = activeSessions.find(s => s.drawer_type === 'safe');
+                            if (safeSession) {
+                              setSelectedSessionType('safe');
+                              setActiveSession(safeSession);
+                              setIsBlindCount(drawerBlindCountPrefs.safe);
+                            }
+                          }}
+                        >
+                          Safe Drawer Session
+                        </Button>
+                      )}
+                      {hasMasterSafe && (
+                        <Button
+                          variant={selectedSessionType === 'master_safe' ? 'contained' : 'outlined'}
+                          onClick={() => {
+                            const masterSafeSession = activeSessions.find(s => s.drawer_type === 'master_safe');
+                            if (masterSafeSession) {
+                              setSelectedSessionType('master_safe');
+                              setActiveSession(masterSafeSession);
+                              setIsBlindCount(drawerBlindCountPrefs.safe);
+                            }
+                          }}
+                        >
+                          Master Safe Session
+                        </Button>
+                      )}
                     </Box>
+                  </Grid>
+                ) : null;
+              })()}
+              
+              {/* Current Session Card */}
+              {activeSession ? (
+                <Grid item xs={12}>
+                  <Card>
+                    <CardContent>
+                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                        <Typography variant="h6">
+                          Active {activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe' ? 'Safe' : 'Drawer'} Session
+                          {activeSession.drawer_name && ` - ${activeSession.drawer_name}`}
+                        </Typography>
+                        {getStatusChip(activeSession.status)}
+                      </Box>
 
                     <Grid container spacing={2}>
+                      <Grid item xs={12} md={6}>
+                        <Typography variant="body2" color="text.secondary">Drawer Type</Typography>
+                        <Typography variant="body1">
+                          {activeSession.drawer_type === 'safe' ? 'Safe/Vault' : 
+                           activeSession.drawer_type === 'master_safe' ? 'Master Safe' : 
+                           'Physical Drawer'}
+                        </Typography>
+                      </Grid>
                       <Grid item xs={12} md={6}>
                         <Typography variant="body2" color="text.secondary">Opened At</Typography>
                         <Typography variant="body1">{formatDateTime(activeSession.opened_at)}</Typography>
                       </Grid>
-                      <Grid item xs={12} md={6}>
+                      <Grid item xs={12} md={4}>
                         <Typography variant="body2" color="text.secondary">Opening Balance</Typography>
                         <Typography variant="h6">{formatCurrency(activeSession.opening_balance)}</Typography>
                       </Grid>
-                      <Grid item xs={12} md={6}>
+                      <Grid item xs={12} md={4}>
                         <Typography variant="body2" color="text.secondary">Current Expected Balance</Typography>
                         <Typography variant="h6">{formatCurrency(activeSession.current_expected_balance)}</Typography>
                       </Grid>
@@ -622,13 +813,13 @@ function CashDrawer() {
                       </Grid>
                     </Grid>
 
-                    <Box mt={3} display="flex" gap={2}>
+                    <Box mt={3} display="flex" gap={2} flexWrap="wrap">
                       <Button
                         variant="contained"
                         color="primary"
                         onClick={() => setCloseDrawerDialog(true)}
                       >
-                        Close Drawer
+                        Close {activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe' ? 'Safe' : 'Drawer'}
                       </Button>
                       <Button
                         variant="outlined"
@@ -644,10 +835,41 @@ function CashDrawer() {
                       >
                         View Details
                       </Button>
+                      {activeSession.drawer_type === 'physical' && (
+                        <>
+                          {allDrawers.some(d => d.drawer_type === 'safe' && d.is_active) && (
+                            <Button
+                              variant="outlined"
+                              color="secondary"
+                              startIcon={<AddIcon />}
+                              onClick={() => {
+                                setDrawerTypeFilter('safe');
+                                setOpenDrawerDialog(true);
+                              }}
+                            >
+                              Open Safe Drawer
+                            </Button>
+                          )}
+                          {allDrawers.some(d => d.drawer_type === 'master_safe' && d.is_active) && (
+                            <Button
+                              variant="outlined"
+                              color="secondary"
+                              startIcon={<AddIcon />}
+                              onClick={() => {
+                                setDrawerTypeFilter('master_safe');
+                                setOpenDrawerDialog(true);
+                              }}
+                            >
+                              Open Master Safe
+                            </Button>
+                          )}
+                        </>
+                      )}
                     </Box>
                   </CardContent>
                 </Card>
-              </Grid>
+                </Grid>
+              ) : null}
             </Grid>
           ) : (
             <Paper sx={{ p: 4, textAlign: 'center' }}>
@@ -656,16 +878,47 @@ function CashDrawer() {
                 No Active Drawer Session
               </Typography>
               <Typography variant="body2" color="text.secondary" paragraph>
-                Open a new cash drawer to start accepting payments
+                Open a drawer to start managing cash
               </Typography>
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<AddIcon />}
-                onClick={() => setOpenDrawerDialog(true)}
-              >
-                Open Cash Drawer
-              </Button>
+              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap', mt: 3 }}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={<AddIcon />}
+                  onClick={() => {
+                    setDrawerTypeFilter('physical');
+                    setOpenDrawerDialog(true);
+                  }}
+                >
+                  Open Cash Drawer
+                </Button>
+                {allDrawers.some(d => d.drawer_type === 'safe' && d.is_active) && (
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    startIcon={<AddIcon />}
+                    onClick={() => {
+                      setDrawerTypeFilter('safe');
+                      setOpenDrawerDialog(true);
+                    }}
+                  >
+                    Open Safe Drawer
+                  </Button>
+                )}
+                {allDrawers.some(d => d.drawer_type === 'master_safe' && d.is_active) && (
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    startIcon={<AddIcon />}
+                    onClick={() => {
+                      setDrawerTypeFilter('master_safe');
+                      setOpenDrawerDialog(true);
+                    }}
+                  >
+                    Open Master Safe
+                  </Button>
+                )}
+              </Box>
             </Paper>
           )}
         </>
@@ -717,8 +970,19 @@ function CashDrawer() {
       )}
 
       {/* Open Drawer Dialog */}
-      <Dialog open={openDrawerDialog} onClose={() => setOpenDrawerDialog(false)} maxWidth={isBlindCount ? "sm" : "md"} fullWidth>
-        <DialogTitle>Open Cash Drawer {!isBlindCount && '(Open Count Mode)'}</DialogTitle>
+      <Dialog open={openDrawerDialog} onClose={() => {
+        setOpenDrawerDialog(false);
+        setDrawerTypeFilter(null);
+        resetOpenForm();
+      }} maxWidth={isBlindCount ? "sm" : "md"} fullWidth>
+        <DialogTitle>
+          {drawerTypeFilter === 'master_safe' 
+            ? 'Open Master Safe' 
+            : drawerTypeFilter === 'safe'
+            ? 'Open Safe Drawer'
+            : 'Open Cash Drawer'}
+          {!isBlindCount && ' (Open Count Mode)'}
+        </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <FormControl fullWidth required>
@@ -738,11 +1002,24 @@ function CashDrawer() {
                   }
                 }}
               >
-                {drawers.map((drawer) => (
-                  <MenuItem key={drawer.drawer_id} value={drawer.drawer_id}>
-                    {drawer.drawer_name} {drawer.drawer_type === 'safe' ? '(Safe)' : drawer.drawer_type === 'master_safe' ? '(Master Safe)' : ''}
-                  </MenuItem>
-                ))}
+                {allDrawers
+                  .filter(drawer => {
+                    // Filter drawers based on drawerTypeFilter
+                    if (drawerTypeFilter === 'physical') {
+                      return drawer.drawer_type === 'physical' && drawer.is_active;
+                    } else if (drawerTypeFilter === 'safe') {
+                      return drawer.drawer_type === 'safe' && drawer.is_active;
+                    } else if (drawerTypeFilter === 'master_safe') {
+                      return drawer.drawer_type === 'master_safe' && drawer.is_active;
+                    }
+                    // If no filter, show all active drawers
+                    return drawer.is_active;
+                  })
+                  .map((drawer) => (
+                    <MenuItem key={drawer.drawer_id} value={drawer.drawer_id}>
+                      {drawer.drawer_name}
+                    </MenuItem>
+                  ))}
               </Select>
             </FormControl>
 
@@ -785,7 +1062,10 @@ function CashDrawer() {
 
       {/* Close Drawer Dialog */}
       <Dialog open={closeDrawerDialog} onClose={() => setCloseDrawerDialog(false)} maxWidth={isBlindCount ? "sm" : "md"} fullWidth>
-        <DialogTitle>Close Cash Drawer</DialogTitle>
+        <DialogTitle>
+          Close {activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? 'Safe' : 'Cash Drawer'} 
+          {!isBlindCount && ' (Open Count Mode)'}
+        </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Alert severity="info">

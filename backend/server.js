@@ -430,7 +430,7 @@ app.get('/api/cash-drawer/active', async (req, res) => {
   }
 });
 
-// GET /api/cash-drawer/employee/:employeeId/active - Check if employee has an active drawer session
+// GET /api/cash-drawer/employee/:employeeId/active - Get all active drawer sessions for an employee
 app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
   const { employeeId } = req.params;
 
@@ -438,21 +438,20 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
     const result = await pool.query(`
       SELECT
         s.*,
+        d.drawer_type,
+        d.drawer_name,
         calculate_expected_balance(s.session_id) AS current_expected_balance,
-        (SELECT COUNT(*) FROM transactions WHERE session_id = s.session_id) AS transaction_count,
+        (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS transaction_count,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments
       FROM cash_drawer_sessions s
+      JOIN drawers d ON s.drawer_id = d.drawer_id
       WHERE s.employee_id = $1 AND s.status = 'open'
       ORDER BY s.opened_at DESC
-      LIMIT 1
     `, [employeeId]);
 
-    if (result.rows.length > 0) {
-      res.json(result.rows[0]);
-    } else {
-      res.json(null);
-    }
+    // Return all active sessions (can have both physical and safe drawer sessions)
+    res.json(result.rows);
   } catch (error) {
     console.error('Error checking active drawer:', error);
     res.status(500).json({ error: 'Failed to check active drawer' });
@@ -575,15 +574,41 @@ app.post('/api/cash-drawer/open', async (req, res) => {
   }
 
   try {
-    // Check if employee already has an open drawer
+    // Check if employee already has an open drawer of the same type
+    // Get the drawer type for the drawer being opened
+    const drawerTypeResult = await pool.query(
+      'SELECT drawer_type FROM drawers WHERE drawer_id = $1',
+      [drawer_id]
+    );
+
+    if (drawerTypeResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Drawer not found' });
+    }
+
+    const drawerType = drawerTypeResult.rows[0].drawer_type;
+
+    // Check for existing open session of the same type
     const existingDrawer = await pool.query(
-      'SELECT session_id FROM cash_drawer_sessions WHERE employee_id = $1 AND status = $2',
-      [employee_id, 'open']
+      `SELECT s.session_id 
+       FROM cash_drawer_sessions s
+       JOIN drawers d ON s.drawer_id = d.drawer_id
+       WHERE s.employee_id = $1 
+         AND s.status = $2
+         AND d.drawer_type = $3`,
+      [employee_id, 'open', drawerType]
     );
 
     if (existingDrawer.rows.length > 0) {
+      let drawerTypeName = 'drawer';
+      if (drawerType === 'safe') {
+        drawerTypeName = 'safe drawer';
+      } else if (drawerType === 'master_safe') {
+        drawerTypeName = 'master safe';
+      } else if (drawerType === 'physical') {
+        drawerTypeName = 'physical drawer';
+      }
       return res.status(400).json({
-        error: 'Employee already has an open drawer session',
+        error: `Employee already has an open ${drawerTypeName} session`,
         session_id: existingDrawer.rows[0].session_id
       });
     }
@@ -671,6 +696,25 @@ app.post('/api/cash-drawer/:sessionId/transaction', async (req, res) => {
   }
 
   try {
+    // Verify that the session is for a physical drawer (not safe drawer)
+    const sessionCheck = await pool.query(`
+      SELECT s.session_id, d.drawer_type
+      FROM cash_drawer_sessions s
+      JOIN drawers d ON s.drawer_id = d.drawer_id
+      WHERE s.session_id = $1 AND s.status = 'open'
+    `, [sessionId]);
+
+    if (sessionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found or not open' });
+    }
+
+    const drawerType = sessionCheck.rows[0].drawer_type;
+    if (drawerType === 'safe' || drawerType === 'master_safe') {
+      return res.status(400).json({
+        error: 'Transactions cannot be linked to safe drawers. Use physical drawers for transactions.'
+      });
+    }
+
     const result = await pool.query(`
       INSERT INTO cash_drawer_transactions
         (session_id, transaction_id, amount, transaction_type, payment_id, notes)
@@ -5432,11 +5476,15 @@ app.post('/api/transactions', async (req, res) => {
         // Generate unique transaction ID
         const transactionId = await generateTransactionId();
 
-        // Get employee's active cash drawer session
+        // Get employee's active physical cash drawer session (exclude safe drawers)
         const sessionResult = await client.query(
-            `SELECT session_id FROM cash_drawer_sessions
-             WHERE employee_id = $1 AND status = 'open'
-             ORDER BY opened_at DESC LIMIT 1`,
+            `SELECT s.session_id 
+             FROM cash_drawer_sessions s
+             JOIN drawers d ON s.drawer_id = d.drawer_id
+             WHERE s.employee_id = $1 
+               AND s.status = 'open'
+               AND d.drawer_type = 'physical'
+             ORDER BY s.opened_at DESC LIMIT 1`,
             [employee_id]
         );
 
@@ -7878,8 +7926,20 @@ app.post('/api/payments', async (req, res) => {
         [transaction.employee_id]
       );
 
-      if (sessionResult.rows.length > 0) {
-        const session_id = sessionResult.rows[0].session_id;
+      // Only use physical drawer sessions for transactions (exclude safe drawers)
+      const physicalSessionResult = await client.query(
+        `SELECT s.session_id 
+         FROM cash_drawer_sessions s
+         JOIN drawers d ON s.drawer_id = d.drawer_id
+         WHERE s.employee_id = $1 
+           AND s.status = 'open'
+           AND d.drawer_type = 'physical'
+         ORDER BY s.opened_at DESC LIMIT 1`,
+        [employee_id]
+      );
+
+      if (physicalSessionResult.rows.length > 0) {
+        const session_id = physicalSessionResult.rows[0].session_id;
 
         // Determine if this is a payable or receivable transaction
         // Payable: total_amount < 0 (business owes customer - buy/pawn transactions)
