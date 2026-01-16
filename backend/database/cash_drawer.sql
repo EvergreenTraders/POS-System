@@ -332,11 +332,18 @@ COMMENT ON TABLE cash_denominations IS 'Stores denomination counts for cash draw
 COMMENT ON COLUMN cash_denominations.denomination_type IS 'Type of count: opening (start of shift) or closing (end of shift)';
 COMMENT ON COLUMN cash_denominations.total_amount IS 'Automatically calculated total from all denominations';
 
--- Add blindCount preferences for cash drawer counting mode (separate for drawers and safe)
+-- Add blindCount preferences for cash drawer closing mode (separate for drawers and safe)
 INSERT INTO user_preferences (preference_name, preference_value)
 VALUES 
   ('blindCount_drawers', 'true'),
   ('blindCount_safe', 'true')
+ON CONFLICT (preference_name) DO NOTHING;
+
+-- Add individualDenominations preferences for cash drawer opening mode (separate for drawers and safe)
+INSERT INTO user_preferences (preference_name, preference_value)
+VALUES 
+  ('individualDenominations_drawers', 'false'),
+  ('individualDenominations_safe', 'false')
 ON CONFLICT (preference_name) DO NOTHING;
 
 -- Migrate existing blindCount preference to blindCount_drawers if it exists

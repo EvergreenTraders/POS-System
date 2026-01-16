@@ -69,8 +69,10 @@ function CashDrawer() {
 
   // Configuration
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState(0.00);
-  const [isBlindCount, setIsBlindCount] = useState(true);
-  const [drawerBlindCountPrefs, setDrawerBlindCountPrefs] = useState({ drawers: true, safe: true });
+  const [isBlindCount, setIsBlindCount] = useState(true); // For closing drawer mode
+  const [isIndividualDenominations, setIsIndividualDenominations] = useState(false); // For opening drawer mode
+  const [drawerBlindCountPrefs, setDrawerBlindCountPrefs] = useState({ drawers: true, safe: true }); // Closing mode preferences
+  const [drawerIndividualDenominationsPrefs, setDrawerIndividualDenominationsPrefs] = useState({ drawers: false, safe: false }); // Opening mode preferences
   const [allDrawers, setAllDrawers] = useState([]); // Store all drawers including safe
 
   // Form states
@@ -94,6 +96,7 @@ function CashDrawer() {
     bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
     coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
   });
+  const [openingDenominationsFromDB, setOpeningDenominationsFromDB] = useState(null); // Opening denominations from database
 
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -115,9 +118,10 @@ function CashDrawer() {
     if (activeSession && activeSession.drawer_type && drawerBlindCountPrefs.drawers !== undefined) {
       const isSafe = activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe';
       setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
+      setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
       setSelectedDrawerType(activeSession.drawer_type);
     }
-  }, [activeSession, drawerBlindCountPrefs]);
+  }, [activeSession, drawerBlindCountPrefs, drawerIndividualDenominationsPrefs]);
 
   // Show message if redirected from checkout
   useEffect(() => {
@@ -148,11 +152,18 @@ function CashDrawer() {
         }
       }
       
-      // Set blind count mode based on drawer type filter
+      // Set closing mode (blind count) based on drawer type filter
       if (drawerTypeFilter === 'safe' || drawerTypeFilter === 'master_safe') {
         setIsBlindCount(drawerBlindCountPrefs.safe);
       } else if (drawerTypeFilter === 'physical') {
         setIsBlindCount(drawerBlindCountPrefs.drawers);
+      }
+      
+      // Set opening mode (individual denominations) based on drawer type filter
+      if (drawerTypeFilter === 'safe' || drawerTypeFilter === 'master_safe') {
+        setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
+      } else if (drawerTypeFilter === 'physical') {
+        setIsIndividualDenominations(drawerIndividualDenominationsPrefs.drawers);
       }
     }
   }, [openDrawerDialog, drawerTypeFilter, drawerBlindCountPrefs]);
@@ -194,31 +205,44 @@ function CashDrawer() {
 
   const fetchBlindCountPreference = async () => {
     try {
-      // Get both preferences
+      // Get all drawer mode preferences
       const response = await axios.get(`${API_BASE_URL}/user_preferences`);
+      
+      // Closing mode preferences (Blind Count vs Open Count)
       const blindCountDrawersPreference = response.data.find(pref => pref.preference_name === 'blindCount_drawers');
       const blindCountSafePreference = response.data.find(pref => pref.preference_name === 'blindCount_safe');
-      
-      // Default to true if not found
       const blindCountDrawers = blindCountDrawersPreference ? blindCountDrawersPreference.preference_value === 'true' : true;
       const blindCountSafe = blindCountSafePreference ? blindCountSafePreference.preference_value === 'true' : true;
       
-      // Store both preferences
+      // Opening mode preferences (Individual Denominations vs Drawer Total)
+      const individualDenominationsDrawersPreference = response.data.find(pref => pref.preference_name === 'individualDenominations_drawers');
+      const individualDenominationsSafePreference = response.data.find(pref => pref.preference_name === 'individualDenominations_safe');
+      const individualDenominationsDrawers = individualDenominationsDrawersPreference ? individualDenominationsDrawersPreference.preference_value === 'true' : false;
+      const individualDenominationsSafe = individualDenominationsSafePreference ? individualDenominationsSafePreference.preference_value === 'true' : false;
+      
+      // Store both preference sets
       setDrawerBlindCountPrefs({
         drawers: blindCountDrawers,
         safe: blindCountSafe
       });
-      
-      // Set initial blind count based on current selection or default to drawers
+      setDrawerIndividualDenominationsPrefs({
+        drawers: individualDenominationsDrawers,
+        safe: individualDenominationsSafe
+      });
+
+      // Set initial modes based on current selection or default to drawers
       if (selectedDrawerType) {
         const isSafe = selectedDrawerType === 'safe' || selectedDrawerType === 'master_safe';
         setIsBlindCount(isSafe ? blindCountSafe : blindCountDrawers);
+        setIsIndividualDenominations(isSafe ? individualDenominationsSafe : individualDenominationsDrawers);
       } else {
         setIsBlindCount(blindCountDrawers); // Default to drawers preference
+        setIsIndividualDenominations(individualDenominationsDrawers);
       }
     } catch (err) {
-      console.error('Error fetching blind count preference:', err);
+      console.error('Error fetching drawer mode preferences:', err);
       setIsBlindCount(true); // Default to blind count
+      setIsIndividualDenominations(false); // Default to drawer total
     }
   };
 
@@ -323,10 +347,10 @@ function CashDrawer() {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = selectedEmployee || currentUser.id;
 
-    // Calculate balance based on mode
-    const calculatedBalance = isBlindCount
-      ? parseFloat(openingBalance)
-      : calculateDenominationTotal(openingDenominations);
+    // Calculate balance based on opening mode (individual denominations vs drawer total)
+    const calculatedBalance = isIndividualDenominations
+      ? calculateDenominationTotal(openingDenominations)
+      : parseFloat(openingBalance);
 
     // Validation
     if (!employeeId || !selectedDrawer) {
@@ -384,8 +408,8 @@ function CashDrawer() {
 
       const sessionId = openResponse.data.session_id;
 
-      // If Open Count mode, save denominations
-      if (!isBlindCount) {
+      // If Individual Denominations mode, save denominations
+      if (isIndividualDenominations) {
         await axios.post(`${API_BASE_URL}/cash-drawer/${sessionId}/denominations`, {
           denomination_type: 'opening',
           counted_by: employeeId,
@@ -543,6 +567,7 @@ function CashDrawer() {
       bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
       coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
     });
+    setOpeningDenominationsFromDB(null);
   };
 
   const resetAdjustmentForm = () => {
@@ -732,6 +757,7 @@ function CashDrawer() {
                               setSelectedSessionType('physical');
                               setActiveSession(physicalSession);
                               setIsBlindCount(drawerBlindCountPrefs.drawers);
+                              setIsIndividualDenominations(drawerIndividualDenominationsPrefs.drawers);
                             }
                           }}
                         >
@@ -762,6 +788,7 @@ function CashDrawer() {
                               setSelectedSessionType('master_safe');
                               setActiveSession(masterSafeSession);
                               setIsBlindCount(drawerBlindCountPrefs.safe);
+                              setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
                             }
                           }}
                         >
@@ -817,7 +844,36 @@ function CashDrawer() {
                       <Button
                         variant="contained"
                         color="primary"
-                        onClick={() => setCloseDrawerDialog(true)}
+                        onClick={async () => {
+                          // If Open Count mode, fetch opening denominations for comparison
+                          if (!isBlindCount && activeSession) {
+                            try {
+                              const response = await axios.get(
+                                `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/denominations/opening`
+                              );
+                              if (response.data) {
+                                setOpeningDenominationsFromDB({
+                                  bill_100: response.data.bill_100 || 0,
+                                  bill_50: response.data.bill_50 || 0,
+                                  bill_20: response.data.bill_20 || 0,
+                                  bill_10: response.data.bill_10 || 0,
+                                  bill_5: response.data.bill_5 || 0,
+                                  coin_2: response.data.coin_2 || 0,
+                                  coin_1: response.data.coin_1 || 0,
+                                  coin_0_25: response.data.coin_0_25 || 0,
+                                  coin_0_10: response.data.coin_0_10 || 0,
+                                  coin_0_05: response.data.coin_0_05 || 0
+                                });
+                              }
+                            } catch (err) {
+                              console.error('Error fetching opening denominations:', err);
+                              setOpeningDenominationsFromDB(null);
+                            }
+                          } else {
+                            setOpeningDenominationsFromDB(null);
+                          }
+                          setCloseDrawerDialog(true);
+                        }}
                       >
                         Close {activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe' ? 'Safe' : 'Drawer'}
                       </Button>
@@ -999,6 +1055,7 @@ function CashDrawer() {
                     setSelectedDrawerType(drawer.drawer_type);
                     const isSafe = drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe';
                     setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
+                    setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
                   }
                 }}
               >
@@ -1023,7 +1080,14 @@ function CashDrawer() {
               </Select>
             </FormControl>
 
-            {isBlindCount ? (
+            {isIndividualDenominations ? (
+              <>
+                {renderDenominationEntry(openingDenominations, setOpeningDenominations, calculateDenominationTotal(openingDenominations))}
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  Opening balance will be automatically set to the total of counted denominations: {formatCurrency(calculateDenominationTotal(openingDenominations))}
+                </Alert>
+              </>
+            ) : (
               <TextField
                 label="Opening Balance"
                 type="number"
@@ -1033,13 +1097,6 @@ function CashDrawer() {
                 required
                 inputProps={{ step: '0.01', min: '0' }}
               />
-            ) : (
-              <>
-                {renderDenominationEntry(openingDenominations, setOpeningDenominations, calculateDenominationTotal(openingDenominations))}
-                <Alert severity="info" sx={{ mt: 1 }}>
-                  Opening balance will be automatically set to the total of counted denominations: {formatCurrency(calculateDenominationTotal(openingDenominations))}
-                </Alert>
-              </>
             )}
 
             <TextField
@@ -1061,21 +1118,29 @@ function CashDrawer() {
       </Dialog>
 
       {/* Close Drawer Dialog */}
-      <Dialog open={closeDrawerDialog} onClose={() => setCloseDrawerDialog(false)} maxWidth={isBlindCount ? "sm" : "md"} fullWidth>
+      <Dialog open={closeDrawerDialog} onClose={() => {
+        setCloseDrawerDialog(false);
+        resetCloseForm();
+      }} maxWidth={isBlindCount ? "sm" : "md"} fullWidth>
         <DialogTitle>
           Close {activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? 'Safe' : 'Cash Drawer'} 
           {!isBlindCount && ' (Open Count Mode)'}
         </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Alert severity="info">
-              Expected Balance: {formatCurrency(activeSession?.current_expected_balance)}
-              <br />
-              Transaction Count: {activeSession?.transaction_count || 0}
-            </Alert>
+            {!isBlindCount && (
+              <Alert severity="info">
+                Expected Balance: {formatCurrency(activeSession?.current_expected_balance)}
+                <br />
+                Transaction Count: {activeSession?.transaction_count || 0}
+              </Alert>
+            )}
 
             {isBlindCount ? (
               <>
+                <Alert severity="info">
+                  Transaction Count: {activeSession?.transaction_count || 0}
+                </Alert>
                 <TextField
                   label="Actual Balance (Counted)"
                   type="number"
@@ -1086,16 +1151,15 @@ function CashDrawer() {
                   inputProps={{ step: '0.01', min: '0' }}
                   autoFocus
                 />
-                {actualBalance && activeSession && (
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Discrepancy: {' '}
-                      <strong>
-                        {formatCurrency(parseFloat(actualBalance) - activeSession.current_expected_balance)}
-                      </strong>
-                    </Typography>
-                  </Box>
-                )}
+                {actualBalance && activeSession && (() => {
+                  const discrepancy = parseFloat(actualBalance) - activeSession.current_expected_balance;
+                  const hasDiscrepancy = Math.abs(discrepancy) > 0.01; // Allow 1 cent tolerance
+                  return hasDiscrepancy ? (
+                    <Alert severity="error">
+                      <strong>Not expected balance. Please recount.</strong>
+                    </Alert>
+                  ) : null;
+                })()}
               </>
             ) : (
               <>
@@ -1103,8 +1167,54 @@ function CashDrawer() {
                 <Alert severity="info" sx={{ mt: 1 }}>
                   Actual balance will be automatically set to the total of counted denominations: {formatCurrency(calculateDenominationTotal(closingDenominations))}
                 </Alert>
+                {openingDenominationsFromDB && (
+                  <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider', mt: 2 }}>
+                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                      Denomination Verification
+                    </Typography>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell><strong>Denomination</strong></TableCell>
+                          <TableCell align="right"><strong>Opening</strong></TableCell>
+                          <TableCell align="right"><strong>Closing</strong></TableCell>
+                          <TableCell align="right"><strong>Difference</strong></TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {[
+                          { label: '$100 Bills', field: 'bill_100', value: 100 },
+                          { label: '$50 Bills', field: 'bill_50', value: 50 },
+                          { label: '$20 Bills', field: 'bill_20', value: 20 },
+                          { label: '$10 Bills', field: 'bill_10', value: 10 },
+                          { label: '$5 Bills', field: 'bill_5', value: 5 },
+                          { label: '$2 Coins', field: 'coin_2', value: 2 },
+                          { label: '$1 Coins', field: 'coin_1', value: 1 },
+                          { label: '25¢ Coins', field: 'coin_0_25', value: 0.25 },
+                          { label: '10¢ Coins', field: 'coin_0_10', value: 0.10 },
+                          { label: '5¢ Coins', field: 'coin_0_05', value: 0.05 }
+                        ].map((denom) => {
+                          const opening = openingDenominationsFromDB[denom.field] || 0;
+                          const closing = closingDenominations[denom.field] || 0;
+                          const difference = closing - opening;
+                          const hasDifference = Math.abs(difference) > 0;
+                          return (
+                            <TableRow key={denom.field}>
+                              <TableCell>{denom.label}</TableCell>
+                              <TableCell align="right">{opening}</TableCell>
+                              <TableCell align="right">{closing}</TableCell>
+                              <TableCell align="right" sx={{ color: hasDifference ? 'error.main' : 'success.main', fontWeight: hasDifference ? 'bold' : 'normal' }}>
+                                {difference > 0 ? `+${difference}` : difference}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </Box>
+                )}
                 {calculateDenominationTotal(closingDenominations) > 0 && activeSession && (
-                  <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                  <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider', mt: 2 }}>
                     <Typography variant="body2" color="text.secondary" gutterBottom>
                       Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
                     </Typography>
@@ -1114,7 +1224,7 @@ function CashDrawer() {
                     <Typography variant="body1" sx={{ mt: 1 }} color={
                       Math.abs(calculateDenominationTotal(closingDenominations) - activeSession.current_expected_balance) === 0 ? 'success.main' : 'error.main'
                     }>
-                      <strong>Discrepancy: {formatCurrency(calculateDenominationTotal(closingDenominations) - activeSession.current_expected_balance)}</strong>
+                      <strong>Total Discrepancy: {formatCurrency(calculateDenominationTotal(closingDenominations) - activeSession.current_expected_balance)}</strong>
                     </Typography>
                   </Box>
                 )}
@@ -1150,24 +1260,32 @@ function CashDrawer() {
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Alert severity="warning">
-              The discrepancy amount exceeds the acceptable threshold of ${Number(discrepancyThreshold || 0).toFixed(2)}.
+              {isBlindCount 
+                ? 'The counted balance does not match the expected balance. Please recount.'
+                : `The discrepancy amount exceeds the acceptable threshold of $${Number(discrepancyThreshold || 0).toFixed(2)}.`}
             </Alert>
             <Box>
               <Typography variant="body1" gutterBottom>
                 <strong>Transaction Count:</strong> {activeSession?.transaction_count || 0}
               </Typography>
-              <Typography variant="body1" gutterBottom>
-                <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
-              </Typography>
+              {!isBlindCount && (
+                <Typography variant="body1" gutterBottom>
+                  <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
+                </Typography>
+              )}
               <Typography variant="body1" gutterBottom>
                 <strong>Actual Balance:</strong> {formatCurrency(parseFloat(actualBalance || 0))}
               </Typography>
-              <Typography variant="body1" color="error" gutterBottom>
-                <strong>Discrepancy:</strong> {formatCurrency(Math.abs(parseFloat(actualBalance || 0) - parseFloat(activeSession?.current_expected_balance || 0)))}
-              </Typography>
+              {!isBlindCount && (
+                <Typography variant="body1" color="error" gutterBottom>
+                  <strong>Discrepancy:</strong> {formatCurrency(Math.abs(parseFloat(actualBalance || 0) - parseFloat(activeSession?.current_expected_balance || 0)))}
+                </Typography>
+              )}
             </Box>
             <Typography variant="body2" color="text.secondary">
-              Please recount the cash drawer to verify the balance. If the discrepancy is correct, you can proceed to close the drawer anyway.
+              {isBlindCount
+                ? 'Please recount the cash drawer to verify the balance. If the balance is correct, you can proceed to close the drawer anyway.'
+                : 'Please recount the cash drawer to verify the balance. If the discrepancy is correct, you can proceed to close the drawer anyway.'}
             </Typography>
           </Box>
         </DialogContent>
