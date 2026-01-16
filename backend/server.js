@@ -899,12 +899,8 @@ app.put('/api/drawer-config', async (req, res) => {
       config = configResult.rows[0];
     }
 
-    // Ensure Safe drawer exists
-    await pool.query(`
-      INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
-      VALUES ('Safe', 'safe', TRUE, 0)
-      ON CONFLICT (drawer_name) DO NOTHING
-    `);
+    // Note: Safe drawers are now managed separately via /api/safe-drawers-config
+    // Master safe is managed separately via /api/master-safe-config
 
     // Get current physical drawers
     const currentDrawers = await pool.query(`
@@ -976,6 +972,139 @@ app.get('/api/drawers', async (req, res) => {
   } catch (error) {
     console.error('Error fetching drawers:', error);
     res.status(500).json({ error: 'Failed to fetch drawers' });
+  }
+});
+
+// PUT /api/safe-drawers-config - Update safe drawers configuration
+app.put('/api/safe-drawers-config', async (req, res) => {
+  const { number_of_safe_drawers } = req.body;
+
+  if (number_of_safe_drawers === undefined || number_of_safe_drawers < 0 || number_of_safe_drawers > 50) {
+    return res.status(400).json({ error: 'number_of_safe_drawers must be between 0 and 50' });
+  }
+
+  try {
+    // Get current safe drawers (excluding master_safe)
+    const currentSafeDrawers = await pool.query(`
+      SELECT drawer_id, drawer_name FROM drawers
+      WHERE drawer_type = 'safe'
+      ORDER BY display_order
+    `);
+
+    const currentCount = currentSafeDrawers.rows.length;
+
+    if (number_of_safe_drawers > currentCount) {
+      // Add new safe drawers
+      for (let i = currentCount + 1; i <= number_of_safe_drawers; i++) {
+        await pool.query(`
+          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
+          VALUES ($1, 'safe', TRUE, $2)
+          ON CONFLICT (drawer_name) DO NOTHING
+        `, [`Safe ${i}`, i]);
+      }
+    } else if (number_of_safe_drawers < currentCount) {
+      // Remove excess safe drawers - delete drawers beyond the new count
+      for (let i = currentCount; i > number_of_safe_drawers; i--) {
+        const drawerName = `Safe ${i}`;
+
+        try {
+          // First, try to delete the drawer and all related data
+          await pool.query(`
+            DELETE FROM cash_drawer_adjustments
+            WHERE session_id IN (
+              SELECT session_id FROM cash_drawer_sessions
+              WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
+            )
+          `, [drawerName]);
+
+          await pool.query(`
+            DELETE FROM cash_drawer_sessions
+            WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
+          `, [drawerName]);
+
+          // Then delete the drawer itself
+          await pool.query('DELETE FROM drawers WHERE drawer_name = $1 AND drawer_type = $2', [drawerName, 'safe']);
+        } catch (deleteError) {
+          console.error(`Error deleting ${drawerName}:`, deleteError);
+          // If deletion fails due to constraints, mark as inactive
+          await pool.query(
+            'UPDATE drawers SET is_active = FALSE WHERE drawer_name = $1 AND drawer_type = $2',
+            [drawerName, 'safe']
+          );
+        }
+      }
+    }
+
+    res.json({ number_of_safe_drawers, id: null });
+  } catch (error) {
+    console.error('Error updating safe drawers config:', error);
+    res.status(500).json({ error: 'Failed to update safe drawers configuration' });
+  }
+});
+
+// PUT /api/master-safe-config - Update master safe configuration
+app.put('/api/master-safe-config', async (req, res) => {
+  const { enabled } = req.body;
+
+  try {
+    if (enabled) {
+      // Ensure Master Safe exists (only one allowed)
+      await pool.query(`
+        INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
+        VALUES ('Master Safe', 'master_safe', TRUE, -1)
+        ON CONFLICT (drawer_name) DO UPDATE SET is_active = TRUE
+      `);
+    } else {
+      // Deactivate or delete master safe
+      const masterSafeResult = await pool.query(`
+        SELECT drawer_id FROM drawers WHERE drawer_type = 'master_safe' LIMIT 1
+      `);
+
+      if (masterSafeResult.rows.length > 0) {
+        const drawerId = masterSafeResult.rows[0].drawer_id;
+
+        // Check if there are any active sessions
+        const sessionsResult = await pool.query(`
+          SELECT COUNT(*) as count FROM cash_drawer_sessions
+          WHERE drawer_id = $1 AND status = 'open'
+        `, [drawerId]);
+
+        if (parseInt(sessionsResult.rows[0].count) > 0) {
+          // If there are active sessions, just mark as inactive
+          await pool.query(`
+            UPDATE drawers SET is_active = FALSE WHERE drawer_type = 'master_safe'
+          `);
+        } else {
+          // If no active sessions, can delete
+          try {
+            await pool.query(`
+              DELETE FROM cash_drawer_adjustments
+              WHERE session_id IN (
+                SELECT session_id FROM cash_drawer_sessions
+                WHERE drawer_id = $1
+              )
+            `, [drawerId]);
+
+            await pool.query(`
+              DELETE FROM cash_drawer_sessions WHERE drawer_id = $1
+            `, [drawerId]);
+
+            await pool.query('DELETE FROM drawers WHERE drawer_type = $1', ['master_safe']);
+          } catch (deleteError) {
+            console.error('Error deleting master safe:', deleteError);
+            // If deletion fails, mark as inactive
+            await pool.query(`
+              UPDATE drawers SET is_active = FALSE WHERE drawer_type = 'master_safe'
+            `);
+          }
+        }
+      }
+    }
+
+    res.json({ enabled });
+  } catch (error) {
+    console.error('Error updating master safe config:', error);
+    res.status(500).json({ error: 'Failed to update master safe configuration' });
   }
 });
 

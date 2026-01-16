@@ -148,6 +148,8 @@ function SystemConfig() {
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
   const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
   const [drawers, setDrawers] = useState([]);
+  const [numberOfSafeDrawers, setNumberOfSafeDrawers] = useState({ count: 0, id: null });
+  const [hasMasterSafe, setHasMasterSafe] = useState(false);
   const [numberOfCases, setNumberOfCases] = useState({ count: 0, id: null, label: '' });
   const [cases, setCases] = useState([]);
   const [isBlindCount, setIsBlindCount] = useState(true);
@@ -184,6 +186,12 @@ function SystemConfig() {
       const response = await axios.get(`${API_BASE_URL}/drawers`);
       if (response.data) {
         setDrawers(response.data);
+        // Count safe drawers (excluding master_safe)
+        const safeDrawers = response.data.filter(d => d.drawer_type === 'safe');
+        setNumberOfSafeDrawers({ count: safeDrawers.length, id: null });
+        // Check if master safe exists
+        const masterSafe = response.data.find(d => d.drawer_type === 'master_safe');
+        setHasMasterSafe(!!masterSafe);
       }
     } catch (error) {
       console.error('Error fetching drawers:', error);
@@ -1143,7 +1151,7 @@ function SystemConfig() {
       await fetchDrawers();
 
       const drawerMessage = newCount === 0
-        ? 'Only the Safe drawer is available.'
+        ? 'No physical drawers configured.'
         : `${newCount} physical drawer${newCount > 1 ? 's' : ''} created (Drawer 1${newCount > 1 ? ` to Drawer ${newCount}` : ''}).`;
 
       setSnackbar({
@@ -1156,6 +1164,77 @@ function SystemConfig() {
       setSnackbar({
         open: true,
         message: 'Failed to update number of drawers configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleNumberOfSafeDrawersChange = async (event) => {
+    const newCount = parseInt(event.target.value);
+    if (newCount < 0) {
+      setSnackbar({
+        open: true,
+        message: 'Number of safe drawers cannot be negative',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      const response = await axios.put(`${API_BASE_URL}/safe-drawers-config`, {
+        number_of_safe_drawers: newCount
+      });
+
+      setNumberOfSafeDrawers({
+        count: response.data.number_of_safe_drawers || newCount,
+        id: response.data.id || null
+      });
+
+      // Refresh the drawers list
+      await fetchDrawers();
+
+      const drawerMessage = newCount === 0
+        ? 'No safe drawers configured.'
+        : `${newCount} safe drawer${newCount > 1 ? 's' : ''} created.`;
+
+      setSnackbar({
+        open: true,
+        message: `Safe drawer configuration updated. ${drawerMessage}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating number of safe drawers:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update safe drawer configuration',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleMasterSafeToggle = async (event) => {
+    const enabled = event.target.checked;
+    
+    try {
+      const response = await axios.put(`${API_BASE_URL}/master-safe-config`, {
+        enabled: enabled
+      });
+
+      setHasMasterSafe(enabled);
+
+      // Refresh the drawers list
+      await fetchDrawers();
+
+      setSnackbar({
+        open: true,
+        message: enabled ? 'Master safe enabled.' : 'Master safe disabled.',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating master safe:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update master safe configuration',
         severity: 'error'
       });
     }
@@ -1758,6 +1837,31 @@ function SystemConfig() {
                     inputProps={{ min: 0, max: 50 }}
                   />
                   <TextField
+                    label="Number of Safe Drawers"
+                    type="number"
+                    value={numberOfSafeDrawers.count}
+                    onChange={(e) => setNumberOfSafeDrawers(prev => ({ ...prev, count: e.target.value }))}
+                    onBlur={(e) => handleNumberOfSafeDrawersChange(e)}
+                    size="small"
+                    sx={{ width: 200, mt: 1 }}
+                    InputProps={{
+                      endAdornment: <InputAdornment position="end">safes</InputAdornment>,
+                    }}
+                    inputProps={{ min: 0, max: 50 }}
+                  />
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={hasMasterSafe}
+                          onChange={handleMasterSafeToggle}
+                          color="primary"
+                        />
+                      }
+                      label="Master Safe"
+                    />
+                  </Box>
+                  <TextField
                     label="Discrepancy Threshold"
                     type="number"
                     value={discrepancyThreshold.amount}
@@ -1816,7 +1920,9 @@ function SystemConfig() {
                         <TableRow key={drawer.drawer_id}>
                           <TableCell>{drawer.drawer_name}</TableCell>
                           <TableCell>
-                            {drawer.drawer_type === 'safe' ? 'Safe/Vault' : 'Physical Drawer'}
+                            {drawer.drawer_type === 'safe' ? 'Safe/Vault' : 
+                             drawer.drawer_type === 'master_safe' ? 'Master Safe' : 
+                             'Physical Drawer'}
                           </TableCell>
                           <TableCell align="center">
                             {drawer.is_active ? (
