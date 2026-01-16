@@ -61,3 +61,7 @@ WHERE NOT EXISTS (SELECT 1 FROM employees LIMIT 1);
 
 -- ALTER TABLE for existing databases (add image column if it doesn't exist)
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS image BYTEA;
+
+-- Add discrepancy_threshold column (per-employee threshold for cash drawer discrepancies)
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS discrepancy_threshold DECIMAL(10,2) DEFAULT NULL;
+COMMENT ON COLUMN employees.discrepancy_threshold IS 'Per-employee cash drawer discrepancy threshold. NULL means use system default.';

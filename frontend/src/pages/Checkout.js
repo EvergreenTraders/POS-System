@@ -262,8 +262,12 @@ function Checkout() {
       try {
         const response = await axios.get(`${API_BASE_URL}/cash-drawer/employee/${user.id}/active`);
 
-        // If no active session exists, redirect to cash drawer page
-        if (!response.data) {
+        // Response is now an array - filter for physical drawer sessions only
+        const sessions = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
+        const physicalSession = sessions.find(s => s.drawer_type === 'physical');
+
+        // If no active physical drawer session exists, redirect to cash drawer page
+        if (!physicalSession) {
           setSnackbar({
             open: true,
             message: 'You must open a cash drawer before processing transactions',

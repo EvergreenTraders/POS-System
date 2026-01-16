@@ -58,7 +58,8 @@ function Employees() {
     phone: '',
     role: '',
     salary: '40000',
-    status: 'Active'
+    status: 'Active',
+    discrepancyThreshold: ''
   });
 
   useEffect(() => {
@@ -92,7 +93,8 @@ function Employees() {
         role: employee.role,
         salary: employee.salary,
         status: employee.status,
-        password: ''
+        password: '',
+        discrepancyThreshold: employee.discrepancy_threshold || ''
       });
     } else {
       setFormData({
@@ -105,6 +107,7 @@ function Employees() {
         role: '',
         salary: '40000',
         status: 'Active',
+        discrepancyThreshold: '',
         autocomplete: 'off'
       });
     }
@@ -136,7 +139,8 @@ function Employees() {
           phone: formData.phone,
           role: formData.role,
           salary: 40000,
-          status: formData.status
+          status: formData.status,
+          discrepancyThreshold: formData.discrepancyThreshold ? parseFloat(formData.discrepancyThreshold) : null
         });
 
         setEmployees([...employees, response.data]);
@@ -146,7 +150,10 @@ function Employees() {
           severity: 'success'
         });
       } else {
-        await axios.put(`http://localhost:5000/api/employees/${selectedEmployee.employee_id}`, formData);
+        await axios.put(`${API_BASE_URL}/employees/${selectedEmployee.employee_id}`, {
+          ...formData,
+          discrepancyThreshold: formData.discrepancyThreshold ? parseFloat(formData.discrepancyThreshold) : null
+        });
         setSnackbar({
           open: true,
           message: 'Employee updated successfully',
@@ -250,6 +257,7 @@ function Employees() {
               <TableCell>Email</TableCell>
               <TableCell>Phone</TableCell>
               <TableCell>Role</TableCell>
+              <TableCell>Discrepancy Threshold</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
@@ -266,6 +274,11 @@ function Employees() {
                     label={employee.role}
                     size="small"
                   />
+                </TableCell>
+                <TableCell>
+                  {employee.discrepancy_threshold !== null && employee.discrepancy_threshold !== undefined
+                    ? `$${parseFloat(employee.discrepancy_threshold).toFixed(2)}`
+                    : 'System Default'}
                 </TableCell>
                 <TableCell>
                   <Chip
@@ -381,6 +394,16 @@ function Employees() {
                 <MenuItem value="Software Developer">Software Developer</MenuItem>
               </Select>
             </FormControl>
+            <TextField
+              label="Discrepancy Threshold ($)"
+              name="discrepancyThreshold"
+              type="number"
+              value={formData.discrepancyThreshold}
+              onChange={handleInputChange}
+              fullWidth
+              helperText="Leave empty to use system default"
+              inputProps={{ min: 0, step: 0.01 }}
+            />
             {dialogMode === 'edit' && (
               <FormControl fullWidth required>
                 <InputLabel>Status</InputLabel>
