@@ -69,6 +69,8 @@ function CashDrawer() {
 
   // Configuration
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState(0.00);
+  const [minClose, setMinClose] = useState(0);
+  const [maxClose, setMaxClose] = useState(0);
   const [isBlindCount, setIsBlindCount] = useState(true); // For closing drawer mode
   const [isIndividualDenominations, setIsIndividualDenominations] = useState(false); // For opening drawer mode
   const [drawerBlindCountPrefs, setDrawerBlindCountPrefs] = useState({ drawers: true, safe: true }); // Closing mode preferences
@@ -108,6 +110,7 @@ function CashDrawer() {
     fetchEmployees();
     fetchDrawers();
     fetchDiscrepancyThreshold();
+    fetchMinMaxClose();
     fetchBlindCountPreference();
     checkActiveSession();
     fetchHistory();
@@ -200,6 +203,20 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching discrepancy threshold:', err);
       setDiscrepancyThreshold(0.00);
+    }
+  };
+
+  const fetchMinMaxClose = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/user_preferences`);
+      const minClosePreference = response.data.find(pref => pref.preference_name === 'minClose');
+      const maxClosePreference = response.data.find(pref => pref.preference_name === 'maxClose');
+      setMinClose(minClosePreference ? parseFloat(minClosePreference.preference_value) || 0 : 0);
+      setMaxClose(maxClosePreference ? parseFloat(maxClosePreference.preference_value) || 0 : 0);
+    } catch (err) {
+      console.error('Error fetching min/max close:', err);
+      setMinClose(0);
+      setMaxClose(0);
     }
   };
 
@@ -458,6 +475,35 @@ function CashDrawer() {
     if (!isBlindCount && calculatedBalance === 0) {
       showSnackbar('Please enter denomination counts', 'error');
       return;
+    }
+
+    // For physical drawers, validate closing balance is within min/max range
+    if (activeSession?.drawer_type === 'physical') {
+      const minCloseValue = parseFloat(minClose || 0);
+      const maxCloseValue = parseFloat(maxClose || 0);
+      
+      // Only validate if both min and max are set (greater than 0)
+      if (minCloseValue > 0 && maxCloseValue > 0) {
+        if (calculatedBalance < minCloseValue || calculatedBalance > maxCloseValue) {
+          showSnackbar(
+            `Closing balance $${calculatedBalance.toFixed(2)} is outside the allowed range ($${minCloseValue.toFixed(2)} - $${maxCloseValue.toFixed(2)})`,
+            'error'
+          );
+          return;
+        }
+      } else if (minCloseValue > 0 && calculatedBalance < minCloseValue) {
+        showSnackbar(
+          `Closing balance $${calculatedBalance.toFixed(2)} is below the minimum allowed ($${minCloseValue.toFixed(2)})`,
+          'error'
+        );
+        return;
+      } else if (maxCloseValue > 0 && calculatedBalance > maxCloseValue) {
+        showSnackbar(
+          `Closing balance $${calculatedBalance.toFixed(2)} exceeds the maximum allowed ($${maxCloseValue.toFixed(2)})`,
+          'error'
+        );
+        return;
+      }
     }
 
     // Calculate discrepancy before closing
@@ -1135,6 +1181,11 @@ function CashDrawer() {
                 Transaction Count: {activeSession?.transaction_count || 0}
               </Alert>
             )}
+            {activeSession?.drawer_type === 'physical' && (minClose > 0 || maxClose > 0) && (
+              <Alert severity="info">
+                Allowed Closing Balance Range: {minClose > 0 ? formatCurrency(minClose) : 'No minimum'} - {maxClose > 0 ? formatCurrency(maxClose) : 'No maximum'}
+              </Alert>
+            )}
 
             {isBlindCount ? (
               <>
@@ -1152,8 +1203,27 @@ function CashDrawer() {
                   autoFocus
                 />
                 {actualBalance && activeSession && (() => {
-                  const discrepancy = parseFloat(actualBalance) - activeSession.current_expected_balance;
+                  const balance = parseFloat(actualBalance);
+                  const discrepancy = balance - activeSession.current_expected_balance;
                   const hasDiscrepancy = Math.abs(discrepancy) > 0.01; // Allow 1 cent tolerance
+                  
+                  // Check min/max range for physical drawers
+                  const isPhysical = activeSession.drawer_type === 'physical';
+                  const minCloseValue = parseFloat(minClose || 0);
+                  const maxCloseValue = parseFloat(maxClose || 0);
+                  const isOutOfRange = isPhysical && (
+                    (minCloseValue > 0 && balance < minCloseValue) ||
+                    (maxCloseValue > 0 && balance > maxCloseValue)
+                  );
+                  
+                  if (isOutOfRange) {
+                    return (
+                      <Alert severity="error">
+                        <strong>Closing balance is outside allowed range (${minCloseValue > 0 ? formatCurrency(minCloseValue) : 'No min'} - ${maxCloseValue > 0 ? formatCurrency(maxCloseValue) : 'No max'})</strong>
+                      </Alert>
+                    );
+                  }
+                  
                   return hasDiscrepancy ? (
                     <Alert severity="error">
                       <strong>Not expected balance. Please recount.</strong>
@@ -1213,21 +1283,42 @@ function CashDrawer() {
                     </Table>
                   </Box>
                 )}
-                {calculateDenominationTotal(closingDenominations) > 0 && activeSession && (
-                  <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider', mt: 2 }}>
-                    <Typography variant="body2" color="text.secondary" gutterBottom>
-                      Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Actual Balance (Counted): {formatCurrency(calculateDenominationTotal(closingDenominations))}
-                    </Typography>
-                    <Typography variant="body1" sx={{ mt: 1 }} color={
-                      Math.abs(calculateDenominationTotal(closingDenominations) - activeSession.current_expected_balance) === 0 ? 'success.main' : 'error.main'
-                    }>
-                      <strong>Total Discrepancy: {formatCurrency(calculateDenominationTotal(closingDenominations) - activeSession.current_expected_balance)}</strong>
-                    </Typography>
-                  </Box>
-                )}
+                {calculateDenominationTotal(closingDenominations) > 0 && activeSession && (() => {
+                  const balance = calculateDenominationTotal(closingDenominations);
+                  const isPhysical = activeSession.drawer_type === 'physical';
+                  const minCloseValue = parseFloat(minClose || 0);
+                  const maxCloseValue = parseFloat(maxClose || 0);
+                  const isOutOfRange = isPhysical && (
+                    (minCloseValue > 0 && balance < minCloseValue) ||
+                    (maxCloseValue > 0 && balance > maxCloseValue)
+                  );
+                  
+                  return (
+                    <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: isOutOfRange ? 'error.main' : 'divider', mt: 2 }}>
+                      {isPhysical && (minCloseValue > 0 || maxCloseValue > 0) && (
+                        <Typography variant="body2" color={isOutOfRange ? 'error.main' : 'text.secondary'} gutterBottom>
+                          Allowed Range: {minCloseValue > 0 ? formatCurrency(minCloseValue) : 'No minimum'} - {maxCloseValue > 0 ? formatCurrency(maxCloseValue) : 'No maximum'}
+                        </Typography>
+                      )}
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Actual Balance (Counted): {formatCurrency(balance)}
+                      </Typography>
+                      <Typography variant="body1" sx={{ mt: 1 }} color={
+                        Math.abs(balance - activeSession.current_expected_balance) === 0 ? 'success.main' : 'error.main'
+                      }>
+                        <strong>Total Discrepancy: {formatCurrency(balance - activeSession.current_expected_balance)}</strong>
+                      </Typography>
+                      {isOutOfRange && (
+                        <Alert severity="error" sx={{ mt: 1 }}>
+                          <strong>Closing balance is outside the allowed range!</strong>
+                        </Alert>
+                      )}
+                    </Box>
+                  );
+                })()}
               </>
             )}
 

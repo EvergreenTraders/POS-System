@@ -346,6 +346,13 @@ VALUES
   ('individualDenominations_safe', 'false')
 ON CONFLICT (preference_name) DO NOTHING;
 
+-- Add minClose and maxClose preferences for physical drawer closing balance validation
+INSERT INTO user_preferences (preference_name, preference_value)
+VALUES 
+  ('minClose', '0'),
+  ('maxClose', '0')
+ON CONFLICT (preference_name) DO NOTHING;
+
 -- Migrate existing blindCount preference to blindCount_drawers if it exists
 UPDATE user_preferences 
 SET preference_name = 'blindCount_drawers'

@@ -270,6 +270,20 @@ function SystemConfig() {
     }
   };
 
+  const fetchMinMaxClose = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/user_preferences`);
+      const minClosePreference = response.data.find(pref => pref.preference_name === 'minClose');
+      const maxClosePreference = response.data.find(pref => pref.preference_name === 'maxClose');
+      setMinClose(minClosePreference ? parseFloat(minClosePreference.preference_value) || 0 : 0);
+      setMaxClose(maxClosePreference ? parseFloat(maxClosePreference.preference_value) || 0 : 0);
+    } catch (error) {
+      console.error('Error fetching min/max close:', error);
+      setMinClose(0);
+      setMaxClose(0);
+    }
+  };
+
   // Tax configuration state
   const [provinceTaxRates, setProvinceTaxRates] = useState({
     'AB': { gst: 5, pst: 0, hst: 0 },  // Alberta
@@ -638,6 +652,7 @@ function SystemConfig() {
     fetchCases();
     fetchBlindCountPreference();
     fetchDiscrepancyThreshold();
+    fetchMinMaxClose();
     fetchTaxConfig();
     fetchAuthorizationTemplate();
     fetchReceiptConfig();
@@ -1452,6 +1467,32 @@ function SystemConfig() {
     }
   };
 
+  const handleMinCloseChange = async (event) => {
+    const newValue = parseFloat(event.target.value) || 0;
+    setMinClose(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/user_preferences`, {
+        preference_name: 'minClose',
+        preference_value: newValue.toString()
+      });
+    } catch (error) {
+      console.error('Error updating min close:', error);
+    }
+  };
+
+  const handleMaxCloseChange = async (event) => {
+    const newValue = parseFloat(event.target.value) || 0;
+    setMaxClose(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/user_preferences`, {
+        preference_name: 'maxClose',
+        preference_value: newValue.toString()
+      });
+    } catch (error) {
+      console.error('Error updating max close:', error);
+    }
+  };
+
   const handleCloseSnackbar = () => {
     setSnackbar({ ...snackbar, open: false });
   };
@@ -2053,6 +2094,7 @@ function SystemConfig() {
                     type="number"
                     value={minClose}
                     onChange={(e) => setMinClose(parseFloat(e.target.value) || 0)}
+                    onBlur={handleMinCloseChange}
                     size="small"
                     sx={{ flex: '1 1 120px', minWidth: '120px' }}
                     InputProps={{
@@ -2065,6 +2107,7 @@ function SystemConfig() {
                     type="number"
                     value={maxClose}
                     onChange={(e) => setMaxClose(parseFloat(e.target.value) || 0)}
+                    onBlur={handleMaxCloseChange}
                     size="small"
                     sx={{ flex: '1 1 120px', minWidth: '120px' }}
                     InputProps={{
