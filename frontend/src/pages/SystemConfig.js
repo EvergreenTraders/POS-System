@@ -148,7 +148,7 @@ function SystemConfig() {
   const [inventoryHoldPeriod, setInventoryHoldPeriod] = useState({ days: 7, id: null });
   const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
   const [drawers, setDrawers] = useState([]);
-  const [numberOfCases, setNumberOfCases] = useState({ count: 0, id: null });
+  const [numberOfCases, setNumberOfCases] = useState({ count: 0, id: null, label: '' });
   const [cases, setCases] = useState([]);
   const [isBlindCount, setIsBlindCount] = useState(true);
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState({ amount: 0.00, id: null });
@@ -198,11 +198,12 @@ function SystemConfig() {
         setNumberOfCases({
           count: response.data.number_of_cases,
           id: response.data.id || null,
+          label: '', // Label is not persisted, always start with empty
         });
       }
     } catch (error) {
       console.error('Error fetching cases config:', error);
-      setNumberOfCases({ count: 0, id: null });
+      setNumberOfCases({ count: 0, id: null, label: '' });
     }
   };
 
@@ -1161,8 +1162,9 @@ function SystemConfig() {
   };
 
   const handleNumberOfCasesChange = async (event) => {
-    const newCount = parseInt(event.target.value);
-    if (newCount < 0) {
+    const casesToAdd = parseInt(event.target.value);
+
+    if (casesToAdd < 0) {
       setSnackbar({
         open: true,
         message: 'Number of cases cannot be negative',
@@ -1171,35 +1173,45 @@ function SystemConfig() {
       return;
     }
 
-    if (newCount > 100) {
+    if (casesToAdd === 0) {
+      // Reset the input field
+      setNumberOfCases(prev => ({ ...prev, count: 0 }));
+      return;
+    }
+
+    if (casesToAdd > 100) {
       setSnackbar({
         open: true,
-        message: 'Number of cases cannot exceed 100',
+        message: 'Cannot add more than 100 cases at once',
         severity: 'error'
       });
       return;
     }
 
     try {
-      const response = await axios.put(`${API_BASE_URL}/cases-config`, {
-        number_of_cases: newCount
+      const response = await axios.post(`${API_BASE_URL}/cases-config/add`, {
+        cases_to_add: casesToAdd,
+        label: numberOfCases.label || ''
       });
 
+      // Reset the count input to 0 after adding cases
       setNumberOfCases({
-        count: response.data.number_of_cases,
-        id: response.data.id
+        count: 0,
+        id: response.data.id,
+        label: numberOfCases.label || '' // Keep the label for next time
       });
 
       // Refresh the cases list
       await fetchCases();
 
-      const caseMessage = newCount === 0
-        ? 'No storage cases configured.'
-        : `${newCount} storage case${newCount > 1 ? 's' : ''} created (Case 1${newCount > 1 ? ` to Case ${newCount}` : ''}).`;
+      const label = numberOfCases.label ? numberOfCases.label.trim() : '';
+      const caseMessage = label
+        ? `${casesToAdd} storage case${casesToAdd > 1 ? 's' : ''} added with label "${label}".`
+        : `${casesToAdd} storage case${casesToAdd > 1 ? 's' : ''} added.`;
 
       setSnackbar({
         open: true,
-        message: `Storage cases configuration updated. ${caseMessage}`,
+        message: caseMessage,
         severity: 'success'
       });
     } catch (error) {
@@ -1563,8 +1575,7 @@ function SystemConfig() {
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         <Tabs value={activeTab} onChange={handleTabChange}>
           <Tab label="General" />
-          <Tab label="Security" />
-          <Tab label="Notifications" />
+          <Tab label="Pawn Configuration" />
           <Tab label="Tax Configuration" />
           <Tab label="Pricing Calculator" />
           <Tab label="Account Authorization" />
@@ -1827,55 +1838,82 @@ function SystemConfig() {
               <Typography variant="h6" gutterBottom fontWeight="bold">
                 Storage Cases Configuration
               </Typography>
-              <Box display="flex" alignItems="center" gap={2} sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider', flexWrap: 'wrap' }}>
-                <TextField
-                  label="Number of Cases"
-                  type="number"
-                  value={numberOfCases.count}
-                  onChange={(e) => setNumberOfCases(prev => ({ ...prev, count: e.target.value }))}
-                  onBlur={(e) => handleNumberOfCasesChange(e)}
-                  size="small"
-                  sx={{ width: 180 }}
-                  InputProps={{
-                    endAdornment: <InputAdornment position="end">cases</InputAdornment>,
-                  }}
-                  inputProps={{ min: 0, max: 100 }}
-                  helperText="Number of cases (0-100)"
-                />
-              </Box>
-            </Box>
+              <Grid container spacing={2}>
+                {/* Left side: Configuration controls */}
+                <Grid item xs={12} md={4}>
+                  <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                    <TextField
+                      label="Case Label"
+                      type="text"
+                      value={numberOfCases.label}
+                      onChange={(e) => setNumberOfCases(prev => ({ ...prev, label: e.target.value }))}
+                      size="small"
+                      fullWidth
+                      placeholder="e.g., Jewelry, Silver"
+                      helperText="Label for cases (optional)"
+                      sx={{ mb: 2 }}
+                    />
+                    <TextField
+                      label="Number of Cases to Add"
+                      type="number"
+                      value={numberOfCases.count}
+                      onChange={(e) => setNumberOfCases(prev => ({ ...prev, count: e.target.value }))}
+                      onBlur={(e) => handleNumberOfCasesChange(e)}
+                      size="small"
+                      fullWidth
+                      InputProps={{
+                        endAdornment: <InputAdornment position="end">cases</InputAdornment>,
+                      }}
+                      inputProps={{ min: 0, max: 100 }}
+                      helperText="Number of cases (0-100)"
+                    />
+                  </Box>
+                </Grid>
 
-            {cases.length > 0 && (
-              <Box sx={{ mt: 3 }}>
-                <Typography variant="subtitle1" gutterBottom fontWeight="bold">
-                  Configured Storage Cases:
-                </Typography>
-                <TableContainer component={Paper} sx={{ mt: 1 }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Location</TableCell>
-                        <TableCell align="center">Status</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {cases.map((caseItem) => (
-                        <TableRow key={caseItem.location_id}>
-                          <TableCell>{caseItem.location}</TableCell>
-                          <TableCell align="center">
-                            {caseItem.is_occupied ? (
-                              <Typography color="warning.main" variant="body2">Occupied</Typography>
-                            ) : (
-                              <Typography color="success.main" variant="body2">Available</Typography>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Box>
-            )}
+                {/* Right side: Configured cases list */}
+                <Grid item xs={12} md={8}>
+                  <Box sx={{ bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                    <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        Configured Storage Cases ({cases.length})
+                      </Typography>
+                    </Box>
+                    {cases.length === 0 ? (
+                      <Box sx={{ p: 3, textAlign: 'center' }}>
+                        <Typography variant="body2" color="text.secondary">
+                          No storage cases configured yet. Add cases using the form on the left.
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <TableContainer sx={{ maxHeight: 300 }}>
+                        <Table size="small" stickyHeader>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Location</TableCell>
+                              <TableCell align="center">Status</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {cases.map((caseItem) => (
+                              <TableRow key={caseItem.location_id} hover>
+                                <TableCell>{caseItem.location}</TableCell>
+                                <TableCell align="center">
+                                  {caseItem.is_occupied ? (
+                                    <Typography color="warning.main" variant="body2">Occupied</Typography>
+                                  ) : (
+                                    <Typography color="success.main" variant="body2">Available</Typography>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
+                  </Box>
+                </Grid>
+              </Grid>
+            </Box>
           </ConfigSection>
 
           <ConfigSection>
@@ -2065,64 +2103,6 @@ function SystemConfig() {
                     />
                   ))}
                 </Box>
-                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                  Pawn Configuration
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={3}>
-                    <TextField
-                      label="Interest Rate (%)"
-                      type="number"
-                      value={pawnConfig.interest_rate}
-                      onChange={(e) => handlePawnConfigChange('interest_rate', e.target.value)}
-                      fullWidth
-                      inputProps={{ min: 0, max: 100, step: 0.01 }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={3}>
-                    <TextField
-                      select
-                      label="Term (Days)"
-                      value={pawnConfig.term_days}
-                      onChange={(e) => handlePawnConfigChange('term_days', e.target.value)}
-                      fullWidth
-                    >
-                      {[15, 30, 45, 60, 90, 120, 180].map((days) => (
-                        <MenuItem key={days} value={days}>
-                          {days}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  </Grid>
-                  <Grid item xs={12} sm={3}>
-                    <TextField
-                      select
-                      label="Frequency (Days)"
-                      value={pawnConfig.frequency_days}
-                      onChange={(e) => handlePawnConfigChange('frequency_days', e.target.value)}
-                      fullWidth
-                    >
-                      {[15, 30, 45, 60, 90, 120, 180].map((days) => (
-                        <MenuItem key={days} value={days}>
-                          {days}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  </Grid>
-                  <Grid item xs={12} sm={3}>
-                    <TextField
-                      select
-                      label="Forfeiture Mode"
-                      value={pawnConfig.forfeiture_mode}
-                      onChange={(e) => handlePawnConfigChange('forfeiture_mode', e.target.value)}
-                      fullWidth
-                      helperText="Manual or Auto"
-                    >
-                      <MenuItem value="manual">Manual</MenuItem>
-                      <MenuItem value="automatic">Automatic</MenuItem>
-                    </TextField>
-                  </Grid>
-                </Grid>
               </Box>
             )}
             <Box mt={2}>
@@ -2259,56 +2239,69 @@ function SystemConfig() {
         </StyledPaper>
       </TabPanel>
 
+      {/* Pawn Configuration Tab */}
       <TabPanel value={activeTab} index={1}>
         <StyledPaper elevation={2}>
           <ConfigSection>
             <Typography variant="h6" gutterBottom>
-              Security Settings
+              Pawn Configuration
             </Typography>
-            <Grid container spacing={3}>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={securitySettings.requirePasswordChange}
-                      onChange={handleSecuritySettingsChange}
-                      name="requirePasswordChange"
-                    />
-                  }
-                  label="Require Password Change Every 90 Days"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={securitySettings.twoFactorAuth}
-                      onChange={handleSecuritySettingsChange}
-                      name="twoFactorAuth"
-                    />
-                  }
-                  label="Enable Two-Factor Authentication"
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={3}>
                 <TextField
-                  fullWidth
+                  label="Interest Rate (%)"
                   type="number"
-                  label="Session Timeout (minutes)"
-                  name="sessionTimeout"
-                  value={securitySettings.sessionTimeout}
-                  onChange={handleSecuritySettingsChange}
+                  value={pawnConfig.interest_rate}
+                  onChange={(e) => handlePawnConfigChange('interest_rate', e.target.value)}
+                  fullWidth
+                  inputProps={{ min: 0, max: 100, step: 0.01 }}
+                  helperText="Interest rate charged per period"
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={3}>
                 <TextField
+                  select
+                  label="Term (Days)"
+                  value={pawnConfig.term_days}
+                  onChange={(e) => handlePawnConfigChange('term_days', e.target.value)}
                   fullWidth
-                  type="number"
-                  label="Max Login Attempts"
-                  name="maxLoginAttempts"
-                  value={securitySettings.maxLoginAttempts}
-                  onChange={handleSecuritySettingsChange}
-                />
+                  helperText="Default pawn term length"
+                >
+                  {[15, 30, 45, 60, 90, 120, 180].map((days) => (
+                    <MenuItem key={days} value={days}>
+                      {days}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <TextField
+                  select
+                  label="Frequency (Days)"
+                  value={pawnConfig.frequency_days}
+                  onChange={(e) => handlePawnConfigChange('frequency_days', e.target.value)}
+                  fullWidth
+                  helperText="Interest calculation frequency"
+                >
+                  {[15, 30, 45, 60, 90, 120, 180].map((days) => (
+                    <MenuItem key={days} value={days}>
+                      {days}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <TextField
+                  select
+                  label="Forfeiture Mode"
+                  value={pawnConfig.forfeiture_mode}
+                  onChange={(e) => handlePawnConfigChange('forfeiture_mode', e.target.value)}
+                  fullWidth
+                  helperText="Manual or Auto"
+                >
+                  <MenuItem value="manual">Manual</MenuItem>
+                  <MenuItem value="automatic">Automatic</MenuItem>
+                </TextField>
               </Grid>
             </Grid>
           </ConfigSection>
@@ -2316,66 +2309,6 @@ function SystemConfig() {
       </TabPanel>
 
       <TabPanel value={activeTab} index={2}>
-        <StyledPaper elevation={2}>
-          <ConfigSection>
-            <Typography variant="h6" gutterBottom>
-              Notification Preferences
-            </Typography>
-            <Grid container spacing={3}>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={notificationSettings.emailNotifications}
-                      onChange={handleNotificationSettingsChange}
-                      name="emailNotifications"
-                    />
-                  }
-                  label="Enable Email Notifications"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={notificationSettings.lowStockAlerts}
-                      onChange={handleNotificationSettingsChange}
-                      name="lowStockAlerts"
-                    />
-                  }
-                  label="Low Stock Alerts"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={notificationSettings.orderConfirmations}
-                      onChange={handleNotificationSettingsChange}
-                      name="orderConfirmations"
-                    />
-                  }
-                  label="Order Confirmations"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={notificationSettings.dailyReports}
-                      onChange={handleNotificationSettingsChange}
-                      name="dailyReports"
-                    />
-                  }
-                  label="Daily Reports"
-                />
-              </Grid>
-            </Grid>
-          </ConfigSection>
-        </StyledPaper>
-      </TabPanel>
-
-      <TabPanel value={activeTab} index={3}>
         <StyledPaper elevation={2}>
           <ConfigSection>
             <Typography variant="h6" gutterBottom>
@@ -2537,7 +2470,7 @@ function SystemConfig() {
         </StyledPaper>
       </TabPanel>
 
-      <TabPanel value={activeTab} index={4}>
+      <TabPanel value={activeTab} index={3}>
         <StyledPaper elevation={2}>
           <Grid container spacing={3}>
             {/* Configuration Block - Left Side */}
@@ -2769,7 +2702,7 @@ function SystemConfig() {
       </TabPanel>
 
       {/* Account Authorization Tab */}
-      <TabPanel value={activeTab} index={5}>
+      <TabPanel value={activeTab} index={4}>
         <StyledPaper elevation={2}>
           <ConfigSection>
             <Typography variant="h6" gutterBottom>
@@ -2851,7 +2784,7 @@ function SystemConfig() {
       </TabPanel>
 
       {/* Item Attributes Tab */}
-      <TabPanel value={activeTab} index={6}>
+      <TabPanel value={activeTab} index={5}>
         <StyledPaper elevation={2}>
           <ConfigSection>
             <Typography variant="h6" gutterBottom>

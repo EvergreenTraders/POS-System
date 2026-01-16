@@ -4,7 +4,7 @@ import {
   CardMedia, Divider, Chip, Button, Avatar, Stack, Tabs, Tab, TextField,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogActions, Snackbar, Alert, CircularProgress,
-  List, ListItem, ListItemText, ListItemAvatar, Menu, MenuItem, Checkbox
+  List, ListItem, ListItemText, ListItemAvatar, Menu, MenuItem, Checkbox, Select
 } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import config from '../config';
@@ -55,6 +55,10 @@ const JewelEstimatorWrapper = ({ prefilledData, onCancel, onSave, transactionTyp
 const CustomerTicket = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  
+  // Maximum number of items allowed in a pawn transaction
+  const MAX_PAWN_ITEMS = 5;
+  
   // State for customer lookup mode
   const [showLookupForm, setShowLookupForm] = useState(false);
   const [searchForm, setSearchForm] = useState({
@@ -72,7 +76,7 @@ const CustomerTicket = () => {
   // Camera capture state
   const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
   const [currentCaptureItemId, setCurrentCaptureItemId] = useState(null);
-  const [currentCaptureItemType, setCurrentCaptureItemType] = useState(null); // 'pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund'
+  const [currentCaptureItemType, setCurrentCaptureItemType] = useState(null); // 'pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund', 'redeem'
   const [videoStream, setVideoStream] = useState(null);
   const videoRef = React.useRef(null);
   const canvasRef = React.useRef(null);
@@ -355,6 +359,9 @@ const CustomerTicket = () => {
       case 'refund':
         setRefundItems(updateItemImages);
         break;
+      case 'redeem':
+        setRedeemItems(updateItemImages);
+        break;
       default:
         break;
     }
@@ -446,7 +453,18 @@ const CustomerTicket = () => {
   };
 
   const { user } = useAuth(); // Get user at component level
-  
+
+  // Pawn configuration for calculations
+  const [interestRate, setInterestRate] = React.useState(2.9);
+  const [frequencyDays, setFrequencyDays] = React.useState(30);
+
+  // Customer's pawn transactions (loans)
+  const [customerLoans, setCustomerLoans] = React.useState([]);
+  const [storageLocations, setStorageLocations] = React.useState([]);
+  const [showLocationDialog, setShowLocationDialog] = React.useState(false);
+  const [selectedRedeemTicket, setSelectedRedeemTicket] = React.useState(null);
+  const [locationCheckStatus, setLocationCheckStatus] = React.useState({});
+
   // Get customer from location state or session storage
   const [customer, setCustomer] = React.useState(() => {
     // First try to get customer from navigation state
@@ -455,13 +473,13 @@ const CustomerTicket = () => {
       sessionStorage.setItem('selectedCustomer', JSON.stringify(location.state.customer));
       return location.state.customer;
     }
-    
+
     // If not in navigation state, try session storage
     const savedCustomer = sessionStorage.getItem('selectedCustomer');
     if (savedCustomer) {
       return JSON.parse(savedCustomer);
     }
-    
+
     // No customer found
     return null;
   });
@@ -493,11 +511,19 @@ const CustomerTicket = () => {
   }, [activeTab]);
 
   // Automatically show customer lookup form if no customer is selected
+  // BUT don't show it if we have incoming redeem/extend data (customer will be fetched)
   React.useEffect(() => {
     if (!customer) {
-      setShowLookupForm(true);
+      // Don't show lookup form if we have incoming redeem or extend data with customerId
+      const hasIncomingCustomer = location.state?.redeemData?.customerId || location.state?.extendData?.customerId;
+      if (!hasIncomingCustomer) {
+        setShowLookupForm(true);
+      }
+    } else {
+      // Hide lookup form when customer is set
+      setShowLookupForm(false);
     }
-  }, [customer]);
+  }, [customer, location.state?.redeemData?.customerId, location.state?.extendData?.customerId]);
 
   // Reload customer data when returning from customer editor
   React.useEffect(() => {
@@ -655,21 +681,26 @@ const CustomerTicket = () => {
   });
   
   const [paymentItems, setPaymentItems] = React.useState(() => {
-    return loadTicketItems('payment') || [{ id: 1, amount: '', method: '', reference: '', notes: '' }];
+    return loadTicketItems('payment') || [{ id: 1, pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] }];
   });
   
   const [refundItems, setRefundItems] = React.useState(() => {
     return loadTicketItems('refund') || [{ id: 1, amount: '', method: '', reference: '', reason: '' }];
   });
 
+  const [redeemItems, setRedeemItems] = React.useState(() => {
+    return loadTicketItems('redeem') || [{ id: 1, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '', images: [] }];
+  });
+
   // Helper functions to create empty items for each tab type
-  const createEmptyPawnItem = () => ({ id: Date.now(), description: '', category: '', value: '' });
+  const createEmptyPawnItem = () => ({ id: Date.now(), description: '', category: '', value: '', location: '' });
   const createEmptyBuyItem = () => ({ id: Date.now(), description: '', category: '', price: '' });
   const createEmptyTradeItem = () => ({ id: Date.now(), tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' });
   const createEmptySaleItem = () => ({ id: Date.now(), description: '', category: '', price: '', paymentMethod: '' });
   const createEmptyRepairItem = () => ({ id: Date.now(), description: '', issue: '', fee: '', completion: '' });
-  const createEmptyPaymentItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', notes: '' });
+  const createEmptyPaymentItem = () => ({ id: Date.now(), pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] });
   const createEmptyRefundItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', reason: '' });
+  const createEmptyRedeemItem = () => ({ id: Date.now(), pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '' });
 
   // Clean up expired ticket items on component mount
   React.useEffect(() => {
@@ -1144,13 +1175,30 @@ const CustomerTicket = () => {
       // Update state with new items and save to localStorage
       if (pawnItemsArr.length > 0) {
         setPawnItems(prevItems => {
+          // Check if adding these items would exceed the limit
+          const currentCount = hasEmptyPawnItems ? 0 : prevItems.filter(item => item.description || item.value).length;
+          const itemsToAdd = Math.min(pawnItemsArr.length, MAX_PAWN_ITEMS - currentCount);
+          
+          if (itemsToAdd < pawnItemsArr.length) {
+            showSnackbar(`Only ${itemsToAdd} of ${pawnItemsArr.length} items added. Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket.`, 'warning');
+          }
+          
+          if (itemsToAdd === 0) {
+            showSnackbar(`Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket`, 'warning');
+            return prevItems;
+          }
+          
           // Replace empty placeholder item if needed
-          const newItems = hasEmptyPawnItems ? pawnItemsArr : [...prevItems, ...pawnItemsArr];
+          const itemsToAddArray = pawnItemsArr.slice(0, itemsToAdd);
+          const newItems = hasEmptyPawnItems ? itemsToAddArray : [...prevItems, ...itemsToAddArray];
           saveTicketItems('pawn', newItems);
           return newItems;
         });
         setActiveTab(0); // Set active tab to Pawn
-        showSnackbar(`${pawnItemsArr.length} pawn items added to ticket`, 'success');
+        const addedCount = Math.min(pawnItemsArr.length, MAX_PAWN_ITEMS - (hasEmptyPawnItems ? 0 : pawnItems.filter(item => item.description || item.value).length));
+        if (addedCount > 0) {
+          showSnackbar(`${addedCount} pawn item${addedCount > 1 ? 's' : ''} added to ticket`, 'success');
+        }
       }
       
       if (buyItemsArr.length > 0) {
@@ -1211,6 +1259,229 @@ const CustomerTicket = () => {
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
+
+  // Fetch pawn config for interest rate and frequency days
+  React.useEffect(() => {
+    const fetchPawnConfig = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${config.apiUrl}/pawn-config`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setInterestRate(parseFloat(data.interest_rate) || 2.9);
+          setFrequencyDays(parseInt(data.frequency_days) || 30);
+        }
+      } catch (error) {
+        console.error('Error fetching pawn config:', error);
+      }
+    };
+    fetchPawnConfig();
+  }, []);
+
+  // Fetch customer's pawn transactions when customer changes
+  React.useEffect(() => {
+    const fetchCustomerLoans = async () => {
+      if (!customer || !customer.id) {
+        setCustomerLoans([]);
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${config.apiUrl}/pawn-transactions`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (response.ok) {
+          const allPawns = await response.json();
+          // Filter pawns for this customer only
+          const customerPawns = allPawns.filter(pawn =>
+            pawn.customer_id === customer.id
+          );
+          setCustomerLoans(customerPawns);
+        }
+      } catch (error) {
+        console.error('Error fetching customer loans:', error);
+        setCustomerLoans([]);
+      }
+    };
+
+    fetchCustomerLoans();
+  }, [customer]);
+
+  // Fetch storage locations
+  React.useEffect(() => {
+    const fetchStorageLocations = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${config.apiUrl}/storage-locations`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (response.ok) {
+          const locations = await response.json();
+          setStorageLocations(locations);
+        }
+      } catch (error) {
+        console.error('Error fetching storage locations:', error);
+      }
+    };
+
+    fetchStorageLocations();
+  }, []);
+
+  // Handle redeem data from Pawns.js
+  React.useEffect(() => {
+    if (location.state?.redeemData) {
+      const stateHash = JSON.stringify({ redeemData: location.state.redeemData });
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+
+      const redeemData = location.state.redeemData;
+
+      // Fetch customer data if customerId is provided
+      const fetchAndSetCustomer = async () => {
+        let customerData = null;
+
+        if (redeemData.customerId) {
+          try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${config.apiUrl}/customers/${redeemData.customerId}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+
+            if (response.ok) {
+              customerData = await response.json();
+              setCustomer(customerData);
+              sessionStorage.setItem('selectedCustomer', JSON.stringify(customerData));
+            } else {
+              console.error('Failed to fetch customer:', response.status);
+              showSnackbar('Could not load customer details', 'warning');
+            }
+          } catch (error) {
+            console.error('Error fetching customer:', error);
+            showSnackbar('Could not load customer details', 'warning');
+          }
+        }
+
+        // Clear empty redeem items if needed
+        const hasEmptyRedeemItems = redeemItems.length === 1 && !redeemItems[0].pawnTicketId;
+
+        // Create redeem item from pawn data (without customer field)
+        const newRedeemItem = {
+          id: Date.now(),
+          pawnTicketId: redeemData.pawnTicketId || '',
+          description: redeemData.description || '',
+          principal: redeemData.principal || '',
+          interest: redeemData.interest || '',
+          totalAmount: redeemData.totalAmount || ''
+        };
+
+        // Update state with new item and save to localStorage
+        const updatedRedeemItems = hasEmptyRedeemItems ? [newRedeemItem] : [...redeemItems, newRedeemItem];
+        setRedeemItems(updatedRedeemItems);
+        saveTicketItems('redeem', updatedRedeemItems);
+
+        // Switch to redeem tab (index 7)
+        setActiveTab(7);
+
+        showSnackbar(`Pawn item added to redeem tab${customerData ? ` for ${customerData.first_name} ${customerData.last_name}` : ''}`, 'success');
+
+        // Clear the location state
+        window.history.replaceState({}, document.title);
+      };
+
+      fetchAndSetCustomer();
+    }
+  }, [location.state?.redeemData]);
+
+  // Handle extend data from Pawns.js
+  React.useEffect(() => {
+    if (location.state?.extendData) {
+      const stateHash = JSON.stringify({ extendData: location.state.extendData });
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+
+      const extendData = location.state.extendData;
+
+      // Fetch customer data if customerId is provided
+      const fetchAndSetCustomer = async () => {
+        let customerData = null;
+
+        if (extendData.customerId) {
+          try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${config.apiUrl}/customers/${extendData.customerId}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+
+            if (response.ok) {
+              customerData = await response.json();
+              setCustomer(customerData);
+              sessionStorage.setItem('selectedCustomer', JSON.stringify(customerData));
+            } else {
+              console.error('Failed to fetch customer:', response.status);
+              showSnackbar('Could not load customer details', 'warning');
+            }
+          } catch (error) {
+            console.error('Error fetching customer:', error);
+            showSnackbar('Could not load customer details', 'warning');
+          }
+        }
+
+        // Clear empty payment items if needed
+        const hasEmptyPaymentItems = paymentItems.length === 1 && !paymentItems[0].pawnTicketId;
+
+        // Create payment item from extend data
+        const interest = parseFloat(extendData.interest) || 0;
+        const fee = parseFloat(extendData.fee) || 0;
+        const amount = (interest + fee).toFixed(2);
+
+        // Calculate days, term and date for default extension (1 period = frequencyDays)
+        const days = frequencyDays || 30;
+        const term = 1;
+        const today = new Date();
+        const futureDate = new Date(today);
+        futureDate.setDate(today.getDate() + days);
+        const date = futureDate.toISOString().split('T')[0];
+
+        const newPaymentItem = {
+          id: Date.now(),
+          pawnTicketId: extendData.pawnTicketId || '',
+          description: extendData.description || '',
+          principal: extendData.principal || '',
+          days: days.toString(),
+          term: term.toString(),
+          date: date,
+          interest: extendData.interest || '',
+          fee: extendData.fee || '',
+          amount: amount,
+          images: []
+        };
+
+        // Update state with new item and save to localStorage
+        const updatedPaymentItems = hasEmptyPaymentItems ? [newPaymentItem] : [...paymentItems, newPaymentItem];
+        setPaymentItems(updatedPaymentItems);
+        saveTicketItems('payment', updatedPaymentItems);
+
+        // Switch to payment tab (index 5)
+        setActiveTab(5);
+
+        showSnackbar(`Extension payment added to payment tab${customerData ? ` for ${customerData.first_name} ${customerData.last_name}` : ''}`, 'success');
+
+        // Clear the location state
+        window.history.replaceState({}, document.title);
+      };
+
+      fetchAndSetCustomer();
+    }
+  }, [location.state?.extendData]);
 
   // Track whether initial load is complete to avoid overwriting saved data
   const initialLoadCompleteRef = React.useRef(false);
@@ -1282,7 +1553,7 @@ const CustomerTicket = () => {
         setTradeItems(mergeItems(tradeItems, savedTrade, { id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }));
         setSaleItems(mergeItems(saleItems, savedSale, { id: 1, description: '', category: '', price: '', paymentMethod: '' }));
         setRepairItems(mergeItems(repairItems, savedRepair, { id: 1, description: '', issue: '', fee: '', completion: '' }));
-        setPaymentItems(mergeItems(paymentItems, savedPayment, { id: 1, amount: '', method: '', reference: '', notes: '' }));
+        setPaymentItems(mergeItems(paymentItems, savedPayment, { id: 1, pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] }));
         setRefundItems(mergeItems(refundItems, savedRefund, { id: 1, amount: '', method: '', reference: '', reason: '' }));
       }
 
@@ -1338,11 +1609,14 @@ const CustomerTicket = () => {
   }, [refundItems, customer]);
 
   // Recalculate totals whenever any item array changes
+  // Note: These are SUBTOTALS (before tax). Tax is added in display functions.
   React.useEffect(() => {
     // Calculate totals for all tabs
-    const pawnTotal = pawnItems.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
-    const buyTotal = buyItems.reduce((sum, item) => sum + (parseFloat(item.price) || 0), 0);
+    // Pawn & Buy are negative (money going OUT to customer)
+    const pawnTotal = -1 * pawnItems.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
+    const buyTotal = -1 * buyItems.reduce((sum, item) => sum + (parseFloat(item.price) || 0), 0);
     const tradeTotal = tradeItems.reduce((sum, item) => sum + (parseFloat(item.priceDiff) || 0), 0);
+    // Sale & Redeem are positive (money coming IN from customer)
     const saleTotal = saleItems.reduce((sum, item) => {
       const itemPrice = parseFloat(item.price) || 0;
       const protectionPlanAmount = item.protectionPlan ? itemPrice * 0.15 : 0;
@@ -1351,6 +1625,7 @@ const CustomerTicket = () => {
     const repairTotal = repairItems.reduce((sum, item) => sum + (parseFloat(item.fee) || 0), 0);
     const paymentTotal = paymentItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
     const refundTotal = refundItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+    const redeemTotal = redeemItems.reduce((sum, item) => sum + (parseFloat(item.totalAmount) || 0), 0);
 
     setTotals({
       pawn: pawnTotal,
@@ -1359,9 +1634,10 @@ const CustomerTicket = () => {
       sale: saleTotal,
       repair: repairTotal,
       payment: paymentTotal,
-      refund: refundTotal
+      refund: refundTotal,
+      redeem: redeemTotal
     });
-  }, [pawnItems, buyItems, tradeItems, saleItems, repairItems, paymentItems, refundItems]);
+  }, [pawnItems, buyItems, tradeItems, saleItems, repairItems, paymentItems, refundItems, redeemItems]);
 
   // Function to get current items based on active tab and type name
   const getCurrentItems = () => {
@@ -1418,7 +1694,7 @@ const CustomerTicket = () => {
           saveTicketItems(type, newItems);
         };
         break;
-      case 6: 
+      case 6:
         type = 'refund';
         items = refundItems;
         setItems = (newItems) => {
@@ -1426,16 +1702,31 @@ const CustomerTicket = () => {
           saveTicketItems(type, newItems);
         };
         break;
-      default: 
+      case 7:
+        type = 'redeem';
+        items = redeemItems;
+        setItems = (newItems) => {
+          setRedeemItems(newItems);
+          saveTicketItems(type, newItems);
+        };
+        break;
+      default:
         return { items: [], setItems: () => {}, type: '' };
     }
-    
+
     return { items, setItems, type };
   };
   
   // Handle adding a new row
   const handleAddRow = () => {
     const { items, setItems } = getCurrentItems();
+    
+    // Check pawn item limit
+    if (activeTab === 0 && items.length >= MAX_PAWN_ITEMS) {
+      showSnackbar(`Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket`, 'warning');
+      return;
+    }
+    
     const newId = items.length > 0 ? Math.max(...items.map(item => item.id)) + 1 : 1;
     
     // Create a new item based on the active tab
@@ -1462,17 +1753,144 @@ const CustomerTicket = () => {
       case 6:
         newItem = { id: newId, amount: '', method: '', reference: '', reason: '' };
         break;
+      case 7:
+        newItem = { id: newId, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '' };
+        break;
       default:
         return;
     }
-    
+
     setItems([...items, newItem]);
   };
   
   // Handle updating an item
-  const handleItemChange = (id, field, value) => {
-    const { items, setItems } = getCurrentItems();
-    setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
+  const handleItemChange = async (id, field, value) => {
+    const { items, setItems, type } = getCurrentItems();
+
+    // For payment items, auto-calculate when days or interest/fee changes
+    if (type === 'payment') {
+      // If pawnTicketId changed, fetch pawn data and auto-fill fields
+      if (field === 'pawnTicketId' && value) {
+        try {
+          const token = localStorage.getItem('token');
+          const response = await fetch(`${config.apiUrl}/pawn-transactions`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          if (response.ok) {
+            const pawnTransactions = await response.json();
+            const pawnData = pawnTransactions.find(p => p.pawn_ticket_id === value);
+
+            if (pawnData) {
+              // Found matching pawn ticket, auto-fill all fields
+              const principalAmount = parseFloat(pawnData.item_price) || 0;
+              const frequency = frequencyDays || 30;
+              const rate = interestRate || 2.9;
+              const days = frequency;
+              const term = 1;
+
+              const today = new Date();
+              const futureDate = new Date(today);
+              futureDate.setDate(today.getDate() + days);
+              const date = futureDate.toISOString().split('T')[0];
+
+              const interestAmount = principalAmount * (rate / 100) * term;
+              const insuranceFee = principalAmount * 0.01 * term;
+              const amount = interestAmount + insuranceFee;
+
+              // Fetch customer if available
+              if (pawnData.customer_id) {
+                try {
+                  const customerResponse = await fetch(`${config.apiUrl}/customers/${pawnData.customer_id}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                  });
+                  if (customerResponse.ok) {
+                    const customerData = await customerResponse.json();
+                    setCustomer(customerData);
+                    sessionStorage.setItem('selectedCustomer', JSON.stringify(customerData));
+                  }
+                } catch (error) {
+                  console.error('Error fetching customer:', error);
+                }
+              }
+
+              setItems(items.map(item => {
+                if (item.id === id) {
+                  return {
+                    ...item,
+                    pawnTicketId: value,
+                    description: pawnData.item_description || pawnData.item_id || '',
+                    principal: principalAmount.toFixed(2),
+                    days: days.toString(),
+                    term: term.toString(),
+                    date: date,
+                    interest: interestAmount.toFixed(2),
+                    fee: insuranceFee.toFixed(2),
+                    amount: amount.toFixed(2)
+                  };
+                }
+                return item;
+              }));
+
+              showSnackbar('Pawn ticket found and fields auto-filled', 'success');
+              return;
+            } else {
+              showSnackbar('Pawn ticket not found', 'warning');
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching pawn data:', error);
+          showSnackbar('Error fetching pawn data', 'error');
+        }
+
+        // If pawn not found or error, just update the field
+        setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
+        return;
+      }
+
+      setItems(items.map(item => {
+        if (item.id === id) {
+          const updatedItem = { ...item, [field]: value };
+
+          // If days changed, calculate term, date, interest, and fee
+          if (field === 'days') {
+            const days = parseInt(value) || 0;
+            const principal = parseFloat(updatedItem.principal) || 0;
+            const frequency = frequencyDays || 30;
+            const rate = interestRate || 2.9;
+
+            // Calculate term (number of periods)
+            const term = Math.ceil(days / frequency);
+            updatedItem.term = term.toString();
+
+            // Calculate date (today + days)
+            const today = new Date();
+            const futureDate = new Date(today);
+            futureDate.setDate(today.getDate() + days);
+            updatedItem.date = futureDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+            // Calculate interest and fee
+            const interestAmount = principal * (rate / 100) * term;
+            const insuranceFee = principal * 0.01 * term;
+
+            updatedItem.interest = interestAmount.toFixed(2);
+            updatedItem.fee = insuranceFee.toFixed(2);
+            updatedItem.amount = (interestAmount + insuranceFee).toFixed(2);
+          }
+          // If interest or fee changed manually, recalculate amount
+          else if (field === 'interest' || field === 'fee') {
+            const interest = parseFloat(updatedItem.interest) || 0;
+            const fee = parseFloat(updatedItem.fee) || 0;
+            updatedItem.amount = (interest + fee).toFixed(2);
+          }
+
+          return updatedItem;
+        }
+        return item;
+      }));
+    } else {
+      setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
+    }
   };
   
   // Handle duplicating an item
@@ -1554,11 +1972,22 @@ const CustomerTicket = () => {
         emptyItem.fee = '';
         emptyItem.completion = '';
       }
-      if (type === 'payment' || type === 'refund') {
+      if (type === 'payment') {
+        emptyItem.pawnTicketId = '';
+        emptyItem.principal = '';
+        emptyItem.days = '';
+        emptyItem.term = '';
+        emptyItem.date = '';
+        emptyItem.interest = '';
+        emptyItem.fee = '';
+        emptyItem.amount = '';
+        emptyItem.images = [];
+      }
+      if (type === 'refund') {
         emptyItem.amount = '';
         emptyItem.method = '';
         emptyItem.reference = '';
-        type === 'payment' ? emptyItem.notes = '' : emptyItem.reason = '';
+        emptyItem.reason = '';
       }
 
       setItems([emptyItem]);
@@ -1602,6 +2031,13 @@ const CustomerTicket = () => {
     let newItem;
     switch(targetTabIndex) {
       case 0: // Pawn
+        // Check pawn item limit
+        const currentPawnCount = pawnItems.filter(item => item.description || item.value).length;
+        if (currentPawnCount >= MAX_PAWN_ITEMS) {
+          showSnackbar(`Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket`, 'warning');
+          handleConvertClose();
+          return;
+        }
         newItem = {
           image: itemToConvert.image,
           images: itemToConvert.images,
@@ -1661,10 +2097,16 @@ const CustomerTicket = () => {
       case 5: // Payment
         newItem = {
           id: Math.max(...paymentItems.map(i => i.id), 0) + 1,
+          pawnTicketId: '',
+          description: itemToConvert.description || '',
+          principal: '',
+          days: '',
+          term: '',
+          date: '',
+          interest: '',
+          fee: '',
           amount: itemToConvert.price || itemToConvert.value || '',
-          method: '',
-          reference: '',
-          notes: itemToConvert.description || ''
+          images: []
         };
         setPaymentItems([...paymentItems, newItem]);
         break;
@@ -1702,16 +2144,18 @@ const CustomerTicket = () => {
       case 4: // Repair
         return repairItems.length > 0 && repairItems.some(item => item.description || item.issue || item.fee);
       case 5: // Payment
-        return paymentItems.length > 0 && paymentItems.some(item => item.amount || item.method);
+        return paymentItems.length > 0 && paymentItems.some(item => item.pawnTicketId || item.amount);
       case 6: // Refund
         return refundItems.length > 0 && refundItems.some(item => item.amount || item.method || item.reason);
+      case 7: // Redeem
+        return redeemItems.length > 0 && redeemItems.some(item => item.pawnTicketId || item.totalAmount);
       default:
         return false;
     }
   };
 
   const getTabName = (tabIndex) => {
-    const tabNames = ['Pawn', 'Buy', 'Trade', 'Sale', 'Repair', 'Payment', 'Refund'];
+    const tabNames = ['Pawn', 'Buy', 'Trade', 'Sale', 'Repair', 'Payment', 'Refund', 'Redeem'];
     return tabNames[tabIndex] || 'Unknown';
   };
 
@@ -1832,8 +2276,19 @@ const CustomerTicket = () => {
         return item;
       });
 
-      if (transactionType === 'pawn') setPawnItems(updateItems);
-      else if (transactionType === 'buy') setBuyItems(updateItems);
+      if (transactionType === 'pawn') {
+        // Check if this is updating an existing item or adding a new one
+        const existingItem = pawnItems.find(item => item.id === itemId);
+        const isNewItem = !existingItem || (!existingItem.description && !existingItem.value);
+        const currentPawnCount = pawnItems.filter(item => item.description || item.value).length;
+        
+        if (isNewItem && currentPawnCount >= MAX_PAWN_ITEMS) {
+          showSnackbar(`Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket`, 'warning');
+          setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null });
+          return;
+        }
+        setPawnItems(updateItems);
+      } else if (transactionType === 'buy') setBuyItems(updateItems);
       else if (transactionType === 'trade') setTradeItems(updateItems);
       else if (transactionType === 'repair') setRepairItems(updateItems);
       else if (transactionType === 'payment') setPaymentItems(updateItems);
@@ -2419,7 +2874,8 @@ const CustomerTicket = () => {
     sale: 0,
     repair: 0,
     payment: 0,
-    refund: 0
+    refund: 0,
+    redeem: 0
   });
   
   // Helper function to get the current tab's total
@@ -2432,8 +2888,69 @@ const CustomerTicket = () => {
       case 4: return totals.repair;
       case 5: return totals.payment;
       case 6: return totals.refund;
+      case 7: return totals.redeem;
       default: return 0;
     }
+  };
+
+  // Helper function to format total with proper sign
+  const formatTotal = (amount) => {
+    const absAmount = Math.abs(amount);
+    if (amount < 0) {
+      return `-$${absAmount.toFixed(2)}`;
+    }
+    return `$${absAmount.toFixed(2)}`;
+  };
+
+  // Tax rate (13% default - Ontario)
+  const [taxRate] = React.useState(0.13);
+
+  // Helper function to calculate tax for current tab
+  const getCurrentTabTax = () => {
+    // Check if customer is tax exempt
+    if (customer?.tax_exempt) {
+      return 0;
+    }
+
+    // Only sale, repair, and redeem transactions are taxable (money coming IN)
+    const currentTotal = getCurrentTabTotal();
+
+    switch(activeTab) {
+      case 3: // Sale
+      case 4: // Repair
+      case 7: // Redeem
+        return Math.abs(currentTotal) * taxRate;
+      default:
+        return 0;
+    }
+  };
+
+  // Helper function to get subtotal (before tax)
+  const getCurrentTabSubtotal = () => {
+    return getCurrentTabTotal();
+  };
+
+  // Helper function to get total with tax
+  const getCurrentTabTotalWithTax = () => {
+    const subtotal = getCurrentTabSubtotal();
+    const tax = getCurrentTabTax();
+    return subtotal + (subtotal < 0 ? 0 : tax); // Only add tax for positive amounts
+  };
+
+  // Helper function to calculate grand total (All Tickets) with tax
+  const getAllTicketsTotal = () => {
+    const taxRate = 0.13;
+    const isTaxExempt = customer?.tax_exempt || false;
+
+    // Non-taxable items (use subtotal as-is)
+    const nonTaxableTotal = totals.pawn + totals.buy + totals.trade + totals.payment + totals.refund;
+
+    // Taxable items (add tax unless customer is tax exempt)
+    const saleTotalWithTax = isTaxExempt ? totals.sale : totals.sale * (1 + taxRate);
+    const repairTotalWithTax = isTaxExempt ? totals.repair : totals.repair * (1 + taxRate);
+    const redeemTotalWithTax = isTaxExempt ? totals.redeem : totals.redeem * (1 + taxRate);
+
+    return nonTaxableTotal + saleTotalWithTax + repairTotalWithTax + redeemTotalWithTax;
   };
 
   // Fetch required fields for each transaction type on component mount
@@ -2593,7 +3110,7 @@ const CustomerTicket = () => {
         setItems([{ id: 1, description: '', issue: '', fee: '', completion: '' }]);
         break;
       case 5: // Payment items
-        setItems([{ id: 1, amount: '', method: '', reference: '', notes: '' }]);
+        setItems([{ id: 1, pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] }]);
         break;
       case 6: // Refund items
         setItems([{ id: 1, amount: '', method: '', reference: '', reason: '' }]);
@@ -2640,22 +3157,26 @@ const CustomerTicket = () => {
           setRepairItems([emptyItem]);
           break;
         case 5: // Payment
-          emptyItem = { id: 1, amount: '', method: '', reference: '', notes: '' };
+          emptyItem = { id: 1, pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] };
           setPaymentItems([emptyItem]);
           break;
         case 6: // Refund
           emptyItem = { id: 1, amount: '', method: '', reference: '', reason: '' };
           setRefundItems([emptyItem]);
           break;
+        case 7: // Redeem
+          emptyItem = { id: 1, pawnTicketId: '', description: '', principal: '', interest: '', totalAmount: '' };
+          setRedeemItems([emptyItem]);
+          break;
       }
-      
+
       // Clear from localStorage
       clearTicketItems(type);
       showSnackbar(`Cleared all items in ${getTabName(activeTab)} tab`, 'success');
     }
   };
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async () => {
     if (!customer) {
       setSnackbarMessage({
         open: true,
@@ -2700,6 +3221,8 @@ const CustomerTicket = () => {
         return item.amount || item.method;
       } else if (activeTab === 6) { // Refund items
         return item.amount || item.method || item.reason;
+      } else if (activeTab === 7) { // Redeem items
+        return item.pawnTicketId || item.totalAmount;
       }
       return false;
     });
@@ -2708,7 +3231,7 @@ const CustomerTicket = () => {
       alert('No valid items to add to cart');
       return;
     }
-    
+
     // Determine item type based on active tab
     let transaction_type;
     switch(activeTab) {
@@ -2719,9 +3242,95 @@ const CustomerTicket = () => {
       case 4: transaction_type = 'repair'; break;
       case 5: transaction_type = 'payment'; break;
       case 6: transaction_type = 'refund'; break;
+      case 7: transaction_type = 'redeem'; break;
       default: transaction_type = 'unknown';
     }
-    
+
+    // Special handling for redeem transactions - fetch pawn ticket items and add to cart
+    if (transaction_type === 'redeem') {
+      try {
+        // Get the redeem data from the first redeem item
+        const redeemRow = filteredItems[0];
+        const pawnTicketId = redeemRow?.pawnTicketId;
+
+        if (!pawnTicketId) {
+          showSnackbar('No pawn ticket selected for redemption', 'error');
+          return;
+        }
+
+        // Fetch all items for this pawn ticket from the backend
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${config.apiUrl}/pawn-transactions?pawn_ticket_id=${pawnTicketId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch pawn ticket items');
+        }
+
+        const pawnTicketItems = await response.json();
+
+        if (!pawnTicketItems || pawnTicketItems.length === 0) {
+          showSnackbar('No items found for this pawn ticket', 'error');
+          return;
+        }
+
+        // Extract redemption amounts from the redeem row
+        const totalRedemptionAmount = parseFloat(redeemRow.totalAmount || 0);
+        const principal = parseFloat(redeemRow.principal || 0);
+        const interest = parseFloat(redeemRow.interest || 0);
+
+        // Convert pawn ticket items to cart items with all necessary metadata
+        const itemsWithMetadata = pawnTicketItems.map(pawnItem => ({
+          id: pawnItem.item_id || Date.now(),
+          description: pawnItem.item_description || pawnItem.item_short_desc || 'Unknown item',
+          long_desc: pawnItem.item_description,
+          short_desc: pawnItem.item_short_desc,
+          price: parseFloat(pawnItem.item_price || 0), // This is the principal for each item
+          value: parseFloat(pawnItem.item_price || 0),
+          category: pawnItem.category || '',
+          images: pawnItem.images || [],
+          location: pawnItem.location || '',
+          item_id: pawnItem.item_id,
+          transaction_type: 'redeem',
+          buyTicketId: pawnTicketId, // Use the pawn ticket ID as the ticket ID
+          pawnTicketId: pawnTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null,
+          // Include the total redemption amount for reference
+          totalRedemptionAmount: totalRedemptionAmount,
+          principal: principal,
+          interest: interest
+        }));
+
+        // Save to session storage for cart
+        const existingCart = JSON.parse(sessionStorage.getItem('cartItems') || '[]');
+        const updatedCart = [...existingCart, ...itemsWithMetadata];
+        sessionStorage.setItem('cartItems', JSON.stringify(updatedCart));
+
+        showSnackbar(`Added ${itemsWithMetadata.length} items from pawn ticket ${pawnTicketId} to cart`, 'success');
+
+        // Navigate to cart
+        navigate('/cart');
+        return;
+      } catch (error) {
+        console.error('Error fetching pawn ticket items:', error);
+        showSnackbar('Failed to fetch pawn ticket items. Please try again.', 'error');
+        return;
+      }
+    }
+
     // Instead of navigating, save to session storage first
     try {
       // Use preserved buyTicketId if editing from cart, otherwise generate new one
@@ -2743,6 +3352,7 @@ const CustomerTicket = () => {
           case 'repair': ticketPrefix = 'RT'; break;
           case 'payment': ticketPrefix = 'PMT'; break;
           case 'refund': ticketPrefix = 'RFT'; break;
+          case 'redeem': ticketPrefix = 'RDT'; break;
           default: ticketPrefix = 'TKT';
         }
 
@@ -2854,18 +3464,37 @@ const CustomerTicket = () => {
       // Clear items from the current tab after adding to cart
       if (activeTab === 0) { // Pawn tab
         setPawnItems([createEmptyPawnItem()]);
+        // Clear from localStorage
+        const key = customer && customer.id ? `ticket_${customer.id}_pawn` : `ticket_global_pawn`;
+        localStorage.removeItem(key);
       } else if (activeTab === 1) { // Buy tab
         setBuyItems([createEmptyBuyItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_buy` : `ticket_global_buy`;
+        localStorage.removeItem(key);
       } else if (activeTab === 2) { // Trade tab
         setTradeItems([createEmptyTradeItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_trade` : `ticket_global_trade`;
+        localStorage.removeItem(key);
       } else if (activeTab === 3) { // Sale tab
         setSaleItems([createEmptySaleItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_sale` : `ticket_global_sale`;
+        localStorage.removeItem(key);
       } else if (activeTab === 4) { // Repair tab
         setRepairItems([createEmptyRepairItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_repair` : `ticket_global_repair`;
+        localStorage.removeItem(key);
       } else if (activeTab === 5) { // Payment tab
         setPaymentItems([createEmptyPaymentItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_payment` : `ticket_global_payment`;
+        localStorage.removeItem(key);
       } else if (activeTab === 6) { // Refund tab
         setRefundItems([createEmptyRefundItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_refund` : `ticket_global_refund`;
+        localStorage.removeItem(key);
+      } else if (activeTab === 7) { // Redeem tab
+        setRedeemItems([createEmptyRedeemItem()]);
+        const key = customer && customer.id ? `ticket_${customer.id}_redeem` : `ticket_global_redeem`;
+        localStorage.removeItem(key);
       }
 
     } catch (error) {
@@ -2886,6 +3515,7 @@ const CustomerTicket = () => {
         case 'repair': ticketPrefix = 'RT'; break;
         case 'payment': ticketPrefix = 'PMT'; break;
         case 'refund': ticketPrefix = 'RFT'; break;
+        case 'redeem': ticketPrefix = 'RDT'; break;
         default: ticketPrefix = 'TKT';
       }
 
@@ -3030,7 +3660,7 @@ const CustomerTicket = () => {
     }
 
     // Add payment items
-    const validPaymentItems = paymentItems.filter(item => item.amount || item.method);
+    const validPaymentItems = paymentItems.filter(item => item.pawnTicketId || item.totalAmount);
     if (validPaymentItems.length > 0) {
       const paymentTicketId = generateBuyTicketId('payment');
       validPaymentItems.forEach(item => {
@@ -3081,6 +3711,32 @@ const CustomerTicket = () => {
       });
     }
 
+    // Add redeem items
+    const validRedeemItems = redeemItems.filter(item => item.pawnTicketId || item.totalAmount);
+    if (validRedeemItems.length > 0) {
+      const redeemTicketId = generateBuyTicketId('redeem');
+      validRedeemItems.forEach(item => {
+        allItems.push({
+          ...item,
+          transaction_type: 'redeem',
+          buyTicketId: redeemTicketId,
+          customer: customer ? {
+            id: customer.id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+            phone: customer.phone || 'N/A',
+            email: customer.email || 'N/A'
+          } : null,
+          employee: user ? {
+            id: user.id,
+            name: `${user.firstName} ${user.lastName}`,
+            role: user.role || 'Employee'
+          } : null
+        });
+      });
+    }
+
     if (allItems.length === 0) {
       showSnackbar('No valid items to proceed to checkout', 'warning');
       return;
@@ -3097,24 +3753,43 @@ const CustomerTicket = () => {
     // Clear all tabs that had valid items after proceeding to checkout
     if (validPawnItems.length > 0) {
       setPawnItems([createEmptyPawnItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_pawn` : `ticket_global_pawn`;
+      localStorage.removeItem(key);
     }
     if (validBuyItems.length > 0) {
       setBuyItems([createEmptyBuyItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_buy` : `ticket_global_buy`;
+      localStorage.removeItem(key);
     }
     if (validTradeItems.length > 0) {
       setTradeItems([createEmptyTradeItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_trade` : `ticket_global_trade`;
+      localStorage.removeItem(key);
     }
     if (validSaleItems.length > 0) {
       setSaleItems([createEmptySaleItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_sale` : `ticket_global_sale`;
+      localStorage.removeItem(key);
     }
     if (validRepairItems.length > 0) {
       setRepairItems([createEmptyRepairItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_repair` : `ticket_global_repair`;
+      localStorage.removeItem(key);
     }
     if (validPaymentItems.length > 0) {
       setPaymentItems([createEmptyPaymentItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_payment` : `ticket_global_payment`;
+      localStorage.removeItem(key);
     }
     if (validRefundItems.length > 0) {
       setRefundItems([createEmptyRefundItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_refund` : `ticket_global_refund`;
+      localStorage.removeItem(key);
+    }
+    if (validRedeemItems.length > 0) {
+      setRedeemItems([createEmptyRedeemItem()]);
+      const key = customer && customer.id ? `ticket_${customer.id}_redeem` : `ticket_global_redeem`;
+      localStorage.removeItem(key);
     }
 
     // Navigate to checkout
@@ -3371,39 +4046,82 @@ return (
               </Box>
             )}
           </Box>
-          {/* Right side - Portfolio KPI */}
-          <Box sx={{ 
-            display: 'flex', 
+          {/* Right side - Loan List for Payment/Redeem tabs, KPI for others */}
+          <Box sx={{
+            display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             width: '58%',
             pl: 2
           }}>
-            <Grid container spacing={2}>
-              <Grid item xs={4}>
-                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
-                  <AttachMoneyIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>${portfolioData.totalValue}</Typography>
-                  <Typography variant="body2" color="text.secondary" align="center">Total Value</Typography>
-                </Card>
+            {(activeTab === 5 || activeTab === 7) ? (
+              // Show loan list for Payment and Redeem tabs
+              <Box sx={{ width: '100%', maxHeight: '200px', overflowY: 'auto' }}>
+                {customerLoans.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    {customer ? 'No active loans found' : 'Select a customer to view loans'}
+                  </Typography>
+                ) : (
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Ticket ID</TableCell>
+                        <TableCell>Description</TableCell>
+                        <TableCell align="right">Principal</TableCell>
+                        <TableCell>Status</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {customerLoans.map((loan) => (
+                        <TableRow key={loan.pawn_ticket_id} hover>
+                          <TableCell>{loan.pawn_ticket_id}</TableCell>
+                          <TableCell>{loan.item_description || loan.item_id || 'N/A'}</TableCell>
+                          <TableCell align="right">${parseFloat(loan.item_price || 0).toFixed(2)}</TableCell>
+                          <TableCell>
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                color: loan.item_status === 'PAWN' ? '#1a8d48' : '#1976d2',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              {loan.item_status || 'N/A'}
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </Box>
+            ) : (
+              // Show KPI for other tabs
+              <Grid container spacing={2}>
+                <Grid item xs={4}>
+                  <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
+                    <AttachMoneyIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
+                    <Typography variant="h6" sx={{ fontWeight: 'bold' }}>${portfolioData.totalValue}</Typography>
+                    <Typography variant="body2" color="text.secondary" align="center">Total Value</Typography>
+                  </Card>
+                </Grid>
+
+                <Grid item xs={4}>
+                  <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
+                    <AccountBalanceWalletIcon color="secondary" sx={{ fontSize: 40, mb: 1 }} />
+                    <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{portfolioData.transactions}</Typography>
+                    <Typography variant="body2" color="text.secondary" align="center">Transactions</Typography>
+                  </Card>
+                </Grid>
+
+                <Grid item xs={4}>
+                  <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
+                    <InventoryIcon color="success" sx={{ fontSize: 40, mb: 1 }} />
+                    <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{portfolioData.itemsCount}</Typography>
+                    <Typography variant="body2" color="text.secondary" align="center">Items</Typography>
+                  </Card>
+                </Grid>
               </Grid>
-              
-              <Grid item xs={4}>
-                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
-                  <AccountBalanceWalletIcon color="secondary" sx={{ fontSize: 40, mb: 1 }} />
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{portfolioData.transactions}</Typography>
-                  <Typography variant="body2" color="text.secondary" align="center">Transactions</Typography>
-                </Card>
-              </Grid>
-              
-              <Grid item xs={4}>
-                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', p: 2 }}>
-                  <InventoryIcon color="success" sx={{ fontSize: 40, mb: 1 }} />
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{portfolioData.itemsCount}</Typography>
-                  <Typography variant="body2" color="text.secondary" align="center">Items</Typography>
-                </Card>
-              </Grid>
-            </Grid>
+            )}
           </Box>
         </Box>
 
@@ -3433,11 +4151,12 @@ return (
                         <Tab label={`Repair${hasActiveItems(4) ? ' *' : ''}`} />
                         <Tab label={`Payment${hasActiveItems(5) ? ' *' : ''}`} />
                         <Tab label={`Refund${hasActiveItems(6) ? ' *' : ''}`} />
+                        <Tab label={`Redeem${hasActiveItems(7) ? ' *' : ''}`} />
                       </Tabs>
                     </Box>
                     <Box sx={{ display: 'flex', alignItems: 'center', pr: 2 }}>
                       <Typography variant="h6" color="primary" sx={{ ml: 2 }}>
-                        All Tickets: ${(totals.pawn + totals.buy + totals.trade + totals.sale + totals.repair + totals.payment + totals.refund).toFixed(2)}
+                        All Tickets: ${getAllTicketsTotal().toFixed(2)}
                       </Typography>
                     </Box>
                   </Box>
@@ -3449,13 +4168,19 @@ return (
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="15%" align="center">Estimator</TableCell>
-                              <TableCell width="10%" align="center">Image</TableCell>
-                              <TableCell width="50%">Item Description</TableCell>
+                              <TableCell width="12%" align="center">Estimator</TableCell>
+                              <TableCell width="8%" align="center">Image</TableCell>
+                              <TableCell width="40%">Item Description</TableCell>
                               <TableCell width="10%">Est. Value</TableCell>
-                              <TableCell width="20%" align="right" padding="none">
-                                <Tooltip title="Add Item">
-                                  <IconButton size="small" color="primary" onClick={handleAddRow}>
+                              <TableCell width="15%">Location</TableCell>
+                              <TableCell width="15%" align="right" padding="none">
+                                <Tooltip title={pawnItems.filter(item => item.description || item.value).length >= MAX_PAWN_ITEMS ? `Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket` : "Add Item"}>
+                                  <IconButton 
+                                    size="small" 
+                                    color="primary" 
+                                    onClick={handleAddRow}
+                                    disabled={pawnItems.filter(item => item.description || item.value).length >= MAX_PAWN_ITEMS}
+                                  >
                                     <AddIcon />
                                   </IconButton>
                                 </Tooltip>
@@ -3529,12 +4254,30 @@ return (
                                   />
                                 </TableCell>
                                 <TableCell>
-                                  <TextField 
-                                    variant="standard" 
-                                    fullWidth 
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.value}
                                     onChange={(e) => handleItemChange(item.id, 'value', e.target.value)}
                                   />
+                                </TableCell>
+                                <TableCell>
+                                  <Select
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.location || ''}
+                                    onChange={(e) => handleItemChange(item.id, 'location', e.target.value)}
+                                    displayEmpty
+                                  >
+                                    <MenuItem value="">
+                                      <em>Select Location</em>
+                                    </MenuItem>
+                                    {storageLocations.map((loc) => (
+                                      <MenuItem key={loc.location_id} value={loc.location}>
+                                        {loc.location}
+                                      </MenuItem>
+                                    ))}
+                                  </Select>
                                 </TableCell>
                                 <TableCell align="right">
                                   <Tooltip title="Edit">
@@ -3563,9 +4306,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -3692,9 +4443,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -3837,9 +4596,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -4000,9 +4767,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -4147,9 +4922,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -4161,13 +4944,17 @@ return (
                         <Table size="small">
                           <TableHead>
                             <TableRow>
-                              <TableCell width="15%" align="center">Estimator</TableCell>
-                              <TableCell width="10%" align="center">Image</TableCell>
-                              <TableCell width="10%">Amount</TableCell>
-                              <TableCell width="15%">Payment Method</TableCell>
-                              <TableCell width="15%">Reference</TableCell>
-                              <TableCell width="20%">Notes</TableCell>
-                              <TableCell width="20%" align="right" padding="none">
+                              <TableCell width="8%" align="center">Image</TableCell>
+                              <TableCell width="10%">Pawn Ticket ID</TableCell>
+                              <TableCell width="18%">Description</TableCell>
+                              <TableCell width="9%">Principal</TableCell>
+                              <TableCell width="8%">Days</TableCell>
+                              <TableCell width="8%">Term</TableCell>
+                              <TableCell width="10%">Date</TableCell>
+                              <TableCell width="9%">Interest</TableCell>
+                              <TableCell width="9%">Insurance Fee</TableCell>
+                              <TableCell width="9%">Amount</TableCell>
+                              <TableCell width="5%" align="right" padding="none">
                                 <Tooltip title="Add Item">
                                   <IconButton size="small" color="primary" onClick={handleAddRow}>
                                     <AddIcon />
@@ -4179,45 +4966,17 @@ return (
                           <TableBody>
                             {paymentItems.map((item) => (
                               <TableRow key={item.id}>
-                                <TableCell align="center" padding="normal">
-                                  <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
-                                    <Tooltip title="Jewelry Estimator">
-                                      <IconButton
-                                        size="small"
-                                        color="secondary"
-                                        onClick={() => handleJewelryEstimatorClick(item.id, 'payment')}
-                                        sx={{
-                                          bgcolor: selectedJewelryEstimator[`payment-${item.id}`] ? 'secondary.main' : 'transparent',
-                                          color: selectedJewelryEstimator[`payment-${item.id}`] ? 'white' : 'inherit',
-                                          '&:hover': {
-                                            bgcolor: selectedJewelryEstimator[`payment-${item.id}`] ? 'secondary.dark' : 'action.hover'
-                                          }
-                                        }}
-                                      >
-                                        <DiamondIcon fontSize="small" />
-                                      </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="Bullion Estimator">
-                                      <IconButton size="small" color="primary" onClick={handleBullionEstimatorClick}>
-                                        <MonetizationOnIcon fontSize="small" />
-                                      </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="Misc Estimator">
-                                      <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
-                                        <WatchIcon fontSize="small" />
-                                      </IconButton>
-                                    </Tooltip>
-                                  </Box>
-                                </TableCell>
                                 <TableCell align="center">
                                   {(item.images && item.images.length > 0) || item.image ? (
                                     <img
                                       src={item.images?.[0]?.url || item.image}
                                       alt="Item"
-                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px' }}
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px', cursor: 'pointer' }}
+                                      onClick={() => handleOpenCamera(item.id, 'payment')}
                                     />
                                   ) : (
                                     <Box
+                                      onClick={() => handleOpenCamera(item.id, 'payment')}
                                       sx={{
                                         width: '50px',
                                         height: '50px',
@@ -4225,7 +4984,11 @@ return (
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
-                                        borderRadius: '4px'
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        '&:hover': {
+                                          bgcolor: 'grey.300'
+                                        }
                                       }}
                                     >
                                       <PhotoCamera sx={{ color: 'grey.400' }} />
@@ -4236,50 +4999,104 @@ return (
                                   <TextField
                                     variant="standard"
                                     fullWidth
+                                    value={item.pawnTicketId}
+                                    onChange={(e) => handleItemChange(item.id, 'pawnTicketId', e.target.value)}
+                                    placeholder="Enter Pawn Ticket ID"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.description}
+                                    onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.principal}
+                                    onChange={(e) => handleItemChange(item.id, 'principal', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    type="number"
+                                    value={item.days}
+                                    onChange={(e) => handleItemChange(item.id, 'days', e.target.value)}
+                                    placeholder="30"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.term}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    type="date"
+                                    value={item.date}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.interest}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.fee}
+                                    onChange={(e) => handleItemChange(item.id, 'fee', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
                                     value={item.amount}
                                     onChange={(e) => handleItemChange(item.id, 'amount', e.target.value)}
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <TextField
-                                    variant="standard"
-                                    fullWidth
-                                    value={item.method}
-                                    onChange={(e) => handleItemChange(item.id, 'method', e.target.value)}
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <TextField
-                                    variant="standard"
-                                    fullWidth
-                                    value={item.reference}
-                                    onChange={(e) => handleItemChange(item.id, 'reference', e.target.value)}
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <TextField
-                                    variant="standard"
-                                    fullWidth
-                                    value={item.notes}
-                                    onChange={(e) => handleItemChange(item.id, 'notes', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
                                   />
                                 </TableCell>
                                 <TableCell align="right">
-                                  <Tooltip title="Edit">
-                                    <IconButton size="small" onClick={() => handleEditItem(item.id)}>
-                                      <EditIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Convert">
-                                    <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
-                                      <SwapHorizIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Duplicate">
-                                    <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
-                                      <ContentCopyIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
                                   <Tooltip title="Delete">
                                     <IconButton size="small" onClick={() => handleDeleteItem(item.id)}>
                                       <DeleteIcon fontSize="small" />
@@ -4291,9 +5108,17 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>
@@ -4436,9 +5261,159 @@ return (
                           </TableBody>
                         </Table>
                       </TableContainer>
-                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pr: 2 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
                         <Typography variant="h6" color="primary">
-                          Total: ${getCurrentTabTotal().toFixed(2)}
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+
+                  {/* Redeem Tab */}
+                  {activeTab === 7 && (
+                    <Box sx={{ p: 1 }}>
+                      <TableContainer>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell width="10%" align="center">Image</TableCell>
+                              <TableCell width="18%">Pawn Ticket ID</TableCell>
+                              <TableCell width="30%">Description</TableCell>
+                              <TableCell width="15%">Principal</TableCell>
+                              <TableCell width="15%">Interest/Fee</TableCell>
+                              <TableCell width="15%">Total Amount</TableCell>
+                              <TableCell width="7%" align="right" padding="none">
+                                <Tooltip title="Add Item">
+                                  <IconButton size="small" color="primary" onClick={handleAddRow}>
+                                    <AddIcon />
+                                  </IconButton>
+                                </Tooltip>
+                              </TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {redeemItems.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell align="center">
+                                  {(item.images && item.images.length > 0) || item.image ? (
+                                    <img
+                                      src={item.images?.[0]?.url || item.image}
+                                      alt="Item"
+                                      style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px', cursor: 'pointer' }}
+                                      onClick={() => handleOpenCamera(item.id, 'redeem')}
+                                    />
+                                  ) : (
+                                    <Box
+                                      onClick={() => handleOpenCamera(item.id, 'redeem')}
+                                      sx={{
+                                        width: '50px',
+                                        height: '50px',
+                                        bgcolor: 'grey.200',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        '&:hover': {
+                                          bgcolor: 'grey.300'
+                                        }
+                                      }}
+                                    >
+                                      <PhotoCamera sx={{ color: 'grey.400' }} />
+                                    </Box>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.pawnTicketId}
+                                    onChange={(e) => handleItemChange(item.id, 'pawnTicketId', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.description}
+                                    onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.principal}
+                                    onChange={(e) => handleItemChange(item.id, 'principal', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.interest}
+                                    onChange={(e) => handleItemChange(item.id, 'interest', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <TextField
+                                    variant="standard"
+                                    fullWidth
+                                    value={item.totalAmount}
+                                    onChange={(e) => handleItemChange(item.id, 'totalAmount', e.target.value)}
+                                    InputProps={{
+                                      readOnly: true,
+                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Tooltip title="Delete">
+                                    <IconButton size="small" onClick={() => handleDeleteItem(item.id)}>
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 2, pr: 2, gap: 0.5 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          Subtotal: {formatTotal(getCurrentTabSubtotal())}
+                        </Typography>
+                        {getCurrentTabTax() > 0 && (
+                          <Typography variant="body1" color="text.secondary">
+                            Tax ({(taxRate * 100).toFixed(1)}%): ${getCurrentTabTax().toFixed(2)}
+                          </Typography>
+                        )}
+                        <Typography variant="h6" color="primary">
+                          Total: {formatTotal(getCurrentTabTotalWithTax())}
                         </Typography>
                       </Box>
                     </Box>

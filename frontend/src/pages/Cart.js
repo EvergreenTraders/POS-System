@@ -321,6 +321,7 @@ const Cart = () => {
       case 'trade': return 'Trade';
       case 'repair': return 'Repair';
       case 'payment': return 'Payment';
+      case 'redeem': return 'Pawn'; // Show as "Pawn" for redeem items
       default: return 'Unknown';
     }
   };
@@ -334,6 +335,7 @@ const Cart = () => {
       case 'trade': return 'info';
       case 'repair': return 'warning';
       case 'payment': return 'default';
+      case 'redeem': return 'secondary'; // Same color as pawn
       default: return 'default';
     }
   };
@@ -353,6 +355,8 @@ const Cart = () => {
         return `${item.description || 'No description'} - Issue: ${item.issue || 'No issue'}`;
       case 'payment':
         return `Method: ${item.method || 'No method'}, Reference: ${item.reference || 'No reference'}`;
+      case 'redeem':
+        return `${item.description || item.long_desc || item.short_desc || 'No description'}`;
       default:
         return 'No description available';
     }
@@ -373,6 +377,12 @@ const Cart = () => {
       case 'trade': return parseFloat(item.priceDiff || 0);
       case 'repair': return parseFloat(item.fee || 0); // Money coming in (positive)
       case 'payment': return parseFloat(item.amount || 0);
+      case 'redeem': {
+        // For redeem items, we want to show the total redemption amount only once per ticket
+        // Set a flag so we only count it for the first item in the group
+        // This will be handled specially in the ticket total calculation
+        return 0; // Don't count individual items, we'll add the total separately
+      }
       default: return 0;
     }
   };
@@ -398,9 +408,38 @@ const Cart = () => {
 
     return selectedTickets.reduce((total, ticketId) => {
       const ticketItems = groupedByTicket[ticketId] || [];
-      const ticketTotal = ticketItems.reduce((subtotal, item) => {
-        return subtotal + parseFloat(getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)) || 0);
-      }, 0);
+
+      // Check if this is a redeem ticket
+      const isRedeemTicket = ticketItems.length > 0 && ticketItems[0].transaction_type === 'redeem';
+
+      let ticketTotal;
+      if (isRedeemTicket) {
+        // For redeem tickets, calculate total redemption amount
+        const firstItem = ticketItems[0];
+        const totalRedemptionAmount = parseFloat(firstItem.totalRedemptionAmount || 0);
+        const principal = parseFloat(firstItem.principal || 0);
+        const interest = parseFloat(firstItem.interest || 0);
+
+        // Use totalRedemptionAmount if available, otherwise calculate from principal + interest
+        if (totalRedemptionAmount > 0) {
+          ticketTotal = totalRedemptionAmount;
+        } else if (principal > 0 || interest > 0) {
+          ticketTotal = principal + interest;
+        } else {
+          // Fallback: sum all item prices (principals) and add interest
+          const totalPrincipal = ticketItems.reduce((sum, item) =>
+            sum + parseFloat(item.price || item.value || 0), 0
+          );
+          ticketTotal = totalPrincipal + interest;
+        }
+
+      } else {
+        // For other tickets, sum individual item values
+        ticketTotal = ticketItems.reduce((subtotal, item) => {
+          return subtotal + parseFloat(getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)) || 0);
+        }, 0);
+      }
+
       return total + ticketTotal;
     }, 0);
   };
@@ -716,9 +755,35 @@ const Cart = () => {
                 )
               );
 
-              const ticketTotal = filteredTicketItems.reduce((sum, item) =>
-                sum + getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)), 0
-              );
+              // Calculate ticket total - special handling for redeem tickets
+              const isRedeemTicket = filteredTicketItems.length > 0 && filteredTicketItems[0].transaction_type === 'redeem';
+              let ticketTotal;
+              if (isRedeemTicket) {
+                // For redeem tickets, calculate total redemption amount
+                const firstItem = filteredTicketItems[0];
+                const totalRedemptionAmount = parseFloat(firstItem.totalRedemptionAmount || 0);
+                const principal = parseFloat(firstItem.principal || 0);
+                const interest = parseFloat(firstItem.interest || 0);
+
+                // Use totalRedemptionAmount if available, otherwise calculate from principal + interest
+                if (totalRedemptionAmount > 0) {
+                  ticketTotal = totalRedemptionAmount;
+                } else if (principal > 0 || interest > 0) {
+                  ticketTotal = principal + interest;
+                } else {
+                  // Fallback: sum all item prices (principals) and add interest
+                  const totalPrincipal = filteredTicketItems.reduce((sum, item) =>
+                    sum + parseFloat(item.price || item.value || 0), 0
+                  );
+                  ticketTotal = totalPrincipal + interest;
+                }
+              } else {
+                // For other tickets, sum individual item values
+                ticketTotal = filteredTicketItems.reduce((sum, item) =>
+                  sum + getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)), 0
+                );
+              }
+
               const isTicketSelected = selectedTickets.includes(ticketId);
 
               return (
@@ -765,12 +830,19 @@ const Cart = () => {
                         <TableCell width="30%"><strong>Description</strong></TableCell>
                         <TableCell width="20%"><strong>Customer</strong></TableCell>
                         <TableCell width="20%"><strong>Employee</strong></TableCell>
-                        <TableCell align="right" width="10%"><strong>Total</strong></TableCell>
-                        <TableCell align="center" width="10%"><strong>Actions</strong></TableCell>
+                        {!isRedeemTicket && <TableCell align="right" width="10%"><strong>Total</strong></TableCell>}
+                        <TableCell align="center" width={isRedeemTicket ? "20%" : "10%"}><strong>Actions</strong></TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {filteredTicketItems.map((item, itemIndex) => (
+                      {filteredTicketItems.map((item, itemIndex) => {
+                        // For non-redeem tickets, calculate individual item value
+                        let displayTotal;
+                        if (!isRedeemTicket) {
+                          displayTotal = getItemValue(item, item.transaction_type || getItemTypeFromStructure(item));
+                        }
+
+                        return (
                         <TableRow key={itemIndex} hover>
                           <TableCell>
                             <Chip
@@ -804,9 +876,11 @@ const Cart = () => {
                               </Typography>
                             )}
                           </TableCell>
-                          <TableCell align="right">
-                            {formatCurrency(getItemValue(item, item.transaction_type || getItemTypeFromStructure(item)))}
-                          </TableCell>
+                          {!isRedeemTicket && (
+                            <TableCell align="right">
+                              {formatCurrency(displayTotal)}
+                            </TableCell>
+                          )}
                           <TableCell align="center">
                             <Tooltip title="Edit">
                               <IconButton
@@ -829,7 +903,8 @@ const Cart = () => {
                             </Tooltip>
                           </TableCell>
                         </TableRow>
-                      ))}
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </Paper>

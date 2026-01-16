@@ -52,6 +52,33 @@ import CreditCardIcon from '@mui/icons-material/CreditCard';
 const API_BASE_URL = config.apiUrl;
 
 /**
+ * Convert a blob URL or data URL to a File object
+ */
+const blobUrlToFile = async (url, filename = 'image.jpg') => {
+  try {
+    // Handle data URLs (base64 encoded images)
+    if (url.startsWith('data:')) {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      return new File([blob], filename, { type: blob.type || 'image/jpeg' });
+    }
+
+    // Handle blob URLs
+    if (url.startsWith('blob:')) {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      return new File([blob], filename, { type: blob.type || 'image/jpeg' });
+    }
+
+    console.warn('URL is neither a blob nor a data URL:', url);
+    return null;
+  } catch (error) {
+    console.error('Error converting URL to file:', error);
+    return null;
+  }
+};
+
+/**
  * Checkout component manages the checkout process, which includes displaying
  * an order summary, handling payment details, and allowing users to save
  * transactions as quotes. It provides functionality for both cash and card
@@ -103,6 +130,9 @@ function Checkout() {
   const [taxRate, setTaxRate] = useState(0.13); // Default 13% tax rate
   const [selectedProvince, setSelectedProvince] = useState('ON');
   const [provinceName, setProvinceName] = useState('Ontario');
+  const [locationDialogOpen, setLocationDialogOpen] = useState(false);
+  const [redeemedLocations, setRedeemedLocations] = useState([]);
+  const [selectedItemsForRedeem, setSelectedItemsForRedeem] = useState([]);
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
@@ -375,14 +405,39 @@ function Checkout() {
     // Always use checkoutItems if available, as it contains the items selected for checkout
     // Only fall back to cartItems if checkoutItems is empty (e.g., coming from estimator)
     const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
-    return itemsToCalculate.reduce((total, item) => {
+
+    return itemsToCalculate.reduce((total, item, index) => {
       let itemValue = 0;
       const transactionType = item.transaction_type?.toLowerCase() || '';
 
-      if (item.price !== undefined) itemValue = parseFloat(item.price) || 0;
-      else if (item.value !== undefined) itemValue = parseFloat(item.value) || 0;
-      else if (item.fee !== undefined) itemValue = parseFloat(item.fee) || 0;
-      else if (item.amount !== undefined) itemValue = parseFloat(item.amount) || 0;
+      // Special handling for redeem transactions
+      if (transactionType === 'redeem') {
+        // Only count the first item in each redeem ticket
+        const ticketId = item.pawnTicketId || item.buyTicketId;
+        const isFirstItemInTicket = itemsToCalculate.findIndex(i =>
+          (i.pawnTicketId || i.buyTicketId) === ticketId &&
+          (i.transaction_type || '').toLowerCase() === 'redeem'
+        ) === index;
+
+        if (isFirstItemInTicket) {
+          // Use totalRedemptionAmount for the first item
+          itemValue = parseFloat(item.totalRedemptionAmount || item.principal || 0);
+          // Add interest if available
+          if (item.interest) {
+            itemValue += parseFloat(item.interest || 0);
+          }
+        } else {
+          // Skip other items in the same redeem ticket
+          itemValue = 0;
+        }
+      } else {
+        // For non-redeem items, use standard price logic
+        if (item.price !== undefined) itemValue = parseFloat(item.price) || 0;
+        else if (item.value !== undefined) itemValue = parseFloat(item.value) || 0;
+        else if (item.fee !== undefined) itemValue = parseFloat(item.fee) || 0;
+        else if (item.amount !== undefined) itemValue = parseFloat(item.amount) || 0;
+        else if (item.totalAmount !== undefined) itemValue = parseFloat(item.totalAmount) || 0;
+      }
 
       // Add protection plan (15% of item price) if enabled
       const protectionPlanAmount = item.protectionPlan ? itemValue * 0.15 : 0;
@@ -390,7 +445,7 @@ function Checkout() {
 
       // Apply sign based on transaction type
       // Money going OUT (buy/pawn) = negative values
-      // Money coming IN (sale/repair) = positive values
+      // Money coming IN (sale/repair/redeem) = positive values
       if (transactionType === 'buy' || transactionType === 'pawn') {
         itemValue = -Math.abs(itemValue);
       } else {
@@ -402,37 +457,16 @@ function Checkout() {
   }, [checkoutItems, cartItems]);
 
   const calculateTax = useCallback(() => {
-    // Check if customer is tax exempt
-    if (selectedCustomer?.tax_exempt) {
-      return 0;
-    }
-    // Tax only applies to sales (positive values)
-    const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
-    const salesSubtotal = itemsToCalculate.reduce((total, item) => {
-      const transactionType = item.transaction_type?.toLowerCase() || '';
-      // Only include sale/repair transactions
-      if (transactionType === 'sale' || transactionType === 'repair') {
-        let itemValue = 0;
-        if (item.price !== undefined) itemValue = parseFloat(item.price) || 0;
-        else if (item.value !== undefined) itemValue = parseFloat(item.value) || 0;
-        else if (item.fee !== undefined) itemValue = parseFloat(item.fee) || 0;
-
-        // Add protection plan (15% of item price) if enabled
-        const protectionPlanAmount = item.protectionPlan ? itemValue * 0.15 : 0;
-        itemValue = itemValue + protectionPlanAmount;
-
-        return total + Math.abs(itemValue);
-      }
-      return total;
-    }, 0);
-    return salesSubtotal * taxRate;
-  }, [selectedCustomer, taxRate, checkoutItems, cartItems]);
+    // Tax is not calculated - all prices already include tax
+    return 0;
+  }, []);
 
   const calculateTotal = useCallback(() => {
-    const total = calculateSubtotal() + calculateTax();
+    // Total is just the subtotal (no tax added)
+    const total = calculateSubtotal();
     // Round to 2 decimal places to avoid floating-point precision issues
     return parseFloat(total.toFixed(2));
-  }, [calculateSubtotal, calculateTax]);
+  }, [calculateSubtotal]);
 
   const handlePaymentMethodChange = (event) => {
     setPaymentMethod(event.target.value);
@@ -768,8 +802,61 @@ function Checkout() {
             // Filter out items from inventory as they already exist in the database
             const newJewelryItems = checkoutItems.filter(item => !item.fromInventory);
 
-            // Check if any items have actual file objects (not just blob URLs)
-            const hasImageFiles = newJewelryItems.some(item =>
+
+            // Convert any blob URLs to File objects before uploading
+            const itemsWithConvertedImages = await Promise.all(
+              newJewelryItems.map(async (item) => {
+                if (!item.images || !Array.isArray(item.images)) {
+                  return item;
+                }
+
+                if (item.images.length === 0) {
+                  return item;
+                }
+
+                const convertedImages = await Promise.all(
+                  item.images.map(async (img, index) => {
+                    // If it's already a File object, keep it
+                    if (img.file instanceof File) {
+                      return img;
+                    }
+
+                    // If the URL is a blob URL or data URL, convert it to a File object
+                    if (img.url && (img.url.startsWith('blob:') || img.url.startsWith('data:'))) {
+                      const file = await blobUrlToFile(img.url, `${item.item_id || 'item'}-${index + 1}.jpg`);
+                      if (file) {
+                        return {
+                          ...img,
+                          file: file,
+                          isPrimary: img.isPrimary !== undefined ? img.isPrimary : index === 0
+                        };
+                      } else {
+                        console.error('Failed to convert URL to file');
+                      }
+                    }
+
+                    // Otherwise, keep the image as-is (might be a server URL like /uploads/...)
+                    if (img.url && !img.url.startsWith('blob:') && !img.url.startsWith('data:')) {
+                      return img;
+                    }
+
+                    console.warn('Image has no valid URL:', img);
+                    return null;
+                  })
+                );
+
+                // Filter out null values from failed conversions
+                const validImages = convertedImages.filter(Boolean);
+
+                return {
+                  ...item,
+                  images: validImages
+                };
+              })
+            );
+
+            // Check if any items have actual file objects (after conversion)
+            const hasImageFiles = itemsWithConvertedImages.some(item =>
               item.images && Array.isArray(item.images) &&
               item.images.some(img => img.file instanceof File)
             );
@@ -784,7 +871,7 @@ function Checkout() {
 
               // Collect all image files from all items and track their metadata
               const imageMetadata = [];
-              newJewelryItems.forEach((item, itemIndex) => {
+              itemsWithConvertedImages.forEach((item, itemIndex) => {
                 if (item.images && Array.isArray(item.images)) {
                   item.images.forEach((img, imgIndex) => {
                     if (img.file instanceof File) {
@@ -801,7 +888,8 @@ function Checkout() {
               });
 
               // Process cart items to remove file objects but keep image metadata
-              const processedItems = newJewelryItems.map(item => {
+              // IMPORTANT: Use itemsWithConvertedImages which has the converted File objects
+              const processedItems = itemsWithConvertedImages.map(item => {
                 const { images, ...itemWithoutImages } = item;
 
                 // Keep image metadata (isPrimary flag) but remove file objects
@@ -816,24 +904,8 @@ function Checkout() {
                 };
               });
 
-              // Check if we have any jewelry items from the gem estimator
-              // If items have originalData, merge it with current item data
-              const jewelryItemsToPost = jewelryItems.map(item => {
-                // Spread originalData first for base jewelry fields
-                // Then spread the current item to override with any updates (vintage, notes, brand, etc.)
-                // This ensures ALL fields including manual additions are preserved
-                const mergedItem = {
-                  ...(item.originalData || {}),
-                  ...item,
-                  // Ensure price and transaction_type are always set
-                  price: item.price || item.originalData?.price,
-                  transaction_type: item.transaction_type || item.originalData?.transaction_type,
-                  images: item.images || item.originalData?.images
-                };
-
-                return mergedItem;
-              });
-              itemsToPost = jewelryItems.length > 0 ? jewelryItemsToPost : processedItems;
+              // Don't use the old jewelryItems state - use processedItems which has converted images
+              itemsToPost = processedItems;
 
               // Add cart items as JSON string in FormData
               formData.append('cartItems', JSON.stringify(itemsToPost));
@@ -853,17 +925,25 @@ function Checkout() {
               );
             } else {
               // No files, use regular JSON approach (for backward compatibility)
-              const processedItems = newJewelryItems.map(item => {
+              // Note: After blob URL conversion, we should always have files if there were blob URLs
+              // This else branch is only for items with server URLs or no images at all
+              const processedItems = itemsWithConvertedImages.map(item => {
                 const { images, ...itemWithoutImages } = item;
 
                 let processedImages = [];
                 if (images && Array.isArray(images)) {
                   processedImages = images.map(img => {
                     if (typeof img === 'object') {
-                      return { url: img.url || '' };
+                      // Only save server URLs, not blob or data URLs
+                      const url = img.url || '';
+                      if (url.startsWith('blob:') || url.startsWith('data:')) {
+                        console.warn('Blob/Data URL detected but not converted to file. Skipping image.');
+                        return null;
+                      }
+                      return { url };
                     }
                     return img;
-                  });
+                  }).filter(Boolean); // Remove null entries
                 }
 
                 return {
@@ -872,24 +952,8 @@ function Checkout() {
                 };
               });
 
-              // Check if we have any jewelry items from the gem estimator
-              // If items have originalData, merge it with current item data
-              const jewelryItemsToPost = jewelryItems.map(item => {
-                // Spread originalData first for base jewelry fields
-                // Then spread the current item to override with any updates (vintage, notes, brand, etc.)
-                // This ensures ALL fields including manual additions are preserved
-                const mergedItem = {
-                  ...(item.originalData || {}),
-                  ...item,
-                  // Ensure price and transaction_type are always set
-                  price: item.price || item.originalData?.price,
-                  transaction_type: item.transaction_type || item.originalData?.transaction_type,
-                  images: item.images || item.originalData?.images
-                };
-
-                return mergedItem;
-              });
-              itemsToPost = jewelryItems.length > 0 ? jewelryItemsToPost : processedItems;
+              // Don't use the old jewelryItems state - use processedItems which has converted images
+              itemsToPost = processedItems;
 
               jewelryResponse = await axios.post(
                 `${config.apiUrl}/jewelry`,
@@ -1251,14 +1315,10 @@ function Checkout() {
             // Only update status for sale transactions with inventory items
             if (transactionType === 'sale' && item.item_id && item.fromInventory) {
               try {
-                // Calculate total price including protection plan and tax
+                // Calculate total price including protection plan (tax already included in price)
                 const basePrice = parseFloat(item.price) || 0;
                 const protectionPlanAmount = item.protectionPlan ? basePrice * 0.15 : 0;
-                const subtotal = basePrice + protectionPlanAmount;
-
-                // Calculate tax (check if customer is tax exempt)
-                const taxAmount = selectedCustomer?.tax_exempt ? 0 : subtotal * taxRate;
-                const totalItemPrice = subtotal + taxAmount;
+                const totalItemPrice = basePrice + protectionPlanAmount;
 
                 const response = await axios.put(
                   `${config.apiUrl}/jewelry/${item.item_id}/status`,
@@ -1268,7 +1328,6 @@ function Checkout() {
                   },
                   { headers: { Authorization: `Bearer ${token}` } }
                 );
-                console.log(`Successfully updated item ${item.item_id} status to SOLD with item price`, response.data);
               } catch (updateError) {
                 console.error(`Error updating item ${item.item_id} status:`, updateError);
                 console.error('Error details:', updateError.response?.data);
@@ -1277,7 +1336,101 @@ function Checkout() {
             }
           }
 
-          // Step 4: Display success message and navigate to home
+          // Step 3.6: Update pawn_ticket status to REDEEMED for redeem transactions
+          const redeemedTickets = new Set();
+          const redeemedItemLocations = []; // Collect locations for popup
+
+          for (const item of checkoutItems) {
+            const transactionType = item.transaction_type?.toLowerCase() || '';
+
+            if (transactionType === 'redeem') {
+              const pawnTicketId = item.pawnTicketId || item.buyTicketId;
+
+              if (pawnTicketId && !redeemedTickets.has(pawnTicketId)) {
+                redeemedTickets.add(pawnTicketId);
+
+                try {
+                  // Update pawn_ticket status to REDEEMED
+                  await axios.put(
+                    `${config.apiUrl}/pawn-ticket/${pawnTicketId}/status`,
+                    { status: 'REDEEMED' },
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+
+                } catch (updateError) {
+                  console.error(`Error updating pawn ticket ${pawnTicketId} status:`, updateError);
+                  console.error('Error details:', updateError.response?.data);
+                }
+              }
+
+              // Collect item location for popup
+              if (item.location) {
+                redeemedItemLocations.push({
+                  item_id: item.item_id,
+                  description: item.description || item.long_desc || item.short_desc || 'Item',
+                  location: item.location,
+                  pawnTicketId: pawnTicketId
+                });
+              }
+            }
+          }
+
+          // Step 4: Clear all storage IMMEDIATELY before any UI updates
+          // Clear all ticket items from localStorage FIRST
+          const ticketTypes = ['pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund', 'redeem'];
+          ticketTypes.forEach(type => {
+            // Clear both customer-specific and global ticket items
+            Object.keys(localStorage).forEach(key => {
+              if (key.startsWith(`ticket_`) && key.includes(`_${type}`)) {
+                localStorage.removeItem(key);
+              }
+            });
+          });
+
+          // Clear checkout items from sessionStorage
+          sessionStorage.removeItem('checkoutItems');
+          sessionStorage.removeItem('selectedCustomer');
+
+          // Remove only the checked out items from cart, keeping other items
+          try {
+            // Read current cart items from sessionStorage to get the most up-to-date state
+            const sessionCartItems = sessionStorage.getItem('cartItems');
+            let currentCartItems = [];
+
+            if (sessionCartItems) {
+              currentCartItems = JSON.parse(sessionCartItems);
+            }
+
+            // Create a set of ticket IDs from checkoutItems for efficient lookup
+            const checkedOutTicketIds = new Set(
+              checkoutItems
+                .filter(item => item.buyTicketId)
+                .map(item => item.buyTicketId)
+            );
+
+            // Filter out all items that belong to the checked out tickets
+            const remainingItems = currentCartItems.filter(item => {
+              // If item has a buyTicketId and it matches one of the checked out tickets, remove it
+              if (item.buyTicketId && checkedOutTicketIds.has(item.buyTicketId)) {
+                return false;
+              }
+              return true;
+            });
+
+            // Update sessionStorage directly to ensure persistence
+            sessionStorage.setItem('cartItems', JSON.stringify(remainingItems));
+
+            // If all items were checked out, clear the cart entirely
+            if (remainingItems.length === 0) {
+              clearCart();
+            }
+          } catch (error) {
+            console.error('Error removing checked out items from cart:', error);
+            // Fallback to clearing everything on error
+            clearCart();
+          }
+
+          // Display success message and navigate
           setLoading(false);
           setSnackbar({
             open: true,
@@ -1285,58 +1438,21 @@ function Checkout() {
             severity: 'success'
           });
 
-          // Remove only the checked out items from cart, keeping other items
-          // This allows multiple tickets to be managed independently
-          setTimeout(() => {
-            try {
-              // Read current cart items from sessionStorage to get the most up-to-date state
-              const sessionCartItems = sessionStorage.getItem('cartItems');
-              let currentCartItems = [];
+          setTransactionCreated(false);
+          setCurrentTransactionId(null);
+          setPayments([]);
 
-              if (sessionCartItems) {
-                currentCartItems = JSON.parse(sessionCartItems);
-              }
-
-              // Create a set of ticket IDs from checkoutItems for efficient lookup
-              const checkedOutTicketIds = new Set(
-                checkoutItems
-                  .filter(item => item.buyTicketId)
-                  .map(item => item.buyTicketId)
-              );
-
-
-              // Filter out all items that belong to the checked out tickets
-              const remainingItems = currentCartItems.filter(item => {
-                // If item has a buyTicketId and it matches one of the checked out tickets, remove it
-                if (item.buyTicketId && checkedOutTicketIds.has(item.buyTicketId)) {
-                  return false;
-                }
-
-                return true;
-              });
-
-              // Update sessionStorage directly to ensure persistence
-              sessionStorage.setItem('cartItems', JSON.stringify(remainingItems));
-
-              // If all items were checked out, clear the cart entirely
-              if (remainingItems.length === 0) {
-                clearCart();
-              }
-            } catch (error) {
-              console.error('Error removing checked out items from cart:', error);
-              // Fallback to clearing everything on error
-              clearCart();
-            }
-
-            // Clear checkout items from sessionStorage after successful transaction
-            sessionStorage.removeItem('checkoutItems');
-            sessionStorage.removeItem('selectedCustomer');
-
-            setTransactionCreated(false);
-            setCurrentTransactionId(null);
-            setPayments([]);
-            navigate('/jewel-estimator');
-          }, 1000);
+          // Check if there are redeemed items with locations to show
+          if (redeemedItemLocations.length > 0) {
+            setRedeemedLocations(redeemedItemLocations);
+            setLocationDialogOpen(true);
+            // Don't navigate yet - user will navigate after closing the dialog
+          } else {
+            // Navigate after a brief delay to show success message
+            setTimeout(() => {
+              navigate('/jewel-estimator');
+            }, 1000);
+          }
 
         } catch (paymentError) {
           console.error('Error processing payment:', paymentError);
@@ -1797,7 +1913,7 @@ function Checkout() {
                       <Grid item xs={12}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                           <Typography variant="subtitle1" sx={{ flexBasis: '30%' }}>
-                            <strong>N:</strong> {`${selectedCustomer.name || ''}`}
+                            <strong>N:</strong> {selectedCustomer.name || `${selectedCustomer.first_name || ''} ${selectedCustomer.last_name || ''}`.trim() || 'N/A'}
                           </Typography>
                           <Typography variant="subtitle1" sx={{ flexBasis: '40%', textAlign: 'center' }}>
                             {selectedCustomer.email && (
@@ -1817,26 +1933,6 @@ function Checkout() {
                           <Typography variant="subtitle1">
                             <strong>Address:</strong> {selectedCustomer.address}
                           </Typography>
-                        </Grid>
-                      )}
-
-                      {selectedCustomer.tax_exempt && (
-                        <Grid item xs={12}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography
-                              variant="subtitle2"
-                              sx={{
-                                color: '#4caf50',
-                                fontWeight: 'bold',
-                                backgroundColor: '#e8f5e9',
-                                padding: '4px 12px',
-                                borderRadius: '4px',
-                                display: 'inline-block'
-                              }}
-                            >
-                              ✓ TAX EXEMPT CUSTOMER
-                            </Typography>
-                          </Box>
                         </Grid>
                       )}
                     </Grid>
@@ -1866,10 +1962,11 @@ function Checkout() {
                   </TableHead>
                   <TableBody>
                     {checkoutItems.map((item, index) => {
-                    
+                      const itemTransactionType = (item.transaction_type || item.transactionType || '').toLowerCase();
+
                       // Determine the appropriate description to display
                       let displayDescription = '';
-                      
+
                       // Try to use description field first (most common)
                       if (item.long_desc || item.description) {
                         displayDescription = item.long_desc || item.description;
@@ -1890,7 +1987,7 @@ function Checkout() {
                       else {
                         displayDescription = 'Item';
                       }
-                      
+
                       // Determine transaction type to display
                       let transactionType = '';
                       if (item.transactionType) {
@@ -1911,13 +2008,37 @@ function Checkout() {
                           transactionType = 'Other';
                         }
                       }
-                      
+
                       // Determine price to display
                       let price = 0;
-                      if (item.price !== undefined) price = parseFloat(item.price) || 0;
-                      else if (item.value !== undefined) price = parseFloat(item.value) || 0;
-                      else if (item.fee !== undefined) price = parseFloat(item.fee) || 0;
-                      else if (item.amount !== undefined) price = parseFloat(item.amount) || 0;
+
+                      // Special handling for redeem transactions
+                      if (itemTransactionType === 'redeem') {
+                        // For redeem items, check if this is the first item in the ticket
+                        const ticketId = item.pawnTicketId || item.buyTicketId;
+                        const isFirstItemInTicket = checkoutItems.findIndex(i =>
+                          (i.pawnTicketId || i.buyTicketId) === ticketId &&
+                          (i.transaction_type || i.transactionType || '').toLowerCase() === 'redeem'
+                        ) === index;
+
+                        if (isFirstItemInTicket) {
+                          // Use totalRedemptionAmount for the first item
+                          price = parseFloat(item.totalRedemptionAmount || item.principal || 0);
+                          // Add interest if available
+                          if (item.interest) {
+                            price += parseFloat(item.interest || 0);
+                          }
+                        } else {
+                          // For other items in the same redeem ticket, price is 0
+                          price = 0;
+                        }
+                      } else {
+                        // For non-redeem items, use standard price logic
+                        if (item.price !== undefined) price = parseFloat(item.price) || 0;
+                        else if (item.value !== undefined) price = parseFloat(item.value) || 0;
+                        else if (item.fee !== undefined) price = parseFloat(item.fee) || 0;
+                        else if (item.amount !== undefined) price = parseFloat(item.amount) || 0;
+                      }
 
                       // Add protection plan (15% of item price) if enabled
                       const protectionPlanAmount = item.protectionPlan ? price * 0.15 : 0;
@@ -1926,7 +2047,6 @@ function Checkout() {
                       // Apply sign based on transaction type
                       // Money going OUT (buy/pawn) = negative values
                       // Money coming IN (sale/repair/other) = positive values
-                      const itemTransactionType = (item.transaction_type || item.transactionType || '').toLowerCase();
                       let displayPrice = totalPrice;
                       if (itemTransactionType === 'buy' || itemTransactionType === 'pawn') {
                         displayPrice = -Math.abs(totalPrice);
@@ -1968,7 +2088,7 @@ function Checkout() {
                             color: displayPrice < 0 ? 'error.main' : 'success.main',
                             fontWeight: 'bold'
                           }}>
-                            ${parseFloat(displayPrice).toFixed(2)}
+                            {displayPrice === 0 && itemTransactionType === 'redeem' ? '-' : `$${parseFloat(displayPrice).toFixed(2)}`}
                           </TableCell>
                         </TableRow>
                       );
@@ -1982,24 +2102,6 @@ function Checkout() {
               {/* Price Breakdown */}
               <Box sx={{ mt: 2 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body1">Subtotal:</Typography>
-                  <Typography variant="body1">${calculateSubtotal().toFixed(2)}</Typography>
-                </Box>
-
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body1">
-                    {selectedCustomer?.tax_exempt ? (
-                      <span style={{ color: '#4caf50', fontWeight: 'bold' }}>Tax (EXEMPT)</span>
-                    ) : (
-                      `Tax (${(taxRate * 100).toFixed(0)}%)`
-                    )}:
-                  </Typography>
-                  <Typography variant="body1">${calculateTax().toFixed(2)}</Typography>
-                </Box>
-
-                <Divider sx={{ my: 1 }} />
-
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant="h6" fontWeight="bold">Total:</Typography>
                   <Typography variant="h6" fontWeight="bold" color="primary">
                     ${calculateTotal().toFixed(2)}
@@ -2110,6 +2212,375 @@ function Checkout() {
         </Grid>
       </Box>
 
+      {/* Redeemed Items Location Dialog */}
+      <Dialog
+        open={locationDialogOpen}
+        onClose={() => {
+          setLocationDialogOpen(false);
+          setSelectedItemsForRedeem([]);
+          navigate('/jewel-estimator');
+        }}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Typography variant="h5" fontWeight="bold">
+            Redeemed Items - Storage Locations
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Please check items as you retrieve them from storage:
+          </Typography>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell width="10%" align="center"><strong>Retrieved</strong></TableCell>
+                  <TableCell width="25%"><strong>Pawn Ticket ID</strong></TableCell>
+                  <TableCell width="35%"><strong>Item Description</strong></TableCell>
+                  <TableCell width="30%"><strong>Storage Location</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {redeemedLocations.map((item, index) => (
+                  <TableRow key={index} hover>
+                    <TableCell align="center">
+                      <Checkbox
+                        checked={selectedItemsForRedeem.includes(index)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedItemsForRedeem([...selectedItemsForRedeem, index]);
+                          } else {
+                            setSelectedItemsForRedeem(selectedItemsForRedeem.filter(i => i !== index));
+                          }
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>{item.pawnTicketId}</TableCell>
+                    <TableCell>{item.description}</TableCell>
+                    <TableCell>
+                      <Chip
+                        label={item.location}
+                        color="primary"
+                        sx={{ fontWeight: 'bold' }}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setLocationDialogOpen(false);
+              setSelectedItemsForRedeem([]);
+              navigate('/jewel-estimator');
+            }}
+            variant="outlined"
+          >
+            Close
+          </Button>
+          <Button
+            onClick={async () => {
+              try {
+                const token = localStorage.getItem('token');
+
+                // Update jewelry status to REDEEMED for checked items
+                for (const itemIndex of selectedItemsForRedeem) {
+                  const item = redeemedLocations[itemIndex];
+                  if (item.item_id) {
+                    await axios.put(
+                      `${config.apiUrl}/jewelry/${item.item_id}/status`,
+                      { status: 'REDEEMED' },
+                      { headers: { Authorization: `Bearer ${token}` } }
+                    );
+                  }
+                }
+
+                // Fetch business info for receipt
+                let businessName = '';
+                let businessAddress = '';
+                let businessPhone = '';
+                let businessLogo = '';
+                let businessLogoMimetype = '';
+
+                try {
+                  const businessResponse = await axios.get(`${config.apiUrl}/business-info`);
+                  if (businessResponse.data) {
+                    businessName = businessResponse.data.business_name || '';
+                    businessAddress = businessResponse.data.address || '';
+                    businessPhone = businessResponse.data.phone || '';
+                    businessLogo = businessResponse.data.logo || '';
+                    businessLogoMimetype = businessResponse.data.logo_mimetype || 'image/png';
+                  }
+                } catch (err) {
+                  console.error('Error fetching business info:', err);
+                }
+
+                // Get selected items for receipt
+                const selectedItems = selectedItemsForRedeem.map(idx => redeemedLocations[idx]);
+
+                // Calculate totals
+                const totalRedemptionAmount = selectedItems.length > 0
+                  ? parseFloat(checkoutItems.find(i => (i.transaction_type || '').toLowerCase() === 'redeem')?.totalRedemptionAmount || 0)
+                  : 0;
+
+                // Get pawn ticket ID
+                const pawnTicketId = selectedItems[0]?.pawnTicketId || 'N/A';
+
+                // Format current date/time
+                const now = new Date();
+                const formattedDate = now.toLocaleDateString('en-US', {
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit'
+                });
+                const formattedTime = now.toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                });
+
+                // Generate redeem receipt HTML
+                const receiptHTML = `
+                  <!DOCTYPE html>
+                  <html>
+                  <head>
+                    <title>Redeem Receipt - ${pawnTicketId}</title>
+                    <style>
+                      body {
+                        font-family: 'Courier New', monospace;
+                        max-width: 300px;
+                        margin: 0 auto;
+                        padding: 20px;
+                        font-size: 12px;
+                      }
+                      .header {
+                        text-align: center;
+                        margin-bottom: 15px;
+                        border-bottom: 2px dashed #333;
+                        padding-bottom: 15px;
+                      }
+                      .header img {
+                        max-width: 100px;
+                        max-height: 60px;
+                        margin-bottom: 10px;
+                      }
+                      .header h1 {
+                        margin: 0;
+                        font-size: 16px;
+                        font-weight: bold;
+                      }
+                      .header p {
+                        margin: 3px 0;
+                        font-size: 10px;
+                      }
+                      .receipt-title {
+                        text-align: center;
+                        font-size: 14px;
+                        font-weight: bold;
+                        margin: 15px 0;
+                        padding: 8px;
+                        background-color: #f0f0f0;
+                        border: 1px solid #333;
+                      }
+                      .info-section {
+                        margin-bottom: 15px;
+                      }
+                      .info-row {
+                        display: flex;
+                        justify-content: space-between;
+                        padding: 4px 0;
+                        font-size: 11px;
+                      }
+                      .info-label {
+                        font-weight: bold;
+                      }
+                      .items-section {
+                        margin: 15px 0;
+                        border-top: 1px dashed #333;
+                        border-bottom: 1px dashed #333;
+                        padding: 10px 0;
+                      }
+                      .items-header {
+                        font-weight: bold;
+                        margin-bottom: 10px;
+                        font-size: 12px;
+                      }
+                      .item-row {
+                        display: flex;
+                        justify-content: space-between;
+                        padding: 5px 0;
+                        border-bottom: 1px dotted #ccc;
+                        font-size: 10px;
+                      }
+                      .item-row:last-child {
+                        border-bottom: none;
+                      }
+                      .item-desc {
+                        flex: 1;
+                      }
+                      .item-location {
+                        text-align: right;
+                        font-weight: bold;
+                        color: #333;
+                      }
+                      .total-section {
+                        margin-top: 15px;
+                        padding-top: 10px;
+                        border-top: 2px dashed #333;
+                      }
+                      .total-row {
+                        display: flex;
+                        justify-content: space-between;
+                        padding: 5px 0;
+                        font-size: 14px;
+                        font-weight: bold;
+                      }
+                      .footer {
+                        margin-top: 20px;
+                        text-align: center;
+                        font-size: 10px;
+                        border-top: 1px dashed #333;
+                        padding-top: 15px;
+                      }
+                      .footer p {
+                        margin: 5px 0;
+                      }
+                      .signature-section {
+                        margin-top: 30px;
+                        padding-top: 10px;
+                      }
+                      .signature-line {
+                        border-top: 1px solid #333;
+                        margin-top: 40px;
+                        padding-top: 5px;
+                        font-size: 10px;
+                      }
+                      .no-print {
+                        margin-top: 30px;
+                        text-align: center;
+                      }
+                      @media print {
+                        body { margin: 0; padding: 10px; }
+                        .no-print { display: none; }
+                      }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="header">
+                      ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Business Logo" />` : ''}
+                      <h1>${businessName || 'Business Name'}</h1>
+                      ${businessAddress ? `<p>${businessAddress}</p>` : ''}
+                      ${businessPhone ? `<p>Tel: ${businessPhone}</p>` : ''}
+                    </div>
+
+                    <div class="receipt-title">
+                      REDEMPTION RECEIPT
+                    </div>
+
+                    <div class="info-section">
+                      <div class="info-row">
+                        <span class="info-label">Pawn Ticket #:</span>
+                        <span>${pawnTicketId}</span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">Date:</span>
+                        <span>${formattedDate}</span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">Time:</span>
+                        <span>${formattedTime}</span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">Customer:</span>
+                        <span>${selectedCustomer?.name || selectedCustomer?.first_name + ' ' + selectedCustomer?.last_name || 'N/A'}</span>
+                      </div>
+                      ${selectedCustomer?.phone ? `
+                      <div class="info-row">
+                        <span class="info-label">Phone:</span>
+                        <span>${selectedCustomer.phone}</span>
+                      </div>
+                      ` : ''}
+                      <div class="info-row">
+                        <span class="info-label">Employee:</span>
+                        <span>${user?.firstName || ''} ${user?.lastName || ''}</span>
+                      </div>
+                    </div>
+
+                    <div class="items-section">
+                      <div class="items-header">REDEEMED ITEMS (${selectedItems.length})</div>
+                      ${selectedItems.map((item, idx) => `
+                        <div class="item-row">
+                          <span class="item-desc">${idx + 1}. ${item.description || 'Item'}</span>
+                          <span class="item-location">[${item.location || 'N/A'}]</span>
+                        </div>
+                      `).join('')}
+                    </div>
+
+                    <div class="total-section">
+                      <div class="total-row">
+                        <span>TOTAL PAID:</span>
+                        <span>$${totalRedemptionAmount.toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    <div class="signature-section">
+                      <div class="signature-line">
+                        Customer Signature
+                      </div>
+                    </div>
+
+                    <div class="footer">
+                      <p>Items have been redeemed and returned to customer.</p>
+                      <p>Thank you for your business!</p>
+                      <p style="margin-top: 10px; font-size: 9px;">
+                        ${formattedDate} ${formattedTime}
+                      </p>
+                    </div>
+
+                    <div class="no-print">
+                      <button onclick="window.print()" style="padding: 10px 30px; font-size: 14px; cursor: pointer;">Print</button>
+                      <button onclick="window.close()" style="padding: 10px 30px; font-size: 14px; margin-left: 10px; cursor: pointer;">Close</button>
+                    </div>
+                  </body>
+                  </html>
+                `;
+
+                // Open receipt in new window
+                const printWindow = window.open('', '_blank');
+                printWindow.document.write(receiptHTML);
+                printWindow.document.close();
+
+                setSnackbar({
+                  open: true,
+                  message: `${selectedItemsForRedeem.length} item(s) marked as redeemed`,
+                  severity: 'success'
+                });
+
+                setLocationDialogOpen(false);
+                setSelectedItemsForRedeem([]);
+                navigate('/jewel-estimator');
+              } catch (error) {
+                console.error('Error updating items:', error);
+                setSnackbar({
+                  open: true,
+                  message: 'Error updating item status',
+                  severity: 'error'
+                });
+              }
+            }}
+            variant="contained"
+            color="success"
+            disabled={selectedItemsForRedeem.length === 0}
+          >
+            Complete Redemption & Print Receipt
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Snackbar for notifications */}
       <Snackbar
         open={snackbar.open}
@@ -2117,7 +2588,7 @@ function Checkout() {
         onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert 
+        <Alert
           onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
           severity={snackbar.severity}
           sx={{ width: '100%' }}
