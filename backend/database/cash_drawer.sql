@@ -332,10 +332,28 @@ COMMENT ON TABLE cash_denominations IS 'Stores denomination counts for cash draw
 COMMENT ON COLUMN cash_denominations.denomination_type IS 'Type of count: opening (start of shift) or closing (end of shift)';
 COMMENT ON COLUMN cash_denominations.total_amount IS 'Automatically calculated total from all denominations';
 
--- Add blindCount preference for cash drawer counting mode
+-- Add blindCount preferences for cash drawer counting mode (separate for drawers and safe)
 INSERT INTO user_preferences (preference_name, preference_value)
-VALUES ('blindCount', 'true')
+VALUES 
+  ('blindCount_drawers', 'true'),
+  ('blindCount_safe', 'true')
 ON CONFLICT (preference_name) DO NOTHING;
+
+-- Migrate existing blindCount preference to blindCount_drawers if it exists
+UPDATE user_preferences 
+SET preference_name = 'blindCount_drawers'
+WHERE preference_name = 'blindCount' 
+AND NOT EXISTS (SELECT 1 FROM user_preferences WHERE preference_name = 'blindCount_drawers');
+
+-- Also set blindCount_safe to the same value if blindCount existed
+INSERT INTO user_preferences (preference_name, preference_value)
+SELECT 'blindCount_safe', preference_value
+FROM user_preferences
+WHERE preference_name = 'blindCount_drawers'
+AND NOT EXISTS (SELECT 1 FROM user_preferences WHERE preference_name = 'blindCount_safe');
+
+-- Remove old blindCount preference if it exists (after migration)
+DELETE FROM user_preferences WHERE preference_name = 'blindCount';
 
 -- Create discrepancy_threshold table to store acceptable discrepancy amount
 CREATE TABLE IF NOT EXISTS discrepancy_threshold (

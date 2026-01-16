@@ -152,7 +152,8 @@ function SystemConfig() {
   const [hasMasterSafe, setHasMasterSafe] = useState(false);
   const [numberOfCases, setNumberOfCases] = useState({ count: 0, id: null, label: '' });
   const [cases, setCases] = useState([]);
-  const [isBlindCount, setIsBlindCount] = useState(true);
+  const [isBlindCountDrawers, setIsBlindCountDrawers] = useState(true);
+  const [isBlindCountSafe, setIsBlindCountSafe] = useState(true);
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState({ amount: 0.00, id: null });
   const [minClose, setMinClose] = useState(0);
   const [maxClose, setMaxClose] = useState(0);
@@ -230,11 +231,14 @@ function SystemConfig() {
   const fetchBlindCountPreference = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/user_preferences`);
-      const blindCountPreference = response.data.find(pref => pref.preference_name === 'blindCount');
-      setIsBlindCount(blindCountPreference ? blindCountPreference.preference_value === 'true' : true);
+      const blindCountDrawersPreference = response.data.find(pref => pref.preference_name === 'blindCount_drawers');
+      const blindCountSafePreference = response.data.find(pref => pref.preference_name === 'blindCount_safe');
+      setIsBlindCountDrawers(blindCountDrawersPreference ? blindCountDrawersPreference.preference_value === 'true' : true);
+      setIsBlindCountSafe(blindCountSafePreference ? blindCountSafePreference.preference_value === 'true' : true);
     } catch (error) {
       console.error('Error fetching blind count preference:', error);
-      setIsBlindCount(true); // Default to blind count
+      setIsBlindCountDrawers(true); // Default to blind count
+      setIsBlindCountSafe(true); // Default to blind count
     }
   };
 
@@ -1303,25 +1307,49 @@ function SystemConfig() {
     }
   };
 
-  const handleBlindCountToggle = async (event) => {
+  const handleBlindCountDrawersToggle = async (event) => {
     const newValue = event.target.checked;
-    setIsBlindCount(newValue);
+    setIsBlindCountDrawers(newValue);
     try {
       await axios.put(`${API_BASE_URL}/user_preferences`, {
-        preference_name: 'blindCount',
+        preference_name: 'blindCount_drawers',
         preference_value: newValue.toString()
       });
       setSnackbar({
         open: true,
-        message: `Cash drawer count mode set to ${newValue ? 'Blind Count' : 'Open Count'}`,
+        message: `Drawers count mode set to ${newValue ? 'Blind Count' : 'Open Count'}`,
         severity: 'success'
       });
     } catch (error) {
-      console.error('Error updating blind count preference:', error);
-      setIsBlindCount(!newValue); // Revert on error
+      console.error('Error updating blind count preference for drawers:', error);
+      setIsBlindCountDrawers(!newValue); // Revert on error
       setSnackbar({
         open: true,
-        message: 'Failed to update count mode settings',
+        message: 'Failed to update count mode settings for drawers',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleBlindCountSafeToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsBlindCountSafe(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/user_preferences`, {
+        preference_name: 'blindCount_safe',
+        preference_value: newValue.toString()
+      });
+      setSnackbar({
+        open: true,
+        message: `Safe count mode set to ${newValue ? 'Blind Count' : 'Open Count'}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating blind count preference for safe:', error);
+      setIsBlindCountSafe(!newValue); // Revert on error
+      setSnackbar({
+        open: true,
+        message: 'Failed to update count mode settings for safe',
         severity: 'error'
       });
     }
@@ -1807,18 +1835,36 @@ function SystemConfig() {
                 <Box display="flex" alignItems="center" gap={3} sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
                   <Box>
                     <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
-                      Count Mode
+                      Count Mode - Drawers
                     </Typography>
                     <Box display="flex" alignItems="center" gap={1}>
-                      <Typography variant="body2" color={!isBlindCount ? 'primary' : 'text.secondary'} fontWeight={!isBlindCount ? 'bold' : 'normal'}>
+                      <Typography variant="body2" color={!isBlindCountDrawers ? 'primary' : 'text.secondary'} fontWeight={!isBlindCountDrawers ? 'bold' : 'normal'}>
                         Open
                       </Typography>
                       <Switch
-                        checked={isBlindCount}
-                        onChange={handleBlindCountToggle}
+                        checked={isBlindCountDrawers}
+                        onChange={handleBlindCountDrawersToggle}
                         color="primary"
                       />
-                      <Typography variant="body2" color={isBlindCount ? 'primary' : 'text.secondary'} fontWeight={isBlindCount ? 'bold' : 'normal'}>
+                      <Typography variant="body2" color={isBlindCountDrawers ? 'primary' : 'text.secondary'} fontWeight={isBlindCountDrawers ? 'bold' : 'normal'}>
+                        Blind
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                      Count Mode - Safe
+                    </Typography>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="body2" color={!isBlindCountSafe ? 'primary' : 'text.secondary'} fontWeight={!isBlindCountSafe ? 'bold' : 'normal'}>
+                        Open
+                      </Typography>
+                      <Switch
+                        checked={isBlindCountSafe}
+                        onChange={handleBlindCountSafeToggle}
+                        color="primary"
+                      />
+                      <Typography variant="body2" color={isBlindCountSafe ? 'primary' : 'text.secondary'} fontWeight={isBlindCountSafe ? 'bold' : 'normal'}>
                         Blind
                       </Typography>
                     </Box>

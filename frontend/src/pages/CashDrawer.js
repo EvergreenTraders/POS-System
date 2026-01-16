@@ -67,10 +67,13 @@ function CashDrawer() {
   // Configuration
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState(0.00);
   const [isBlindCount, setIsBlindCount] = useState(true);
+  const [drawerBlindCountPrefs, setDrawerBlindCountPrefs] = useState({ drawers: true, safe: true });
+  const [allDrawers, setAllDrawers] = useState([]); // Store all drawers including safe
 
   // Form states
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [selectedDrawer, setSelectedDrawer] = useState('');
+  const [selectedDrawerType, setSelectedDrawerType] = useState(null);
   const [openingBalance, setOpeningBalance] = useState('');
   const [openingNotes, setOpeningNotes] = useState('');
   const [actualBalance, setActualBalance] = useState('');
@@ -136,9 +139,11 @@ function CashDrawer() {
   const fetchDrawers = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/drawers`);
-      // Filter out the Safe drawer (only show physical drawers)
-      const physicalDrawers = response.data.filter(drawer => drawer.drawer_type !== 'safe' && drawer.is_active);
-      setDrawers(physicalDrawers);
+      // Store all drawers including safe
+      const allActiveDrawers = response.data.filter(drawer => drawer.is_active);
+      setAllDrawers(allActiveDrawers);
+      // Show all active drawers (physical, safe, and master_safe)
+      setDrawers(allActiveDrawers);
     } catch (err) {
       console.error('Error fetching drawers:', err);
       showSnackbar('Failed to load drawers', 'error');
@@ -158,9 +163,28 @@ function CashDrawer() {
 
   const fetchBlindCountPreference = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/user_preferences/blindCount`);
-      const blindCountValue = response.data.preference_value === 'true';
-      setIsBlindCount(blindCountValue);
+      // Get both preferences
+      const response = await axios.get(`${API_BASE_URL}/user_preferences`);
+      const blindCountDrawersPreference = response.data.find(pref => pref.preference_name === 'blindCount_drawers');
+      const blindCountSafePreference = response.data.find(pref => pref.preference_name === 'blindCount_safe');
+      
+      // Default to true if not found
+      const blindCountDrawers = blindCountDrawersPreference ? blindCountDrawersPreference.preference_value === 'true' : true;
+      const blindCountSafe = blindCountSafePreference ? blindCountSafePreference.preference_value === 'true' : true;
+      
+      // Store both preferences
+      setDrawerBlindCountPrefs({
+        drawers: blindCountDrawers,
+        safe: blindCountSafe
+      });
+      
+      // Set initial blind count based on current selection or default to drawers
+      if (selectedDrawerType) {
+        const isSafe = selectedDrawerType === 'safe' || selectedDrawerType === 'master_safe';
+        setIsBlindCount(isSafe ? blindCountSafe : blindCountDrawers);
+      } else {
+        setIsBlindCount(blindCountDrawers); // Default to drawers preference
+      }
     } catch (err) {
       console.error('Error fetching blind count preference:', err);
       setIsBlindCount(true); // Default to blind count
@@ -382,6 +406,7 @@ function CashDrawer() {
   const resetOpenForm = () => {
     setSelectedEmployee('');
     setSelectedDrawer('');
+    setSelectedDrawerType(null);
     setOpeningBalance('');
     setOpeningNotes('');
     setOpeningDenominations({
@@ -701,11 +726,21 @@ function CashDrawer() {
               <Select
                 value={selectedDrawer}
                 label="Select Drawer"
-                onChange={(e) => setSelectedDrawer(e.target.value)}
+                onChange={(e) => {
+                  const drawerId = e.target.value;
+                  setSelectedDrawer(drawerId);
+                  // Find the drawer type and update blind count accordingly
+                  const drawer = allDrawers.find(d => d.drawer_id === drawerId);
+                  if (drawer) {
+                    setSelectedDrawerType(drawer.drawer_type);
+                    const isSafe = drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe';
+                    setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
+                  }
+                }}
               >
                 {drawers.map((drawer) => (
                   <MenuItem key={drawer.drawer_id} value={drawer.drawer_id}>
-                    {drawer.drawer_name}
+                    {drawer.drawer_name} {drawer.drawer_type === 'safe' ? '(Safe)' : drawer.drawer_type === 'master_safe' ? '(Master Safe)' : ''}
                   </MenuItem>
                 ))}
               </Select>
