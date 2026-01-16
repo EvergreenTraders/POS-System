@@ -279,14 +279,13 @@ const Pawns = () => {
     try {
       const token = localStorage.getItem('token');
 
-      // Update all items in the ticket to FORFEITED status
-      for (const item of ticket.items) {
-        await axios.put(
-          `${API_BASE_URL}/pawn-transactions/${item.transaction_id}`,
-          { item_status: 'FORFEITED' },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-      }
+      // Update pawn_ticket status to FORFEITED
+      // Backend will automatically move jewelry items to IN_PROCESS status
+      await axios.put(
+        `${API_BASE_URL}/pawn-ticket/${ticket.pawn_ticket_id}/status`,
+        { status: 'FORFEITED' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
 
       // Refresh the pawn transactions list
       const response = await axios.get(`${API_BASE_URL}/pawn-transactions`, {
@@ -294,7 +293,7 @@ const Pawns = () => {
       });
       setPawns(response.data);
 
-      alert(`Pawn Ticket #${ticket.pawn_ticket_id} has been forfeited successfully.`);
+      alert(`Pawn Ticket #${ticket.pawn_ticket_id} has been forfeited. Items moved to inventory for processing.`);
     } catch (error) {
       console.error('Error forfeiting pawn ticket:', error);
       alert('Failed to forfeit pawn ticket. Please try again.');

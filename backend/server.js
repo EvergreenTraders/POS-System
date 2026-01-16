@@ -3494,7 +3494,13 @@ app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
       [status, pawn_ticket_id]
     );
 
-    // Also update all jewelry items associated with this pawn ticket
+    // Determine jewelry status based on pawn_ticket status
+    // FORFEITED pawn tickets -> jewelry moves to IN_PROCESS (ready for resale)
+    // REDEEMED pawn tickets -> jewelry status is REDEEMED
+    // PAWN -> jewelry status is PAWN
+    const jewelryStatus = status === 'FORFEITED' ? 'IN_PROCESS' : status;
+
+    // Update all jewelry items associated with this pawn ticket
     const itemsResult = await pool.query(
       'SELECT item_id FROM pawn_ticket WHERE pawn_ticket_id = $1',
       [pawn_ticket_id]
@@ -3503,7 +3509,7 @@ app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
     for (const row of itemsResult.rows) {
       await pool.query(
         'UPDATE jewelry SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE item_id = $2',
-        [status, row.item_id]
+        [jewelryStatus, row.item_id]
       );
     }
 
@@ -3513,7 +3519,8 @@ app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
       success: true,
       message: `Pawn ticket ${pawn_ticket_id} status updated to ${status}`,
       pawn_ticket_id,
-      status
+      status,
+      jewelry_status: jewelryStatus
     });
   } catch (error) {
     await pool.query('ROLLBACK');
@@ -7510,6 +7517,7 @@ app.post('/api/pawn/check-forfeitures', async (req, res) => {
       INNER JOIN pawn_ticket pt ON j.item_id = pt.item_id
       INNER JOIN transactions t ON pt.transaction_id = t.transaction_id
       WHERE j.status = 'PAWN'
+        AND pt.status = 'PAWN'
         AND t.transaction_date + INTERVAL '1 day' * $1 < CURRENT_DATE
     `;
 
@@ -7524,20 +7532,25 @@ app.post('/api/pawn/check-forfeitures', async (req, res) => {
       });
     }
 
-    // Determine target status based on forfeiture_mode
-    const targetStatus = forfeiture_mode === 'automatic' ? 'ACTIVE' : 'FORFEITED';
-
-    // Update all forfeited items to the target status
+    // Get unique pawn ticket IDs and item IDs
+    const pawnTicketIds = [...new Set(forfeitedItems.rows.map(item => item.pawn_ticket_id))];
     const itemIds = forfeitedItems.rows.map(item => item.item_id);
 
+    // Update pawn_ticket status to FORFEITED
+    await client.query(
+      `UPDATE pawn_ticket SET status = 'FORFEITED' WHERE pawn_ticket_id = ANY($1)`,
+      [pawnTicketIds]
+    );
+
+    // Move jewelry items to IN_PROCESS status (ready for resale processing)
     const updateQuery = `
       UPDATE jewelry
-      SET status = $1, updated_at = CURRENT_TIMESTAMP
-      WHERE item_id = ANY($2)
+      SET status = 'IN_PROCESS', updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = ANY($1)
       RETURNING item_id, status
     `;
 
-    const updateResult = await client.query(updateQuery, [targetStatus, itemIds]);
+    const updateResult = await client.query(updateQuery, [itemIds]);
 
     await client.query('COMMIT');
 
@@ -7545,7 +7558,8 @@ app.post('/api/pawn/check-forfeitures', async (req, res) => {
       message: `Successfully processed ${updateResult.rows.length} forfeited items`,
       count: updateResult.rows.length,
       forfeiture_mode,
-      target_status: targetStatus,
+      target_status: 'IN_PROCESS',
+      pawn_tickets_forfeited: pawnTicketIds.length,
       items: updateResult.rows
     });
 
@@ -7574,6 +7588,12 @@ async function checkPawnForfeitures() {
 
     const { term_days, forfeiture_mode } = configResult.rows[0];
 
+    // Only process automatic forfeitures if mode is 'automatic'
+    if (forfeiture_mode !== 'automatic') {
+      await client.query('COMMIT');
+      return;
+    }
+
     // Find all pawn items that have passed their due date
     const forfeitedItemsQuery = `
       SELECT
@@ -7585,6 +7605,7 @@ async function checkPawnForfeitures() {
       INNER JOIN pawn_ticket pt ON j.item_id = pt.item_id
       INNER JOIN transactions t ON pt.transaction_id = t.transaction_id
       WHERE j.status = 'PAWN'
+        AND pt.status = 'PAWN'
         AND t.transaction_date + INTERVAL '1 day' * $1 < CURRENT_DATE
     `;
 
@@ -7595,20 +7616,25 @@ async function checkPawnForfeitures() {
       return;
     }
 
-    // Determine target status based on forfeiture_mode
-    const targetStatus = forfeiture_mode === 'automatic' ? 'ACTIVE' : 'FORFEITED';
-
-    // Update all forfeited items to the target status
+    // Get unique pawn ticket IDs
+    const pawnTicketIds = [...new Set(forfeitedItems.rows.map(item => item.pawn_ticket_id))];
     const itemIds = forfeitedItems.rows.map(item => item.item_id);
 
+    // Update pawn_ticket status to FORFEITED
+    await client.query(
+      `UPDATE pawn_ticket SET status = 'FORFEITED' WHERE pawn_ticket_id = ANY($1)`,
+      [pawnTicketIds]
+    );
+
+    // Move jewelry items to IN_PROCESS status (ready for resale processing)
     const updateQuery = `
       UPDATE jewelry
-      SET status = $1, updated_at = CURRENT_TIMESTAMP
-      WHERE item_id = ANY($2)
+      SET status = 'IN_PROCESS', updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = ANY($1)
       RETURNING item_id, status
     `;
 
-    const updateResult = await client.query(updateQuery, [targetStatus, itemIds]);
+    const updateResult = await client.query(updateQuery, [itemIds]);
 
     await client.query('COMMIT');
 
