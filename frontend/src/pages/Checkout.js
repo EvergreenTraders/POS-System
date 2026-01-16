@@ -132,6 +132,7 @@ function Checkout() {
   const [provinceName, setProvinceName] = useState('Ontario');
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const [redeemedLocations, setRedeemedLocations] = useState([]);
+  const [selectedItemsForRedeem, setSelectedItemsForRedeem] = useState([]);
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
@@ -2216,6 +2217,7 @@ function Checkout() {
         open={locationDialogOpen}
         onClose={() => {
           setLocationDialogOpen(false);
+          setSelectedItemsForRedeem([]);
           navigate('/jewel-estimator');
         }}
         maxWidth="md"
@@ -2228,20 +2230,33 @@ function Checkout() {
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Please retrieve the following items from storage:
+            Please check items as you retrieve them from storage:
           </Typography>
           <TableContainer>
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell><strong>Pawn Ticket ID</strong></TableCell>
-                  <TableCell><strong>Item Description</strong></TableCell>
-                  <TableCell><strong>Storage Location</strong></TableCell>
+                  <TableCell width="10%" align="center"><strong>Retrieved</strong></TableCell>
+                  <TableCell width="25%"><strong>Pawn Ticket ID</strong></TableCell>
+                  <TableCell width="35%"><strong>Item Description</strong></TableCell>
+                  <TableCell width="30%"><strong>Storage Location</strong></TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {redeemedLocations.map((item, index) => (
                   <TableRow key={index} hover>
+                    <TableCell align="center">
+                      <Checkbox
+                        checked={selectedItemsForRedeem.includes(index)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedItemsForRedeem([...selectedItemsForRedeem, index]);
+                          } else {
+                            setSelectedItemsForRedeem(selectedItemsForRedeem.filter(i => i !== index));
+                          }
+                        }}
+                      />
+                    </TableCell>
                     <TableCell>{item.pawnTicketId}</TableCell>
                     <TableCell>{item.description}</TableCell>
                     <TableCell>
@@ -2261,12 +2276,307 @@ function Checkout() {
           <Button
             onClick={() => {
               setLocationDialogOpen(false);
+              setSelectedItemsForRedeem([]);
               navigate('/jewel-estimator');
             }}
-            variant="contained"
-            color="primary"
+            variant="outlined"
           >
             Close
+          </Button>
+          <Button
+            onClick={async () => {
+              try {
+                const token = localStorage.getItem('token');
+
+                // Update jewelry status to REDEEMED for checked items
+                for (const itemIndex of selectedItemsForRedeem) {
+                  const item = redeemedLocations[itemIndex];
+                  if (item.item_id) {
+                    await axios.put(
+                      `${config.apiUrl}/jewelry/${item.item_id}/status`,
+                      { status: 'REDEEMED' },
+                      { headers: { Authorization: `Bearer ${token}` } }
+                    );
+                  }
+                }
+
+                // Fetch business info for receipt
+                let businessName = '';
+                let businessAddress = '';
+                let businessPhone = '';
+                let businessLogo = '';
+                let businessLogoMimetype = '';
+
+                try {
+                  const businessResponse = await axios.get(`${config.apiUrl}/business-info`);
+                  if (businessResponse.data) {
+                    businessName = businessResponse.data.business_name || '';
+                    businessAddress = businessResponse.data.address || '';
+                    businessPhone = businessResponse.data.phone || '';
+                    businessLogo = businessResponse.data.logo || '';
+                    businessLogoMimetype = businessResponse.data.logo_mimetype || 'image/png';
+                  }
+                } catch (err) {
+                  console.error('Error fetching business info:', err);
+                }
+
+                // Get selected items for receipt
+                const selectedItems = selectedItemsForRedeem.map(idx => redeemedLocations[idx]);
+
+                // Calculate totals
+                const totalRedemptionAmount = selectedItems.length > 0
+                  ? parseFloat(checkoutItems.find(i => (i.transaction_type || '').toLowerCase() === 'redeem')?.totalRedemptionAmount || 0)
+                  : 0;
+
+                // Get pawn ticket ID
+                const pawnTicketId = selectedItems[0]?.pawnTicketId || 'N/A';
+
+                // Format current date/time
+                const now = new Date();
+                const formattedDate = now.toLocaleDateString('en-US', {
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit'
+                });
+                const formattedTime = now.toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                });
+
+                // Generate redeem receipt HTML
+                const receiptHTML = `
+                  <!DOCTYPE html>
+                  <html>
+                  <head>
+                    <title>Redeem Receipt - ${pawnTicketId}</title>
+                    <style>
+                      body {
+                        font-family: 'Courier New', monospace;
+                        max-width: 300px;
+                        margin: 0 auto;
+                        padding: 20px;
+                        font-size: 12px;
+                      }
+                      .header {
+                        text-align: center;
+                        margin-bottom: 15px;
+                        border-bottom: 2px dashed #333;
+                        padding-bottom: 15px;
+                      }
+                      .header img {
+                        max-width: 100px;
+                        max-height: 60px;
+                        margin-bottom: 10px;
+                      }
+                      .header h1 {
+                        margin: 0;
+                        font-size: 16px;
+                        font-weight: bold;
+                      }
+                      .header p {
+                        margin: 3px 0;
+                        font-size: 10px;
+                      }
+                      .receipt-title {
+                        text-align: center;
+                        font-size: 14px;
+                        font-weight: bold;
+                        margin: 15px 0;
+                        padding: 8px;
+                        background-color: #f0f0f0;
+                        border: 1px solid #333;
+                      }
+                      .info-section {
+                        margin-bottom: 15px;
+                      }
+                      .info-row {
+                        display: flex;
+                        justify-content: space-between;
+                        padding: 4px 0;
+                        font-size: 11px;
+                      }
+                      .info-label {
+                        font-weight: bold;
+                      }
+                      .items-section {
+                        margin: 15px 0;
+                        border-top: 1px dashed #333;
+                        border-bottom: 1px dashed #333;
+                        padding: 10px 0;
+                      }
+                      .items-header {
+                        font-weight: bold;
+                        margin-bottom: 10px;
+                        font-size: 12px;
+                      }
+                      .item-row {
+                        display: flex;
+                        justify-content: space-between;
+                        padding: 5px 0;
+                        border-bottom: 1px dotted #ccc;
+                        font-size: 10px;
+                      }
+                      .item-row:last-child {
+                        border-bottom: none;
+                      }
+                      .item-desc {
+                        flex: 1;
+                      }
+                      .item-location {
+                        text-align: right;
+                        font-weight: bold;
+                        color: #333;
+                      }
+                      .total-section {
+                        margin-top: 15px;
+                        padding-top: 10px;
+                        border-top: 2px dashed #333;
+                      }
+                      .total-row {
+                        display: flex;
+                        justify-content: space-between;
+                        padding: 5px 0;
+                        font-size: 14px;
+                        font-weight: bold;
+                      }
+                      .footer {
+                        margin-top: 20px;
+                        text-align: center;
+                        font-size: 10px;
+                        border-top: 1px dashed #333;
+                        padding-top: 15px;
+                      }
+                      .footer p {
+                        margin: 5px 0;
+                      }
+                      .signature-section {
+                        margin-top: 30px;
+                        padding-top: 10px;
+                      }
+                      .signature-line {
+                        border-top: 1px solid #333;
+                        margin-top: 40px;
+                        padding-top: 5px;
+                        font-size: 10px;
+                      }
+                      .no-print {
+                        margin-top: 30px;
+                        text-align: center;
+                      }
+                      @media print {
+                        body { margin: 0; padding: 10px; }
+                        .no-print { display: none; }
+                      }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="header">
+                      ${businessLogo ? `<img src="data:${businessLogoMimetype};base64,${businessLogo}" alt="Business Logo" />` : ''}
+                      <h1>${businessName || 'Business Name'}</h1>
+                      ${businessAddress ? `<p>${businessAddress}</p>` : ''}
+                      ${businessPhone ? `<p>Tel: ${businessPhone}</p>` : ''}
+                    </div>
+
+                    <div class="receipt-title">
+                      REDEMPTION RECEIPT
+                    </div>
+
+                    <div class="info-section">
+                      <div class="info-row">
+                        <span class="info-label">Pawn Ticket #:</span>
+                        <span>${pawnTicketId}</span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">Date:</span>
+                        <span>${formattedDate}</span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">Time:</span>
+                        <span>${formattedTime}</span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">Customer:</span>
+                        <span>${selectedCustomer?.name || selectedCustomer?.first_name + ' ' + selectedCustomer?.last_name || 'N/A'}</span>
+                      </div>
+                      ${selectedCustomer?.phone ? `
+                      <div class="info-row">
+                        <span class="info-label">Phone:</span>
+                        <span>${selectedCustomer.phone}</span>
+                      </div>
+                      ` : ''}
+                      <div class="info-row">
+                        <span class="info-label">Employee:</span>
+                        <span>${user?.firstName || ''} ${user?.lastName || ''}</span>
+                      </div>
+                    </div>
+
+                    <div class="items-section">
+                      <div class="items-header">REDEEMED ITEMS (${selectedItems.length})</div>
+                      ${selectedItems.map((item, idx) => `
+                        <div class="item-row">
+                          <span class="item-desc">${idx + 1}. ${item.description || 'Item'}</span>
+                          <span class="item-location">[${item.location || 'N/A'}]</span>
+                        </div>
+                      `).join('')}
+                    </div>
+
+                    <div class="total-section">
+                      <div class="total-row">
+                        <span>TOTAL PAID:</span>
+                        <span>$${totalRedemptionAmount.toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    <div class="signature-section">
+                      <div class="signature-line">
+                        Customer Signature
+                      </div>
+                    </div>
+
+                    <div class="footer">
+                      <p>Items have been redeemed and returned to customer.</p>
+                      <p>Thank you for your business!</p>
+                      <p style="margin-top: 10px; font-size: 9px;">
+                        ${formattedDate} ${formattedTime}
+                      </p>
+                    </div>
+
+                    <div class="no-print">
+                      <button onclick="window.print()" style="padding: 10px 30px; font-size: 14px; cursor: pointer;">Print</button>
+                      <button onclick="window.close()" style="padding: 10px 30px; font-size: 14px; margin-left: 10px; cursor: pointer;">Close</button>
+                    </div>
+                  </body>
+                  </html>
+                `;
+
+                // Open receipt in new window
+                const printWindow = window.open('', '_blank');
+                printWindow.document.write(receiptHTML);
+                printWindow.document.close();
+
+                setSnackbar({
+                  open: true,
+                  message: `${selectedItemsForRedeem.length} item(s) marked as redeemed`,
+                  severity: 'success'
+                });
+
+                setLocationDialogOpen(false);
+                setSelectedItemsForRedeem([]);
+                navigate('/jewel-estimator');
+              } catch (error) {
+                console.error('Error updating items:', error);
+                setSnackbar({
+                  open: true,
+                  message: 'Error updating item status',
+                  severity: 'error'
+                });
+              }
+            }}
+            variant="contained"
+            color="success"
+            disabled={selectedItemsForRedeem.length === 0}
+          >
+            Complete Redemption & Print Receipt
           </Button>
         </DialogActions>
       </Dialog>

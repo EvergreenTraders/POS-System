@@ -507,11 +507,19 @@ const CustomerTicket = () => {
   }, [activeTab]);
 
   // Automatically show customer lookup form if no customer is selected
+  // BUT don't show it if we have incoming redeem/extend data (customer will be fetched)
   React.useEffect(() => {
     if (!customer) {
-      setShowLookupForm(true);
+      // Don't show lookup form if we have incoming redeem or extend data with customerId
+      const hasIncomingCustomer = location.state?.redeemData?.customerId || location.state?.extendData?.customerId;
+      if (!hasIncomingCustomer) {
+        setShowLookupForm(true);
+      }
+    } else {
+      // Hide lookup form when customer is set
+      setShowLookupForm(false);
     }
-  }, [customer]);
+  }, [customer, location.state?.redeemData?.customerId, location.state?.extendData?.customerId]);
 
   // Reload customer data when returning from customer editor
   React.useEffect(() => {
