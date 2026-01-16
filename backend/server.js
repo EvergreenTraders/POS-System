@@ -3397,7 +3397,28 @@ app.post('/api/pawn-ticket', async (req, res) => {
       return res.status(400).json({ error: 'pawn_ticket_id is required' });
     }
 
+    // Maximum number of items allowed in a pawn transaction
+    const MAX_PAWN_ITEMS = 5;
+
     await client.query('BEGIN');
+
+    // Check current item count for this pawn ticket
+    const countQuery = `
+      SELECT COUNT(*) as item_count
+      FROM pawn_ticket
+      WHERE pawn_ticket_id = $1
+    `;
+    const countResult = await client.query(countQuery, [pawn_ticket_id]);
+    const currentItemCount = parseInt(countResult.rows[0].item_count) || 0;
+
+    // Validate item limit
+    if (currentItemCount >= MAX_PAWN_ITEMS) {
+      await client.query('ROLLBACK');
+      console.error(`❌ Pawn ticket ${pawn_ticket_id} already has ${currentItemCount} items. Maximum ${MAX_PAWN_ITEMS} items allowed.`);
+      return res.status(400).json({ 
+        error: `Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket. This ticket already has ${currentItemCount} items.` 
+      });
+    }
 
     // Insert new pawn_ticket record
     const insertQuery = `

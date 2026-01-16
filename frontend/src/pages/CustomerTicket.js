@@ -55,6 +55,10 @@ const JewelEstimatorWrapper = ({ prefilledData, onCancel, onSave, transactionTyp
 const CustomerTicket = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  
+  // Maximum number of items allowed in a pawn transaction
+  const MAX_PAWN_ITEMS = 5;
+  
   // State for customer lookup mode
   const [showLookupForm, setShowLookupForm] = useState(false);
   const [searchForm, setSearchForm] = useState({
@@ -1171,13 +1175,30 @@ const CustomerTicket = () => {
       // Update state with new items and save to localStorage
       if (pawnItemsArr.length > 0) {
         setPawnItems(prevItems => {
+          // Check if adding these items would exceed the limit
+          const currentCount = hasEmptyPawnItems ? 0 : prevItems.filter(item => item.description || item.value).length;
+          const itemsToAdd = Math.min(pawnItemsArr.length, MAX_PAWN_ITEMS - currentCount);
+          
+          if (itemsToAdd < pawnItemsArr.length) {
+            showSnackbar(`Only ${itemsToAdd} of ${pawnItemsArr.length} items added. Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket.`, 'warning');
+          }
+          
+          if (itemsToAdd === 0) {
+            showSnackbar(`Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket`, 'warning');
+            return prevItems;
+          }
+          
           // Replace empty placeholder item if needed
-          const newItems = hasEmptyPawnItems ? pawnItemsArr : [...prevItems, ...pawnItemsArr];
+          const itemsToAddArray = pawnItemsArr.slice(0, itemsToAdd);
+          const newItems = hasEmptyPawnItems ? itemsToAddArray : [...prevItems, ...itemsToAddArray];
           saveTicketItems('pawn', newItems);
           return newItems;
         });
         setActiveTab(0); // Set active tab to Pawn
-        showSnackbar(`${pawnItemsArr.length} pawn items added to ticket`, 'success');
+        const addedCount = Math.min(pawnItemsArr.length, MAX_PAWN_ITEMS - (hasEmptyPawnItems ? 0 : pawnItems.filter(item => item.description || item.value).length));
+        if (addedCount > 0) {
+          showSnackbar(`${addedCount} pawn item${addedCount > 1 ? 's' : ''} added to ticket`, 'success');
+        }
       }
       
       if (buyItemsArr.length > 0) {
@@ -1699,6 +1720,13 @@ const CustomerTicket = () => {
   // Handle adding a new row
   const handleAddRow = () => {
     const { items, setItems } = getCurrentItems();
+    
+    // Check pawn item limit
+    if (activeTab === 0 && items.length >= MAX_PAWN_ITEMS) {
+      showSnackbar(`Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket`, 'warning');
+      return;
+    }
+    
     const newId = items.length > 0 ? Math.max(...items.map(item => item.id)) + 1 : 1;
     
     // Create a new item based on the active tab
@@ -2003,6 +2031,13 @@ const CustomerTicket = () => {
     let newItem;
     switch(targetTabIndex) {
       case 0: // Pawn
+        // Check pawn item limit
+        const currentPawnCount = pawnItems.filter(item => item.description || item.value).length;
+        if (currentPawnCount >= MAX_PAWN_ITEMS) {
+          showSnackbar(`Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket`, 'warning');
+          handleConvertClose();
+          return;
+        }
         newItem = {
           image: itemToConvert.image,
           images: itemToConvert.images,
@@ -2241,8 +2276,19 @@ const CustomerTicket = () => {
         return item;
       });
 
-      if (transactionType === 'pawn') setPawnItems(updateItems);
-      else if (transactionType === 'buy') setBuyItems(updateItems);
+      if (transactionType === 'pawn') {
+        // Check if this is updating an existing item or adding a new one
+        const existingItem = pawnItems.find(item => item.id === itemId);
+        const isNewItem = !existingItem || (!existingItem.description && !existingItem.value);
+        const currentPawnCount = pawnItems.filter(item => item.description || item.value).length;
+        
+        if (isNewItem && currentPawnCount >= MAX_PAWN_ITEMS) {
+          showSnackbar(`Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket`, 'warning');
+          setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null });
+          return;
+        }
+        setPawnItems(updateItems);
+      } else if (transactionType === 'buy') setBuyItems(updateItems);
       else if (transactionType === 'trade') setTradeItems(updateItems);
       else if (transactionType === 'repair') setRepairItems(updateItems);
       else if (transactionType === 'payment') setPaymentItems(updateItems);
@@ -4128,8 +4174,13 @@ return (
                               <TableCell width="10%">Est. Value</TableCell>
                               <TableCell width="15%">Location</TableCell>
                               <TableCell width="15%" align="right" padding="none">
-                                <Tooltip title="Add Item">
-                                  <IconButton size="small" color="primary" onClick={handleAddRow}>
+                                <Tooltip title={pawnItems.filter(item => item.description || item.value).length >= MAX_PAWN_ITEMS ? `Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket` : "Add Item"}>
+                                  <IconButton 
+                                    size="small" 
+                                    color="primary" 
+                                    onClick={handleAddRow}
+                                    disabled={pawnItems.filter(item => item.description || item.value).length >= MAX_PAWN_ITEMS}
+                                  >
                                     <AddIcon />
                                   </IconButton>
                                 </Tooltip>
