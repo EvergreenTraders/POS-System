@@ -66,6 +66,13 @@ function CashDrawer() {
   const [adjustmentDialog, setAdjustmentDialog] = useState(false);
   const [detailsDialog, setDetailsDialog] = useState(false);
   const [discrepancyWarningDialog, setDiscrepancyWarningDialog] = useState(false);
+  const [managerApprovalDialog, setManagerApprovalDialog] = useState(false);
+
+  // Manager approval form states
+  const [managerUsername, setManagerUsername] = useState('');
+  const [managerPassword, setManagerPassword] = useState('');
+  const [managerApprovalError, setManagerApprovalError] = useState('');
+  const [managerApprovalLoading, setManagerApprovalLoading] = useState(false);
 
   // Configuration
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState(0.00);
@@ -99,6 +106,7 @@ function CashDrawer() {
     coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
   });
   const [openingDenominationsFromDB, setOpeningDenominationsFromDB] = useState(null); // Opening denominations from database
+  const [calculatedClosingBalance, setCalculatedClosingBalance] = useState(0); // Store calculated balance for discrepancy dialog
 
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -197,6 +205,21 @@ function CashDrawer() {
 
   const fetchDiscrepancyThreshold = async () => {
     try {
+      // Get current logged-in user
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+      // First try to get employee-specific threshold
+      if (currentUser.id) {
+        const employeeResponse = await axios.get(`${API_BASE_URL}/employees`);
+        const employee = employeeResponse.data.find(emp => emp.employee_id === currentUser.id);
+
+        if (employee && employee.discrepancy_threshold !== null && employee.discrepancy_threshold !== undefined) {
+          setDiscrepancyThreshold(parseFloat(employee.discrepancy_threshold));
+          return;
+        }
+      }
+
+      // Fall back to system default
       const response = await axios.get(`${API_BASE_URL}/discrepancy-threshold`);
       const thresholdValue = response.data.threshold_amount || 0.00;
       setDiscrepancyThreshold(thresholdValue);
@@ -263,7 +286,7 @@ function CashDrawer() {
     }
   };
 
-  const checkActiveSession = async () => {
+  const checkActiveSession = async (preferredSessionType = null) => {
     try {
       setLoading(true);
       // Get current logged-in employee from localStorage or context
@@ -277,22 +300,31 @@ function CashDrawer() {
         // Response is now an array of all active sessions
         const sessions = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
         setActiveSessions(sessions);
-        
+
         // Separate sessions by type
         const physicalSession = sessions.find(s => s.drawer_type === 'physical');
         const safeSession = sessions.find(s => s.drawer_type === 'safe');
         const masterSafeSession = sessions.find(s => s.drawer_type === 'master_safe');
-        
-        // Set active session - always prioritize physical drawer by default (used for transactions)
+
+        // Use preferred session type if provided, otherwise use current selectedSessionType
+        const targetSessionType = preferredSessionType || selectedSessionType;
+
+        // Set active session based on preferred/selected type or default priority
         let currentSession = null;
-        if (selectedSessionType === 'safe' && safeSession) {
-          // Show safe if user explicitly selected it via the button
+        if (targetSessionType === 'physical' && physicalSession) {
+          // Show physical if explicitly requested and exists
+          currentSession = physicalSession;
+          setSelectedSessionType('physical');
+        } else if (targetSessionType === 'safe' && safeSession) {
+          // Show safe if explicitly requested and exists
           currentSession = safeSession;
-        } else if (selectedSessionType === 'master_safe' && masterSafeSession) {
-          // Show master safe if user explicitly selected it via the button
+          setSelectedSessionType('safe');
+        } else if (targetSessionType === 'master_safe' && masterSafeSession) {
+          // Show master safe if explicitly requested and exists
           currentSession = masterSafeSession;
+          setSelectedSessionType('master_safe');
         } else if (physicalSession) {
-          // Always default to physical drawer when it exists (for transactions)
+          // Default to physical drawer when it exists (for transactions)
           currentSession = physicalSession;
           setSelectedSessionType('physical');
         } else if (safeSession) {
@@ -314,9 +346,9 @@ function CashDrawer() {
             setSelectedSessionType('physical');
           }
         }
-        
+
         setActiveSession(currentSession);
-        
+
         // Update count mode based on drawer type if session exists
         if (currentSession && currentSession.drawer_type) {
           setSelectedDrawerType(currentSession.drawer_type);
@@ -440,16 +472,9 @@ function CashDrawer() {
       setOpenDrawerDialog(false);
       setDrawerTypeFilter(null);
       resetOpenForm();
-      
-      // Update selected session type and refresh sessions
-      if (drawerType === 'master_safe') {
-        setSelectedSessionType('master_safe');
-      } else if (drawerType === 'safe') {
-        setSelectedSessionType('safe');
-      } else {
-        setSelectedSessionType('physical');
-      }
-      await checkActiveSession();
+
+      // Refresh sessions and show the newly opened drawer type
+      await checkActiveSession(drawerType);
     } catch (err) {
       console.error('Error opening drawer:', err);
       showSnackbar(err.response?.data?.error || 'Failed to open drawer', 'error');
@@ -514,6 +539,7 @@ function CashDrawer() {
 
     // Check if discrepancy exceeds threshold and not forcing close
     if (!forceClose && discrepancyAmount > threshold) {
+      setCalculatedClosingBalance(calculatedBalance); // Store calculated balance for the warning dialog
       setCloseDrawerDialog(false); // Close the original dialog
       setDiscrepancyWarningDialog(true);
       return;
@@ -620,6 +646,52 @@ function CashDrawer() {
     setAdjustmentAmount('');
     setAdjustmentType('bank_deposit');
     setAdjustmentReason('');
+  };
+
+  const resetManagerApprovalForm = () => {
+    setManagerUsername('');
+    setManagerPassword('');
+    setManagerApprovalError('');
+    setManagerApprovalLoading(false);
+  };
+
+  const handleManagerApproval = async () => {
+    if (!managerUsername || !managerPassword) {
+      setManagerApprovalError('Please enter both username and password');
+      return;
+    }
+
+    setManagerApprovalLoading(true);
+    setManagerApprovalError('');
+
+    try {
+      // Verify manager credentials
+      const response = await axios.post(`${API_BASE_URL}/auth/login`, {
+        identifier: managerUsername,
+        password: managerPassword
+      });
+
+      const user = response.data.user;
+
+      // Check if the user is a Store Manager or Store Owner
+      if (user.role !== 'Store Manager' && user.role !== 'Store Owner') {
+        setManagerApprovalError('Only Store Managers or Store Owners can approve this action');
+        setManagerApprovalLoading(false);
+        return;
+      }
+
+      // Manager approved - close the drawer with force
+      setManagerApprovalDialog(false);
+      resetManagerApprovalForm();
+      showSnackbar(`Approved by ${user.first_name} ${user.last_name} (${user.role})`, 'success');
+
+      // Now close the drawer
+      await handleCloseDrawer(true);
+    } catch (err) {
+      console.error('Manager approval error:', err);
+      setManagerApprovalError(err.response?.data?.error || 'Invalid credentials');
+      setManagerApprovalLoading(false);
+    }
   };
 
   const showSnackbar = (message, severity = 'success') => {
@@ -937,35 +1009,47 @@ function CashDrawer() {
                       >
                         View Details
                       </Button>
-                      {activeSession.drawer_type === 'physical' && (
-                        <>
-                          {allDrawers.some(d => d.drawer_type === 'safe' && d.is_active) && (
-                            <Button
-                              variant="outlined"
-                              color="secondary"
-                              startIcon={<AddIcon />}
-                              onClick={() => {
-                                setDrawerTypeFilter('safe');
-                                setOpenDrawerDialog(true);
-                              }}
-                            >
-                              Open Safe Drawer
-                            </Button>
-                          )}
-                          {allDrawers.some(d => d.drawer_type === 'master_safe' && d.is_active) && (
-                            <Button
-                              variant="outlined"
-                              color="secondary"
-                              startIcon={<AddIcon />}
-                              onClick={() => {
-                                setDrawerTypeFilter('master_safe');
-                                setOpenDrawerDialog(true);
-                              }}
-                            >
-                              Open Master Safe
-                            </Button>
-                          )}
-                        </>
+                      {/* Show Open Cash Drawer button if no physical session exists */}
+                      {!activeSessions.some(s => s.drawer_type === 'physical') && allDrawers.some(d => d.drawer_type === 'physical' && d.is_active) && (
+                        <Button
+                          variant="contained"
+                          color="primary"
+                          startIcon={<AddIcon />}
+                          onClick={() => {
+                            setDrawerTypeFilter('physical');
+                            setOpenDrawerDialog(true);
+                          }}
+                        >
+                          Open Cash Drawer
+                        </Button>
+                      )}
+                      {/* Show Open Safe Drawer button if no safe session exists */}
+                      {!activeSessions.some(s => s.drawer_type === 'safe') && allDrawers.some(d => d.drawer_type === 'safe' && d.is_active) && (
+                        <Button
+                          variant="outlined"
+                          color="secondary"
+                          startIcon={<AddIcon />}
+                          onClick={() => {
+                            setDrawerTypeFilter('safe');
+                            setOpenDrawerDialog(true);
+                          }}
+                        >
+                          Open Safe Drawer
+                        </Button>
+                      )}
+                      {/* Show Open Master Safe button if no master_safe session exists */}
+                      {!activeSessions.some(s => s.drawer_type === 'master_safe') && allDrawers.some(d => d.drawer_type === 'master_safe' && d.is_active) && (
+                        <Button
+                          variant="outlined"
+                          color="secondary"
+                          startIcon={<AddIcon />}
+                          onClick={() => {
+                            setDrawerTypeFilter('master_safe');
+                            setOpenDrawerDialog(true);
+                          }}
+                        >
+                          Open Master Safe
+                        </Button>
                       )}
                     </Box>
                   </CardContent>
@@ -1351,32 +1435,28 @@ function CashDrawer() {
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Alert severity="warning">
-              {isBlindCount 
-                ? 'The counted balance does not match the expected balance. Please recount.'
-                : `The discrepancy amount exceeds the acceptable threshold of $${Number(discrepancyThreshold || 0).toFixed(2)}.`}
+              The discrepancy amount exceeds the acceptable threshold of {formatCurrency(discrepancyThreshold || 0)}. Please recount.
             </Alert>
             <Box>
               <Typography variant="body1" gutterBottom>
                 <strong>Transaction Count:</strong> {activeSession?.transaction_count || 0}
               </Typography>
-              {!isBlindCount && (
-                <Typography variant="body1" gutterBottom>
-                  <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
-                </Typography>
-              )}
               <Typography variant="body1" gutterBottom>
-                <strong>Actual Balance:</strong> {formatCurrency(parseFloat(actualBalance || 0))}
+                <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
               </Typography>
-              {!isBlindCount && (
-                <Typography variant="body1" color="error" gutterBottom>
-                  <strong>Discrepancy:</strong> {formatCurrency(Math.abs(parseFloat(actualBalance || 0) - parseFloat(activeSession?.current_expected_balance || 0)))}
-                </Typography>
-              )}
+              <Typography variant="body1" gutterBottom>
+                <strong>Actual Balance:</strong> {formatCurrency(calculatedClosingBalance)}
+              </Typography>
+              <Typography variant="body1" color="error" gutterBottom>
+                <strong>Discrepancy:</strong> {formatCurrency(calculatedClosingBalance - parseFloat(activeSession?.current_expected_balance || 0))}
+                {' '}({calculatedClosingBalance > parseFloat(activeSession?.current_expected_balance || 0) ? 'Overage' : 'Shortage'})
+              </Typography>
+              <Typography variant="body1" gutterBottom>
+                <strong>Threshold:</strong> {formatCurrency(discrepancyThreshold || 0)}
+              </Typography>
             </Box>
             <Typography variant="body2" color="text.secondary">
-              {isBlindCount
-                ? 'Please recount the cash drawer to verify the balance. If the balance is correct, you can proceed to close the drawer anyway.'
-                : 'Please recount the cash drawer to verify the balance. If the discrepancy is correct, you can proceed to close the drawer anyway.'}
+              Please recount the cash drawer to verify the balance. If the discrepancy is correct, request manager approval to close the drawer.
             </Typography>
           </Box>
         </DialogContent>
@@ -1384,8 +1464,94 @@ function CashDrawer() {
           <Button onClick={() => setDiscrepancyWarningDialog(false)}>
             Recount
           </Button>
-          <Button onClick={() => handleCloseDrawer(true)} variant="contained" color="warning">
-            Close Anyway
+          <Button
+            onClick={() => {
+              setDiscrepancyWarningDialog(false);
+              setManagerApprovalDialog(true);
+            }}
+            variant="contained"
+            color="warning"
+          >
+            Request Manager Approval
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Manager Approval Dialog */}
+      <Dialog
+        open={managerApprovalDialog}
+        onClose={() => {
+          setManagerApprovalDialog(false);
+          resetManagerApprovalForm();
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarningIcon color="warning" />
+            <Typography variant="h6">Manager Approval Required</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="info">
+              A Store Manager or Store Owner must approve closing this drawer with discrepancy.
+            </Alert>
+            <Box sx={{ p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+              <Typography variant="body2" gutterBottom>
+                <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
+              </Typography>
+              <Typography variant="body2" gutterBottom>
+                <strong>Actual Balance:</strong> {formatCurrency(calculatedClosingBalance)}
+              </Typography>
+              <Typography variant="body2" color="error">
+                <strong>Discrepancy:</strong> {formatCurrency(Math.abs(calculatedClosingBalance - parseFloat(activeSession?.current_expected_balance || 0)))}
+                {' '}({calculatedClosingBalance > parseFloat(activeSession?.current_expected_balance || 0) ? 'Overage' : 'Shortage'})
+              </Typography>
+            </Box>
+            <TextField
+              label="Manager Username"
+              fullWidth
+              value={managerUsername}
+              onChange={(e) => setManagerUsername(e.target.value)}
+              autoFocus
+              autoComplete="off"
+            />
+            <TextField
+              label="Manager Password"
+              type="password"
+              fullWidth
+              value={managerPassword}
+              onChange={(e) => setManagerPassword(e.target.value)}
+              autoComplete="off"
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  handleManagerApproval();
+                }
+              }}
+            />
+            {managerApprovalError && (
+              <Alert severity="error">{managerApprovalError}</Alert>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setManagerApprovalDialog(false);
+              resetManagerApprovalForm();
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleManagerApproval}
+            variant="contained"
+            color="primary"
+            disabled={managerApprovalLoading}
+          >
+            {managerApprovalLoading ? 'Verifying...' : 'Approve & Close'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -158,7 +158,6 @@ function SystemConfig() {
   // Opening drawer mode (Individual Denominations vs Drawer Total)
   const [isIndividualDenominationsDrawers, setIsIndividualDenominationsDrawers] = useState(false);
   const [isIndividualDenominationsSafe, setIsIndividualDenominationsSafe] = useState(false);
-  const [discrepancyThreshold, setDiscrepancyThreshold] = useState({ amount: 0.00, id: null });
   const [minClose, setMinClose] = useState(0);
   const [maxClose, setMaxClose] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -252,21 +251,6 @@ function SystemConfig() {
       setIsBlindCountSafe(true); // Default to blind count
       setIsIndividualDenominationsDrawers(false); // Default to drawer total
       setIsIndividualDenominationsSafe(false); // Default to drawer total
-    }
-  };
-
-  const fetchDiscrepancyThreshold = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/discrepancy-threshold`);
-      if (response.data) {
-        setDiscrepancyThreshold({
-          amount: response.data.threshold_amount || 0.00,
-          id: response.data.id || null
-        });
-      }
-    } catch (error) {
-      console.error('Error fetching discrepancy threshold:', error);
-      setDiscrepancyThreshold({ amount: 0.00, id: null });
     }
   };
 
@@ -651,7 +635,6 @@ function SystemConfig() {
     fetchCasesConfig();
     fetchCases();
     fetchBlindCountPreference();
-    fetchDiscrepancyThreshold();
     fetchMinMaxClose();
     fetchTaxConfig();
     fetchAuthorizationTemplate();
@@ -1431,42 +1414,6 @@ function SystemConfig() {
     }
   };
 
-  const handleDiscrepancyThresholdChange = async (event) => {
-    const newAmount = parseFloat(event.target.value);
-    if (isNaN(newAmount) || newAmount < 0) {
-      setSnackbar({
-        open: true,
-        message: 'Discrepancy threshold must be a positive number',
-        severity: 'error'
-      });
-      return;
-    }
-
-    try {
-      const response = await axios.put(`${API_BASE_URL}/discrepancy-threshold`, {
-        threshold_amount: newAmount
-      });
-
-      setDiscrepancyThreshold({
-        amount: response.data.threshold_amount,
-        id: response.data.id
-      });
-
-      setSnackbar({
-        open: true,
-        message: `Discrepancy threshold updated to $${newAmount.toFixed(2)}`,
-        severity: 'success'
-      });
-    } catch (error) {
-      console.error('Error updating discrepancy threshold:', error);
-      setSnackbar({
-        open: true,
-        message: 'Failed to update discrepancy threshold',
-        severity: 'error'
-      });
-    }
-  };
-
   const handleMinCloseChange = async (event) => {
     const newValue = parseFloat(event.target.value) || 0;
     setMinClose(newValue);
@@ -2076,19 +2023,6 @@ function SystemConfig() {
                       label="Master Safe"
                     />
                   </Box>
-                  <TextField
-                    label="Discrepancy Threshold"
-                    type="number"
-                    value={discrepancyThreshold.amount}
-                    onChange={(e) => setDiscrepancyThreshold(prev => ({ ...prev, amount: e.target.value }))}
-                    onBlur={(e) => handleDiscrepancyThresholdChange(e)}
-                    size="small"
-                    sx={{ flex: '1 1 150px', minWidth: '150px' }}
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                    }}
-                    inputProps={{ min: 0, step: 0.01 }}
-                  />
                   <TextField
                     label="Min Close"
                     type="number"

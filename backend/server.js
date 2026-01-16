@@ -282,7 +282,7 @@ app.get('/', (req, res) => {
 app.get('/api/employees', async (req, res) => {
   try {
     const query = `
-      SELECT 
+      SELECT
         employee_id,
         username,
         first_name,
@@ -292,7 +292,8 @@ app.get('/api/employees', async (req, res) => {
         role,
         hire_date,
         salary,
-        status
+        status,
+        discrepancy_threshold
       FROM employees
       ORDER BY employee_id ASC
     `;
@@ -306,25 +307,25 @@ app.get('/api/employees', async (req, res) => {
 
 app.post('/api/employees', async (req, res) => {
   try {
-    const { username, firstName, lastName, email, password, phone, role, salary } = req.body;
-    
+    const { username, firstName, lastName, email, password, phone, role, salary, discrepancyThreshold } = req.body;
+
     // Check if username or email already exists
     const checkQuery = 'SELECT * FROM employees WHERE username = $1 OR email = $2';
     const checkResult = await pool.query(checkQuery, [username, email]);
-    
+
     if (checkResult.rows.length > 0) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
 
     const query = `
       INSERT INTO employees (
-        username, first_name, last_name, email, password, phone, role, 
-        hire_date, salary, status
+        username, first_name, last_name, email, password, phone, role,
+        hire_date, salary, status, discrepancy_threshold
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8, 'Active')
-      RETURNING 
-        employee_id, username, first_name, last_name, email, phone, role, 
-        hire_date, salary, status
+      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8, 'Active', $9)
+      RETURNING
+        employee_id, username, first_name, last_name, email, phone, role,
+        hire_date, salary, status, discrepancy_threshold
     `;
     const result = await pool.query(query, [
       username,
@@ -334,9 +335,10 @@ app.post('/api/employees', async (req, res) => {
       password,
       phone || null,
       role,
-      salary
+      salary,
+      discrepancyThreshold || null
     ]);
-    
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error creating employee:', err);
@@ -347,29 +349,29 @@ app.post('/api/employees', async (req, res) => {
 app.put('/api/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { username, firstName, lastName, email, phone, role, salary, status } = req.body;
-    
+    const { username, firstName, lastName, email, phone, role, salary, status, discrepancyThreshold } = req.body;
+
     // Check if username or email already exists for other employees
     const checkQuery = `
-      SELECT * FROM employees 
-      WHERE (username = $1 OR email = $2) 
+      SELECT * FROM employees
+      WHERE (username = $1 OR email = $2)
       AND employee_id != $3
     `;
     const checkResult = await pool.query(checkQuery, [username, email, id]);
-    
+
     if (checkResult.rows.length > 0) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
 
     const query = `
-      UPDATE employees 
-      SET username = $1, first_name = $2, last_name = $3, 
+      UPDATE employees
+      SET username = $1, first_name = $2, last_name = $3,
           email = $4, phone = $5, role = $6, salary = $7,
-          status = $8, updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $9
-      RETURNING 
+          status = $8, discrepancy_threshold = $9, updated_at = CURRENT_TIMESTAMP
+      WHERE employee_id = $10
+      RETURNING
         employee_id, username, first_name, last_name, email, phone, role,
-        hire_date, salary, status
+        hire_date, salary, status, discrepancy_threshold
     `;
     const result = await pool.query(query, [
       username,
@@ -380,13 +382,14 @@ app.put('/api/employees/:id', async (req, res) => {
       role,
       salary,
       status,
+      discrepancyThreshold || null,
       id
     ]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Employee not found' });
     }
-    
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error updating employee:', err);
