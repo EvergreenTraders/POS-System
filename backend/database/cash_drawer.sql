@@ -23,18 +23,35 @@ WHERE NOT EXISTS (SELECT 1 FROM drawer_config LIMIT 1);
 CREATE TABLE IF NOT EXISTS drawers (
     drawer_id SERIAL PRIMARY KEY,
     drawer_name VARCHAR(100) NOT NULL UNIQUE,
-    drawer_type VARCHAR(20) NOT NULL DEFAULT 'physical', -- 'safe' or 'physical'
+    drawer_type VARCHAR(20) NOT NULL DEFAULT 'physical', -- 'safe', 'physical', or 'master_safe'
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     display_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP,
-    CONSTRAINT chk_drawer_type CHECK (drawer_type IN ('safe', 'physical'))
+    CONSTRAINT chk_drawer_type CHECK (drawer_type IN ('safe', 'physical', 'master_safe'))
 );
+
+-- Alter existing drawers table to support master_safe type (for existing databases)
+DO $$
+BEGIN
+    -- Drop the old constraint if it exists
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'chk_drawer_type' 
+        AND conrelid = 'drawers'::regclass
+    ) THEN
+        ALTER TABLE drawers DROP CONSTRAINT chk_drawer_type;
+    END IF;
+    
+    -- Add the new constraint with master_safe support
+    ALTER TABLE drawers ADD CONSTRAINT chk_drawer_type 
+        CHECK (drawer_type IN ('safe', 'physical', 'master_safe'));
+END $$;
 
 -- Add comment for documentation
 COMMENT ON TABLE drawers IS 'Stores individual drawer information (safe and physical drawers)';
 COMMENT ON COLUMN drawers.drawer_name IS 'Name of the drawer (e.g., "Safe", "Drawer 1", "Drawer 2")';
-COMMENT ON COLUMN drawers.drawer_type IS 'Type of drawer: safe (vault/safe) or physical (cash drawer)';
+COMMENT ON COLUMN drawers.drawer_type IS 'Type of drawer: safe (vault/safe - multiple allowed), physical (cash drawer), or master_safe (master safe - only one allowed)';
 COMMENT ON COLUMN drawers.is_active IS 'Whether this drawer is currently active and usable';
 COMMENT ON COLUMN drawers.display_order IS 'Order in which drawers should be displayed in the UI';
 
@@ -109,18 +126,20 @@ CREATE TABLE IF NOT EXISTS cash_drawer_adjustments (
     adjustment_id SERIAL PRIMARY KEY,
     session_id INTEGER NOT NULL,
     amount DECIMAL(10,2) NOT NULL, -- Positive for additions, negative for removals
-    adjustment_type VARCHAR(30) NOT NULL, -- bank_deposit, change_order, petty_cash, other
+    adjustment_type VARCHAR(30) NOT NULL, -- bank_deposit, change_order, petty_cash, transfer, other
     reason TEXT NOT NULL,
     performed_by INTEGER NOT NULL, -- Employee who made adjustment
     approved_by INTEGER, -- Manager approval
+    source_session_id INTEGER, -- For transfers: the session cash is coming FROM
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (performed_by) REFERENCES employees(employee_id),
     FOREIGN KEY (approved_by) REFERENCES employees(employee_id),
+    FOREIGN KEY (source_session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE SET NULL,
 
     CONSTRAINT chk_adjustment_type CHECK (
-        adjustment_type IN ('bank_deposit', 'change_order', 'petty_cash', 'correction', 'other')
+        adjustment_type IN ('bank_deposit', 'change_order', 'petty_cash', 'correction', 'transfer', 'other')
     )
 );
 
@@ -315,10 +334,42 @@ COMMENT ON TABLE cash_denominations IS 'Stores denomination counts for cash draw
 COMMENT ON COLUMN cash_denominations.denomination_type IS 'Type of count: opening (start of shift) or closing (end of shift)';
 COMMENT ON COLUMN cash_denominations.total_amount IS 'Automatically calculated total from all denominations';
 
--- Add blindCount preference for cash drawer counting mode
+-- Add blindCount preferences for cash drawer closing mode (separate for drawers and safe)
 INSERT INTO user_preferences (preference_name, preference_value)
-VALUES ('blindCount', 'true')
+VALUES 
+  ('blindCount_drawers', 'true'),
+  ('blindCount_safe', 'true')
 ON CONFLICT (preference_name) DO NOTHING;
+
+-- Add individualDenominations preferences for cash drawer opening mode (separate for drawers and safe)
+INSERT INTO user_preferences (preference_name, preference_value)
+VALUES 
+  ('individualDenominations_drawers', 'false'),
+  ('individualDenominations_safe', 'false')
+ON CONFLICT (preference_name) DO NOTHING;
+
+-- Add minClose and maxClose preferences for physical drawer closing balance validation
+INSERT INTO user_preferences (preference_name, preference_value)
+VALUES 
+  ('minClose', '0'),
+  ('maxClose', '0')
+ON CONFLICT (preference_name) DO NOTHING;
+
+-- Migrate existing blindCount preference to blindCount_drawers if it exists
+UPDATE user_preferences 
+SET preference_name = 'blindCount_drawers'
+WHERE preference_name = 'blindCount' 
+AND NOT EXISTS (SELECT 1 FROM user_preferences WHERE preference_name = 'blindCount_drawers');
+
+-- Also set blindCount_safe to the same value if blindCount existed
+INSERT INTO user_preferences (preference_name, preference_value)
+SELECT 'blindCount_safe', preference_value
+FROM user_preferences
+WHERE preference_name = 'blindCount_drawers'
+AND NOT EXISTS (SELECT 1 FROM user_preferences WHERE preference_name = 'blindCount_safe');
+
+-- Remove old blindCount preference if it exists (after migration)
+DELETE FROM user_preferences WHERE preference_name = 'blindCount';
 
 -- Create discrepancy_threshold table to store acceptable discrepancy amount
 CREATE TABLE IF NOT EXISTS discrepancy_threshold (
