@@ -51,6 +51,7 @@ function CashDrawer() {
 
   const [activeSession, setActiveSession] = useState(null);
   const [activeSessions, setActiveSessions] = useState([]); // All active sessions (physical, safe, and master_safe)
+  const [allActiveSessions, setAllActiveSessions] = useState([]); // All active sessions from all employees (for transfers)
   const [selectedSessionType, setSelectedSessionType] = useState('physical'); // 'physical', 'safe', or 'master_safe'
   const [loading, setLoading] = useState(true);
   const [tabValue, setTabValue] = useState(0);
@@ -95,6 +96,7 @@ function CashDrawer() {
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
   const [adjustmentType, setAdjustmentType] = useState('bank_deposit');
   const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [transferSourceSession, setTransferSourceSession] = useState('');
 
   // Denomination states for Open Count mode
   const [openingDenominations, setOpeningDenominations] = useState({
@@ -283,6 +285,16 @@ function CashDrawer() {
       console.error('Error fetching drawer mode preferences:', err);
       setIsBlindCount(true); // Default to blind count
       setIsIndividualDenominations(false); // Default to drawer total
+    }
+  };
+
+  const fetchAllActiveSessions = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/cash-drawer/active`);
+      setAllActiveSessions(Array.isArray(response.data) ? response.data : []);
+    } catch (err) {
+      console.error('Error fetching all active sessions:', err);
+      setAllActiveSessions([]);
     }
   };
 
@@ -596,20 +608,41 @@ function CashDrawer() {
       return;
     }
 
+    // For transfers, require source session
+    if (adjustmentType === 'transfer' && !transferSourceSession) {
+      showSnackbar('Please select a source drawer for transfer', 'error');
+      return;
+    }
+
     try {
       const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
-      await axios.post(
-        `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/adjustment`,
-        {
-          amount: parseFloat(adjustmentAmount),
-          adjustment_type: adjustmentType,
-          reason: adjustmentReason,
-          performed_by: currentUser.id
-        }
-      );
+      if (adjustmentType === 'transfer') {
+        // Use the transfer endpoint for drawer-to-drawer transfers
+        await axios.post(
+          `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/transfer`,
+          {
+            amount: parseFloat(adjustmentAmount),
+            source_session_id: parseInt(transferSourceSession),
+            reason: adjustmentReason,
+            performed_by: currentUser.id
+          }
+        );
+        showSnackbar('Transfer completed successfully', 'success');
+      } else {
+        // Regular adjustment
+        await axios.post(
+          `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/adjustment`,
+          {
+            amount: parseFloat(adjustmentAmount),
+            adjustment_type: adjustmentType,
+            reason: adjustmentReason,
+            performed_by: currentUser.id
+          }
+        );
+        showSnackbar('Adjustment added successfully', 'success');
+      }
 
-      showSnackbar('Adjustment added successfully', 'success');
       setAdjustmentDialog(false);
       resetAdjustmentForm();
       checkActiveSession();
@@ -646,6 +679,7 @@ function CashDrawer() {
     setAdjustmentAmount('');
     setAdjustmentType('bank_deposit');
     setAdjustmentReason('');
+    setTransferSourceSession('');
   };
 
   const resetManagerApprovalForm = () => {
@@ -1565,16 +1599,42 @@ function CashDrawer() {
               <InputLabel>Adjustment Type</InputLabel>
               <Select
                 value={adjustmentType}
-                onChange={(e) => setAdjustmentType(e.target.value)}
+                onChange={(e) => {
+                  setAdjustmentType(e.target.value);
+                  if (e.target.value === 'transfer') {
+                    fetchAllActiveSessions();
+                  } else {
+                    setTransferSourceSession('');
+                  }
+                }}
                 label="Adjustment Type"
               >
                 <MenuItem value="bank_deposit">Bank Deposit (Remove Cash)</MenuItem>
                 <MenuItem value="change_order">Change Order (Add Cash)</MenuItem>
+                <MenuItem value="transfer">Transfer from Another Drawer</MenuItem>
                 <MenuItem value="petty_cash">Petty Cash</MenuItem>
                 <MenuItem value="correction">Correction</MenuItem>
                 <MenuItem value="other">Other</MenuItem>
               </Select>
             </FormControl>
+            {adjustmentType === 'transfer' && (
+              <FormControl fullWidth required>
+                <InputLabel>Source Drawer (Transfer From)</InputLabel>
+                <Select
+                  value={transferSourceSession}
+                  onChange={(e) => setTransferSourceSession(e.target.value)}
+                  label="Source Drawer (Transfer From)"
+                >
+                  {allActiveSessions
+                    .filter(session => session.drawer_id !== activeSession?.drawer_id)
+                    .map((session) => (
+                      <MenuItem key={session.session_id} value={session.session_id}>
+                        {session.drawer_name} (${parseFloat(session.current_expected_balance || 0).toFixed(2)})
+                      </MenuItem>
+                    ))}
+                </Select>
+              </FormControl>
+            )}
             <TextField
               label="Amount"
               type="number"
@@ -1582,8 +1642,10 @@ function CashDrawer() {
               value={adjustmentAmount}
               onChange={(e) => setAdjustmentAmount(e.target.value)}
               required
-              inputProps={{ step: '0.01' }}
-              helperText="Positive for adding cash, negative for removing cash"
+              inputProps={{ step: '0.01', min: '0.01' }}
+              helperText={adjustmentType === 'transfer'
+                ? "Enter the amount to transfer (must be positive)"
+                : "Positive for adding cash, negative for removing cash"}
             />
             <TextField
               label="Reason"

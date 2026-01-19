@@ -126,18 +126,20 @@ CREATE TABLE IF NOT EXISTS cash_drawer_adjustments (
     adjustment_id SERIAL PRIMARY KEY,
     session_id INTEGER NOT NULL,
     amount DECIMAL(10,2) NOT NULL, -- Positive for additions, negative for removals
-    adjustment_type VARCHAR(30) NOT NULL, -- bank_deposit, change_order, petty_cash, other
+    adjustment_type VARCHAR(30) NOT NULL, -- bank_deposit, change_order, petty_cash, transfer, other
     reason TEXT NOT NULL,
     performed_by INTEGER NOT NULL, -- Employee who made adjustment
     approved_by INTEGER, -- Manager approval
+    source_session_id INTEGER, -- For transfers: the session cash is coming FROM
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (performed_by) REFERENCES employees(employee_id),
     FOREIGN KEY (approved_by) REFERENCES employees(employee_id),
+    FOREIGN KEY (source_session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE SET NULL,
 
     CONSTRAINT chk_adjustment_type CHECK (
-        adjustment_type IN ('bank_deposit', 'change_order', 'petty_cash', 'correction', 'other')
+        adjustment_type IN ('bank_deposit', 'change_order', 'petty_cash', 'correction', 'transfer', 'other')
     )
 );
 

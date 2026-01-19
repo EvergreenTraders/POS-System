@@ -642,7 +642,7 @@ app.post('/api/cash-drawer/:sessionId/adjustment', async (req, res) => {
     });
   }
 
-  const validTypes = ['bank_deposit', 'change_order', 'petty_cash', 'correction', 'other'];
+  const validTypes = ['bank_deposit', 'change_order', 'petty_cash', 'correction', 'transfer', 'other'];
   if (!validTypes.includes(adjustment_type)) {
     return res.status(400).json({
       error: `adjustment_type must be one of: ${validTypes.join(', ')}`
@@ -676,6 +676,108 @@ app.post('/api/cash-drawer/:sessionId/adjustment', async (req, res) => {
   } catch (error) {
     console.error('Error adding cash drawer adjustment:', error);
     res.status(500).json({ error: 'Failed to add adjustment' });
+  }
+});
+
+// POST /api/cash-drawer/:sessionId/transfer - Transfer cash from another drawer to this drawer
+app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
+  const { sessionId } = req.params; // Target session (receiving cash)
+  const { amount, source_session_id, reason, performed_by } = req.body;
+
+  // Validation
+  if (!amount || !source_session_id || !reason || !performed_by) {
+    return res.status(400).json({
+      error: 'amount, source_session_id, reason, and performed_by are required'
+    });
+  }
+
+  if (parseFloat(amount) <= 0) {
+    return res.status(400).json({
+      error: 'Transfer amount must be positive'
+    });
+  }
+
+  if (parseInt(sessionId) === parseInt(source_session_id)) {
+    return res.status(400).json({
+      error: 'Cannot transfer to the same drawer'
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Verify target session exists and is open
+    const targetCheck = await client.query(
+      `SELECT s.session_id, s.status, d.drawer_name
+       FROM cash_drawer_sessions s
+       JOIN drawers d ON s.drawer_id = d.drawer_id
+       WHERE s.session_id = $1`,
+      [sessionId]
+    );
+
+    if (targetCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Target session not found' });
+    }
+
+    if (targetCheck.rows[0].status !== 'open') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Target drawer session is not open' });
+    }
+
+    // Verify source session exists and is open
+    const sourceCheck = await client.query(
+      `SELECT s.session_id, s.status, d.drawer_name
+       FROM cash_drawer_sessions s
+       JOIN drawers d ON s.drawer_id = d.drawer_id
+       WHERE s.session_id = $1`,
+      [source_session_id]
+    );
+
+    if (sourceCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Source session not found' });
+    }
+
+    if (sourceCheck.rows[0].status !== 'open') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Source drawer session is not open' });
+    }
+
+    const sourceDrawerName = sourceCheck.rows[0].drawer_name;
+    const targetDrawerName = targetCheck.rows[0].drawer_name;
+    const transferAmount = parseFloat(amount);
+
+    // Create negative adjustment on source drawer (cash going out)
+    const sourceAdjustment = await client.query(`
+      INSERT INTO cash_drawer_adjustments
+        (session_id, amount, adjustment_type, reason, performed_by, source_session_id)
+      VALUES ($1, $2, 'transfer', $3, $4, NULL)
+      RETURNING *
+    `, [source_session_id, -transferAmount, `Transfer to ${targetDrawerName}: ${reason}`, performed_by]);
+
+    // Create positive adjustment on target drawer (cash coming in)
+    const targetAdjustment = await client.query(`
+      INSERT INTO cash_drawer_adjustments
+        (session_id, amount, adjustment_type, reason, performed_by, source_session_id)
+      VALUES ($1, $2, 'transfer', $3, $4, $5)
+      RETURNING *
+    `, [sessionId, transferAmount, `Transfer from ${sourceDrawerName}: ${reason}`, performed_by, source_session_id]);
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      message: 'Transfer completed successfully',
+      source_adjustment: sourceAdjustment.rows[0],
+      target_adjustment: targetAdjustment.rows[0]
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error processing cash transfer:', error);
+    res.status(500).json({ error: 'Failed to process transfer' });
+  } finally {
+    client.release();
   }
 });
 
