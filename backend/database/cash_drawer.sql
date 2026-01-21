@@ -60,6 +60,11 @@ INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
 VALUES ('Safe', 'safe', TRUE, 0)
 ON CONFLICT (drawer_name) DO NOTHING;
 
+-- Insert default master safe drawer
+INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
+VALUES ('Master Safe', 'master_safe', TRUE, 0)
+ON CONFLICT (drawer_name) DO NOTHING;
+
 -- Create cash_drawer_sessions table
 CREATE TABLE IF NOT EXISTS cash_drawer_sessions (
     session_id SERIAL PRIMARY KEY,
@@ -143,6 +148,31 @@ CREATE TABLE IF NOT EXISTS cash_drawer_adjustments (
     )
 );
 
+-- Alter existing cash_drawer_adjustments table to add transfer support (for existing databases)
+DO $$
+BEGIN
+    -- Add source_session_id column if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'cash_drawer_adjustments' AND column_name = 'source_session_id'
+    ) THEN
+        ALTER TABLE cash_drawer_adjustments
+        ADD COLUMN source_session_id INTEGER REFERENCES cash_drawer_sessions(session_id) ON DELETE SET NULL;
+    END IF;
+
+    -- Update the adjustment type constraint to include 'transfer'
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_adjustment_type'
+        AND conrelid = 'cash_drawer_adjustments'::regclass
+    ) THEN
+        ALTER TABLE cash_drawer_adjustments DROP CONSTRAINT chk_adjustment_type;
+    END IF;
+
+    ALTER TABLE cash_drawer_adjustments ADD CONSTRAINT chk_adjustment_type
+        CHECK (adjustment_type IN ('bank_deposit', 'change_order', 'petty_cash', 'correction', 'transfer', 'other'));
+END $$;
+
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_drawer_sessions_employee ON cash_drawer_sessions(employee_id);
 CREATE INDEX IF NOT EXISTS idx_drawer_sessions_status ON cash_drawer_sessions(status);
@@ -150,6 +180,7 @@ CREATE INDEX IF NOT EXISTS idx_drawer_sessions_opened_at ON cash_drawer_sessions
 CREATE INDEX IF NOT EXISTS idx_drawer_transactions_session ON cash_drawer_transactions(session_id);
 CREATE INDEX IF NOT EXISTS idx_drawer_transactions_transaction ON cash_drawer_transactions(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_drawer_adjustments_session ON cash_drawer_adjustments(session_id);
+CREATE INDEX IF NOT EXISTS idx_drawer_adjustments_source_session ON cash_drawer_adjustments(source_session_id);
 
 -- Function to calculate expected balance for a session
 CREATE OR REPLACE FUNCTION calculate_expected_balance(p_session_id INTEGER)
