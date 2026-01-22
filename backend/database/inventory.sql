@@ -8,22 +8,19 @@ CREATE TABLE IF NOT EXISTS inventory_status (
     updated_at TIMESTAMP,
     CONSTRAINT valid_status_code CHECK (status_code ~ '^[A-Z0-9_]+$')
 );
--- First, drop the existing column if it exists
--- ALTER TABLE jewelry DROP COLUMN IF EXISTS images;
--- ALTER TABLE jewelry ADD COLUMN total_weight DECIMAL(10,2);
--- ALTER TABLE jewelry ADD COLUMN inventory_type DECIMAL(10,2);
 
--- Add inventory_type column with check constraint
--- ALTER TABLE jewelry ADD COLUMN inventory_type VARCHAR(20)
---     CHECK (inventory_type IN ('jewelry', 'bullion', 'hard_goods'));
---     ('IN_PROCESS', 'In Process', 'Item is being processed or worked on'),
---     ('SCRAP', 'Scrap', 'Item is scrap and not available for sale'),
---     ('RESERVED', 'Reserved', 'Item is reserved for a customer'),
---     ('SOLD', 'Sold', 'Item has been sold')
---     ('PAWN', 'Pawn', 'Item is pawned to a customer')
---     ('REDEEMED', 'Redeemed', 'Item has been redeemed by customer')
---     ('FORFEITED', 'Forfeited', 'Item has been forfeited and ready to be moved to active inventory')
--- ON CONFLICT (status_code) DO NOTHING;
+-- Insert default inventory statuses
+INSERT INTO inventory_status (status_code, status_name, description) VALUES
+    ('HOLD', 'Hold', 'Item is on hold and not available for sale'),
+    ('ACTIVE', 'Active', 'Item is available for sale'),
+    ('IN_PROCESS', 'In Process', 'Item is being processed or worked on'),
+    ('SCRAP', 'Scrap', 'Item is scrap and not available for sale'),
+    ('RESERVED', 'Reserved', 'Item is reserved for a customer'),
+    ('SOLD', 'Sold', 'Item has been sold'),
+    ('PAWN', 'Pawn', 'Item is pawned to a customer'),
+    ('REDEEMED', 'Redeemed', 'Item has been redeemed by customer'),
+    ('FORFEITED', 'Forfeited', 'Item has been forfeited and ready to be moved to active inventory')
+ON CONFLICT (status_code) DO NOTHING;
 
 -- Drop change_notes column if it exists (migration)
 ALTER TABLE jewelry DROP COLUMN IF EXISTS change_notes;
