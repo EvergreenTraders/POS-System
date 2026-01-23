@@ -158,10 +158,11 @@ BEGIN
     -- Add comment for documentation
     COMMENT ON TABLE receipt_config IS 'Stores configurable footer text for different receipt types';
 
-    -- Insert default configuration if table is empty
+    -- Insert default configuration only if table is empty
     INSERT INTO receipt_config (transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt)
-    VALUES ('Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us',
-            'Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us');
+    SELECT 'Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us',
+            'Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us'
+    WHERE NOT EXISTS (SELECT 1 FROM receipt_config LIMIT 1);
 
     -- Add sales_receipt column if it doesn't exist
     IF NOT EXISTS (
