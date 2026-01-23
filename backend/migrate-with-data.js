@@ -176,12 +176,15 @@ async function importData() {
 
       console.log('\n  Starting data import...\n');
 
+      const tableResults = []; // Track results for each table
+
       for (const tableName of importOrder) {
         // Find table in export by name
         const tableExport = dataExport.tables.find(t => t.table === tableName);
 
         if (!tableExport || !tableExport.rows || tableExport.rows.length === 0) {
           console.log(`  ⊘ ${tableName}: No data to import`);
+          tableResults.push({ table: tableName, status: 'skipped', reason: 'no data' });
           skippedCount++;
           continue;
         }
@@ -210,6 +213,7 @@ async function importData() {
         // Insert data
         let successCount = 0;
         let errorCount = 0;
+        let firstError = null;
 
         for (const row of tableData) {
           // Handle special column types (JSON, JSONB, arrays)
@@ -232,6 +236,9 @@ async function importData() {
             successCount++;
           } catch (error) {
             errorCount++;
+            if (!firstError) {
+              firstError = error.message;
+            }
             // Log first 5 errors for debugging
             if (errorCount <= 5) {
               console.log(`    ⚠ Row ${errorCount} failed for ${tableName}: ${error.message}`);
@@ -243,13 +250,20 @@ async function importData() {
           }
         }
 
+        tableResults.push({
+          table: tableName,
+          total: tableData.length,
+          inserted: successCount,
+          errors: errorCount,
+          firstError: firstError
+        });
+
         if (errorCount > 0) {
           console.log(`  ✓ ${tableName}: ${successCount} rows inserted, ${errorCount} errors`);
         } else {
           console.log(`  ✓ ${tableName}: ${successCount} rows inserted`);
         }
 
-        console.log(`  ✓ ${tableName} imported successfully`);
         importedCount++;
       }
 
@@ -278,6 +292,7 @@ async function importData() {
       return {
         success: true,
         imported: importedCount,
+        tableDetails: tableResults.filter(t => t.errors > 0 || t.status === 'skipped'),
         skipped: skippedCount
       };
 
