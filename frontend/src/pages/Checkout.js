@@ -1255,6 +1255,25 @@ function Checkout() {
                 console.error('Error details:', pawnTicketError.response?.data);
               }
             }
+
+            // Record pawn history for creation (once per pawn ticket)
+            try {
+              const totalPrincipal = itemsForTicket.reduce((sum, item) => sum + (parseFloat(item.price || item.value) || 0), 0);
+              await axios.post(
+                `${config.apiUrl}/pawn-history`,
+                {
+                  pawn_ticket_id: pawnTicketId,
+                  action_type: 'CREATED',
+                  transaction_id: realTransactionId,
+                  principal_amount: totalPrincipal,
+                  performed_by: employeeId,
+                  notes: 'Pawn created'
+                },
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+            } catch (historyError) {
+              console.error(`Error recording pawn history for ${pawnTicketId}:`, historyError);
+            }
           }
 
           // Step 2.7: Post trade_ticket records for each unique trade_ticket_id
@@ -1361,6 +1380,22 @@ function Checkout() {
                     { headers: { Authorization: `Bearer ${token}` } }
                   );
 
+                  // Record pawn history for redemption
+                  await axios.post(
+                    `${config.apiUrl}/pawn-history`,
+                    {
+                      pawn_ticket_id: pawnTicketId,
+                      action_type: 'REDEEM',
+                      transaction_id: realTransactionId,
+                      principal_amount: parseFloat(item.principal) || null,
+                      interest_paid: parseFloat(item.interest) || null,
+                      total_paid: parseFloat(item.totalRedemptionAmount || item.totalAmount) || null,
+                      performed_by: employeeId,
+                      notes: 'Pawn redeemed'
+                    },
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+
                 } catch (updateError) {
                   console.error(`Error updating pawn ticket ${pawnTicketId} status:`, updateError);
                   console.error('Error details:', updateError.response?.data);
@@ -1375,6 +1410,44 @@ function Checkout() {
                   location: item.location,
                   pawnTicketId: pawnTicketId
                 });
+              }
+            }
+          }
+
+          // Step 3.7: Record pawn history for payment (extension) transactions
+          const extendedTickets = new Set();
+
+          for (const item of checkoutItems) {
+            const transactionType = item.transaction_type?.toLowerCase() || '';
+
+            if (transactionType === 'payment' && item.pawnTicketId) {
+              const pawnTicketId = item.pawnTicketId;
+
+              if (!extendedTickets.has(pawnTicketId)) {
+                extendedTickets.add(pawnTicketId);
+
+                try {
+                  // Record pawn history for extension
+                  await axios.post(
+                    `${config.apiUrl}/pawn-history`,
+                    {
+                      pawn_ticket_id: pawnTicketId,
+                      action_type: 'EXTEND',
+                      transaction_id: realTransactionId,
+                      principal_amount: parseFloat(item.principal) || null,
+                      interest_paid: parseFloat(item.interest) || null,
+                      fee_paid: parseFloat(item.fee) || null,
+                      total_paid: parseFloat(item.amount) || null,
+                      new_due_date: item.date || null,
+                      extension_days: parseInt(item.days) || null,
+                      performed_by: employeeId,
+                      notes: `Extended by ${item.term || 1} term(s)`
+                    },
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+                } catch (historyError) {
+                  console.error(`Error recording pawn history for ${pawnTicketId}:`, historyError);
+                }
               }
             }
           }

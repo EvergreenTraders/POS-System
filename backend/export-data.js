@@ -44,6 +44,7 @@ const TABLES = [
   'payment_methods',
   'payments',
   'pawn_ticket',
+  'pawn_history',
   'buy_ticket',
   'sale_ticket',
   'layaway',

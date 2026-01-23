@@ -37,6 +37,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import BlockIcon from '@mui/icons-material/Block';
+import HistoryIcon from '@mui/icons-material/History';
 import axios from 'axios';
 import config from '../config';
 
@@ -62,6 +63,10 @@ const Pawns = () => {
     transactionDate: '',
     dueDate: '',
   });
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [pawnHistory, setPawnHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [selectedTicketForHistory, setSelectedTicketForHistory] = useState(null);
 
   // Fetch pawn config for term_days, interest_rate, and frequency_days
   useEffect(() => {
@@ -278,12 +283,27 @@ const Pawns = () => {
 
     try {
       const token = localStorage.getItem('token');
+      const employeeId = JSON.parse(atob(token.split('.')[1])).id;
 
       // Update pawn_ticket status to FORFEITED
       // Backend will automatically move jewelry items to IN_PROCESS status
       await axios.put(
         `${API_BASE_URL}/pawn-ticket/${ticket.pawn_ticket_id}/status`,
         { status: 'FORFEITED' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Record pawn history for forfeiture
+      const totalPrincipal = ticket.items.reduce((sum, item) => sum + (parseFloat(item.item_price) || 0), 0);
+      await axios.post(
+        `${API_BASE_URL}/pawn-history`,
+        {
+          pawn_ticket_id: ticket.pawn_ticket_id,
+          action_type: 'FORFEIT',
+          principal_amount: totalPrincipal,
+          performed_by: employeeId,
+          notes: 'Pawn forfeited - items moved to inventory'
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -298,6 +318,59 @@ const Pawns = () => {
       console.error('Error forfeiting pawn ticket:', error);
       alert('Failed to forfeit pawn ticket. Please try again.');
     }
+  };
+
+  const handleViewHistory = async (ticket) => {
+    setSelectedTicketForHistory(ticket);
+    setHistoryDialogOpen(true);
+    setHistoryLoading(true);
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/pawn-history/${ticket.pawn_ticket_id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setPawnHistory(response.data);
+    } catch (error) {
+      console.error('Error fetching pawn history:', error);
+      setPawnHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const formatHistoryDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const getActionTypeLabel = (actionType) => {
+    const labels = {
+      'CREATED': 'Created',
+      'EXTEND': 'Extended',
+      'REDEEM': 'Redeemed',
+      'FORFEIT': 'Forfeited',
+      'PARTIAL_REDEEM': 'Partial Redeem'
+    };
+    return labels[actionType] || actionType;
+  };
+
+  const getActionTypeColor = (actionType) => {
+    const colors = {
+      'CREATED': '#1976d2',
+      'EXTEND': '#ff9800',
+      'REDEEM': '#4caf50',
+      'FORFEIT': '#f44336',
+      'PARTIAL_REDEEM': '#9c27b0'
+    };
+    return colors[actionType] || '#757575';
   };
 
   const handleRedeemConfirm = async () => {
@@ -677,7 +750,41 @@ const Pawns = () => {
                               >
                                 Forfeit
                               </Button>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<HistoryIcon />}
+                                onClick={() => handleViewHistory(ticket)}
+                                sx={{
+                                  borderColor: '#757575',
+                                  color: '#757575',
+                                  '&:hover': {
+                                    borderColor: '#424242',
+                                    backgroundColor: '#f5f5f5'
+                                  }
+                                }}
+                              >
+                                History
+                              </Button>
                             </Box>
+                          )}
+                          {!isPawnStatus && (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              startIcon={<HistoryIcon />}
+                              onClick={() => handleViewHistory(ticket)}
+                              sx={{
+                                borderColor: '#757575',
+                                color: '#757575',
+                                '&:hover': {
+                                  borderColor: '#424242',
+                                  backgroundColor: '#f5f5f5'
+                                }
+                              }}
+                            >
+                              History
+                            </Button>
                           )}
                         </TableCell>
                       </TableRow>
@@ -789,6 +896,109 @@ const Pawns = () => {
             }}
           >
             Confirm Redemption
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Pawn History Dialog */}
+      <Dialog
+        open={historyDialogOpen}
+        onClose={() => setHistoryDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          Pawn History - {selectedTicketForHistory?.pawn_ticket_id}
+        </DialogTitle>
+        <DialogContent>
+          {historyLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : pawnHistory.length === 0 ? (
+            <Box sx={{ p: 3, textAlign: 'center' }}>
+              <Typography variant="body1" color="text.secondary">
+                No history records found for this pawn ticket.
+              </Typography>
+            </Box>
+          ) : (
+            <TableContainer component={Paper} sx={{ mt: 2 }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>DATE</TableCell>
+                    <TableCell>ACTION</TableCell>
+                    <TableCell>PRINCIPAL</TableCell>
+                    <TableCell>INTEREST PAID</TableCell>
+                    <TableCell>FEE PAID</TableCell>
+                    <TableCell>TOTAL PAID</TableCell>
+                    <TableCell>NEW DUE DATE</TableCell>
+                    <TableCell>PERFORMED BY</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {pawnHistory.map((record, index) => (
+                    <TableRow key={record.id || index}>
+                      <TableCell>
+                        {formatHistoryDate(record.action_date)}
+                      </TableCell>
+                      <TableCell>
+                        <span style={{
+                          backgroundColor: getActionTypeColor(record.action_type) + '20',
+                          color: getActionTypeColor(record.action_type),
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          fontWeight: 'bold'
+                        }}>
+                          {getActionTypeLabel(record.action_type)}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {record.principal_amount ? formatCurrency(record.principal_amount) : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {record.interest_paid ? formatCurrency(record.interest_paid) : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {record.fee_paid ? formatCurrency(record.fee_paid) : '-'}
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>
+                        {record.total_paid ? formatCurrency(record.total_paid) : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {record.new_due_date ? new Date(record.new_due_date).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric'
+                        }) : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {record.performed_by_name || 'N/A'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+          {selectedTicketForHistory && (
+            <Box sx={{ mt: 3, p: 2, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
+              <Typography variant="body2" gutterBottom>
+                <strong>Customer:</strong> {selectedTicketForHistory.customer_name || 'N/A'}
+              </Typography>
+              <Typography variant="body2" gutterBottom>
+                <strong>Items:</strong> {selectedTicketForHistory.items?.map(item => item.item_description || item.item_id).join(', ')}
+              </Typography>
+              <Typography variant="body2">
+                <strong>Current Status:</strong> {getStatusChip(selectedTicketForHistory.item_status)}
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setHistoryDialogOpen(false)} variant="outlined">
+            Close
           </Button>
         </DialogActions>
       </Dialog>

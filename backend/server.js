@@ -4367,6 +4367,148 @@ app.put('/api/pawn-config', async (req, res) => {
   }
 });
 
+// Pawn History Endpoints
+
+// Get pawn history for a specific pawn ticket
+app.get('/api/pawn-history/:pawn_ticket_id', async (req, res) => {
+  try {
+    const { pawn_ticket_id } = req.params;
+
+    const query = `
+      SELECT
+        ph.*,
+        e.first_name || ' ' || e.last_name as performed_by_name
+      FROM pawn_history ph
+      LEFT JOIN employees e ON ph.performed_by = e.employee_id
+      WHERE ph.pawn_ticket_id = $1
+      ORDER BY ph.action_date DESC
+    `;
+
+    const result = await pool.query(query, [pawn_ticket_id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching pawn history:', error);
+    res.status(500).json({ error: 'Failed to fetch pawn history' });
+  }
+});
+
+// Get all pawn history (for reporting)
+app.get('/api/pawn-history', async (req, res) => {
+  try {
+    const { action_type, from_date, to_date, limit = 100 } = req.query;
+
+    let query = `
+      SELECT
+        ph.*,
+        e.first_name || ' ' || e.last_name as performed_by_name
+      FROM pawn_history ph
+      LEFT JOIN employees e ON ph.performed_by = e.employee_id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramCount = 1;
+
+    if (action_type) {
+      query += ` AND ph.action_type = $${paramCount}`;
+      params.push(action_type);
+      paramCount++;
+    }
+
+    if (from_date) {
+      query += ` AND ph.action_date >= $${paramCount}`;
+      params.push(from_date);
+      paramCount++;
+    }
+
+    if (to_date) {
+      query += ` AND ph.action_date <= $${paramCount}`;
+      params.push(to_date);
+      paramCount++;
+    }
+
+    query += ` ORDER BY ph.action_date DESC LIMIT $${paramCount}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching pawn history:', error);
+    res.status(500).json({ error: 'Failed to fetch pawn history' });
+  }
+});
+
+// Record a pawn history entry (extension, redemption, etc.)
+app.post('/api/pawn-history', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const {
+      pawn_ticket_id,
+      action_type,
+      transaction_id,
+      principal_amount,
+      interest_paid,
+      fee_paid,
+      total_paid,
+      previous_due_date,
+      new_due_date,
+      extension_days,
+      performed_by,
+      notes
+    } = req.body;
+
+    // Validate required fields
+    if (!pawn_ticket_id || !action_type) {
+      return res.status(400).json({ error: 'pawn_ticket_id and action_type are required' });
+    }
+
+    // Validate action_type
+    const validActions = ['CREATED', 'EXTEND', 'REDEEM', 'FORFEIT', 'PARTIAL_REDEEM'];
+    if (!validActions.includes(action_type)) {
+      return res.status(400).json({
+        error: `Invalid action_type. Must be one of: ${validActions.join(', ')}`
+      });
+    }
+
+    await client.query('BEGIN');
+
+    const insertQuery = `
+      INSERT INTO pawn_history (
+        pawn_ticket_id, action_type, transaction_id, principal_amount,
+        interest_paid, fee_paid, total_paid, previous_due_date,
+        new_due_date, extension_days, performed_by, notes
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING *
+    `;
+
+    const result = await client.query(insertQuery, [
+      pawn_ticket_id,
+      action_type,
+      transaction_id || null,
+      principal_amount || null,
+      interest_paid || null,
+      fee_paid || null,
+      total_paid || null,
+      previous_due_date || null,
+      new_due_date || null,
+      extension_days || null,
+      performed_by || null,
+      notes || null
+    ]);
+
+    await client.query('COMMIT');
+
+    console.log(`✓ Pawn history recorded: ${action_type} for ticket ${pawn_ticket_id}`);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error recording pawn history:', error);
+    res.status(500).json({ error: 'Failed to record pawn history' });
+  } finally {
+    client.release();
+  }
+});
+
 // Customer routes
 app.get('/api/customers', async (req, res) => {
   try {
