@@ -193,9 +193,13 @@ async function importData() {
 
         console.log(`  Importing ${tableName} (${tableData.length} rows)...`);
 
-        // Get column names from first row, excluding generated columns
+        // Get column names from first row, excluding generated columns for specific tables
         const allColumns = Object.keys(tableData[0]);
-        const generatedColumns = ['total_amount']; // Generated columns that can't be inserted
+        // cash_denominations has a generated 'total_amount' column, but other tables don't
+        const generatedColumnsMap = {
+          'cash_denominations': ['total_amount']
+        };
+        const generatedColumns = generatedColumnsMap[tableName] || [];
         const columns = allColumns.filter(col => !generatedColumns.includes(col));
 
         // Build placeholders with special handling for bytea columns
@@ -215,17 +219,30 @@ async function importData() {
         let errorCount = 0;
         let firstError = null;
 
+        // Columns that are JSON/JSONB type (not PostgreSQL arrays)
+        const jsonColumns = ['images', 'changed_fields', 'old_value', 'new_value', 'metadata'];
+        // Columns that are PostgreSQL array type
+        const pgArrayColumns = ['attribute_options'];
+
         for (const row of tableData) {
           // Handle special column types (JSON, JSONB, arrays)
           const values = columns.map(col => {
             const value = row[col];
-            // Convert arrays to PostgreSQL array format
-            if (Array.isArray(value)) {
+            // Handle JSON/JSONB columns - convert to JSON string
+            if (jsonColumns.includes(col) && value !== null) {
+              return JSON.stringify(value);
+            }
+            // Handle PostgreSQL array columns
+            if (pgArrayColumns.includes(col) && Array.isArray(value)) {
               return `{${value.map(v => `"${v}"`).join(',')}}`;
             }
-            // Convert objects to JSON strings for JSONB columns
-            if (value !== null && typeof value === 'object') {
+            // Convert other objects to JSON strings
+            if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
               return JSON.stringify(value);
+            }
+            // Convert other arrays to PostgreSQL array format
+            if (Array.isArray(value)) {
+              return `{${value.map(v => `"${v}"`).join(',')}}`;
             }
             return value;
           });
