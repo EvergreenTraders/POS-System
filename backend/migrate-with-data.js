@@ -186,16 +186,18 @@ async function importData() {
 
         console.log(`  Importing ${tableName} (${tableData.length} rows)...`);
 
-        // Get column names from first row, but exclude BYTEA columns that need special handling
+        // Get column names from first row
         const allColumns = Object.keys(tableData[0]);
-        const columns = allColumns.filter(col => {
-          // Skip image columns for now - they need base64 decoding
-          if (col === 'image' && tableData[0][col] && typeof tableData[0][col] === 'string' && tableData[0][col].length > 1000) {
-            return false;
+        const columns = allColumns;
+
+        // Build placeholders with special handling for bytea columns
+        const byteaColumns = ['logo', 'image', 'photo'];
+        const placeholders = columns.map((col, i) => {
+          if (byteaColumns.includes(col)) {
+            return `decode($${i + 1}, 'base64')`;
           }
-          return true;
-        });
-        const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+          return `$${i + 1}`;
+        }).join(', ');
         const columnNames = columns.join(', ');
 
         // Insert data
