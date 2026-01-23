@@ -9,8 +9,9 @@ CREATE TABLE IF NOT EXISTS inventory_status (
     CONSTRAINT valid_status_code CHECK (status_code ~ '^[A-Z0-9_]+$')
 );
 
--- Insert default inventory statuses
-INSERT INTO inventory_status (status_code, status_name, description) VALUES
+-- Insert default inventory statuses only if table is empty
+INSERT INTO inventory_status (status_code, status_name, description)
+SELECT * FROM (VALUES
     ('HOLD', 'Hold', 'Item is on hold and not available for sale'),
     ('ACTIVE', 'Active', 'Item is available for sale'),
     ('IN_PROCESS', 'In Process', 'Item is being processed or worked on'),
@@ -20,7 +21,8 @@ INSERT INTO inventory_status (status_code, status_name, description) VALUES
     ('PAWN', 'Pawn', 'Item is pawned to a customer'),
     ('REDEEMED', 'Redeemed', 'Item has been redeemed by customer'),
     ('FORFEITED', 'Forfeited', 'Item has been forfeited and ready to be moved to active inventory')
-ON CONFLICT (status_code) DO NOTHING;
+) AS v(status_code, status_name, description)
+WHERE NOT EXISTS (SELECT 1 FROM inventory_status LIMIT 1);
 
 -- Drop change_notes column if it exists (migration)
 ALTER TABLE jewelry DROP COLUMN IF EXISTS change_notes;
