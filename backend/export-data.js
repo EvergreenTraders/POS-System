@@ -24,7 +24,14 @@ const TABLES = [
   'pawn_config',
   'tax_config',
   'cases_config',
+  'inventory_status',
+  'drawers',
+  'drawer_config',
+  'discrepancy_threshold',
   'cash_drawer_sessions',
+  'cash_drawer_transactions',
+  'cash_drawer_adjustments',
+  'cash_denominations',
   'storage_location',
   'metal_estimator',
   'gem_estimator',
@@ -42,12 +49,15 @@ const TABLES = [
   'layaway_payments',
   'scrap_buckets',
   'scrap_items',
+  'scrap_bucket_history',
   'quotes',
   'quote_items',
   'jewelry_item_history',
   'linked_account_authorization',
   'customer_account_links',
-  'customer_headers_preferences'
+  'customer_headers_preferences',
+  'attribute_config',
+  'item_attributes'
 ];
 
 async function exportTableData(tableName) {

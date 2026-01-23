@@ -123,9 +123,15 @@ async function importData() {
         'pawn_config',
         'tax_config',
         'cases_config',
-        'cash_drawer_sessions',
-        'storage_location',
         'inventory_status',
+        'drawers',
+        'drawer_config',
+        'discrepancy_threshold',
+        'cash_drawer_sessions',
+        'cash_drawer_transactions',
+        'cash_drawer_adjustments',
+        'cash_denominations',
+        'storage_location',
         'jewelry',
         'jewelry_secondary_gems',
         'transactions',
@@ -137,11 +143,16 @@ async function importData() {
         'sale_ticket',
         'layaway',
         'layaway_payments',
+        'scrap_buckets',
+        'scrap_items',
+        'scrap_bucket_history',
         'quotes',
         'quote_items',
         'jewelry_item_history',
         'customer_account_links',
-        'customer_headers_preferences'
+        'customer_headers_preferences',
+        'attribute_config',
+        'item_attributes'
       ];
 
       let importedCount = 0;
