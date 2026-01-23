@@ -24,6 +24,7 @@ const TABLES = [
   'pawn_config',
   'tax_config',
   'cases_config',
+  'receipt_config',
   'inventory_status',
   'drawers',
   'drawer_config',

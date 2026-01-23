@@ -123,6 +123,7 @@ async function importData() {
         'pawn_config',
         'tax_config',
         'cases_config',
+        'receipt_config',
         'inventory_status',
         'drawers',
         'drawer_config',
@@ -158,12 +159,15 @@ async function importData() {
       let importedCount = 0;
       let skippedCount = 0;
 
+      // Disable foreign key checks during import
+      await client.query('SET session_replication_role = replica;');
+
       // Clear tables OUTSIDE transaction (so failures don't abort everything)
       console.log('  Clearing existing data...\n');
       for (let i = importOrder.length - 1; i >= 0; i--) {
         const tableName = importOrder[i];
         try {
-          await client.query(`DELETE FROM ${tableName}`);
+          await client.query(`TRUNCATE TABLE ${tableName} CASCADE`);
           console.log(`    Cleared ${tableName}`);
         } catch (error) {
           console.log(`    ⚠ Could not clear ${tableName}: ${error.message}`);
@@ -249,6 +253,10 @@ async function importData() {
         console.log(`  ✓ ${tableName} imported successfully`);
         importedCount++;
       }
+
+      // Re-enable foreign key checks
+      console.log('\n  Re-enabling foreign key checks...');
+      await client.query('SET session_replication_role = DEFAULT;');
 
       console.log(`\n✓ Data import completed!`);
       console.log(`  Imported: ${importedCount} tables`);
