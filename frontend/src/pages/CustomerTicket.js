@@ -3331,6 +3331,99 @@ const CustomerTicket = () => {
       }
     }
 
+    // Special handling for payment transactions with pawnTicketId (pawn extensions) - similar to redeem
+    if (transaction_type === 'payment') {
+      const paymentRow = filteredItems[0];
+      const pawnTicketId = paymentRow?.pawnTicketId;
+
+      if (pawnTicketId) {
+        try {
+          // Fetch all items for this pawn ticket from the backend
+          const token = localStorage.getItem('token');
+          const response = await fetch(`${config.apiUrl}/pawn-transactions?pawn_ticket_id=${pawnTicketId}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to fetch pawn ticket items');
+          }
+
+          const pawnTicketItems = await response.json();
+
+          if (!pawnTicketItems || pawnTicketItems.length === 0) {
+            showSnackbar('No items found for this pawn ticket', 'error');
+            return;
+          }
+
+          // Extract extension payment amounts from the payment row
+          const interest = parseFloat(paymentRow.interest || 0);
+          const fee = parseFloat(paymentRow.fee || 0);
+          const totalAmount = parseFloat(paymentRow.amount || 0);
+          const principal = parseFloat(paymentRow.principal || 0);
+          const extensionDays = parseInt(paymentRow.days || 0);
+          const newDueDate = paymentRow.date || null;
+
+          // Convert pawn ticket items to cart items with extension metadata
+          const itemsWithMetadata = pawnTicketItems.map(pawnItem => ({
+            id: pawnItem.item_id || Date.now(),
+            description: pawnItem.item_description || pawnItem.item_short_desc || 'Unknown item',
+            long_desc: pawnItem.item_description,
+            short_desc: pawnItem.item_short_desc,
+            price: totalAmount, // For extension, price is the extension payment amount
+            value: parseFloat(pawnItem.item_price || 0),
+            category: pawnItem.category || '',
+            images: pawnItem.images || [],
+            location: pawnItem.location || '',
+            item_id: pawnItem.item_id,
+            transaction_type: 'payment', // Keep as payment type for proper processing
+            buyTicketId: pawnTicketId, // Use the original pawn ticket ID
+            pawnTicketId: pawnTicketId,
+            customer: customer ? {
+              id: customer.id,
+              first_name: customer.first_name,
+              last_name: customer.last_name,
+              name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+              phone: customer.phone || 'N/A',
+              email: customer.email || 'N/A'
+            } : null,
+            employee: user ? {
+              id: user.id,
+              name: `${user.firstName} ${user.lastName}`,
+              role: user.role || 'Employee'
+            } : null,
+            // Include extension payment details
+            principal: principal,
+            interest: interest,
+            fee: fee,
+            amount: totalAmount,
+            days: extensionDays,
+            date: newDueDate,
+            term: paymentRow.term || '1'
+          }));
+
+          // Save to session storage for cart
+          const existingCart = JSON.parse(sessionStorage.getItem('cartItems') || '[]');
+          const updatedCart = [...existingCart, ...itemsWithMetadata];
+          sessionStorage.setItem('cartItems', JSON.stringify(updatedCart));
+
+          // Clear payment items after adding to cart
+          setPaymentItems([createEmptyPaymentItem()]);
+          const key = customer && customer.id ? `ticket_${customer.id}_payment` : `ticket_global_payment`;
+          localStorage.removeItem(key);
+
+          showSnackbar(`Added extension for pawn ticket ${pawnTicketId} to cart`, 'success');
+
+          // Navigate to cart
+          navigate('/cart');
+          return;
+        } catch (error) {
+          console.error('Error fetching pawn ticket items for extension:', error);
+          showSnackbar('Failed to fetch pawn ticket items. Please try again.', 'error');
+          return;
+        }
+      }
+    }
+
     // Instead of navigating, save to session storage first
     try {
       // Use preserved buyTicketId if editing from cart, otherwise generate new one
@@ -3379,6 +3472,8 @@ const CustomerTicket = () => {
           ...item,
           transaction_type: transaction_type,
           buyTicketId: buyTicketId, // Assign the ticket ID to all items in this batch
+          // For pawn transactions, also set pawnTicketId for consistency with redeem flow
+          ...(transaction_type === 'pawn' ? { pawnTicketId: buyTicketId } : {}),
           customer: customer ? {
             id: customer.id,
             first_name: customer.first_name,
@@ -3538,6 +3633,7 @@ const CustomerTicket = () => {
           ...item,
           transaction_type: 'pawn',
           buyTicketId: pawnTicketId,
+          pawnTicketId: pawnTicketId, // Also set pawnTicketId for consistency with pawn history tracking
           customer: customer ? {
             id: customer.id,
             first_name: customer.first_name,
