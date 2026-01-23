@@ -2573,7 +2573,7 @@ function Checkout() {
                       </div>
                       <div class="info-row">
                         <span class="info-label">Customer:</span>
-                        <span>${selectedCustomer?.name || selectedCustomer?.first_name + ' ' + selectedCustomer?.last_name || 'N/A'}</span>
+                        <span>${selectedCustomer?.name || ((selectedCustomer?.first_name || '') + ' ' + (selectedCustomer?.last_name || '')).trim() || 'N/A'}</span>
                       </div>
                       ${selectedCustomer?.phone ? `
                       <div class="info-row">
