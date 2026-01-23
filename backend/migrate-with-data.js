@@ -167,7 +167,7 @@ async function importData() {
       for (let i = importOrder.length - 1; i >= 0; i--) {
         const tableName = importOrder[i];
         try {
-          await client.query(`TRUNCATE TABLE ${tableName} CASCADE`);
+          await client.query(`TRUNCATE TABLE ${tableName} RESTART IDENTITY CASCADE`);
           console.log(`    Cleared ${tableName}`);
         } catch (error) {
           console.log(`    ⚠ Could not clear ${tableName}: ${error.message}`);
@@ -232,14 +232,13 @@ async function importData() {
             successCount++;
           } catch (error) {
             errorCount++;
-            // Only log first 3 errors to avoid spam
-            if (errorCount <= 3) {
+            // Log first 5 errors for debugging
+            if (errorCount <= 5) {
               console.log(`    ⚠ Row ${errorCount} failed for ${tableName}: ${error.message}`);
-            }
-            if (errorCount === 1) {
-              // Log full error details for first failure
-              console.log(`    First error query:`, query);
-              console.log(`    First error values (first 5):`, values.slice(0, 5));
+              if (errorCount === 1) {
+                console.log(`    Query: ${query}`);
+                console.log(`    Values (first 5): ${JSON.stringify(values.slice(0, 5))}`);
+              }
             }
           }
         }
