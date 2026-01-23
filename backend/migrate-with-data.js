@@ -186,17 +186,20 @@ async function importData() {
 
         console.log(`  Importing ${tableName} (${tableData.length} rows)...`);
 
-        // Get column names from first row
+        // Get column names from first row, excluding generated columns
         const allColumns = Object.keys(tableData[0]);
-        const columns = allColumns;
+        const generatedColumns = ['total_amount']; // Generated columns that can't be inserted
+        const columns = allColumns.filter(col => !generatedColumns.includes(col));
 
         // Build placeholders with special handling for bytea columns
         const byteaColumns = ['logo', 'image', 'photo'];
-        const placeholders = columns.map((col, i) => {
+        let paramIndex = 0;
+        const placeholders = columns.map((col) => {
+          paramIndex++;
           if (byteaColumns.includes(col)) {
-            return `decode($${i + 1}, 'base64')`;
+            return `decode($${paramIndex}, 'base64')`;
           }
-          return `$${i + 1}`;
+          return `$${paramIndex}`;
         }).join(', ');
         const columnNames = columns.join(', ');
 
@@ -208,7 +211,11 @@ async function importData() {
           // Handle special column types (JSON, JSONB, arrays)
           const values = columns.map(col => {
             const value = row[col];
-            // Convert objects/arrays to JSON strings for JSONB columns
+            // Convert arrays to PostgreSQL array format
+            if (Array.isArray(value)) {
+              return `{${value.map(v => `"${v}"`).join(',')}}`;
+            }
+            // Convert objects to JSON strings for JSONB columns
             if (value !== null && typeof value === 'object') {
               return JSON.stringify(value);
             }
