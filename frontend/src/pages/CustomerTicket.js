@@ -397,10 +397,13 @@ const CustomerTicket = () => {
           const categories = await categoriesResponse.json();
           setMetalCategories(categories);
 
-          // Create a map of category_code to category name
+          // Create a map of category_code to category name (normalize to uppercase for case-insensitive lookup)
           const categoryMap = {};
           categories.forEach(cat => {
             if (cat.category_code) {
+              // Store with uppercase key for case-insensitive matching
+              categoryMap[cat.category_code.toUpperCase()] = cat.category;
+              // Also store with original case for backward compatibility
               categoryMap[cat.category_code] = cat.category;
             }
           });
@@ -413,10 +416,13 @@ const CustomerTicket = () => {
           const colors = await colorsResponse.json();
           setMetalColors(colors);
 
-          // Create a map of color_code to color name
+          // Create a map of color_code to color name (normalize to uppercase for case-insensitive lookup)
           const colorMap = {};
           colors.forEach(color => {
             if (color.color_code) {
+              // Store with uppercase key for case-insensitive matching
+              colorMap[color.color_code.toUpperCase()] = color.color;
+              // Also store with original case for backward compatibility
               colorMap[color.color_code] = color.color;
             }
           });
@@ -429,10 +435,13 @@ const CustomerTicket = () => {
           const types = await typesResponse.json();
           setPreciousMetalTypes(types);
 
-          // Create a map of type_code to type name
+          // Create a map of type_code to type name (normalize to uppercase for case-insensitive lookup)
           const typeMap = {};
           types.forEach(type => {
             if (type.type_code) {
+              // Store with uppercase key for case-insensitive matching
+              typeMap[type.type_code.toUpperCase()] = type.type;
+              // Also store with original case for backward compatibility
               typeMap[type.type_code] = type.type;
             }
           });
@@ -2347,15 +2356,16 @@ const CustomerTicket = () => {
     let partIndex = 0;
     const firstPart = parts[0];
 
-    // Check if first part looks like a category code (single letter) and second part looks like purity
-    if (parts.length >= 3 && firstPart.length === 1) {
-      const potentialPurity = parts[1];
-
-      if (potentialPurity.match(/^\d+K?$/i) || potentialPurity.match(/^0?\.\d+$/) || potentialPurity.match(/^1\.0+$/) || potentialPurity.match(/^[a-zA-Z]+$/)) {
-        // First part is category code
-        parsed.category = categoryCodeMap[firstPart] || firstPart;
-        partIndex++;
-      }
+    // Check if first part is a category code (can be 1-3 characters like 'R', 'SE', 'BR', 'CSM', 'LDS')
+    // Try to match category codes by checking if firstPart matches any category code in the map
+    if (categoryCodeMap[firstPart]) {
+      // Found a matching category code
+      parsed.category = categoryCodeMap[firstPart];
+      partIndex = 1; // Skip the category code part, move to next part (purity)
+    } else {
+      // No category code found, first part might be purity directly
+      // This handles formats like "10k 5.6g RG" (no category code)
+      partIndex = 0;
     }
 
     // Parse Purity (e.g., "10K", "14K", "18K", "24K", "0.585", "0.999", "pure", "sterling")
