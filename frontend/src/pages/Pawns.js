@@ -40,11 +40,13 @@ import BlockIcon from '@mui/icons-material/Block';
 import HistoryIcon from '@mui/icons-material/History';
 import axios from 'axios';
 import config from '../config';
+import { useWorkingDate } from '../context/WorkingDateContext';
 
 const API_BASE_URL = config.apiUrl;
 
 const Pawns = () => {
   const navigate = useNavigate();
+  const { getCurrentDateObject } = useWorkingDate();
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [pawns, setPawns] = useState([]);
@@ -185,7 +187,7 @@ const Pawns = () => {
   const isOverdue = (transactionDate, itemStatus) => {
     if (itemStatus !== 'PAWN') return false;
     const dueDate = calculateDueDate(transactionDate);
-    return new Date() > dueDate;
+    return getCurrentDateObject() > dueDate;
   };
 
   const getDisplayStatus = (pawn) => {

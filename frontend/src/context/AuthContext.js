@@ -19,6 +19,8 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('lockedSession');
+    localStorage.removeItem('workingDate');
+    localStorage.removeItem('workingDateEnabled');
     sessionStorage.removeItem('redirectAfterLogin');
     setUser(null);
     navigate('/login');

@@ -16,9 +16,11 @@ import {
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
+import { useWorkingDate } from '../context/WorkingDateContext';
 
 const CustomerDashboard = () => {
   const navigate = useNavigate();
+  const { getCurrentDateObject } = useWorkingDate();
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState({
     totalCustomers: 0,
@@ -59,7 +61,7 @@ const CustomerDashboard = () => {
   const formatDate = (dateString) => {
     if (!dateString) return 'Never';
     const date = new Date(dateString);
-    const now = new Date();
+    const now = getCurrentDateObject();
     const diffTime = Math.abs(now - date);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 

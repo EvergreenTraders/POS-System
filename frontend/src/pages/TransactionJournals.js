@@ -28,12 +28,14 @@ import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon, Warning as Warn
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { useWorkingDate } from '../context/WorkingDateContext';
 import { Avatar } from '@mui/material';
 import { pdf } from '@react-pdf/renderer';
 import PawnTicketTemplate from '../components/PawnTicketTemplate';
 import config from '../config';
 
 function TransactionJournals() {
+  const { getCurrentDateObject } = useWorkingDate();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [transactionToDelete, setTransactionToDelete] = useState(null);
   const [store, setStore] = useState('');
@@ -989,7 +991,7 @@ function TransactionJournals() {
     }
     
     const transactionDate = new Date(transaction.created_at).toDateString();
-    const today = new Date().toDateString();
+    const today = getCurrentDateObject().toDateString();
     
     if (transactionDate !== today) {
       alert('You can only delete transactions made today.');

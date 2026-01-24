@@ -9,6 +9,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
+import { useWorkingDate } from '../context/WorkingDateContext';
 import MetalEstimator from './MetalEstimator';
 import GemEstimator from './GemEstimator';
 import JewelEstimator from './JewelEstimator';
@@ -453,6 +454,7 @@ const CustomerTicket = () => {
   };
 
   const { user } = useAuth(); // Get user at component level
+  const { getCurrentDateObject } = useWorkingDate(); // Get working date for calculations
 
   // Pawn configuration for calculations
   const [interestRate, setInterestRate] = React.useState(2.9);
@@ -1446,7 +1448,7 @@ const CustomerTicket = () => {
         // Calculate days, term and date for default extension (1 period = frequencyDays)
         const days = frequencyDays || 30;
         const term = 1;
-        const today = new Date();
+        const today = getCurrentDateObject();
         const futureDate = new Date(today);
         futureDate.setDate(today.getDate() + days);
         const date = futureDate.toISOString().split('T')[0];
@@ -1789,7 +1791,7 @@ const CustomerTicket = () => {
               const days = frequency;
               const term = 1;
 
-              const today = new Date();
+              const today = getCurrentDateObject();
               const futureDate = new Date(today);
               futureDate.setDate(today.getDate() + days);
               const date = futureDate.toISOString().split('T')[0];
@@ -1863,8 +1865,8 @@ const CustomerTicket = () => {
             const term = Math.ceil(days / frequency);
             updatedItem.term = term.toString();
 
-            // Calculate date (today + days)
-            const today = new Date();
+            // Calculate date (working date + days)
+            const today = getCurrentDateObject();
             const futureDate = new Date(today);
             futureDate.setDate(today.getDate() + days);
             updatedItem.date = futureDate.toISOString().split('T')[0]; // YYYY-MM-DD format

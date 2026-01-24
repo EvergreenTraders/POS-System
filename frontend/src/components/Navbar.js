@@ -10,6 +10,7 @@ import {
   Menu,
   MenuItem,
   Box,
+  Chip,
 } from '@mui/material';
 import {
   ShoppingCart as CartIcon,
@@ -20,6 +21,7 @@ import {
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useWorkingDate } from '../context/WorkingDateContext';
 import { useNavigate } from 'react-router-dom';
 import Cart from './Cart';
 
@@ -50,6 +52,7 @@ function Navbar() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const { cartItems } = useCart();
   const { user, logout, lockScreen } = useAuth();
+  const { workingDate, isWorkingDateEnabled } = useWorkingDate();
   const navigate = useNavigate();
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
@@ -231,6 +234,23 @@ function Navbar() {
             >
               {formatTime()}
             </Typography>
+
+            {/* Working Date Indicator */}
+            {isWorkingDateEnabled && (
+              <Chip
+                label={`Working: ${new Date(workingDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
+                size="small"
+                sx={{
+                  ml: 1,
+                  bgcolor: '#ff9800',
+                  color: 'white',
+                  fontWeight: 600,
+                  '& .MuiChip-label': {
+                    px: 1
+                  }
+                }}
+              />
+            )}
           </Box>
 
           <Box sx={{ flexGrow: 1 }} />

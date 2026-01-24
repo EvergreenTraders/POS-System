@@ -4,6 +4,7 @@ import axios from 'axios';
 import config from '../config';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useWorkingDate } from '../context/WorkingDateContext';
 import PersonSearchIcon from '@mui/icons-material/PersonSearch';
 import {
   Container,
@@ -90,6 +91,7 @@ function Checkout() {
   const navigate = useNavigate();
   const { cartItems, addToCart, selectedCustomer, setCustomer, clearCart, removeMultipleItems } = useCart();
   const { user } = useAuth();
+  const { getCurrentDate } = useWorkingDate();
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [customerSearchDialogOpen, setCustomerSearchDialogOpen] = useState(false);
@@ -1039,7 +1041,7 @@ function Checkout() {
             customer_id: selectedCustomer.id,
             employee_id: employeeId,
             total_amount: parseFloat(calculateTotal().toFixed(2)), // Round to 2 decimal places
-            transaction_date: new Date().toISOString().split('T')[0]
+            transaction_date: getCurrentDate() // Use working date from context
           };
 
           // Build cart items for transaction
