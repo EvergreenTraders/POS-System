@@ -3667,7 +3667,7 @@ app.get('/api/pawn-ticket', async (req, res) => {
 app.post('/api/pawn-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { pawn_ticket_id, transaction_id, item_id } = req.body;
+    const { pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, frequency_days, due_date } = req.body;
 
     // Validate required fields
     if (!pawn_ticket_id) {
@@ -3693,22 +3693,26 @@ app.post('/api/pawn-ticket', async (req, res) => {
     if (currentItemCount >= MAX_PAWN_ITEMS) {
       await client.query('ROLLBACK');
       console.error(`❌ Pawn ticket ${pawn_ticket_id} already has ${currentItemCount} items. Maximum ${MAX_PAWN_ITEMS} items allowed.`);
-      return res.status(400).json({ 
-        error: `Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket. This ticket already has ${currentItemCount} items.` 
+      return res.status(400).json({
+        error: `Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket. This ticket already has ${currentItemCount} items.`
       });
     }
 
-    // Insert new pawn_ticket record
+    // Insert new pawn_ticket record with pawn config values frozen at time of creation
     const insertQuery = `
-      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id)
-      VALUES ($1, $2, $3)
+      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, frequency_days, due_date)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *
     `;
 
     const result = await client.query(insertQuery, [
       pawn_ticket_id,
       transaction_id || null,
-      item_id || null
+      item_id || null,
+      term_days || 90,
+      interest_rate || 2.9,
+      frequency_days || 30,
+      due_date || null
     ]);
 
     await client.query('COMMIT');
@@ -3736,6 +3740,10 @@ app.get('/api/pawn-transactions', async (req, res) => {
         pt.item_id,
         pt.status as ticket_status,
         pt.created_at as pawn_created_at,
+        pt.term_days,
+        pt.interest_rate,
+        pt.frequency_days,
+        pt.due_date,
         t.transaction_date,
         t.customer_id,
         CONCAT(c.first_name, ' ', c.last_name) as customer_name,

@@ -135,6 +135,12 @@ function Checkout() {
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const [redeemedLocations, setRedeemedLocations] = useState([]);
   const [selectedItemsForRedeem, setSelectedItemsForRedeem] = useState([]);
+  // Pawn config - frozen at time of pawn creation
+  const [pawnConfig, setPawnConfig] = useState({
+    term_days: 90,
+    interest_rate: 2.9,
+    frequency_days: 30
+  });
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
@@ -336,6 +342,26 @@ function Checkout() {
       }
     };
     fetchTransactionTypes();
+  }, []);
+
+  // Fetch pawn config on component mount (frozen at time of pawn creation)
+  useEffect(() => {
+    const fetchPawnConfig = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await axios.get(`${config.apiUrl}/pawn-config`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setPawnConfig({
+          term_days: parseInt(response.data.term_days) || 90,
+          interest_rate: parseFloat(response.data.interest_rate) || 2.9,
+          frequency_days: parseInt(response.data.frequency_days) || 30
+        });
+      } catch (error) {
+        console.error('Error fetching pawn config:', error);
+      }
+    };
+    fetchPawnConfig();
   }, []);
 
   // Fetch province tax rate on component mount
@@ -1232,6 +1258,12 @@ function Checkout() {
                 return item.pawnTicketId === pawnTicketId || item.buyTicketId === pawnTicketId;
               });
 
+            // Calculate due date based on transaction date and term_days
+            const transactionDate = new Date(getCurrentDate());
+            const dueDate = new Date(transactionDate);
+            dueDate.setDate(dueDate.getDate() + pawnConfig.term_days);
+            const dueDateStr = dueDate.toISOString().split('T')[0];
+
             for (const item of itemsForTicket) {
               try {
                 let itemId = null;
@@ -1246,7 +1278,12 @@ function Checkout() {
                   {
                     pawn_ticket_id: pawnTicketId,
                     transaction_id: realTransactionId,
-                    item_id: itemId
+                    item_id: itemId,
+                    // Store pawn config values frozen at time of pawn creation
+                    term_days: pawnConfig.term_days,
+                    interest_rate: pawnConfig.interest_rate,
+                    frequency_days: pawnConfig.frequency_days,
+                    due_date: dueDateStr
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -55,6 +55,8 @@ const Pawns = () => {
   const [termDays, setTermDays] = useState(62);
   const [interestRate, setInterestRate] = useState(2.9);
   const [frequencyDays, setFrequencyDays] = useState(30);
+  const [forfeitureMode, setForfeitureMode] = useState('manual');
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [redeemDialogOpen, setRedeemDialogOpen] = useState(false);
   const [selectedPawn, setSelectedPawn] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
@@ -70,7 +72,7 @@ const Pawns = () => {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedTicketForHistory, setSelectedTicketForHistory] = useState(null);
 
-  // Fetch pawn config for term_days, interest_rate, and frequency_days
+  // Fetch pawn config for term_days, interest_rate, frequency_days, and forfeiture_mode
   useEffect(() => {
     const fetchPawnConfig = async () => {
       try {
@@ -81,8 +83,11 @@ const Pawns = () => {
         setTermDays(parseInt(response.data.term_days) || 62);
         setInterestRate(parseFloat(response.data.interest_rate) || 2.9);
         setFrequencyDays(parseInt(response.data.frequency_days) || 30);
+        setForfeitureMode(response.data.forfeiture_mode || 'manual');
+        setConfigLoaded(true);
       } catch (error) {
         console.error('Error fetching pawn config:', error);
+        setConfigLoaded(true);
       }
     };
     fetchPawnConfig();
@@ -108,6 +113,103 @@ const Pawns = () => {
     };
     fetchPawnTransactions();
   }, []);
+
+  // Auto-forfeit overdue pawns when forfeiture_mode is 'automatic'
+  // This runs once after both config and pawns are loaded
+  const autoForfeitRanRef = useRef(false);
+
+  useEffect(() => {
+    const autoForfeitOverduePawns = async () => {
+      // Only run once after both config and pawns are loaded
+      if (!configLoaded || loading || autoForfeitRanRef.current) return;
+      if (forfeitureMode !== 'automatic') {
+        autoForfeitRanRef.current = true;
+        return;
+      }
+
+      // Group pawns by ticket ID first (same logic as groupedTickets)
+      // All items in a ticket share the same status (ticket_status)
+      const ticketMap = new Map();
+      pawns.forEach(pawn => {
+        const ticketId = pawn.pawn_ticket_id;
+        if (!ticketMap.has(ticketId)) {
+          ticketMap.set(ticketId, {
+            pawn_ticket_id: ticketId,
+            transaction_date: pawn.transaction_date,
+            ticket_status: pawn.ticket_status, // Use ticket_status from pawn_ticket table
+            term_days: pawn.term_days, // Stored pawn config
+            due_date: pawn.due_date, // Stored due date
+            items: []
+          });
+        }
+        ticketMap.get(ticketId).items.push(pawn);
+      });
+      const tickets = Array.from(ticketMap.values());
+
+      // Find tickets that are overdue and still have PAWN ticket status
+      const overdueTickets = tickets.filter(ticket => {
+        // Check ticket status (all items in a ticket share the same status)
+        if (ticket.ticket_status !== 'PAWN') return false;
+
+        // Check if overdue using stored due_date or calculated from stored term_days
+        let dueDate;
+        if (ticket.due_date) {
+          dueDate = new Date(ticket.due_date);
+        } else {
+          dueDate = new Date(ticket.transaction_date);
+          dueDate.setDate(dueDate.getDate() + (ticket.term_days || termDays));
+        }
+        return getCurrentDateObject() > dueDate;
+      });
+
+      autoForfeitRanRef.current = true;
+
+      if (overdueTickets.length === 0) return;
+
+      try {
+        const token = localStorage.getItem('token');
+        const employeeId = JSON.parse(atob(token.split('.')[1])).id;
+
+        // Forfeit each overdue ticket
+        for (const ticket of overdueTickets) {
+          // Update pawn_ticket status to FORFEITED
+          await axios.put(
+            `${API_BASE_URL}/pawn-ticket/${ticket.pawn_ticket_id}/status`,
+            { status: 'FORFEITED' },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+
+          // Record pawn history for auto-forfeiture
+          const totalPrincipal = ticket.items.reduce((sum, item) => sum + (parseFloat(item.item_price) || 0), 0);
+          await axios.post(
+            `${API_BASE_URL}/pawn-history`,
+            {
+              pawn_ticket_id: ticket.pawn_ticket_id,
+              action_type: 'FORFEIT',
+              principal_amount: totalPrincipal,
+              performed_by: employeeId,
+              notes: 'Auto-forfeited - pawn exceeded due date'
+            },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        }
+
+        // Refresh the pawn transactions list
+        const response = await axios.get(`${API_BASE_URL}/pawn-transactions`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setPawns(response.data);
+
+        if (overdueTickets.length > 0) {
+          setSuccessMessage(`${overdueTickets.length} overdue pawn ticket(s) automatically forfeited.`);
+        }
+      } catch (error) {
+        console.error('Error auto-forfeiting overdue pawns:', error);
+      }
+    };
+
+    autoForfeitOverduePawns();
+  }, [configLoaded, loading, forfeitureMode, termDays, pawns, getCurrentDateObject]);
 
   const getStatusChip = (status) => {
     // Default style for any status
@@ -178,31 +280,47 @@ const Pawns = () => {
     );
   };
 
-  const calculateDueDate = (transactionDate) => {
+  // Calculate due date using stored term_days from ticket, or fall back to current config
+  const calculateDueDate = (transactionDate, ticketTermDays) => {
     const date = new Date(transactionDate);
-    date.setDate(date.getDate() + termDays);
+    // Use stored term_days from ticket if available, otherwise use current config
+    const days = ticketTermDays || termDays;
+    date.setDate(date.getDate() + days);
     return date;
   };
 
-  const isOverdue = (transactionDate, itemStatus) => {
-    if (itemStatus !== 'PAWN') return false;
-    const dueDate = calculateDueDate(transactionDate);
+  // Check if ticket is overdue using stored due_date or calculated from stored term_days
+  const isOverdue = (ticket) => {
+    if ((ticket.ticket_status || ticket.item_status) !== 'PAWN') return false;
+
+    // Use stored due_date if available
+    if (ticket.due_date) {
+      const dueDate = new Date(ticket.due_date);
+      return getCurrentDateObject() > dueDate;
+    }
+
+    // Fall back to calculating from transaction_date + stored term_days
+    const dueDate = calculateDueDate(ticket.transaction_date, ticket.term_days);
     return getCurrentDateObject() > dueDate;
   };
 
-  const getDisplayStatus = (pawn) => {
-    if (pawn.item_status === 'PAWN' && isOverdue(pawn.transaction_date, pawn.item_status)) {
+  const getDisplayStatus = (ticket) => {
+    // Use ticket_status (from pawn_ticket table) - all items in a ticket share the same status
+    const status = ticket.ticket_status || ticket.item_status;
+    if (status === 'PAWN' && isOverdue(ticket)) {
       return 'OVERDUE';
     }
-    return pawn.item_status;
+    return status;
   };
 
-  const calculateRedemptionAmount = (principalAmount) => {
+  // Calculate redemption amount using stored ticket values or current config as fallback
+  const calculateRedemptionAmount = (principalAmount, ticket = null) => {
     // Handle null/undefined/NaN values
     const principal = parseFloat(principalAmount) || 0;
-    const term = termDays || 62;
-    const frequency = frequencyDays || 30;
-    const rate = interestRate || 2.9;
+    // Use stored values from ticket if available, otherwise use current config
+    const term = ticket?.term_days || termDays || 90;
+    const frequency = ticket?.frequency_days || frequencyDays || 30;
+    const rate = ticket?.interest_rate || interestRate || 2.9;
 
     // Calculate number of interest periods
     const interestPeriods = Math.ceil(term / frequency);
@@ -221,11 +339,12 @@ const Pawns = () => {
   };
 
   const handleRedeemClick = (ticket) => {
-    // Calculate redemption details for entire ticket
+    // Calculate redemption details for entire ticket using stored pawn config values
     const totalPrincipal = ticket.items.reduce((sum, item) => sum + (parseFloat(item.item_price) || 0), 0);
-    const term = termDays || 62;
-    const frequency = frequencyDays || 30;
-    const rate = interestRate || 2.9;
+    // Use stored values from ticket if available, otherwise use current config
+    const term = ticket.term_days || termDays || 90;
+    const frequency = ticket.frequency_days || frequencyDays || 30;
+    const rate = ticket.interest_rate || interestRate || 2.9;
     const interestPeriods = Math.ceil(term / frequency);
     const interestAmount = totalPrincipal * (rate / 100) * interestPeriods;
     const insuranceCost = totalPrincipal * 0.01 * interestPeriods;
@@ -249,10 +368,11 @@ const Pawns = () => {
   };
 
   const handleExtendClick = (ticket) => {
-    // Calculate extension payment for entire ticket
+    // Calculate extension payment for entire ticket using stored pawn config values
     const totalPrincipal = ticket.items.reduce((sum, item) => sum + (parseFloat(item.item_price) || 0), 0);
-    const rate = interestRate || 2.9;
-    const frequency = frequencyDays || 30;
+    // Use stored values from ticket if available, otherwise use current config
+    const rate = ticket.interest_rate || interestRate || 2.9;
+    const frequency = ticket.frequency_days || frequencyDays || 30;
 
     // Extension is for 1 period (1 frequency cycle)
     const extensionPeriods = 1;
@@ -432,6 +552,8 @@ const Pawns = () => {
   }, [pawns]);
 
   // Group pawns by pawn_ticket_id
+  // All items in a ticket share the same status (ticket_status from pawn_ticket table)
+  // Pawn config values (term_days, interest_rate, frequency_days, due_date) are stored per ticket
   const groupedTickets = useMemo(() => {
     const ticketMap = new Map();
 
@@ -443,7 +565,13 @@ const Pawns = () => {
           customer_id: pawn.customer_id,
           customer_name: pawn.customer_name,
           transaction_date: pawn.transaction_date,
-          item_status: pawn.item_status,
+          ticket_status: pawn.ticket_status, // Use ticket_status from pawn_ticket table
+          item_status: pawn.item_status, // Keep for backward compatibility
+          // Store pawn config values frozen at time of pawn creation
+          term_days: pawn.term_days,
+          interest_rate: pawn.interest_rate,
+          frequency_days: pawn.frequency_days,
+          due_date: pawn.due_date,
           items: []
         });
       }
@@ -617,10 +745,10 @@ const Pawns = () => {
       )}
 
       {/* Alert */}
-      {filteredTickets.filter(p => isOverdue(p.transaction_date, p.item_status)).length > 0 && (
+      {filteredTickets.filter(p => isOverdue(p)).length > 0 && (
         <Alert severity="warning" sx={{ mb: 3 }}>
           <Typography variant="body2">
-            Attention: There are {filteredTickets.filter(p => isOverdue(p.transaction_date, p.item_status)).length} overdue pawns. Please review and contact customers.
+            Attention: There are {filteredTickets.filter(p => isOverdue(p)).length} overdue pawns. Please review and contact customers.
           </Typography>
         </Alert>
       )}
@@ -672,8 +800,8 @@ const Pawns = () => {
                   .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
                   .map((ticket) => {
                     const totalPrincipal = ticket.items.reduce((sum, item) => sum + (parseFloat(item.item_price) || 0), 0);
-                    const redemptionAmount = calculateRedemptionAmount(totalPrincipal);
-                    const isPawnStatus = ticket.item_status === 'PAWN';
+                    const redemptionAmount = calculateRedemptionAmount(totalPrincipal, ticket);
+                    const isPawnStatus = (ticket.ticket_status || ticket.item_status) === 'PAWN';
 
                     return (
                       <TableRow key={ticket.pawn_ticket_id} hover>
