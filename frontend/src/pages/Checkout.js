@@ -4,6 +4,7 @@ import axios from 'axios';
 import config from '../config';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useWorkingDate } from '../context/WorkingDateContext';
 import PersonSearchIcon from '@mui/icons-material/PersonSearch';
 import {
   Container,
@@ -90,6 +91,7 @@ function Checkout() {
   const navigate = useNavigate();
   const { cartItems, addToCart, selectedCustomer, setCustomer, clearCart, removeMultipleItems } = useCart();
   const { user } = useAuth();
+  const { getCurrentDate } = useWorkingDate();
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [customerSearchDialogOpen, setCustomerSearchDialogOpen] = useState(false);
@@ -133,6 +135,12 @@ function Checkout() {
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const [redeemedLocations, setRedeemedLocations] = useState([]);
   const [selectedItemsForRedeem, setSelectedItemsForRedeem] = useState([]);
+  // Pawn config - frozen at time of pawn creation
+  const [pawnConfig, setPawnConfig] = useState({
+    term_days: 90,
+    interest_rate: 2.9,
+    frequency_days: 30
+  });
 
   // Effect to initialize cart and customer from navigation (Estimator, CoinsBullions, or Cart)
   useEffect(() => {
@@ -334,6 +342,26 @@ function Checkout() {
       }
     };
     fetchTransactionTypes();
+  }, []);
+
+  // Fetch pawn config on component mount (frozen at time of pawn creation)
+  useEffect(() => {
+    const fetchPawnConfig = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await axios.get(`${config.apiUrl}/pawn-config`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setPawnConfig({
+          term_days: parseInt(response.data.term_days) || 90,
+          interest_rate: parseFloat(response.data.interest_rate) || 2.9,
+          frequency_days: parseInt(response.data.frequency_days) || 30
+        });
+      } catch (error) {
+        console.error('Error fetching pawn config:', error);
+      }
+    };
+    fetchPawnConfig();
   }, []);
 
   // Fetch province tax rate on component mount
@@ -1039,7 +1067,7 @@ function Checkout() {
             customer_id: selectedCustomer.id,
             employee_id: employeeId,
             total_amount: parseFloat(calculateTotal().toFixed(2)), // Round to 2 decimal places
-            transaction_date: new Date().toISOString().split('T')[0]
+            transaction_date: getCurrentDate() // Use working date from context
           };
 
           // Build cart items for transaction
@@ -1230,6 +1258,12 @@ function Checkout() {
                 return item.pawnTicketId === pawnTicketId || item.buyTicketId === pawnTicketId;
               });
 
+            // Calculate due date based on transaction date and term_days
+            const transactionDate = new Date(getCurrentDate());
+            const dueDate = new Date(transactionDate);
+            dueDate.setDate(dueDate.getDate() + pawnConfig.term_days);
+            const dueDateStr = dueDate.toISOString().split('T')[0];
+
             for (const item of itemsForTicket) {
               try {
                 let itemId = null;
@@ -1244,7 +1278,12 @@ function Checkout() {
                   {
                     pawn_ticket_id: pawnTicketId,
                     transaction_id: realTransactionId,
-                    item_id: itemId
+                    item_id: itemId,
+                    // Store pawn config values frozen at time of pawn creation
+                    term_days: pawnConfig.term_days,
+                    interest_rate: pawnConfig.interest_rate,
+                    frequency_days: pawnConfig.frequency_days,
+                    due_date: dueDateStr
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }
@@ -1254,6 +1293,25 @@ function Checkout() {
                 console.error('❌ Error posting pawn_ticket:', pawnTicketError);
                 console.error('Error details:', pawnTicketError.response?.data);
               }
+            }
+
+            // Record pawn history for creation (once per pawn ticket)
+            try {
+              const totalPrincipal = itemsForTicket.reduce((sum, item) => sum + (parseFloat(item.price || item.value) || 0), 0);
+              await axios.post(
+                `${config.apiUrl}/pawn-history`,
+                {
+                  pawn_ticket_id: pawnTicketId,
+                  action_type: 'CREATED',
+                  transaction_id: realTransactionId,
+                  principal_amount: totalPrincipal,
+                  performed_by: employeeId,
+                  notes: 'Pawn created'
+                },
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+            } catch (historyError) {
+              console.error(`Error recording pawn history for ${pawnTicketId}:`, historyError);
             }
           }
 
@@ -1297,18 +1355,85 @@ function Checkout() {
           }
 
           // Step 3: Process all collected payments against the real transaction ID
-          for (const payment of updatedPayments) {
-            const paymentResponse = await axios.post(
-              `${config.apiUrl}/payments`,
-              {
-                transaction_id: realTransactionId,
-                amount: parseFloat(payment.amount.toFixed(2)), // Round to 2 decimal places
-                payment_method: payment.payment_method
-              },
-              {
-                headers: { Authorization: `Bearer ${token}` }
+          // Track created resources for cleanup if payment fails
+          const createdResources = {
+            jewelryItems: createdJewelryItems || [],
+            transactionId: realTransactionId,
+            pawnTicketsCreated: pawnTicketIds.size > 0,
+            pawnHistoryCreated: pawnTicketIds.size > 0
+          };
+
+          try {
+            for (const payment of updatedPayments) {
+              const paymentResponse = await axios.post(
+                `${config.apiUrl}/payments`,
+                {
+                  transaction_id: realTransactionId,
+                  amount: parseFloat(payment.amount.toFixed(2)), // Round to 2 decimal places
+                  payment_method: payment.payment_method
+                },
+                {
+                  headers: { Authorization: `Bearer ${token}` }
+                }
+              );
+            }
+          } catch (paymentError) {
+            // Cleanup all created resources on payment failure
+            console.error('Payment failed, cleaning up created resources...', paymentError);
+            
+            try {
+              // 1. Delete pawn history (if any was created)
+              if (createdResources.pawnHistoryCreated && realTransactionId) {
+                await axios.delete(
+                  `${config.apiUrl}/pawn-history/transaction/${realTransactionId}`,
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+                console.log('✓ Cleaned up pawn history');
               }
-            );
+
+              // 2. Delete pawn tickets (if any were created)
+              if (createdResources.pawnTicketsCreated && realTransactionId) {
+                await axios.delete(
+                  `${config.apiUrl}/pawn-ticket/transaction/${realTransactionId}`,
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+                console.log('✓ Cleaned up pawn tickets');
+              }
+
+              // 3. Delete transaction
+              if (realTransactionId) {
+                await axios.delete(
+                  `${config.apiUrl}/transactions/${realTransactionId}`,
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+                console.log('✓ Cleaned up transaction');
+              }
+
+              // 4. Delete jewelry items (if any were created)
+              if (createdResources.jewelryItems && createdResources.jewelryItems.length > 0) {
+                const itemIds = createdResources.jewelryItems.map(item => item.item_id).filter(Boolean);
+                if (itemIds.length > 0) {
+                  // Delete jewelry items in batch
+                  for (const itemId of itemIds) {
+                    try {
+                      await axios.delete(
+                        `${config.apiUrl}/jewelry/${itemId}`,
+                        { headers: { Authorization: `Bearer ${token}` } }
+                      );
+                    } catch (deleteError) {
+                      console.error(`Error deleting jewelry item ${itemId}:`, deleteError);
+                    }
+                  }
+                  console.log('✓ Cleaned up jewelry items');
+                }
+              }
+            } catch (cleanupError) {
+              console.error('Error during cleanup:', cleanupError);
+              // Continue to throw the original payment error
+            }
+
+            // Re-throw the payment error to be caught by outer catch block
+            throw paymentError;
           }
 
           // Step 3.5: Update jewelry inventory status to SOLD for sale transactions
@@ -1361,6 +1486,22 @@ function Checkout() {
                     { headers: { Authorization: `Bearer ${token}` } }
                   );
 
+                  // Record pawn history for redemption
+                  await axios.post(
+                    `${config.apiUrl}/pawn-history`,
+                    {
+                      pawn_ticket_id: pawnTicketId,
+                      action_type: 'REDEEM',
+                      transaction_id: realTransactionId,
+                      principal_amount: parseFloat(item.principal) || null,
+                      interest_paid: parseFloat(item.interest) || null,
+                      total_paid: parseFloat(item.totalRedemptionAmount || item.totalAmount) || null,
+                      performed_by: employeeId,
+                      notes: 'Pawn redeemed'
+                    },
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+
                 } catch (updateError) {
                   console.error(`Error updating pawn ticket ${pawnTicketId} status:`, updateError);
                   console.error('Error details:', updateError.response?.data);
@@ -1375,6 +1516,44 @@ function Checkout() {
                   location: item.location,
                   pawnTicketId: pawnTicketId
                 });
+              }
+            }
+          }
+
+          // Step 3.7: Record pawn history for payment (extension) transactions
+          const extendedTickets = new Set();
+
+          for (const item of checkoutItems) {
+            const transactionType = item.transaction_type?.toLowerCase() || '';
+
+            if (transactionType === 'payment' && item.pawnTicketId) {
+              const pawnTicketId = item.pawnTicketId;
+
+              if (!extendedTickets.has(pawnTicketId)) {
+                extendedTickets.add(pawnTicketId);
+
+                try {
+                  // Record pawn history for extension
+                  await axios.post(
+                    `${config.apiUrl}/pawn-history`,
+                    {
+                      pawn_ticket_id: pawnTicketId,
+                      action_type: 'EXTEND',
+                      transaction_id: realTransactionId,
+                      principal_amount: parseFloat(item.principal) || null,
+                      interest_paid: parseFloat(item.interest) || null,
+                      fee_paid: parseFloat(item.fee) || null,
+                      total_paid: parseFloat(item.amount) || null,
+                      new_due_date: item.date || null,
+                      extension_days: parseInt(item.days) || null,
+                      performed_by: employeeId,
+                      notes: `Extended by ${item.term || 1} term(s)`
+                    },
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+                } catch (historyError) {
+                  console.error(`Error recording pawn history for ${pawnTicketId}:`, historyError);
+                }
               }
             }
           }
@@ -2500,7 +2679,7 @@ function Checkout() {
                       </div>
                       <div class="info-row">
                         <span class="info-label">Customer:</span>
-                        <span>${selectedCustomer?.name || selectedCustomer?.first_name + ' ' + selectedCustomer?.last_name || 'N/A'}</span>
+                        <span>${selectedCustomer?.name || ((selectedCustomer?.first_name || '') + ' ' + (selectedCustomer?.last_name || '')).trim() || 'N/A'}</span>
                       </div>
                       ${selectedCustomer?.phone ? `
                       <div class="info-row">

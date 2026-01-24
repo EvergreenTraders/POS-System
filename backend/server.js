@@ -3308,6 +3308,37 @@ app.post('/api/jewelry', async (req, res) => {
     }
 });
 
+// DELETE a jewelry item
+app.delete('/api/jewelry/:item_id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { item_id } = req.params;
+    
+    await client.query('BEGIN');
+    
+    // Delete secondary gems first (foreign key constraint)
+    await client.query('DELETE FROM jewelry_secondary_gems WHERE item_id = $1', [item_id]);
+    
+    // Delete the jewelry item
+    const deleteQuery = 'DELETE FROM jewelry WHERE item_id = $1 RETURNING *';
+    const result = await client.query(deleteQuery, [item_id]);
+    
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+    
+    await client.query('COMMIT');
+    res.json({ message: 'Jewelry item deleted successfully', item: result.rows[0] });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting jewelry item:', error);
+    res.status(500).json({ error: 'Failed to delete jewelry item' });
+  } finally {
+    client.release();
+  }
+});
+
 // Inventory Status API Endpoints
 app.get('/api/inventory-status', async (req, res) => {
   try {
@@ -3667,7 +3698,7 @@ app.get('/api/pawn-ticket', async (req, res) => {
 app.post('/api/pawn-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { pawn_ticket_id, transaction_id, item_id } = req.body;
+    const { pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, frequency_days, due_date } = req.body;
 
     // Validate required fields
     if (!pawn_ticket_id) {
@@ -3693,22 +3724,26 @@ app.post('/api/pawn-ticket', async (req, res) => {
     if (currentItemCount >= MAX_PAWN_ITEMS) {
       await client.query('ROLLBACK');
       console.error(`❌ Pawn ticket ${pawn_ticket_id} already has ${currentItemCount} items. Maximum ${MAX_PAWN_ITEMS} items allowed.`);
-      return res.status(400).json({ 
-        error: `Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket. This ticket already has ${currentItemCount} items.` 
+      return res.status(400).json({
+        error: `Maximum ${MAX_PAWN_ITEMS} items allowed per pawn ticket. This ticket already has ${currentItemCount} items.`
       });
     }
 
-    // Insert new pawn_ticket record
+    // Insert new pawn_ticket record with pawn config values frozen at time of creation
     const insertQuery = `
-      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id)
-      VALUES ($1, $2, $3)
+      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, frequency_days, due_date)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *
     `;
 
     const result = await client.query(insertQuery, [
       pawn_ticket_id,
       transaction_id || null,
-      item_id || null
+      item_id || null,
+      term_days || 90,
+      interest_rate || 2.9,
+      frequency_days || 30,
+      due_date || null
     ]);
 
     await client.query('COMMIT');
@@ -3736,6 +3771,10 @@ app.get('/api/pawn-transactions', async (req, res) => {
         pt.item_id,
         pt.status as ticket_status,
         pt.created_at as pawn_created_at,
+        pt.term_days,
+        pt.interest_rate,
+        pt.frequency_days,
+        pt.due_date,
         t.transaction_date,
         t.customer_id,
         CONCAT(c.first_name, ' ', c.last_name) as customer_name,
@@ -4362,6 +4401,192 @@ app.put('/api/pawn-config', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error updating pawn config:', err);
     res.status(500).json({ error: 'Failed to update pawn configuration' });
+  } finally {
+    client.release();
+  }
+});
+
+// Pawn History Endpoints
+
+// Get pawn history for a specific pawn ticket
+app.get('/api/pawn-history/:pawn_ticket_id', async (req, res) => {
+  try {
+    const { pawn_ticket_id } = req.params;
+
+    const query = `
+      SELECT
+        ph.*,
+        e.first_name || ' ' || e.last_name as performed_by_name
+      FROM pawn_history ph
+      LEFT JOIN employees e ON ph.performed_by = e.employee_id
+      WHERE ph.pawn_ticket_id = $1
+      ORDER BY ph.action_date DESC
+    `;
+
+    const result = await pool.query(query, [pawn_ticket_id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching pawn history:', error);
+    res.status(500).json({ error: 'Failed to fetch pawn history' });
+  }
+});
+
+// Get all pawn history (for reporting)
+app.get('/api/pawn-history', async (req, res) => {
+  try {
+    const { action_type, from_date, to_date, limit = 100 } = req.query;
+
+    let query = `
+      SELECT
+        ph.*,
+        e.first_name || ' ' || e.last_name as performed_by_name
+      FROM pawn_history ph
+      LEFT JOIN employees e ON ph.performed_by = e.employee_id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramCount = 1;
+
+    if (action_type) {
+      query += ` AND ph.action_type = $${paramCount}`;
+      params.push(action_type);
+      paramCount++;
+    }
+
+    if (from_date) {
+      query += ` AND ph.action_date >= $${paramCount}`;
+      params.push(from_date);
+      paramCount++;
+    }
+
+    if (to_date) {
+      query += ` AND ph.action_date <= $${paramCount}`;
+      params.push(to_date);
+      paramCount++;
+    }
+
+    query += ` ORDER BY ph.action_date DESC LIMIT $${paramCount}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching pawn history:', error);
+    res.status(500).json({ error: 'Failed to fetch pawn history' });
+  }
+});
+
+// Record a pawn history entry (extension, redemption, etc.)
+app.post('/api/pawn-history', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const {
+      pawn_ticket_id,
+      action_type,
+      transaction_id,
+      principal_amount,
+      interest_paid,
+      fee_paid,
+      total_paid,
+      previous_due_date,
+      new_due_date,
+      extension_days,
+      performed_by,
+      notes
+    } = req.body;
+
+    // Validate required fields
+    if (!pawn_ticket_id || !action_type) {
+      return res.status(400).json({ error: 'pawn_ticket_id and action_type are required' });
+    }
+
+    // Validate action_type
+    const validActions = ['CREATED', 'EXTEND', 'REDEEM', 'FORFEIT', 'PARTIAL_REDEEM'];
+    if (!validActions.includes(action_type)) {
+      return res.status(400).json({
+        error: `Invalid action_type. Must be one of: ${validActions.join(', ')}`
+      });
+    }
+
+    await client.query('BEGIN');
+
+    const insertQuery = `
+      INSERT INTO pawn_history (
+        pawn_ticket_id, action_type, transaction_id, principal_amount,
+        interest_paid, fee_paid, total_paid, previous_due_date,
+        new_due_date, extension_days, performed_by, notes
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING *
+    `;
+
+    const result = await client.query(insertQuery, [
+      pawn_ticket_id,
+      action_type,
+      transaction_id || null,
+      principal_amount || null,
+      interest_paid || null,
+      fee_paid || null,
+      total_paid || null,
+      previous_due_date || null,
+      new_due_date || null,
+      extension_days || null,
+      performed_by || null,
+      notes || null
+    ]);
+
+    await client.query('COMMIT');
+
+    console.log(`✓ Pawn history recorded: ${action_type} for ticket ${pawn_ticket_id}`);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error recording pawn history:', error);
+    res.status(500).json({ error: 'Failed to record pawn history' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE pawn history by transaction_id (for cleanup on payment failure)
+app.delete('/api/pawn-history/transaction/:transaction_id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { transaction_id } = req.params;
+    
+    await client.query('BEGIN');
+    
+    const deleteQuery = 'DELETE FROM pawn_history WHERE transaction_id = $1 RETURNING *';
+    const result = await client.query(deleteQuery, [transaction_id]);
+    
+    await client.query('COMMIT');
+    res.json({ message: 'Pawn history deleted successfully', count: result.rows.length });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting pawn history:', error);
+    res.status(500).json({ error: 'Failed to delete pawn history' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE pawn tickets by transaction_id (for cleanup on payment failure)
+app.delete('/api/pawn-ticket/transaction/:transaction_id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { transaction_id } = req.params;
+    
+    await client.query('BEGIN');
+    
+    const deleteQuery = 'DELETE FROM pawn_ticket WHERE transaction_id = $1 RETURNING *';
+    const result = await client.query(deleteQuery, [transaction_id]);
+    
+    await client.query('COMMIT');
+    res.json({ message: 'Pawn tickets deleted successfully', count: result.rows.length });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting pawn tickets:', error);
+    res.status(500).json({ error: 'Failed to delete pawn tickets' });
   } finally {
     client.release();
   }
@@ -7998,6 +8223,13 @@ app.post('/api/payments', async (req, res) => {
 
     const transaction = transactionResult.rows[0];
 
+    // Validate transaction has employee_id
+    if (!transaction.employee_id) {
+      throw new Error('Transaction is missing employee_id');
+    }
+
+    const employee_id = transaction.employee_id;
+
     // Get total payments made so far
     const paymentsResult = await client.query(
       'SELECT COALESCE(SUM(amount), 0) as paid_amount FROM payments WHERE transaction_id = $1',
@@ -8028,7 +8260,7 @@ app.post('/api/payments', async (req, res) => {
         `SELECT session_id FROM cash_drawer_sessions
          WHERE employee_id = $1 AND status = 'open'
          ORDER BY opened_at DESC LIMIT 1`,
-        [transaction.employee_id]
+        [employee_id]
       );
 
       // Only use physical drawer sessions for transactions (exclude safe drawers)

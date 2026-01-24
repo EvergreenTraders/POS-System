@@ -5,6 +5,7 @@ import { Box } from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
 import { CartProvider } from './context/CartContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { WorkingDateProvider } from './context/WorkingDateContext';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import Login from './components/Login';
@@ -144,7 +145,8 @@ function App() {
       <CssBaseline />
       <Router>
         <AuthProvider>
-          <CartProvider>
+          <WorkingDateProvider>
+            <CartProvider>
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route
@@ -477,7 +479,8 @@ function App() {
               />
               <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
-          </CartProvider>
+            </CartProvider>
+          </WorkingDateProvider>
         </AuthProvider>
       </Router>
     </ThemeProvider>

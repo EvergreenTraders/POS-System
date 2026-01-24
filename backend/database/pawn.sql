@@ -40,3 +40,44 @@ COMMENT ON COLUMN pawn_config.interest_rate IS 'Interest rate as a percentage (0
 COMMENT ON COLUMN pawn_config.term_days IS 'Default pawn term in days';
 COMMENT ON COLUMN pawn_config.frequency_days IS 'Payment frequency in days';
 COMMENT ON COLUMN pawn_config.forfeiture_mode IS 'Forfeiture mode: manual (FORFEITED status) or automatic (ACTIVE status)';
+
+-- Create pawn_history table for tracking extensions, redemptions, and forfeitures
+CREATE TABLE IF NOT EXISTS pawn_history (
+    id SERIAL PRIMARY KEY,
+    pawn_ticket_id VARCHAR(50) NOT NULL,
+    action_type VARCHAR(20) NOT NULL,
+    action_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    transaction_id VARCHAR(50),
+    principal_amount DECIMAL(10,2),
+    interest_paid DECIMAL(10,2),
+    fee_paid DECIMAL(10,2),
+    total_paid DECIMAL(10,2),
+    previous_due_date DATE,
+    new_due_date DATE,
+    extension_days INTEGER,
+    performed_by INTEGER,
+    notes TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT chk_action_type CHECK (
+        action_type IN ('CREATED', 'EXTEND', 'REDEEM', 'FORFEIT', 'PARTIAL_REDEEM')
+    ),
+    FOREIGN KEY (performed_by) REFERENCES employees(employee_id)
+);
+
+-- Create indexes for better query performance
+CREATE INDEX IF NOT EXISTS idx_pawn_history_ticket ON pawn_history(pawn_ticket_id);
+CREATE INDEX IF NOT EXISTS idx_pawn_history_action_date ON pawn_history(action_date);
+CREATE INDEX IF NOT EXISTS idx_pawn_history_action_type ON pawn_history(action_type);
+
+-- Add comments for pawn_history table
+COMMENT ON TABLE pawn_history IS 'Tracks all pawn ticket actions including creation, extensions, redemptions, and forfeitures';
+COMMENT ON COLUMN pawn_history.pawn_ticket_id IS 'Reference to the pawn ticket';
+COMMENT ON COLUMN pawn_history.action_type IS 'Type of action: CREATED, EXTEND, REDEEM, FORFEIT, PARTIAL_REDEEM';
+COMMENT ON COLUMN pawn_history.principal_amount IS 'Principal amount of the pawn at the time of action';
+COMMENT ON COLUMN pawn_history.interest_paid IS 'Interest amount paid (for extensions/redemptions)';
+COMMENT ON COLUMN pawn_history.fee_paid IS 'Fee amount paid (for extensions/redemptions)';
+COMMENT ON COLUMN pawn_history.total_paid IS 'Total amount paid (interest + fee)';
+COMMENT ON COLUMN pawn_history.previous_due_date IS 'Due date before the action';
+COMMENT ON COLUMN pawn_history.new_due_date IS 'New due date after the action (for extensions)';
+COMMENT ON COLUMN pawn_history.extension_days IS 'Number of days the loan was extended by';

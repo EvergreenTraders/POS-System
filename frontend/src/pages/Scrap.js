@@ -51,8 +51,10 @@ import HistoryIcon from '@mui/icons-material/History';
 import axios from 'axios';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
+import { useWorkingDate } from '../context/WorkingDateContext';
 
 const Scrap = () => {
+  const { getCurrentDate } = useWorkingDate();
   const API_BASE_URL = config.apiUrl;
 
   // Debug logging
@@ -1157,8 +1159,8 @@ const Scrap = () => {
 
   // Handle opening processing dialog
   const handleOpenProcessingDialog = () => {
-    // Get today's date in YYYY-MM-DD format
-    const today = new Date().toISOString().split('T')[0];
+    // Get today's date in YYYY-MM-DD format (uses working date from context)
+    const today = getCurrentDate();
 
     // Convert database date to YYYY-MM-DD format if it exists
     let dateReceived = today;

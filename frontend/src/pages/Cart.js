@@ -313,28 +313,28 @@ const Cart = () => {
   };
 
   // Get label for different item types
-  const getItemTypeLabel = (type) => {
+  const getItemTypeLabel = (type, item) => {
     switch (type) {
       case 'pawn': return 'Pawn';
       case 'buy': return 'Buy';
       case 'sale': return 'Sale';
       case 'trade': return 'Trade';
       case 'repair': return 'Repair';
-      case 'payment': return 'Payment';
+      case 'payment': return item?.pawnTicketId ? 'Pawn' : 'Payment'; // Show as "Pawn" for extension payments
       case 'redeem': return 'Pawn'; // Show as "Pawn" for redeem items
       default: return 'Unknown';
     }
   };
 
   // Get color for different item types
-  const getItemTypeColor = (type) => {
+  const getItemTypeColor = (type, item) => {
     switch (type) {
       case 'pawn': return 'secondary';
       case 'buy': return 'primary';
       case 'sale': return 'success';
       case 'trade': return 'info';
       case 'repair': return 'warning';
-      case 'payment': return 'default';
+      case 'payment': return item?.pawnTicketId ? 'secondary' : 'default'; // Same color as pawn for extensions
       case 'redeem': return 'secondary'; // Same color as pawn
       default: return 'default';
     }
@@ -354,6 +354,10 @@ const Cart = () => {
       case 'repair':
         return `${item.description || 'No description'} - Issue: ${item.issue || 'No issue'}`;
       case 'payment':
+        // Check if this is a pawn extension payment
+        if (item.pawnTicketId) {
+          return `${item.description || 'N/A'}`;
+        }
         return `Method: ${item.method || 'No method'}, Reference: ${item.reference || 'No reference'}`;
       case 'redeem':
         return `${item.description || item.long_desc || item.short_desc || 'No description'}`;
@@ -846,8 +850,8 @@ const Cart = () => {
                         <TableRow key={itemIndex} hover>
                           <TableCell>
                             <Chip
-                              label={getItemTypeLabel(item.transaction_type || getItemTypeFromStructure(item))}
-                              color={getItemTypeColor(item.transaction_type || getItemTypeFromStructure(item))}
+                              label={getItemTypeLabel(item.transaction_type || getItemTypeFromStructure(item), item)}
+                              color={getItemTypeColor(item.transaction_type || getItemTypeFromStructure(item), item)}
                               size="small"
                             />
                           </TableCell>

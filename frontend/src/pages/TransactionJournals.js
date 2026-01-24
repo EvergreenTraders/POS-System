@@ -28,12 +28,14 @@ import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon, Warning as Warn
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { useWorkingDate } from '../context/WorkingDateContext';
 import { Avatar } from '@mui/material';
 import { pdf } from '@react-pdf/renderer';
 import PawnTicketTemplate from '../components/PawnTicketTemplate';
 import config from '../config';
 
 function TransactionJournals() {
+  const { getCurrentDateObject } = useWorkingDate();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [transactionToDelete, setTransactionToDelete] = useState(null);
   const [store, setStore] = useState('');
@@ -272,20 +274,34 @@ function TransactionJournals() {
       console.error('Error fetching business info:', error);
     }
 
-    // Fetch pawn config to get term_days, interest_rate, and frequency_days
-    let termDays = 62; // Default value
+    // Get pawn ticket details if this is a pawn ticket
+    const pawnTicketData = isPawnTicket ? pawnTickets.find(pt => pt.pawn_ticket_id === ticketId) : null;
+
+    // Use stored values from pawn_ticket if available, otherwise fetch from pawn-config
+    let termDays = 90; // Default value
     let configInterestRate = 2.9; // Default value
     let frequencyDays = 30; // Default value
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_BASE_URL}/pawn-config`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      termDays = parseInt(response.data.term_days) || 62;
-      configInterestRate = parseFloat(response.data.interest_rate) || 2.9;
-      frequencyDays = parseInt(response.data.frequency_days) || 30;
-    } catch (error) {
-      console.error('Error fetching pawn config:', error);
+    let storedDueDate = null;
+
+    if (pawnTicketData && (pawnTicketData.term_days || pawnTicketData.interest_rate || pawnTicketData.due_date)) {
+      // Use stored values from pawn_ticket (frozen at time of pawn creation)
+      termDays = parseInt(pawnTicketData.term_days) || 90;
+      configInterestRate = parseFloat(pawnTicketData.interest_rate) || 2.9;
+      frequencyDays = parseInt(pawnTicketData.frequency_days) || 30;
+      storedDueDate = pawnTicketData.due_date;
+    } else {
+      // Fallback to current pawn config for older tickets without stored values
+      try {
+        const token = localStorage.getItem('token');
+        const response = await axios.get(`${API_BASE_URL}/pawn-config`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        termDays = parseInt(response.data.term_days) || 90;
+        configInterestRate = parseFloat(response.data.interest_rate) || 2.9;
+        frequencyDays = parseInt(response.data.frequency_days) || 30;
+      } catch (error) {
+        console.error('Error fetching pawn config:', error);
+      }
     }
 
     // Calculate total and due date
@@ -301,17 +317,24 @@ function TransactionJournals() {
       minute: '2-digit'
     });
 
-    // Calculate due date using term_days from pawn_config
-    const dueDateObj = new Date(transactionDate);
-    dueDateObj.setDate(dueDateObj.getDate() + termDays);
-    const dueDate = dueDateObj.toLocaleDateString('en-US', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-
-    // Get pawn ticket details if this is a pawn ticket
-    const pawnTicketData = isPawnTicket ? pawnTickets.find(pt => pt.pawn_ticket_id === ticketId) : null;
+    // Use stored due_date if available, otherwise calculate from transaction date + term_days
+    let dueDate;
+    if (storedDueDate) {
+      const dueDateObj = new Date(storedDueDate);
+      dueDate = dueDateObj.toLocaleDateString('en-US', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      });
+    } else {
+      const dueDateObj = new Date(transactionDate);
+      dueDateObj.setDate(dueDateObj.getDate() + termDays);
+      dueDate = dueDateObj.toLocaleDateString('en-US', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      });
+    }
 
     // Calculate fees based on pawn_config values
     // Principal amount is the sum of all item prices from jewelry table
@@ -989,7 +1012,7 @@ function TransactionJournals() {
     }
     
     const transactionDate = new Date(transaction.created_at).toDateString();
-    const today = new Date().toDateString();
+    const today = getCurrentDateObject().toDateString();
     
     if (transactionDate !== today) {
       alert('You can only delete transactions made today.');

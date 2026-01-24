@@ -3,6 +3,8 @@ import config from '../config';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useWorkingDate } from '../context/WorkingDateContext';
+import WorkingDateSelector from './WorkingDateSelector';
 import {
     Box,
     Paper,
@@ -73,8 +75,13 @@ const Login = () => {
     const [isFullScreen, setIsFullScreen] = React.useState(false);
     const [isLocked, setIsLocked] = useState(false);
     const [lockedUser, setLockedUser] = useState(null);
+    const [tempWorkingDate, setTempWorkingDate] = useState(
+        new Date().toISOString().split('T')[0]
+    );
+    const [tempDateEnabled, setTempDateEnabled] = useState(false);
     const navigate = useNavigate();
     const { setUser } = useAuth();
+    const { setWorkingDate, setIsWorkingDateEnabled } = useWorkingDate();
 
     // Check if this is a locked session on component mount
     useEffect(() => {
@@ -142,6 +149,10 @@ const Login = () => {
                 localStorage.setItem('user', JSON.stringify(response.data.user));
                 localStorage.removeItem('lockedSession'); // Clear locked session flag
                 setUser(response.data.user);
+
+                // Save working date settings
+                setWorkingDate(tempWorkingDate);
+                setIsWorkingDateEnabled(tempDateEnabled);
 
                 // Check for redirect path
                 const redirectPath = sessionStorage.getItem('redirectAfterLogin');
@@ -263,6 +274,15 @@ const Login = () => {
                             ),
                         }}
                     />
+
+                    {!isLocked && (
+                        <WorkingDateSelector
+                            workingDate={tempWorkingDate}
+                            setWorkingDate={setTempWorkingDate}
+                            isEnabled={tempDateEnabled}
+                            setIsEnabled={setTempDateEnabled}
+                        />
+                    )}
 
                     <LoginButton
                         fullWidth

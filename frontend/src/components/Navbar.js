@@ -10,6 +10,7 @@ import {
   Menu,
   MenuItem,
   Box,
+  Chip,
 } from '@mui/material';
 import {
   ShoppingCart as CartIcon,
@@ -20,6 +21,7 @@ import {
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useWorkingDate } from '../context/WorkingDateContext';
 import { useNavigate } from 'react-router-dom';
 import Cart from './Cart';
 
@@ -27,36 +29,57 @@ const StyledAppBar = styled(AppBar)({
   zIndex: 1201, // Higher than drawer's z-index
 });
 
-// Map provinces to their timezones
-const provinceTimezones = {
-  'AB': 'America/Edmonton',        // Mountain Time
-  'BC': 'America/Vancouver',       // Pacific Time
-  'MB': 'America/Winnipeg',        // Central Time
-  'NB': 'America/Moncton',         // Atlantic Time
-  'NL': 'America/St_Johns',        // Newfoundland Time
-  'NT': 'America/Yellowknife',     // Mountain Time
-  'NS': 'America/Halifax',         // Atlantic Time
-  'NU': 'America/Iqaluit',         // Eastern Time
-  'ON': 'America/Toronto',         // Eastern Time
-  'PE': 'America/Halifax',         // Atlantic Time
-  'QC': 'America/Montreal',        // Eastern Time
-  'SK': 'America/Regina',          // Central Time (no DST)
-  'YT': 'America/Whitehorse'       // Pacific Time
+// Get timezone from coordinates using a simple API
+const getTimezoneFromLocation = async (lat, lng) => {
+  try {
+    const response = await fetch(
+      `https://timeapi.io/api/TimeZone/coordinate?latitude=${lat}&longitude=${lng}`
+    );
+    if (response.ok) {
+      const data = await response.json();
+      return data.timeZone || null;
+    }
+  } catch (error) {
+    // API failed, return null to use browser timezone
+  }
+  return null;
 };
 
 function Navbar() {
   const [cartOpen, setCartOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  // Initialize with browser timezone immediately so time displays correctly from the start
+  const [timezone, setTimezone] = useState(() => {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  });
   const { cartItems } = useCart();
   const { user, logout, lockScreen } = useAuth();
+  const { workingDate, isWorkingDateEnabled } = useWorkingDate();
   const navigate = useNavigate();
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
 
-  // Get timezone based on selected province
-  const selectedProvince = localStorage.getItem('selectedProvince') || 'ON';
-  const timezone = provinceTimezones[selectedProvince] || 'America/Toronto';
+  // Get timezone from location
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const timezone = await getTimezoneFromLocation(
+            position.coords.latitude,
+            position.coords.longitude
+          );
+          if (timezone) {
+            setTimezone(timezone);
+          }
+        },
+        () => {
+          // If geolocation fails, keep browser timezone
+        },
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    }
+  }, []);
 
   // Update time every second
   useEffect(() => {
@@ -67,7 +90,7 @@ function Navbar() {
     return () => clearInterval(timer);
   }, []);
 
-  // Get time parts for the selected timezone
+  // Get time parts for the detected timezone
   const getTimeParts = () => {
     const timeString = currentTime.toLocaleString('en-US', {
       timeZone: timezone,
@@ -231,6 +254,23 @@ function Navbar() {
             >
               {formatTime()}
             </Typography>
+
+            {/* Working Date Indicator */}
+            {isWorkingDateEnabled && (
+              <Chip
+                label={`Working: ${new Date(workingDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
+                size="small"
+                sx={{
+                  ml: 1,
+                  bgcolor: '#ff9800',
+                  color: 'white',
+                  fontWeight: 600,
+                  '& .MuiChip-label': {
+                    px: 1
+                  }
+                }}
+              />
+            )}
           </Box>
 
           <Box sx={{ flexGrow: 1 }} />

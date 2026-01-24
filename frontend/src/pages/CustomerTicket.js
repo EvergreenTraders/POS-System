@@ -9,6 +9,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
+import { useWorkingDate } from '../context/WorkingDateContext';
 import MetalEstimator from './MetalEstimator';
 import GemEstimator from './GemEstimator';
 import JewelEstimator from './JewelEstimator';
@@ -396,10 +397,13 @@ const CustomerTicket = () => {
           const categories = await categoriesResponse.json();
           setMetalCategories(categories);
 
-          // Create a map of category_code to category name
+          // Create a map of category_code to category name (normalize to uppercase for case-insensitive lookup)
           const categoryMap = {};
           categories.forEach(cat => {
             if (cat.category_code) {
+              // Store with uppercase key for case-insensitive matching
+              categoryMap[cat.category_code.toUpperCase()] = cat.category;
+              // Also store with original case for backward compatibility
               categoryMap[cat.category_code] = cat.category;
             }
           });
@@ -412,10 +416,13 @@ const CustomerTicket = () => {
           const colors = await colorsResponse.json();
           setMetalColors(colors);
 
-          // Create a map of color_code to color name
+          // Create a map of color_code to color name (normalize to uppercase for case-insensitive lookup)
           const colorMap = {};
           colors.forEach(color => {
             if (color.color_code) {
+              // Store with uppercase key for case-insensitive matching
+              colorMap[color.color_code.toUpperCase()] = color.color;
+              // Also store with original case for backward compatibility
               colorMap[color.color_code] = color.color;
             }
           });
@@ -428,10 +435,13 @@ const CustomerTicket = () => {
           const types = await typesResponse.json();
           setPreciousMetalTypes(types);
 
-          // Create a map of type_code to type name
+          // Create a map of type_code to type name (normalize to uppercase for case-insensitive lookup)
           const typeMap = {};
           types.forEach(type => {
             if (type.type_code) {
+              // Store with uppercase key for case-insensitive matching
+              typeMap[type.type_code.toUpperCase()] = type.type;
+              // Also store with original case for backward compatibility
               typeMap[type.type_code] = type.type;
             }
           });
@@ -453,6 +463,7 @@ const CustomerTicket = () => {
   };
 
   const { user } = useAuth(); // Get user at component level
+  const { getCurrentDateObject } = useWorkingDate(); // Get working date for calculations
 
   // Pawn configuration for calculations
   const [interestRate, setInterestRate] = React.useState(2.9);
@@ -1446,7 +1457,7 @@ const CustomerTicket = () => {
         // Calculate days, term and date for default extension (1 period = frequencyDays)
         const days = frequencyDays || 30;
         const term = 1;
-        const today = new Date();
+        const today = getCurrentDateObject();
         const futureDate = new Date(today);
         futureDate.setDate(today.getDate() + days);
         const date = futureDate.toISOString().split('T')[0];
@@ -1789,7 +1800,7 @@ const CustomerTicket = () => {
               const days = frequency;
               const term = 1;
 
-              const today = new Date();
+              const today = getCurrentDateObject();
               const futureDate = new Date(today);
               futureDate.setDate(today.getDate() + days);
               const date = futureDate.toISOString().split('T')[0];
@@ -1863,8 +1874,8 @@ const CustomerTicket = () => {
             const term = Math.ceil(days / frequency);
             updatedItem.term = term.toString();
 
-            // Calculate date (today + days)
-            const today = new Date();
+            // Calculate date (working date + days)
+            const today = getCurrentDateObject();
             const futureDate = new Date(today);
             futureDate.setDate(today.getDate() + days);
             updatedItem.date = futureDate.toISOString().split('T')[0]; // YYYY-MM-DD format
@@ -2345,15 +2356,16 @@ const CustomerTicket = () => {
     let partIndex = 0;
     const firstPart = parts[0];
 
-    // Check if first part looks like a category code (single letter) and second part looks like purity
-    if (parts.length >= 3 && firstPart.length === 1) {
-      const potentialPurity = parts[1];
-
-      if (potentialPurity.match(/^\d+K?$/i) || potentialPurity.match(/^0?\.\d+$/) || potentialPurity.match(/^1\.0+$/) || potentialPurity.match(/^[a-zA-Z]+$/)) {
-        // First part is category code
-        parsed.category = categoryCodeMap[firstPart] || firstPart;
-        partIndex++;
-      }
+    // Check if first part is a category code (can be 1-3 characters like 'R', 'SE', 'BR', 'CSM', 'LDS')
+    // Try to match category codes by checking if firstPart matches any category code in the map
+    if (categoryCodeMap[firstPart]) {
+      // Found a matching category code
+      parsed.category = categoryCodeMap[firstPart];
+      partIndex = 1; // Skip the category code part, move to next part (purity)
+    } else {
+      // No category code found, first part might be purity directly
+      // This handles formats like "10k 5.6g RG" (no category code)
+      partIndex = 0;
     }
 
     // Parse Purity (e.g., "10K", "14K", "18K", "24K", "0.585", "0.999", "pure", "sterling")
@@ -3331,6 +3343,99 @@ const CustomerTicket = () => {
       }
     }
 
+    // Special handling for payment transactions with pawnTicketId (pawn extensions) - similar to redeem
+    if (transaction_type === 'payment') {
+      const paymentRow = filteredItems[0];
+      const pawnTicketId = paymentRow?.pawnTicketId;
+
+      if (pawnTicketId) {
+        try {
+          // Fetch all items for this pawn ticket from the backend
+          const token = localStorage.getItem('token');
+          const response = await fetch(`${config.apiUrl}/pawn-transactions?pawn_ticket_id=${pawnTicketId}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to fetch pawn ticket items');
+          }
+
+          const pawnTicketItems = await response.json();
+
+          if (!pawnTicketItems || pawnTicketItems.length === 0) {
+            showSnackbar('No items found for this pawn ticket', 'error');
+            return;
+          }
+
+          // Extract extension payment amounts from the payment row
+          const interest = parseFloat(paymentRow.interest || 0);
+          const fee = parseFloat(paymentRow.fee || 0);
+          const totalAmount = parseFloat(paymentRow.amount || 0);
+          const principal = parseFloat(paymentRow.principal || 0);
+          const extensionDays = parseInt(paymentRow.days || 0);
+          const newDueDate = paymentRow.date || null;
+
+          // Convert pawn ticket items to cart items with extension metadata
+          const itemsWithMetadata = pawnTicketItems.map(pawnItem => ({
+            id: pawnItem.item_id || Date.now(),
+            description: pawnItem.item_description || pawnItem.item_short_desc || 'Unknown item',
+            long_desc: pawnItem.item_description,
+            short_desc: pawnItem.item_short_desc,
+            price: totalAmount, // For extension, price is the extension payment amount
+            value: parseFloat(pawnItem.item_price || 0),
+            category: pawnItem.category || '',
+            images: pawnItem.images || [],
+            location: pawnItem.location || '',
+            item_id: pawnItem.item_id,
+            transaction_type: 'payment', // Keep as payment type for proper processing
+            buyTicketId: pawnTicketId, // Use the original pawn ticket ID
+            pawnTicketId: pawnTicketId,
+            customer: customer ? {
+              id: customer.id,
+              first_name: customer.first_name,
+              last_name: customer.last_name,
+              name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+              phone: customer.phone || 'N/A',
+              email: customer.email || 'N/A'
+            } : null,
+            employee: user ? {
+              id: user.id,
+              name: `${user.firstName} ${user.lastName}`,
+              role: user.role || 'Employee'
+            } : null,
+            // Include extension payment details
+            principal: principal,
+            interest: interest,
+            fee: fee,
+            amount: totalAmount,
+            days: extensionDays,
+            date: newDueDate,
+            term: paymentRow.term || '1'
+          }));
+
+          // Save to session storage for cart
+          const existingCart = JSON.parse(sessionStorage.getItem('cartItems') || '[]');
+          const updatedCart = [...existingCart, ...itemsWithMetadata];
+          sessionStorage.setItem('cartItems', JSON.stringify(updatedCart));
+
+          // Clear payment items after adding to cart
+          setPaymentItems([createEmptyPaymentItem()]);
+          const key = customer && customer.id ? `ticket_${customer.id}_payment` : `ticket_global_payment`;
+          localStorage.removeItem(key);
+
+          showSnackbar(`Added extension for pawn ticket ${pawnTicketId} to cart`, 'success');
+
+          // Navigate to cart
+          navigate('/cart');
+          return;
+        } catch (error) {
+          console.error('Error fetching pawn ticket items for extension:', error);
+          showSnackbar('Failed to fetch pawn ticket items. Please try again.', 'error');
+          return;
+        }
+      }
+    }
+
     // Instead of navigating, save to session storage first
     try {
       // Use preserved buyTicketId if editing from cart, otherwise generate new one
@@ -3379,6 +3484,8 @@ const CustomerTicket = () => {
           ...item,
           transaction_type: transaction_type,
           buyTicketId: buyTicketId, // Assign the ticket ID to all items in this batch
+          // For pawn transactions, also set pawnTicketId for consistency with redeem flow
+          ...(transaction_type === 'pawn' ? { pawnTicketId: buyTicketId } : {}),
           customer: customer ? {
             id: customer.id,
             first_name: customer.first_name,
@@ -3538,6 +3645,7 @@ const CustomerTicket = () => {
           ...item,
           transaction_type: 'pawn',
           buyTicketId: pawnTicketId,
+          pawnTicketId: pawnTicketId, // Also set pawnTicketId for consistency with pawn history tracking
           customer: customer ? {
             id: customer.id,
             first_name: customer.first_name,
