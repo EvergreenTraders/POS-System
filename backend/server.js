@@ -5723,6 +5723,7 @@ app.get('/api/transactions', async (req, res) => {
         e.first_name || ' ' || e.last_name as employee_name,
         e.employee_id,
         t.total_amount,
+        t.transaction_date,
         t.created_at,
         t.updated_at,
         TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as formatted_created_at,
@@ -5735,7 +5736,7 @@ app.get('/api/transactions', async (req, res) => {
         t.transaction_id, t.customer_id, c.first_name, c.last_name, c.phone,
         c.address_line1, c.address_line2, c.city, c.state, c.postal_code,
         e.first_name, e.last_name, e.employee_id, t.total_amount,
-        t.created_at, t.updated_at, tic.item_count
+        t.transaction_date, t.created_at, t.updated_at, tic.item_count
       ORDER BY t.created_at DESC`;
     
     const result = await pool.query(query);
