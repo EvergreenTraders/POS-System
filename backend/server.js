@@ -3308,6 +3308,37 @@ app.post('/api/jewelry', async (req, res) => {
     }
 });
 
+// DELETE a jewelry item
+app.delete('/api/jewelry/:item_id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { item_id } = req.params;
+    
+    await client.query('BEGIN');
+    
+    // Delete secondary gems first (foreign key constraint)
+    await client.query('DELETE FROM jewelry_secondary_gems WHERE item_id = $1', [item_id]);
+    
+    // Delete the jewelry item
+    const deleteQuery = 'DELETE FROM jewelry WHERE item_id = $1 RETURNING *';
+    const result = await client.query(deleteQuery, [item_id]);
+    
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Jewelry item not found' });
+    }
+    
+    await client.query('COMMIT');
+    res.json({ message: 'Jewelry item deleted successfully', item: result.rows[0] });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting jewelry item:', error);
+    res.status(500).json({ error: 'Failed to delete jewelry item' });
+  } finally {
+    client.release();
+  }
+});
+
 // Inventory Status API Endpoints
 app.get('/api/inventory-status', async (req, res) => {
   try {
@@ -4512,6 +4543,50 @@ app.post('/api/pawn-history', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error recording pawn history:', error);
     res.status(500).json({ error: 'Failed to record pawn history' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE pawn history by transaction_id (for cleanup on payment failure)
+app.delete('/api/pawn-history/transaction/:transaction_id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { transaction_id } = req.params;
+    
+    await client.query('BEGIN');
+    
+    const deleteQuery = 'DELETE FROM pawn_history WHERE transaction_id = $1 RETURNING *';
+    const result = await client.query(deleteQuery, [transaction_id]);
+    
+    await client.query('COMMIT');
+    res.json({ message: 'Pawn history deleted successfully', count: result.rows.length });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting pawn history:', error);
+    res.status(500).json({ error: 'Failed to delete pawn history' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE pawn tickets by transaction_id (for cleanup on payment failure)
+app.delete('/api/pawn-ticket/transaction/:transaction_id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { transaction_id } = req.params;
+    
+    await client.query('BEGIN');
+    
+    const deleteQuery = 'DELETE FROM pawn_ticket WHERE transaction_id = $1 RETURNING *';
+    const result = await client.query(deleteQuery, [transaction_id]);
+    
+    await client.query('COMMIT');
+    res.json({ message: 'Pawn tickets deleted successfully', count: result.rows.length });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting pawn tickets:', error);
+    res.status(500).json({ error: 'Failed to delete pawn tickets' });
   } finally {
     client.release();
   }
@@ -8148,6 +8223,13 @@ app.post('/api/payments', async (req, res) => {
 
     const transaction = transactionResult.rows[0];
 
+    // Validate transaction has employee_id
+    if (!transaction.employee_id) {
+      throw new Error('Transaction is missing employee_id');
+    }
+
+    const employee_id = transaction.employee_id;
+
     // Get total payments made so far
     const paymentsResult = await client.query(
       'SELECT COALESCE(SUM(amount), 0) as paid_amount FROM payments WHERE transaction_id = $1',
@@ -8178,7 +8260,7 @@ app.post('/api/payments', async (req, res) => {
         `SELECT session_id FROM cash_drawer_sessions
          WHERE employee_id = $1 AND status = 'open'
          ORDER BY opened_at DESC LIMIT 1`,
-        [transaction.employee_id]
+        [employee_id]
       );
 
       // Only use physical drawer sessions for transactions (exclude safe drawers)

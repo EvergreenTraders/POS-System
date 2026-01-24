@@ -1355,18 +1355,85 @@ function Checkout() {
           }
 
           // Step 3: Process all collected payments against the real transaction ID
-          for (const payment of updatedPayments) {
-            const paymentResponse = await axios.post(
-              `${config.apiUrl}/payments`,
-              {
-                transaction_id: realTransactionId,
-                amount: parseFloat(payment.amount.toFixed(2)), // Round to 2 decimal places
-                payment_method: payment.payment_method
-              },
-              {
-                headers: { Authorization: `Bearer ${token}` }
+          // Track created resources for cleanup if payment fails
+          const createdResources = {
+            jewelryItems: createdJewelryItems || [],
+            transactionId: realTransactionId,
+            pawnTicketsCreated: pawnTicketIds.size > 0,
+            pawnHistoryCreated: pawnTicketIds.size > 0
+          };
+
+          try {
+            for (const payment of updatedPayments) {
+              const paymentResponse = await axios.post(
+                `${config.apiUrl}/payments`,
+                {
+                  transaction_id: realTransactionId,
+                  amount: parseFloat(payment.amount.toFixed(2)), // Round to 2 decimal places
+                  payment_method: payment.payment_method
+                },
+                {
+                  headers: { Authorization: `Bearer ${token}` }
+                }
+              );
+            }
+          } catch (paymentError) {
+            // Cleanup all created resources on payment failure
+            console.error('Payment failed, cleaning up created resources...', paymentError);
+            
+            try {
+              // 1. Delete pawn history (if any was created)
+              if (createdResources.pawnHistoryCreated && realTransactionId) {
+                await axios.delete(
+                  `${config.apiUrl}/pawn-history/transaction/${realTransactionId}`,
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+                console.log('✓ Cleaned up pawn history');
               }
-            );
+
+              // 2. Delete pawn tickets (if any were created)
+              if (createdResources.pawnTicketsCreated && realTransactionId) {
+                await axios.delete(
+                  `${config.apiUrl}/pawn-ticket/transaction/${realTransactionId}`,
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+                console.log('✓ Cleaned up pawn tickets');
+              }
+
+              // 3. Delete transaction
+              if (realTransactionId) {
+                await axios.delete(
+                  `${config.apiUrl}/transactions/${realTransactionId}`,
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+                console.log('✓ Cleaned up transaction');
+              }
+
+              // 4. Delete jewelry items (if any were created)
+              if (createdResources.jewelryItems && createdResources.jewelryItems.length > 0) {
+                const itemIds = createdResources.jewelryItems.map(item => item.item_id).filter(Boolean);
+                if (itemIds.length > 0) {
+                  // Delete jewelry items in batch
+                  for (const itemId of itemIds) {
+                    try {
+                      await axios.delete(
+                        `${config.apiUrl}/jewelry/${itemId}`,
+                        { headers: { Authorization: `Bearer ${token}` } }
+                      );
+                    } catch (deleteError) {
+                      console.error(`Error deleting jewelry item ${itemId}:`, deleteError);
+                    }
+                  }
+                  console.log('✓ Cleaned up jewelry items');
+                }
+              }
+            } catch (cleanupError) {
+              console.error('Error during cleanup:', cleanupError);
+              // Continue to throw the original payment error
+            }
+
+            // Re-throw the payment error to be caught by outer catch block
+            throw paymentError;
           }
 
           // Step 3.5: Update jewelry inventory status to SOLD for sale transactions
