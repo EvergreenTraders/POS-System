@@ -311,60 +311,83 @@ function CashDrawer() {
 
         // Response is now an array of all active sessions
         const sessions = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
+
         setActiveSessions(sessions);
 
-        // Separate sessions by type
-        const physicalSession = sessions.find(s => s.drawer_type === 'physical');
-        const safeSession = sessions.find(s => s.drawer_type === 'safe');
-        const masterSafeSession = sessions.find(s => s.drawer_type === 'master_safe');
+        // First, try to preserve the current active session by session_id AND drawer_id
+        // This ensures we don't switch to a different drawer after operations like transfers
+        // IMPORTANT: We must also verify the employee_id to prevent showing other employees' sessions
+        const currentSessionId = activeSession?.session_id;
+        const currentDrawerId = activeSession?.drawer_id;
+        const preservedSession = (currentSessionId && currentDrawerId)
+          ? sessions.find(s =>
+              s.session_id === currentSessionId &&
+              s.drawer_id === currentDrawerId &&
+              s.employee_id === currentUser.id  // Ensure it belongs to current user
+            )
+          : null;
 
-        // Use preferred session type if provided, otherwise use current selectedSessionType
-        const targetSessionType = preferredSessionType || selectedSessionType;
+        // Determine the final session to use
+        let finalSession = null;
 
-        // Set active session based on preferred/selected type or default priority
-        let currentSession = null;
-        if (targetSessionType === 'physical' && physicalSession) {
-          // Show physical if explicitly requested and exists
-          currentSession = physicalSession;
-          setSelectedSessionType('physical');
-        } else if (targetSessionType === 'safe' && safeSession) {
-          // Show safe if explicitly requested and exists
-          currentSession = safeSession;
-          setSelectedSessionType('safe');
-        } else if (targetSessionType === 'master_safe' && masterSafeSession) {
-          // Show master safe if explicitly requested and exists
-          currentSession = masterSafeSession;
-          setSelectedSessionType('master_safe');
-        } else if (physicalSession) {
-          // Default to physical drawer when it exists (for transactions)
-          currentSession = physicalSession;
-          setSelectedSessionType('physical');
-        } else if (safeSession) {
-          // Show safe if no physical drawer exists
-          currentSession = safeSession;
-          setSelectedSessionType('safe');
-        } else if (masterSafeSession) {
-          // Show master safe if no physical or safe drawer exists
-          currentSession = masterSafeSession;
-          setSelectedSessionType('master_safe');
-        } else if (sessions.length > 0) {
-          // Fallback to first available session
-          currentSession = sessions[0];
-          if (currentSession.drawer_type === 'safe') {
-            setSelectedSessionType('safe');
-          } else if (currentSession.drawer_type === 'master_safe') {
-            setSelectedSessionType('master_safe');
-          } else {
+        if (preservedSession) {
+          // Keep the same session that was active (verified to belong to current user)
+          finalSession = preservedSession;
+          setSelectedSessionType(preservedSession.drawer_type);
+        } else {
+          // No current session or it's no longer active - use selection logic
+          // Separate sessions by type
+          const physicalSession = sessions.find(s => s.drawer_type === 'physical');
+          const safeSession = sessions.find(s => s.drawer_type === 'safe');
+          const masterSafeSession = sessions.find(s => s.drawer_type === 'master_safe');
+
+          // Use preferred session type if provided, otherwise use current selectedSessionType
+          const targetSessionType = preferredSessionType || selectedSessionType;
+
+          // Set active session based on preferred/selected type or default priority
+          if (targetSessionType === 'physical' && physicalSession) {
+            // Show physical if explicitly requested and exists
+            finalSession = physicalSession;
             setSelectedSessionType('physical');
+          } else if (targetSessionType === 'safe' && safeSession) {
+            // Show safe if explicitly requested and exists
+            finalSession = safeSession;
+            setSelectedSessionType('safe');
+          } else if (targetSessionType === 'master_safe' && masterSafeSession) {
+            // Show master safe if explicitly requested and exists
+            finalSession = masterSafeSession;
+            setSelectedSessionType('master_safe');
+          } else if (physicalSession) {
+            // Default to physical drawer when it exists (for transactions)
+            finalSession = physicalSession;
+            setSelectedSessionType('physical');
+          } else if (safeSession) {
+            // Show safe if no physical drawer exists
+            finalSession = safeSession;
+            setSelectedSessionType('safe');
+          } else if (masterSafeSession) {
+            // Show master safe if no physical or safe drawer exists
+            finalSession = masterSafeSession;
+            setSelectedSessionType('master_safe');
+          } else if (sessions.length > 0) {
+            // Fallback to first available session
+            finalSession = sessions[0];
+            if (finalSession.drawer_type === 'safe') {
+              setSelectedSessionType('safe');
+            } else if (finalSession.drawer_type === 'master_safe') {
+              setSelectedSessionType('master_safe');
+            } else {
+              setSelectedSessionType('physical');
+            }
           }
         }
 
-        setActiveSession(currentSession);
+        setActiveSession(finalSession);
 
         // Update count mode based on drawer type if session exists
-        if (currentSession && currentSession.drawer_type) {
-          setSelectedDrawerType(currentSession.drawer_type);
-          const isSafe = currentSession.drawer_type === 'safe' || currentSession.drawer_type === 'master_safe';
+        if (finalSession && finalSession.drawer_type) {
+          setSelectedDrawerType(finalSession.drawer_type);
+          const isSafe = finalSession.drawer_type === 'safe' || finalSession.drawer_type === 'master_safe';
           setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
         }
       } else {
@@ -591,17 +614,18 @@ function CashDrawer() {
       return;
     }
 
-    // For transfers, require source session
-    if (adjustmentType === 'transfer' && !transferSourceSession) {
-      showSnackbar('Please select a source drawer for transfer', 'error');
+    // For transfers, require source/target session
+    if ((adjustmentType === 'transfer_from' || adjustmentType === 'transfer_to') && !transferSourceSession) {
+      showSnackbar('Please select a drawer for transfer', 'error');
       return;
     }
 
     try {
       const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
-      if (adjustmentType === 'transfer') {
-        // Use the transfer endpoint for drawer-to-drawer transfers
+      if (adjustmentType === 'transfer_from') {
+        // Transfer FROM another drawer TO this drawer (receiving money)
+        // activeSession is the target (receiving), transferSourceSession is the source (sending)
         await axios.post(
           `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/transfer`,
           {
@@ -611,7 +635,20 @@ function CashDrawer() {
             performed_by: currentUser.id
           }
         );
-        showSnackbar('Transfer completed successfully', 'success');
+        showSnackbar('Transfer received successfully', 'success');
+      } else if (adjustmentType === 'transfer_to') {
+        // Transfer TO another drawer FROM this drawer (sending money)
+        // activeSession is the source (sending), transferSourceSession is the target (receiving)
+        await axios.post(
+          `${API_BASE_URL}/cash-drawer/${parseInt(transferSourceSession)}/transfer`,
+          {
+            amount: parseFloat(adjustmentAmount),
+            source_session_id: activeSession.session_id,
+            reason: adjustmentReason,
+            performed_by: currentUser.id
+          }
+        );
+        showSnackbar('Transfer sent successfully', 'success');
       } else {
         // Regular adjustment
         await axios.post(
@@ -628,7 +665,12 @@ function CashDrawer() {
 
       setAdjustmentDialog(false);
       resetAdjustmentForm();
-      checkActiveSession();
+
+      // Refresh both current user's sessions and all active sessions
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions()
+      ]);
     } catch (err) {
       console.error('Error adding adjustment:', err);
       showSnackbar(err.response?.data?.error || 'Failed to add adjustment', 'error');
@@ -1502,7 +1544,7 @@ function CashDrawer() {
                 value={adjustmentType}
                 onChange={(e) => {
                   setAdjustmentType(e.target.value);
-                  if (e.target.value === 'transfer') {
+                  if (e.target.value === 'transfer_from' || e.target.value === 'transfer_to') {
                     fetchAllActiveSessions();
                   } else {
                     setTransferSourceSession('');
@@ -1523,44 +1565,60 @@ function CashDrawer() {
                   <MenuItem value="change_order">Change Order (Add Cash)</MenuItem>
                 )}
                 {/* All drawer types can transfer */}
-                <MenuItem value="transfer">Transfer from Another Drawer</MenuItem>
+                <MenuItem value="transfer_from">Transfer FROM Another Drawer (Receive)</MenuItem>
+                <MenuItem value="transfer_to">Transfer TO Another Drawer (Send)</MenuItem>
                 {/* General adjustments */}
                 <MenuItem value="petty_cash">Petty Cash</MenuItem>
                 <MenuItem value="correction">Correction</MenuItem>
                 <MenuItem value="other">Other</MenuItem>
               </Select>
             </FormControl>
-            {adjustmentType === 'transfer' && (
+            {(adjustmentType === 'transfer_from' || adjustmentType === 'transfer_to') && (
               <FormControl fullWidth required>
-                <InputLabel>Source Drawer (Transfer From)</InputLabel>
+                <InputLabel>
+                  {adjustmentType === 'transfer_from' ? 'Source Drawer (Receive From)' : 'Target Drawer (Send To)'}
+                </InputLabel>
                 <Select
                   value={transferSourceSession}
                   onChange={(e) => setTransferSourceSession(e.target.value)}
-                  label="Source Drawer (Transfer From)"
+                  label={adjustmentType === 'transfer_from' ? 'Source Drawer (Receive From)' : 'Target Drawer (Send To)'}
                 >
                   {allActiveSessions
                     .filter(session => {
-                      // Don't show the same drawer
-                      if (session.drawer_id === activeSession?.drawer_id) return false;
+                      // Don't show the same session (must compare session_id, not drawer_id, since drawers can be shared)
+                      if (session.session_id === activeSession?.session_id) return false;
 
                       // Filter based on drawer type hierarchy:
-                      // - Physical drawers can receive from: other physical drawers, safe drawers
-                      // - Safe drawers can receive from: physical drawers, master_safe
-                      // - Master safe can receive from: safe drawers only
-                      const targetType = activeSession?.drawer_type;
-                      const sourceType = session.drawer_type;
+                      // For transfer_from (receiving): filter by what can send TO active drawer
+                      // For transfer_to (sending): filter by what active drawer can send TO
+                      const activeType = activeSession?.drawer_type;
+                      const otherType = session.drawer_type;
 
+                      // Allowed sources (who can send TO this drawer type)
                       const allowedSources = {
                         'physical': ['physical', 'safe'],
                         'safe': ['physical', 'master_safe'],
                         'master_safe': ['safe']
                       };
 
-                      return allowedSources[targetType]?.includes(sourceType) || false;
+                      // Allowed targets (who this drawer type can send TO)
+                      const allowedTargets = {
+                        'physical': ['physical', 'safe'],
+                        'safe': ['physical', 'master_safe'],
+                        'master_safe': ['safe']
+                      };
+
+                      if (adjustmentType === 'transfer_from') {
+                        // Who can send to us
+                        return allowedSources[activeType]?.includes(otherType) || false;
+                      } else {
+                        // Who we can send to
+                        return allowedTargets[activeType]?.includes(otherType) || false;
+                      }
                     })
                     .map((session) => (
                       <MenuItem key={session.session_id} value={session.session_id}>
-                        {session.drawer_name} ({session.drawer_type === 'master_safe' ? 'Master Safe' : session.drawer_type === 'safe' ? 'Safe' : 'Physical'}) - {formatCurrency(session.current_expected_balance || 0)}
+                        {session.drawer_name} - {session.employee_name} - {formatCurrency(session.current_expected_balance || 0)}
                       </MenuItem>
                     ))}
                 </Select>
@@ -1574,7 +1632,7 @@ function CashDrawer() {
               onChange={(e) => setAdjustmentAmount(e.target.value)}
               required
               inputProps={{ step: '0.01', min: '0.01' }}
-              helperText={adjustmentType === 'transfer'
+              helperText={(adjustmentType === 'transfer_from' || adjustmentType === 'transfer_to')
                 ? "Enter the amount to transfer (must be positive)"
                 : "Positive for adding cash, negative for removing cash"}
             />
