@@ -642,7 +642,7 @@ app.post('/api/cash-drawer/:sessionId/adjustment', async (req, res) => {
     });
   }
 
-  const validTypes = ['bank_deposit', 'change_order', 'petty_cash', 'correction', 'transfer', 'other'];
+  const validTypes = ['bank_deposit', 'bank_withdrawal', 'change_order', 'petty_cash', 'correction', 'transfer', 'other'];
   if (!validTypes.includes(adjustment_type)) {
     return res.status(400).json({
       error: `adjustment_type must be one of: ${validTypes.join(', ')}`
@@ -709,7 +709,7 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
 
     // Verify target session exists and is open
     const targetCheck = await client.query(
-      `SELECT s.session_id, s.status, d.drawer_name
+      `SELECT s.session_id, s.status, d.drawer_name, d.drawer_type
        FROM cash_drawer_sessions s
        JOIN drawers d ON s.drawer_id = d.drawer_id
        WHERE s.session_id = $1`,
@@ -728,7 +728,7 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
 
     // Verify source session exists and is open
     const sourceCheck = await client.query(
-      `SELECT s.session_id, s.status, d.drawer_name
+      `SELECT s.session_id, s.status, d.drawer_name, d.drawer_type
        FROM cash_drawer_sessions s
        JOIN drawers d ON s.drawer_id = d.drawer_id
        WHERE s.session_id = $1`,
@@ -745,8 +745,28 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
       return res.status(400).json({ error: 'Source drawer session is not open' });
     }
 
+    const sourceDrawerType = sourceCheck.rows[0].drawer_type;
+    const targetDrawerType = targetCheck.rows[0].drawer_type;
     const sourceDrawerName = sourceCheck.rows[0].drawer_name;
     const targetDrawerName = targetCheck.rows[0].drawer_name;
+
+    // Validate transfer based on drawer type hierarchy:
+    // - Physical drawers can receive from: other physical drawers, safe drawers
+    // - Safe drawers can receive from: physical drawers, master_safe
+    // - Master safe can receive from: safe drawers, bank (handled separately)
+    const allowedSources = {
+      'physical': ['physical', 'safe'],
+      'safe': ['physical', 'master_safe'],
+      'master_safe': ['safe']
+    };
+
+    const allowed = allowedSources[targetDrawerType] || [];
+    if (!allowed.includes(sourceDrawerType)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `Cannot transfer from ${sourceDrawerType} drawer to ${targetDrawerType} drawer. Allowed sources: ${allowed.join(', ')}`
+      });
+    }
     const transferAmount = parseFloat(amount);
 
     // Create negative adjustment on source drawer (cash going out)

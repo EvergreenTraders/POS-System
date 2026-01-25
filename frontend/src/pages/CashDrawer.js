@@ -1510,9 +1510,21 @@ function CashDrawer() {
                 }}
                 label="Adjustment Type"
               >
-                <MenuItem value="bank_deposit">Bank Deposit (Remove Cash)</MenuItem>
-                <MenuItem value="change_order">Change Order (Add Cash)</MenuItem>
+                {/* Master safe can receive from bank */}
+                {activeSession?.drawer_type === 'master_safe' && (
+                  <MenuItem value="bank_withdrawal">Bank Withdrawal (Add Cash from Bank)</MenuItem>
+                )}
+                {/* Master safe can send to bank */}
+                {activeSession?.drawer_type === 'master_safe' && (
+                  <MenuItem value="bank_deposit">Bank Deposit (Remove Cash to Bank)</MenuItem>
+                )}
+                {/* Physical drawers can have change orders */}
+                {activeSession?.drawer_type === 'physical' && (
+                  <MenuItem value="change_order">Change Order (Add Cash)</MenuItem>
+                )}
+                {/* All drawer types can transfer */}
                 <MenuItem value="transfer">Transfer from Another Drawer</MenuItem>
+                {/* General adjustments */}
                 <MenuItem value="petty_cash">Petty Cash</MenuItem>
                 <MenuItem value="correction">Correction</MenuItem>
                 <MenuItem value="other">Other</MenuItem>
@@ -1527,10 +1539,28 @@ function CashDrawer() {
                   label="Source Drawer (Transfer From)"
                 >
                   {allActiveSessions
-                    .filter(session => session.drawer_id !== activeSession?.drawer_id)
+                    .filter(session => {
+                      // Don't show the same drawer
+                      if (session.drawer_id === activeSession?.drawer_id) return false;
+
+                      // Filter based on drawer type hierarchy:
+                      // - Physical drawers can receive from: other physical drawers, safe drawers
+                      // - Safe drawers can receive from: physical drawers, master_safe
+                      // - Master safe can receive from: safe drawers only
+                      const targetType = activeSession?.drawer_type;
+                      const sourceType = session.drawer_type;
+
+                      const allowedSources = {
+                        'physical': ['physical', 'safe'],
+                        'safe': ['physical', 'master_safe'],
+                        'master_safe': ['safe']
+                      };
+
+                      return allowedSources[targetType]?.includes(sourceType) || false;
+                    })
                     .map((session) => (
                       <MenuItem key={session.session_id} value={session.session_id}>
-                        {session.drawer_name} (${parseFloat(session.current_expected_balance || 0).toFixed(2)})
+                        {session.drawer_name} ({session.drawer_type === 'master_safe' ? 'Master Safe' : session.drawer_type === 'safe' ? 'Safe' : 'Physical'}) - {formatCurrency(session.current_expected_balance || 0)}
                       </MenuItem>
                     ))}
                 </Select>

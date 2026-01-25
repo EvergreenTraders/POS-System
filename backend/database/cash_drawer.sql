@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS cash_drawer_adjustments (
     FOREIGN KEY (source_session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE SET NULL,
 
     CONSTRAINT chk_adjustment_type CHECK (
-        adjustment_type IN ('bank_deposit', 'change_order', 'petty_cash', 'correction', 'transfer', 'other')
+        adjustment_type IN ('bank_deposit', 'bank_withdrawal', 'change_order', 'petty_cash', 'correction', 'transfer', 'other')
     )
 );
 
@@ -160,7 +160,7 @@ BEGIN
         ADD COLUMN source_session_id INTEGER REFERENCES cash_drawer_sessions(session_id) ON DELETE SET NULL;
     END IF;
 
-    -- Update the adjustment type constraint to include 'transfer'
+    -- Update the adjustment type constraint to include all types
     IF EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'chk_adjustment_type'
@@ -170,8 +170,11 @@ BEGIN
     END IF;
 
     ALTER TABLE cash_drawer_adjustments ADD CONSTRAINT chk_adjustment_type
-        CHECK (adjustment_type IN ('bank_deposit', 'change_order', 'petty_cash', 'correction', 'transfer', 'other'));
+        CHECK (adjustment_type IN ('bank_deposit', 'bank_withdrawal', 'change_order', 'petty_cash', 'correction', 'transfer', 'other'));
 END $$;
+
+-- Add comment documenting transfer rules
+COMMENT ON TABLE cash_drawer_adjustments IS 'Records manual cash additions/removals during shifts. Transfer rules: Physical drawers receive from physical/safe. Safe drawers receive from physical/master_safe. Master safe receives from safe/bank.';
 
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_drawer_sessions_employee ON cash_drawer_sessions(employee_id);
