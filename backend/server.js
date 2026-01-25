@@ -449,11 +449,15 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments
       FROM cash_drawer_sessions s
       JOIN drawers d ON s.drawer_id = d.drawer_id
-      WHERE s.employee_id = $1 AND s.status = 'open'
+      WHERE s.status = 'open'
+        AND (
+          s.employee_id = $1  -- Employee's own physical drawer sessions
+          OR d.drawer_type IN ('safe', 'master_safe')  -- All shared safe/master_safe sessions
+        )
       ORDER BY s.opened_at DESC
     `, [employeeId]);
 
-    // Return all active sessions (can have both physical and safe drawer sessions)
+    // Return all active sessions (employee's physical drawers + shared safe drawers)
     res.json(result.rows);
   } catch (error) {
     console.error('Error checking active drawer:', error);
@@ -590,30 +594,48 @@ app.post('/api/cash-drawer/open', async (req, res) => {
 
     const drawerType = drawerTypeResult.rows[0].drawer_type;
 
-    // Check for existing open session of the same type
-    const existingDrawer = await pool.query(
-      `SELECT s.session_id 
-       FROM cash_drawer_sessions s
-       JOIN drawers d ON s.drawer_id = d.drawer_id
-       WHERE s.employee_id = $1 
-         AND s.status = $2
-         AND d.drawer_type = $3`,
-      [employee_id, 'open', drawerType]
-    );
+    // For safe and master_safe: check globally for any existing open session (shared across all employees)
+    // For physical drawers: check only for this employee
+    let existingDrawer;
+    if (drawerType === 'safe' || drawerType === 'master_safe') {
+      // Safe and master safe are shared - check if ANY employee has it open
+      existingDrawer = await pool.query(
+        `SELECT s.session_id, s.employee_id, e.first_name, e.last_name
+         FROM cash_drawer_sessions s
+         JOIN drawers d ON s.drawer_id = d.drawer_id
+         LEFT JOIN employees e ON s.employee_id = e.employee_id
+         WHERE s.status = $1
+           AND d.drawer_type = $2`,
+        ['open', drawerType]
+      );
 
-    if (existingDrawer.rows.length > 0) {
-      let drawerTypeName = 'drawer';
-      if (drawerType === 'safe') {
-        drawerTypeName = 'safe drawer';
-      } else if (drawerType === 'master_safe') {
-        drawerTypeName = 'master safe';
-      } else if (drawerType === 'physical') {
-        drawerTypeName = 'physical drawer';
+      if (existingDrawer.rows.length > 0) {
+        const existingSession = existingDrawer.rows[0];
+        const drawerTypeName = drawerType === 'safe' ? 'safe drawer' : 'master safe';
+        const openedBy = `${existingSession.first_name} ${existingSession.last_name}`;
+        return res.status(400).json({
+          error: `The ${drawerTypeName} is already open (opened by ${openedBy})`,
+          session_id: existingSession.session_id
+        });
       }
-      return res.status(400).json({
-        error: `Employee already has an open ${drawerTypeName} session`,
-        session_id: existingDrawer.rows[0].session_id
-      });
+    } else {
+      // Physical drawers are per-employee
+      existingDrawer = await pool.query(
+        `SELECT s.session_id
+         FROM cash_drawer_sessions s
+         JOIN drawers d ON s.drawer_id = d.drawer_id
+         WHERE s.employee_id = $1
+           AND s.status = $2
+           AND d.drawer_type = $3`,
+        [employee_id, 'open', drawerType]
+      );
+
+      if (existingDrawer.rows.length > 0) {
+        return res.status(400).json({
+          error: `Employee already has an open physical drawer session`,
+          session_id: existingDrawer.rows[0].session_id
+        });
+      }
     }
 
     // Create new drawer session

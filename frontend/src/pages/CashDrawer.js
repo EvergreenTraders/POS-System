@@ -316,15 +316,21 @@ function CashDrawer() {
 
         // First, try to preserve the current active session by session_id AND drawer_id
         // This ensures we don't switch to a different drawer after operations like transfers
-        // IMPORTANT: We must also verify the employee_id to prevent showing other employees' sessions
+        // IMPORTANT: For physical drawers, verify employee_id to prevent showing other employees' sessions
+        // For safe/master_safe, don't check employee_id since they're shared across all employees
         const currentSessionId = activeSession?.session_id;
         const currentDrawerId = activeSession?.drawer_id;
+        const currentDrawerType = activeSession?.drawer_type;
         const preservedSession = (currentSessionId && currentDrawerId)
-          ? sessions.find(s =>
-              s.session_id === currentSessionId &&
-              s.drawer_id === currentDrawerId &&
-              s.employee_id === currentUser.id  // Ensure it belongs to current user
-            )
+          ? sessions.find(s => {
+              const sessionMatches = s.session_id === currentSessionId && s.drawer_id === currentDrawerId;
+              // For physical drawers, verify employee_id; for safe/master_safe, skip employee check
+              if (s.drawer_type === 'physical') {
+                return sessionMatches && s.employee_id === currentUser.id;
+              } else {
+                return sessionMatches;  // Safe and master_safe are shared
+              }
+            })
           : null;
 
         // Determine the final session to use
@@ -1616,11 +1622,19 @@ function CashDrawer() {
                         return allowedTargets[activeType]?.includes(otherType) || false;
                       }
                     })
-                    .map((session) => (
-                      <MenuItem key={session.session_id} value={session.session_id}>
-                        {session.drawer_name} - {session.employee_name} - {formatCurrency(session.current_expected_balance || 0)}
-                      </MenuItem>
-                    ))}
+                    .map((session) => {
+                      // For physical drawers, show employee name (since they're per-employee)
+                      // For safe/master_safe, don't show employee name (since they're shared)
+                      const displayName = session.drawer_type === 'physical'
+                        ? `${session.drawer_name} - ${session.employee_name} - ${formatCurrency(session.current_expected_balance || 0)}`
+                        : `${session.drawer_name} - ${formatCurrency(session.current_expected_balance || 0)}`;
+
+                      return (
+                        <MenuItem key={session.session_id} value={session.session_id}>
+                          {displayName}
+                        </MenuItem>
+                      );
+                    })}
                 </Select>
               </FormControl>
             )}
