@@ -49,7 +49,10 @@ INSERT INTO transaction_type (type) VALUES
     ('retail'),
     ('sale'),
     ('refund'),
-    ('return')
+    ('return'),
+    ('repair'),
+    ('payment'),
+    ('redeem')
 ON CONFLICT (type) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS transactions (

@@ -982,10 +982,12 @@ function CashDrawer() {
                         <Typography variant="body2" color="text.secondary">Opening Balance</Typography>
                         <Typography variant="h6">{formatCurrency(activeSession.opening_balance)}</Typography>
                       </Grid>
-                      <Grid item xs={12} md={4}>
-                        <Typography variant="body2" color="text.secondary">Current Expected Balance</Typography>
-                        <Typography variant="h6">{formatCurrency(activeSession.current_expected_balance)}</Typography>
-                      </Grid>
+                      {!isBlindCount && (
+                        <Grid item xs={12} md={4}>
+                          <Typography variant="body2" color="text.secondary">Current Expected Balance</Typography>
+                          <Typography variant="h6">{formatCurrency(activeSession.current_expected_balance)}</Typography>
+                        </Grid>
+                      )}
                       <Grid item xs={12} md={6}>
                         <Typography variant="body2" color="text.secondary">Transaction Count</Typography>
                         <Typography variant="body1">{activeSession.transaction_count || 0}</Typography>
@@ -1322,10 +1324,8 @@ function CashDrawer() {
                 />
                 {actualBalance && activeSession && (() => {
                   const balance = parseFloat(actualBalance);
-                  const discrepancy = balance - activeSession.current_expected_balance;
-                  const hasDiscrepancy = Math.abs(discrepancy) > 0.01; // Allow 1 cent tolerance
-                  
-                  // Check min/max range for physical drawers
+
+                  // Check min/max range for physical drawers only - don't reveal expected amount info
                   const isPhysical = activeSession.drawer_type === 'physical';
                   const minCloseValue = parseFloat(minClose || 0);
                   const maxCloseValue = parseFloat(maxClose || 0);
@@ -1333,20 +1333,17 @@ function CashDrawer() {
                     (minCloseValue > 0 && balance < minCloseValue) ||
                     (maxCloseValue > 0 && balance > maxCloseValue)
                   );
-                  
+
                   if (isOutOfRange) {
                     return (
                       <Alert severity="error">
-                        <strong>Closing balance is outside allowed range (${minCloseValue > 0 ? formatCurrency(minCloseValue) : 'No min'} - ${maxCloseValue > 0 ? formatCurrency(maxCloseValue) : 'No max'})</strong>
+                        <strong>Closing balance is outside allowed range ({minCloseValue > 0 ? formatCurrency(minCloseValue) : 'No min'} - {maxCloseValue > 0 ? formatCurrency(maxCloseValue) : 'No max'})</strong>
                       </Alert>
                     );
                   }
-                  
-                  return hasDiscrepancy ? (
-                    <Alert severity="error">
-                      <strong>Not expected balance. Please recount.</strong>
-                    </Alert>
-                  ) : null;
+
+                  // In blind count mode, don't show any hint about whether the count matches expected
+                  return null;
                 })()}
               </>
             ) : (
@@ -1702,14 +1699,20 @@ function CashDrawer() {
                   <Typography variant="body2" color="text.secondary">Opening</Typography>
                   <Typography variant="h6">{formatCurrency(sessionDetails.session.opening_balance)}</Typography>
                 </Grid>
-                <Grid item xs={4}>
-                  <Typography variant="body2" color="text.secondary">Expected</Typography>
-                  <Typography variant="h6">{formatCurrency(sessionDetails.session.expected_balance)}</Typography>
-                </Grid>
-                <Grid item xs={4}>
-                  <Typography variant="body2" color="text.secondary">Actual</Typography>
-                  <Typography variant="h6">{formatCurrency(sessionDetails.session.actual_balance)}</Typography>
-                </Grid>
+                {/* Hide expected balance for open sessions in blind count mode */}
+                {(!isBlindCount || sessionDetails.session.status === 'closed') && (
+                  <Grid item xs={4}>
+                    <Typography variant="body2" color="text.secondary">Expected</Typography>
+                    <Typography variant="h6">{formatCurrency(sessionDetails.session.expected_balance)}</Typography>
+                  </Grid>
+                )}
+                {/* Only show actual balance for closed sessions */}
+                {sessionDetails.session.status === 'closed' && (
+                  <Grid item xs={4}>
+                    <Typography variant="body2" color="text.secondary">Actual</Typography>
+                    <Typography variant="h6">{formatCurrency(sessionDetails.session.actual_balance)}</Typography>
+                  </Grid>
+                )}
               </Grid>
 
               {sessionDetails.adjustments.length > 0 && (
