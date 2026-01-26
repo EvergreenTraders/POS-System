@@ -449,11 +449,15 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments
       FROM cash_drawer_sessions s
       JOIN drawers d ON s.drawer_id = d.drawer_id
-      WHERE s.employee_id = $1 AND s.status = 'open'
+      WHERE s.status = 'open'
+        AND (
+          s.employee_id = $1  -- Employee's own physical drawer sessions
+          OR d.drawer_type IN ('safe', 'master_safe')  -- All shared safe/master_safe sessions
+        )
       ORDER BY s.opened_at DESC
     `, [employeeId]);
 
-    // Return all active sessions (can have both physical and safe drawer sessions)
+    // Return all active sessions (employee's physical drawers + shared safe drawers)
     res.json(result.rows);
   } catch (error) {
     console.error('Error checking active drawer:', error);
@@ -590,30 +594,48 @@ app.post('/api/cash-drawer/open', async (req, res) => {
 
     const drawerType = drawerTypeResult.rows[0].drawer_type;
 
-    // Check for existing open session of the same type
-    const existingDrawer = await pool.query(
-      `SELECT s.session_id 
-       FROM cash_drawer_sessions s
-       JOIN drawers d ON s.drawer_id = d.drawer_id
-       WHERE s.employee_id = $1 
-         AND s.status = $2
-         AND d.drawer_type = $3`,
-      [employee_id, 'open', drawerType]
-    );
+    // For safe and master_safe: check globally for any existing open session (shared across all employees)
+    // For physical drawers: check only for this employee
+    let existingDrawer;
+    if (drawerType === 'safe' || drawerType === 'master_safe') {
+      // Safe and master safe are shared - check if ANY employee has it open
+      existingDrawer = await pool.query(
+        `SELECT s.session_id, s.employee_id, e.first_name, e.last_name
+         FROM cash_drawer_sessions s
+         JOIN drawers d ON s.drawer_id = d.drawer_id
+         LEFT JOIN employees e ON s.employee_id = e.employee_id
+         WHERE s.status = $1
+           AND d.drawer_type = $2`,
+        ['open', drawerType]
+      );
 
-    if (existingDrawer.rows.length > 0) {
-      let drawerTypeName = 'drawer';
-      if (drawerType === 'safe') {
-        drawerTypeName = 'safe drawer';
-      } else if (drawerType === 'master_safe') {
-        drawerTypeName = 'master safe';
-      } else if (drawerType === 'physical') {
-        drawerTypeName = 'physical drawer';
+      if (existingDrawer.rows.length > 0) {
+        const existingSession = existingDrawer.rows[0];
+        const drawerTypeName = drawerType === 'safe' ? 'safe drawer' : 'master safe';
+        const openedBy = `${existingSession.first_name} ${existingSession.last_name}`;
+        return res.status(400).json({
+          error: `The ${drawerTypeName} is already open (opened by ${openedBy})`,
+          session_id: existingSession.session_id
+        });
       }
-      return res.status(400).json({
-        error: `Employee already has an open ${drawerTypeName} session`,
-        session_id: existingDrawer.rows[0].session_id
-      });
+    } else {
+      // Physical drawers are per-employee
+      existingDrawer = await pool.query(
+        `SELECT s.session_id
+         FROM cash_drawer_sessions s
+         JOIN drawers d ON s.drawer_id = d.drawer_id
+         WHERE s.employee_id = $1
+           AND s.status = $2
+           AND d.drawer_type = $3`,
+        [employee_id, 'open', drawerType]
+      );
+
+      if (existingDrawer.rows.length > 0) {
+        return res.status(400).json({
+          error: `Employee already has an open physical drawer session`,
+          session_id: existingDrawer.rows[0].session_id
+        });
+      }
     }
 
     // Create new drawer session
@@ -642,7 +664,7 @@ app.post('/api/cash-drawer/:sessionId/adjustment', async (req, res) => {
     });
   }
 
-  const validTypes = ['bank_deposit', 'change_order', 'petty_cash', 'correction', 'transfer', 'other'];
+  const validTypes = ['bank_deposit', 'bank_withdrawal', 'change_order', 'petty_cash', 'correction', 'transfer', 'other'];
   if (!validTypes.includes(adjustment_type)) {
     return res.status(400).json({
       error: `adjustment_type must be one of: ${validTypes.join(', ')}`
@@ -709,7 +731,7 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
 
     // Verify target session exists and is open
     const targetCheck = await client.query(
-      `SELECT s.session_id, s.status, d.drawer_name
+      `SELECT s.session_id, s.status, d.drawer_name, d.drawer_type
        FROM cash_drawer_sessions s
        JOIN drawers d ON s.drawer_id = d.drawer_id
        WHERE s.session_id = $1`,
@@ -728,7 +750,7 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
 
     // Verify source session exists and is open
     const sourceCheck = await client.query(
-      `SELECT s.session_id, s.status, d.drawer_name
+      `SELECT s.session_id, s.status, d.drawer_name, d.drawer_type
        FROM cash_drawer_sessions s
        JOIN drawers d ON s.drawer_id = d.drawer_id
        WHERE s.session_id = $1`,
@@ -745,8 +767,28 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
       return res.status(400).json({ error: 'Source drawer session is not open' });
     }
 
+    const sourceDrawerType = sourceCheck.rows[0].drawer_type;
+    const targetDrawerType = targetCheck.rows[0].drawer_type;
     const sourceDrawerName = sourceCheck.rows[0].drawer_name;
     const targetDrawerName = targetCheck.rows[0].drawer_name;
+
+    // Validate transfer based on drawer type hierarchy:
+    // - Physical drawers can receive from: other physical drawers, safe drawers
+    // - Safe drawers can receive from: physical drawers, master_safe
+    // - Master safe can receive from: safe drawers, bank (handled separately)
+    const allowedSources = {
+      'physical': ['physical', 'safe'],
+      'safe': ['physical', 'master_safe'],
+      'master_safe': ['safe']
+    };
+
+    const allowed = allowedSources[targetDrawerType] || [];
+    if (!allowed.includes(sourceDrawerType)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: `Cannot transfer from ${sourceDrawerType} drawer to ${targetDrawerType} drawer. Allowed sources: ${allowed.join(', ')}`
+      });
+    }
     const transferAmount = parseFloat(amount);
 
     // Create negative adjustment on source drawer (cash going out)
@@ -5723,6 +5765,7 @@ app.get('/api/transactions', async (req, res) => {
         e.first_name || ' ' || e.last_name as employee_name,
         e.employee_id,
         t.total_amount,
+        t.transaction_date,
         t.created_at,
         t.updated_at,
         TO_CHAR(t.created_at, 'YYYY-MM-DD HH24:MI:SS') as formatted_created_at,
@@ -5735,7 +5778,7 @@ app.get('/api/transactions', async (req, res) => {
         t.transaction_id, t.customer_id, c.first_name, c.last_name, c.phone,
         c.address_line1, c.address_line2, c.city, c.state, c.postal_code,
         e.first_name, e.last_name, e.employee_id, t.total_amount,
-        t.created_at, t.updated_at, tic.item_count
+        t.transaction_date, t.created_at, t.updated_at, tic.item_count
       ORDER BY t.created_at DESC`;
     
     const result = await pool.query(query);

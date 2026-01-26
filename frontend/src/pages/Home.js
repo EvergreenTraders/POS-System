@@ -13,6 +13,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
+import { useWorkingDate } from '../context/WorkingDateContext';
+import axios from 'axios';
 
 const messages = [
   { type: 'announcement', text: 'Easter Promotion starts today – click for details' },
@@ -37,11 +39,6 @@ const tasks = [
   '"Ask 5 customers for reviews"'
 ];
 
-const loansDue = [
-  { id: 'TSD-P123456', name: 'Joe Smith', due: '$29/$1029 – 10k 4.5g YG ring, Dewalt DW-123 Drill, other stuff...' },
-  { id: 'TSD-L456789', name: 'Bob Smith', due: '$50/$450 – Dell PC model 112345' },
-  { id: 'TSD-L456789', name: 'Bob Smith', due: '$50/$450 – Dell PC model 112345' },
-];
 
 // Converts a Buffer-like object (from backend) to a base64 data URL for image preview
 function bufferToDataUrl(bufferObj) {
@@ -149,6 +146,114 @@ const Home = () => {
 const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dialog customer selection
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+
+  // Dashboard stats state
+  const { getCurrentDate } = useWorkingDate();
+  const [dashboardStats, setDashboardStats] = useState({
+    totalCustomers: 0,
+    activeLoans: 0,
+    pendingQuotes: 0,
+    todaysSales: 0
+  });
+  const [loansDueToday, setLoansDueToday] = useState([]);
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  // Fetch dashboard stats on component mount
+  useEffect(() => {
+    const fetchDashboardStats = async () => {
+      try {
+        setStatsLoading(true);
+        const token = localStorage.getItem('token');
+        const headers = { Authorization: `Bearer ${token}` };
+        const today = getCurrentDate();
+
+        // Fetch all stats in parallel
+        const [customersRes, pawnsRes, quotesRes, transactionsRes, layawaysRes] = await Promise.all([
+          axios.get(`${config.apiUrl}/customers?limit=1`, { headers }), // Just need pagination info
+          axios.get(`${config.apiUrl}/pawn-transactions`, { headers }),
+          axios.get(`${config.apiUrl}/quotes`, { headers }),
+          axios.get(`${config.apiUrl}/transactions`, { headers }),
+          axios.get(`${config.apiUrl}/layaway`, { headers }).catch(() => ({ data: [] }))
+        ]);
+
+        // Total Customers (from pagination info)
+        const totalCustomers = customersRes.data.pagination?.total_customers || 0;
+
+        // Active Loans (pawn tickets with PAWN status)
+        const activeLoans = new Set(
+          pawnsRes.data
+            .filter(p => p.ticket_status === 'PAWN')
+            .map(p => p.pawn_ticket_id)
+        ).size;
+
+        // Pending Quotes (quotes with pending status)
+        const pendingQuotes = quotesRes.data.filter(q =>
+          q.status === 'pending' || q.status === 'PENDING'
+        ).length;
+
+        // Today's Sales (sum of positive sale transactions for today - excludes pawn/buy which are negative)
+        const todaysSales = transactionsRes.data
+          .filter(t => {
+            // transaction_date is a DATE type, may come as 'YYYY-MM-DD' or with time
+            const transDate = t.transaction_date?.split('T')[0];
+            const amount = parseFloat(t.total_amount) || 0;
+            return transDate === today && amount > 0;
+          })
+          .reduce((sum, t) => sum + (parseFloat(t.total_amount) || 0), 0);
+
+        setDashboardStats({
+          totalCustomers,
+          activeLoans,
+          pendingQuotes,
+          todaysSales
+        });
+
+        // Loans/Layaways Due Today
+        const dueItems = [];
+
+        // Get pawn tickets due today
+        pawnsRes.data
+          .filter(p => p.ticket_status === 'PAWN')
+          .forEach(pawn => {
+            const dueDate = pawn.due_date?.split('T')[0];
+            if (dueDate === today) {
+              // Check if already added (grouped tickets)
+              if (!dueItems.some(d => d.id === pawn.pawn_ticket_id)) {
+                dueItems.push({
+                  id: pawn.pawn_ticket_id,
+                  name: pawn.customer_name || 'Unknown',
+                  type: 'Pawn',
+                  details: `$${parseFloat(pawn.item_price || 0).toFixed(2)} - ${pawn.item_description || pawn.item_id || 'Item'}`
+                });
+              }
+            }
+          });
+
+        // Get layaways due today
+        layawaysRes.data
+          .filter(l => l.status === 'active' || l.status === 'ACTIVE')
+          .forEach(layaway => {
+            const dueDate = layaway.due_date?.split('T')[0];
+            if (dueDate === today) {
+              dueItems.push({
+                id: layaway.layaway_id || `LAY-${layaway.id}`,
+                name: layaway.customer_name || 'Unknown',
+                type: 'Layaway',
+                details: `$${parseFloat(layaway.remaining_amount || 0).toFixed(2)} remaining`
+              });
+            }
+          });
+
+        setLoansDueToday(dueItems);
+      } catch (error) {
+        console.error('Error fetching dashboard stats:', error);
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+
+    fetchDashboardStats();
+  }, [getCurrentDate]);
 
   const fetchCustomers = async () => {
     try {
@@ -604,25 +709,25 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
         <Grid item xs={6} sm={3}>
           <Paper sx={{ p: 1.2, borderRadius: 2, boxShadow: 1, textAlign: 'center', bgcolor: '#fff' }}>
             <Typography variant="subtitle2" sx={{ color: 'primary.main', fontWeight: 700 }}>Total Customers</Typography>
-            <Typography variant="h6">2,384</Typography>
+            <Typography variant="h6">{statsLoading ? '...' : (dashboardStats.totalCustomers || 0).toLocaleString()}</Typography>
           </Paper>
         </Grid>
         <Grid item xs={6} sm={3}>
           <Paper sx={{ p: 1.2, borderRadius: 2, boxShadow: 1, textAlign: 'center', bgcolor: '#fff' }}>
             <Typography variant="subtitle2" sx={{ color: 'primary.main', fontWeight: 700 }}>Active Loans</Typography>
-            <Typography variant="h6">87</Typography>
+            <Typography variant="h6">{statsLoading ? '...' : (dashboardStats.activeLoans || 0)}</Typography>
           </Paper>
         </Grid>
         <Grid item xs={6} sm={3}>
           <Paper sx={{ p: 1.2, borderRadius: 2, boxShadow: 1, textAlign: 'center', bgcolor: '#fff' }}>
             <Typography variant="subtitle2" sx={{ color: 'primary.main', fontWeight: 700 }}>Pending Quotes</Typography>
-            <Typography variant="h6">14</Typography>
+            <Typography variant="h6">{statsLoading ? '...' : (dashboardStats.pendingQuotes || 0)}</Typography>
           </Paper>
         </Grid>
         <Grid item xs={6} sm={3}>
           <Paper sx={{ p: 1.2, borderRadius: 2, boxShadow: 1, textAlign: 'center', bgcolor: '#fff' }}>
             <Typography variant="subtitle2" sx={{ color: 'primary.main', fontWeight: 700 }}>Today's Sales</Typography>
-            <Typography variant="h6">$3,245</Typography>
+            <Typography variant="h6">{statsLoading ? '...' : `$${(dashboardStats.todaysSales || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</Typography>
           </Paper>
         </Grid>
       </Grid>
@@ -1503,17 +1608,31 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                   <TableRow>
                     <TableCell>ID</TableCell>
                     <TableCell>Name</TableCell>
+                    <TableCell>Type</TableCell>
                     <TableCell>Details</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {loansDue.map((loan, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell>{loan.id}</TableCell>
-                      <TableCell>{loan.name}</TableCell>
-                      <TableCell>{loan.due}</TableCell>
+                  {statsLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={4} align="center">Loading...</TableCell>
                     </TableRow>
-                  ))}
+                  ) : loansDueToday.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} align="center" sx={{ color: 'text.secondary' }}>
+                        No loans or layaways due today
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    loansDueToday.map((item, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell>{item.id}</TableCell>
+                        <TableCell>{item.name}</TableCell>
+                        <TableCell>{item.type}</TableCell>
+                        <TableCell>{item.details}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
                 </TableBody>
               </Table>
             </TableContainer>

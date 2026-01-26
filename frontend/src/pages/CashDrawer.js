@@ -311,60 +311,89 @@ function CashDrawer() {
 
         // Response is now an array of all active sessions
         const sessions = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
+
         setActiveSessions(sessions);
 
-        // Separate sessions by type
-        const physicalSession = sessions.find(s => s.drawer_type === 'physical');
-        const safeSession = sessions.find(s => s.drawer_type === 'safe');
-        const masterSafeSession = sessions.find(s => s.drawer_type === 'master_safe');
+        // First, try to preserve the current active session by session_id AND drawer_id
+        // This ensures we don't switch to a different drawer after operations like transfers
+        // IMPORTANT: For physical drawers, verify employee_id to prevent showing other employees' sessions
+        // For safe/master_safe, don't check employee_id since they're shared across all employees
+        const currentSessionId = activeSession?.session_id;
+        const currentDrawerId = activeSession?.drawer_id;
+        const currentDrawerType = activeSession?.drawer_type;
+        const preservedSession = (currentSessionId && currentDrawerId)
+          ? sessions.find(s => {
+              const sessionMatches = s.session_id === currentSessionId && s.drawer_id === currentDrawerId;
+              // For physical drawers, verify employee_id; for safe/master_safe, skip employee check
+              if (s.drawer_type === 'physical') {
+                return sessionMatches && s.employee_id === currentUser.id;
+              } else {
+                return sessionMatches;  // Safe and master_safe are shared
+              }
+            })
+          : null;
 
-        // Use preferred session type if provided, otherwise use current selectedSessionType
-        const targetSessionType = preferredSessionType || selectedSessionType;
+        // Determine the final session to use
+        let finalSession = null;
 
-        // Set active session based on preferred/selected type or default priority
-        let currentSession = null;
-        if (targetSessionType === 'physical' && physicalSession) {
-          // Show physical if explicitly requested and exists
-          currentSession = physicalSession;
-          setSelectedSessionType('physical');
-        } else if (targetSessionType === 'safe' && safeSession) {
-          // Show safe if explicitly requested and exists
-          currentSession = safeSession;
-          setSelectedSessionType('safe');
-        } else if (targetSessionType === 'master_safe' && masterSafeSession) {
-          // Show master safe if explicitly requested and exists
-          currentSession = masterSafeSession;
-          setSelectedSessionType('master_safe');
-        } else if (physicalSession) {
-          // Default to physical drawer when it exists (for transactions)
-          currentSession = physicalSession;
-          setSelectedSessionType('physical');
-        } else if (safeSession) {
-          // Show safe if no physical drawer exists
-          currentSession = safeSession;
-          setSelectedSessionType('safe');
-        } else if (masterSafeSession) {
-          // Show master safe if no physical or safe drawer exists
-          currentSession = masterSafeSession;
-          setSelectedSessionType('master_safe');
-        } else if (sessions.length > 0) {
-          // Fallback to first available session
-          currentSession = sessions[0];
-          if (currentSession.drawer_type === 'safe') {
-            setSelectedSessionType('safe');
-          } else if (currentSession.drawer_type === 'master_safe') {
-            setSelectedSessionType('master_safe');
-          } else {
+        if (preservedSession) {
+          // Keep the same session that was active (verified to belong to current user)
+          finalSession = preservedSession;
+          setSelectedSessionType(preservedSession.drawer_type);
+        } else {
+          // No current session or it's no longer active - use selection logic
+          // Separate sessions by type
+          const physicalSession = sessions.find(s => s.drawer_type === 'physical');
+          const safeSession = sessions.find(s => s.drawer_type === 'safe');
+          const masterSafeSession = sessions.find(s => s.drawer_type === 'master_safe');
+
+          // Use preferred session type if provided, otherwise use current selectedSessionType
+          const targetSessionType = preferredSessionType || selectedSessionType;
+
+          // Set active session based on preferred/selected type or default priority
+          if (targetSessionType === 'physical' && physicalSession) {
+            // Show physical if explicitly requested and exists
+            finalSession = physicalSession;
             setSelectedSessionType('physical');
+          } else if (targetSessionType === 'safe' && safeSession) {
+            // Show safe if explicitly requested and exists
+            finalSession = safeSession;
+            setSelectedSessionType('safe');
+          } else if (targetSessionType === 'master_safe' && masterSafeSession) {
+            // Show master safe if explicitly requested and exists
+            finalSession = masterSafeSession;
+            setSelectedSessionType('master_safe');
+          } else if (physicalSession) {
+            // Default to physical drawer when it exists (for transactions)
+            finalSession = physicalSession;
+            setSelectedSessionType('physical');
+          } else if (safeSession) {
+            // Show safe if no physical drawer exists
+            finalSession = safeSession;
+            setSelectedSessionType('safe');
+          } else if (masterSafeSession) {
+            // Show master safe if no physical or safe drawer exists
+            finalSession = masterSafeSession;
+            setSelectedSessionType('master_safe');
+          } else if (sessions.length > 0) {
+            // Fallback to first available session
+            finalSession = sessions[0];
+            if (finalSession.drawer_type === 'safe') {
+              setSelectedSessionType('safe');
+            } else if (finalSession.drawer_type === 'master_safe') {
+              setSelectedSessionType('master_safe');
+            } else {
+              setSelectedSessionType('physical');
+            }
           }
         }
 
-        setActiveSession(currentSession);
+        setActiveSession(finalSession);
 
         // Update count mode based on drawer type if session exists
-        if (currentSession && currentSession.drawer_type) {
-          setSelectedDrawerType(currentSession.drawer_type);
-          const isSafe = currentSession.drawer_type === 'safe' || currentSession.drawer_type === 'master_safe';
+        if (finalSession && finalSession.drawer_type) {
+          setSelectedDrawerType(finalSession.drawer_type);
+          const isSafe = finalSession.drawer_type === 'safe' || finalSession.drawer_type === 'master_safe';
           setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
         }
       } else {
@@ -419,12 +448,12 @@ function CashDrawer() {
       return;
     }
 
-    if (isBlindCount && !openingBalance) {
+    if (!isIndividualDenominations && !openingBalance) {
       showSnackbar('Please enter the opening balance', 'error');
       return;
     }
 
-    if (!isBlindCount && calculatedBalance === 0) {
+    if (isIndividualDenominations && calculatedBalance === 0) {
       showSnackbar('Please enter denomination counts', 'error');
       return;
     }
@@ -498,19 +527,19 @@ function CashDrawer() {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = currentUser.id;
 
-    // Calculate balance based on mode
-    const calculatedBalance = isBlindCount
-      ? parseFloat(actualBalance)
-      : calculateDenominationTotal(closingDenominations);
+    // Calculate balance based on mode (individual denominations vs total)
+    const calculatedBalance = isIndividualDenominations
+      ? calculateDenominationTotal(closingDenominations)
+      : parseFloat(actualBalance);
 
     // Validation
-    if (isBlindCount && !actualBalance) {
-      showSnackbar('Please enter the actual balance', 'error');
+    if (isIndividualDenominations && calculatedBalance === 0) {
+      showSnackbar('Please enter denomination counts', 'error');
       return;
     }
 
-    if (!isBlindCount && calculatedBalance === 0) {
-      showSnackbar('Please enter denomination counts', 'error');
+    if (!isIndividualDenominations && (!actualBalance || isNaN(calculatedBalance))) {
+      showSnackbar('Please enter the actual balance', 'error');
       return;
     }
 
@@ -558,16 +587,6 @@ function CashDrawer() {
     }
 
     try {
-      // If Open Count mode, save denominations first
-      if (!isBlindCount) {
-        await axios.post(`${API_BASE_URL}/cash-drawer/${activeSession.session_id}/denominations`, {
-          denomination_type: 'closing',
-          counted_by: employeeId,
-          notes: closingNotes || null,
-          ...closingDenominations
-        });
-      }
-
       // Close the drawer
       const response = await axios.put(
         `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/close`,
@@ -576,6 +595,16 @@ function CashDrawer() {
           closing_notes: closingNotes || null
         }
       );
+
+      // If Individual Denominations mode, save closing denominations
+      if (isIndividualDenominations) {
+        await axios.post(`${API_BASE_URL}/cash-drawer/${activeSession.session_id}/denominations`, {
+          denomination_type: 'closing',
+          counted_by: employeeId,
+          notes: closingNotes || null,
+          ...closingDenominations
+        });
+      }
 
       const discrepancy = parseFloat(response.data.discrepancy) || 0;
       const transactionCount = response.data.transaction_count || 0;
@@ -608,17 +637,18 @@ function CashDrawer() {
       return;
     }
 
-    // For transfers, require source session
-    if (adjustmentType === 'transfer' && !transferSourceSession) {
-      showSnackbar('Please select a source drawer for transfer', 'error');
+    // For transfers, require source/target session
+    if ((adjustmentType === 'transfer_from' || adjustmentType === 'transfer_to') && !transferSourceSession) {
+      showSnackbar('Please select a drawer for transfer', 'error');
       return;
     }
 
     try {
       const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
-      if (adjustmentType === 'transfer') {
-        // Use the transfer endpoint for drawer-to-drawer transfers
+      if (adjustmentType === 'transfer_from') {
+        // Transfer FROM another drawer TO this drawer (receiving money)
+        // activeSession is the target (receiving), transferSourceSession is the source (sending)
         await axios.post(
           `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/transfer`,
           {
@@ -628,7 +658,20 @@ function CashDrawer() {
             performed_by: currentUser.id
           }
         );
-        showSnackbar('Transfer completed successfully', 'success');
+        showSnackbar('Transfer received successfully', 'success');
+      } else if (adjustmentType === 'transfer_to') {
+        // Transfer TO another drawer FROM this drawer (sending money)
+        // activeSession is the source (sending), transferSourceSession is the target (receiving)
+        await axios.post(
+          `${API_BASE_URL}/cash-drawer/${parseInt(transferSourceSession)}/transfer`,
+          {
+            amount: parseFloat(adjustmentAmount),
+            source_session_id: activeSession.session_id,
+            reason: adjustmentReason,
+            performed_by: currentUser.id
+          }
+        );
+        showSnackbar('Transfer sent successfully', 'success');
       } else {
         // Regular adjustment
         await axios.post(
@@ -645,7 +688,12 @@ function CashDrawer() {
 
       setAdjustmentDialog(false);
       resetAdjustmentForm();
-      checkActiveSession();
+
+      // Refresh both current user's sessions and all active sessions
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions()
+      ]);
     } catch (err) {
       console.error('Error adding adjustment:', err);
       showSnackbar(err.response?.data?.error || 'Failed to add adjustment', 'error');
@@ -982,10 +1030,12 @@ function CashDrawer() {
                         <Typography variant="body2" color="text.secondary">Opening Balance</Typography>
                         <Typography variant="h6">{formatCurrency(activeSession.opening_balance)}</Typography>
                       </Grid>
-                      <Grid item xs={12} md={4}>
-                        <Typography variant="body2" color="text.secondary">Current Expected Balance</Typography>
-                        <Typography variant="h6">{formatCurrency(activeSession.current_expected_balance)}</Typography>
-                      </Grid>
+                      {!isBlindCount && (
+                        <Grid item xs={12} md={4}>
+                          <Typography variant="body2" color="text.secondary">Current Expected Balance</Typography>
+                          <Typography variant="h6">{formatCurrency(activeSession.current_expected_balance)}</Typography>
+                        </Grid>
+                      )}
                       <Grid item xs={12} md={6}>
                         <Typography variant="body2" color="text.secondary">Transaction Count</Typography>
                         <Typography variant="body1">{activeSession.transaction_count || 0}</Typography>
@@ -997,8 +1047,8 @@ function CashDrawer() {
                         variant="contained"
                         color="primary"
                         onClick={async () => {
-                          // If Open Count mode, fetch opening denominations for comparison
-                          if (!isBlindCount && activeSession) {
+                          // If Individual Denominations mode or Open Count mode, fetch opening denominations for comparison
+                          if ((isIndividualDenominations || !isBlindCount) && activeSession) {
                             try {
                               const response = await axios.get(
                                 `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/denominations/opening`
@@ -1285,31 +1335,103 @@ function CashDrawer() {
       <Dialog open={closeDrawerDialog} onClose={() => {
         setCloseDrawerDialog(false);
         resetCloseForm();
-      }} maxWidth={isBlindCount ? "sm" : "md"} fullWidth>
+      }} maxWidth={isIndividualDenominations ? "md" : "sm"} fullWidth>
         <DialogTitle>
-          Close {activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? 'Safe' : 'Cash Drawer'} 
-          {!isBlindCount && ' (Open Count Mode)'}
+          Close {activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? 'Safe' : 'Cash Drawer'}
+          {!isBlindCount && ' (Open Count)'}
+          {isIndividualDenominations && ' - Individual Denominations'}
         </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {!isBlindCount && (
-              <Alert severity="info">
-                Expected Balance: {formatCurrency(activeSession?.current_expected_balance)}
-                <br />
-                Transaction Count: {activeSession?.transaction_count || 0}
-              </Alert>
-            )}
             {activeSession?.drawer_type === 'physical' && (minClose > 0 || maxClose > 0) && (
               <Alert severity="info">
                 Allowed Closing Balance Range: {minClose > 0 ? formatCurrency(minClose) : 'No minimum'} - {maxClose > 0 ? formatCurrency(maxClose) : 'No maximum'}
               </Alert>
             )}
 
-            {isBlindCount ? (
+            <Alert severity="info">
+              Transaction Count: {activeSession?.transaction_count || 0}
+            </Alert>
+
+            {/* Individual Denominations mode - show denomination entry fields */}
+            {isIndividualDenominations ? (
               <>
-                <Alert severity="info">
-                  Transaction Count: {activeSession?.transaction_count || 0}
-                </Alert>
+                {renderDenominationEntry(closingDenominations, setClosingDenominations, calculateDenominationTotal(closingDenominations))}
+                {!isBlindCount && openingDenominationsFromDB && (
+                  <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                    <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold' }}>
+                      Opening Denominations (for reference):
+                    </Typography>
+                    <Grid container spacing={1}>
+                      {[
+                        { label: '$100', field: 'bill_100' },
+                        { label: '$50', field: 'bill_50' },
+                        { label: '$20', field: 'bill_20' },
+                        { label: '$10', field: 'bill_10' },
+                        { label: '$5', field: 'bill_5' },
+                        { label: '$2', field: 'coin_2' },
+                        { label: '$1', field: 'coin_1' },
+                        { label: '$0.25', field: 'coin_0_25' },
+                        { label: '$0.10', field: 'coin_0_10' },
+                        { label: '$0.05', field: 'coin_0_05' },
+                      ].map(item => (
+                        openingDenominationsFromDB[item.field] > 0 && (
+                          <Grid item xs={6} sm={4} md={3} key={item.field}>
+                            <Typography variant="body2" color="text.secondary">
+                              {item.label}: {openingDenominationsFromDB[item.field]}
+                            </Typography>
+                          </Grid>
+                        )
+                      ))}
+                    </Grid>
+                  </Box>
+                )}
+                {(() => {
+                  const balance = calculateDenominationTotal(closingDenominations);
+
+                  // Check min/max range for physical drawers
+                  const isPhysical = activeSession?.drawer_type === 'physical';
+                  const minCloseValue = parseFloat(minClose || 0);
+                  const maxCloseValue = parseFloat(maxClose || 0);
+                  const isOutOfRange = isPhysical && (
+                    (minCloseValue > 0 && balance < minCloseValue) ||
+                    (maxCloseValue > 0 && balance > maxCloseValue)
+                  );
+
+                  if (isOutOfRange) {
+                    return (
+                      <Alert severity="error">
+                        <strong>Closing balance is outside allowed range ({minCloseValue > 0 ? formatCurrency(minCloseValue) : 'No min'} - {maxCloseValue > 0 ? formatCurrency(maxCloseValue) : 'No max'})</strong>
+                      </Alert>
+                    );
+                  }
+
+                  // In open count mode, show discrepancy info
+                  if (!isBlindCount && activeSession) {
+                    const discrepancy = balance - activeSession.current_expected_balance;
+                    const hasDiscrepancy = Math.abs(discrepancy) > 0.01;
+                    return (
+                      <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: hasDiscrepancy ? 'warning.main' : 'success.main', mt: 1 }}>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          Counted Total: {formatCurrency(balance)}
+                        </Typography>
+                        <Typography variant="body1" color={hasDiscrepancy ? 'error.main' : 'success.main'}>
+                          <strong>Discrepancy: {formatCurrency(discrepancy)}</strong>
+                          {hasDiscrepancy && ` (${discrepancy > 0 ? 'Overage' : 'Shortage'})`}
+                        </Typography>
+                      </Box>
+                    );
+                  }
+
+                  return null;
+                })()}
+              </>
+            ) : (
+              /* Simple total balance entry */
+              <>
                 <TextField
                   label="Actual Balance (Counted)"
                   type="number"
@@ -1322,9 +1444,7 @@ function CashDrawer() {
                 />
                 {actualBalance && activeSession && (() => {
                   const balance = parseFloat(actualBalance);
-                  const discrepancy = balance - activeSession.current_expected_balance;
-                  const hasDiscrepancy = Math.abs(discrepancy) > 0.01; // Allow 1 cent tolerance
-                  
+
                   // Check min/max range for physical drawers
                   const isPhysical = activeSession.drawer_type === 'physical';
                   const minCloseValue = parseFloat(minClose || 0);
@@ -1333,109 +1453,37 @@ function CashDrawer() {
                     (minCloseValue > 0 && balance < minCloseValue) ||
                     (maxCloseValue > 0 && balance > maxCloseValue)
                   );
-                  
+
                   if (isOutOfRange) {
                     return (
                       <Alert severity="error">
-                        <strong>Closing balance is outside allowed range (${minCloseValue > 0 ? formatCurrency(minCloseValue) : 'No min'} - ${maxCloseValue > 0 ? formatCurrency(maxCloseValue) : 'No max'})</strong>
+                        <strong>Closing balance is outside allowed range ({minCloseValue > 0 ? formatCurrency(minCloseValue) : 'No min'} - {maxCloseValue > 0 ? formatCurrency(maxCloseValue) : 'No max'})</strong>
                       </Alert>
                     );
                   }
-                  
-                  return hasDiscrepancy ? (
-                    <Alert severity="error">
-                      <strong>Not expected balance. Please recount.</strong>
-                    </Alert>
-                  ) : null;
-                })()}
-              </>
-            ) : (
-              <>
-                {renderDenominationEntry(closingDenominations, setClosingDenominations, calculateDenominationTotal(closingDenominations))}
-                <Alert severity="info" sx={{ mt: 1 }}>
-                  Actual balance will be automatically set to the total of counted denominations: {formatCurrency(calculateDenominationTotal(closingDenominations))}
-                </Alert>
-                {openingDenominationsFromDB && (
-                  <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider', mt: 2 }}>
-                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                      Denomination Verification
-                    </Typography>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell><strong>Denomination</strong></TableCell>
-                          <TableCell align="right"><strong>Opening</strong></TableCell>
-                          <TableCell align="right"><strong>Closing</strong></TableCell>
-                          <TableCell align="right"><strong>Difference</strong></TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {[
-                          { label: '$100 Bills', field: 'bill_100', value: 100 },
-                          { label: '$50 Bills', field: 'bill_50', value: 50 },
-                          { label: '$20 Bills', field: 'bill_20', value: 20 },
-                          { label: '$10 Bills', field: 'bill_10', value: 10 },
-                          { label: '$5 Bills', field: 'bill_5', value: 5 },
-                          { label: '$2 Coins', field: 'coin_2', value: 2 },
-                          { label: '$1 Coins', field: 'coin_1', value: 1 },
-                          { label: '25¢ Coins', field: 'coin_0_25', value: 0.25 },
-                          { label: '10¢ Coins', field: 'coin_0_10', value: 0.10 },
-                          { label: '5¢ Coins', field: 'coin_0_05', value: 0.05 }
-                        ].map((denom) => {
-                          const opening = openingDenominationsFromDB[denom.field] || 0;
-                          const closing = closingDenominations[denom.field] || 0;
-                          const difference = closing - opening;
-                          const hasDifference = Math.abs(difference) > 0;
-                          return (
-                            <TableRow key={denom.field}>
-                              <TableCell>{denom.label}</TableCell>
-                              <TableCell align="right">{opening}</TableCell>
-                              <TableCell align="right">{closing}</TableCell>
-                              <TableCell align="right" sx={{ color: hasDifference ? 'error.main' : 'success.main', fontWeight: hasDifference ? 'bold' : 'normal' }}>
-                                {difference > 0 ? `+${difference}` : difference}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </Box>
-                )}
-                {calculateDenominationTotal(closingDenominations) > 0 && activeSession && (() => {
-                  const balance = calculateDenominationTotal(closingDenominations);
-                  const isPhysical = activeSession.drawer_type === 'physical';
-                  const minCloseValue = parseFloat(minClose || 0);
-                  const maxCloseValue = parseFloat(maxClose || 0);
-                  const isOutOfRange = isPhysical && (
-                    (minCloseValue > 0 && balance < minCloseValue) ||
-                    (maxCloseValue > 0 && balance > maxCloseValue)
-                  );
-                  
-                  return (
-                    <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: isOutOfRange ? 'error.main' : 'divider', mt: 2 }}>
-                      {isPhysical && (minCloseValue > 0 || maxCloseValue > 0) && (
-                        <Typography variant="body2" color={isOutOfRange ? 'error.main' : 'text.secondary'} gutterBottom>
-                          Allowed Range: {minCloseValue > 0 ? formatCurrency(minCloseValue) : 'No minimum'} - {maxCloseValue > 0 ? formatCurrency(maxCloseValue) : 'No maximum'}
+
+                  // In open count mode, show discrepancy info
+                  if (!isBlindCount) {
+                    const discrepancy = balance - activeSession.current_expected_balance;
+                    const hasDiscrepancy = Math.abs(discrepancy) > 0.01;
+                    return (
+                      <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: hasDiscrepancy ? 'warning.main' : 'success.main', mt: 1 }}>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
                         </Typography>
-                      )}
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
-                        Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Actual Balance (Counted): {formatCurrency(balance)}
-                      </Typography>
-                      <Typography variant="body1" sx={{ mt: 1 }} color={
-                        Math.abs(balance - activeSession.current_expected_balance) === 0 ? 'success.main' : 'error.main'
-                      }>
-                        <strong>Total Discrepancy: {formatCurrency(balance - activeSession.current_expected_balance)}</strong>
-                      </Typography>
-                      {isOutOfRange && (
-                        <Alert severity="error" sx={{ mt: 1 }}>
-                          <strong>Closing balance is outside the allowed range!</strong>
-                        </Alert>
-                      )}
-                    </Box>
-                  );
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          Actual Balance: {formatCurrency(balance)}
+                        </Typography>
+                        <Typography variant="body1" color={hasDiscrepancy ? 'error.main' : 'success.main'}>
+                          <strong>Discrepancy: {formatCurrency(discrepancy)}</strong>
+                          {hasDiscrepancy && ` (${discrepancy > 0 ? 'Overage' : 'Shortage'})`}
+                        </Typography>
+                      </Box>
+                    );
+                  }
+
+                  // In blind count mode, don't show any hint about whether the count matches expected
+                  return null;
                 })()}
               </>
             )}
@@ -1601,7 +1649,7 @@ function CashDrawer() {
                 value={adjustmentType}
                 onChange={(e) => {
                   setAdjustmentType(e.target.value);
-                  if (e.target.value === 'transfer') {
+                  if (e.target.value === 'transfer_from' || e.target.value === 'transfer_to') {
                     fetchAllActiveSessions();
                   } else {
                     setTransferSourceSession('');
@@ -1609,29 +1657,83 @@ function CashDrawer() {
                 }}
                 label="Adjustment Type"
               >
-                <MenuItem value="bank_deposit">Bank Deposit (Remove Cash)</MenuItem>
-                <MenuItem value="change_order">Change Order (Add Cash)</MenuItem>
-                <MenuItem value="transfer">Transfer from Another Drawer</MenuItem>
+                {/* Master safe can receive from bank */}
+                {activeSession?.drawer_type === 'master_safe' && (
+                  <MenuItem value="bank_withdrawal">Bank Withdrawal (Add Cash from Bank)</MenuItem>
+                )}
+                {/* Master safe can send to bank */}
+                {activeSession?.drawer_type === 'master_safe' && (
+                  <MenuItem value="bank_deposit">Bank Deposit (Remove Cash to Bank)</MenuItem>
+                )}
+                {/* Physical drawers can have change orders */}
+                {activeSession?.drawer_type === 'physical' && (
+                  <MenuItem value="change_order">Change Order (Add Cash)</MenuItem>
+                )}
+                {/* All drawer types can transfer */}
+                <MenuItem value="transfer_from">Transfer FROM Another Drawer (Receive)</MenuItem>
+                <MenuItem value="transfer_to">Transfer TO Another Drawer (Send)</MenuItem>
+                {/* General adjustments */}
                 <MenuItem value="petty_cash">Petty Cash</MenuItem>
                 <MenuItem value="correction">Correction</MenuItem>
                 <MenuItem value="other">Other</MenuItem>
               </Select>
             </FormControl>
-            {adjustmentType === 'transfer' && (
+            {(adjustmentType === 'transfer_from' || adjustmentType === 'transfer_to') && (
               <FormControl fullWidth required>
-                <InputLabel>Source Drawer (Transfer From)</InputLabel>
+                <InputLabel>
+                  {adjustmentType === 'transfer_from' ? 'Source Drawer (Receive From)' : 'Target Drawer (Send To)'}
+                </InputLabel>
                 <Select
                   value={transferSourceSession}
                   onChange={(e) => setTransferSourceSession(e.target.value)}
-                  label="Source Drawer (Transfer From)"
+                  label={adjustmentType === 'transfer_from' ? 'Source Drawer (Receive From)' : 'Target Drawer (Send To)'}
                 >
                   {allActiveSessions
-                    .filter(session => session.drawer_id !== activeSession?.drawer_id)
-                    .map((session) => (
-                      <MenuItem key={session.session_id} value={session.session_id}>
-                        {session.drawer_name} (${parseFloat(session.current_expected_balance || 0).toFixed(2)})
-                      </MenuItem>
-                    ))}
+                    .filter(session => {
+                      // Don't show the same session (must compare session_id, not drawer_id, since drawers can be shared)
+                      if (session.session_id === activeSession?.session_id) return false;
+
+                      // Filter based on drawer type hierarchy:
+                      // For transfer_from (receiving): filter by what can send TO active drawer
+                      // For transfer_to (sending): filter by what active drawer can send TO
+                      const activeType = activeSession?.drawer_type;
+                      const otherType = session.drawer_type;
+
+                      // Allowed sources (who can send TO this drawer type)
+                      const allowedSources = {
+                        'physical': ['physical', 'safe'],
+                        'safe': ['physical', 'master_safe'],
+                        'master_safe': ['safe']
+                      };
+
+                      // Allowed targets (who this drawer type can send TO)
+                      const allowedTargets = {
+                        'physical': ['physical', 'safe'],
+                        'safe': ['physical', 'master_safe'],
+                        'master_safe': ['safe']
+                      };
+
+                      if (adjustmentType === 'transfer_from') {
+                        // Who can send to us
+                        return allowedSources[activeType]?.includes(otherType) || false;
+                      } else {
+                        // Who we can send to
+                        return allowedTargets[activeType]?.includes(otherType) || false;
+                      }
+                    })
+                    .map((session) => {
+                      // For physical drawers, show employee name (since they're per-employee)
+                      // For safe/master_safe, don't show employee name (since they're shared)
+                      const displayName = session.drawer_type === 'physical'
+                        ? `${session.drawer_name} - ${session.employee_name} - ${formatCurrency(session.current_expected_balance || 0)}`
+                        : `${session.drawer_name} - ${formatCurrency(session.current_expected_balance || 0)}`;
+
+                      return (
+                        <MenuItem key={session.session_id} value={session.session_id}>
+                          {displayName}
+                        </MenuItem>
+                      );
+                    })}
                 </Select>
               </FormControl>
             )}
@@ -1643,7 +1745,7 @@ function CashDrawer() {
               onChange={(e) => setAdjustmentAmount(e.target.value)}
               required
               inputProps={{ step: '0.01', min: '0.01' }}
-              helperText={adjustmentType === 'transfer'
+              helperText={(adjustmentType === 'transfer_from' || adjustmentType === 'transfer_to')
                 ? "Enter the amount to transfer (must be positive)"
                 : "Positive for adding cash, negative for removing cash"}
             />
@@ -1702,14 +1804,20 @@ function CashDrawer() {
                   <Typography variant="body2" color="text.secondary">Opening</Typography>
                   <Typography variant="h6">{formatCurrency(sessionDetails.session.opening_balance)}</Typography>
                 </Grid>
-                <Grid item xs={4}>
-                  <Typography variant="body2" color="text.secondary">Expected</Typography>
-                  <Typography variant="h6">{formatCurrency(sessionDetails.session.expected_balance)}</Typography>
-                </Grid>
-                <Grid item xs={4}>
-                  <Typography variant="body2" color="text.secondary">Actual</Typography>
-                  <Typography variant="h6">{formatCurrency(sessionDetails.session.actual_balance)}</Typography>
-                </Grid>
+                {/* Hide expected balance for open sessions in blind count mode */}
+                {(!isBlindCount || sessionDetails.session.status === 'closed') && (
+                  <Grid item xs={4}>
+                    <Typography variant="body2" color="text.secondary">Expected</Typography>
+                    <Typography variant="h6">{formatCurrency(sessionDetails.session.expected_balance)}</Typography>
+                  </Grid>
+                )}
+                {/* Only show actual balance for closed sessions */}
+                {sessionDetails.session.status === 'closed' && (
+                  <Grid item xs={4}>
+                    <Typography variant="body2" color="text.secondary">Actual</Typography>
+                    <Typography variant="h6">{formatCurrency(sessionDetails.session.actual_balance)}</Typography>
+                  </Grid>
+                )}
               </Grid>
 
               {sessionDetails.adjustments.length > 0 && (
