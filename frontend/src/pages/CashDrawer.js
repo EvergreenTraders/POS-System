@@ -448,12 +448,12 @@ function CashDrawer() {
       return;
     }
 
-    if (isBlindCount && !openingBalance) {
+    if (!isIndividualDenominations && !openingBalance) {
       showSnackbar('Please enter the opening balance', 'error');
       return;
     }
 
-    if (!isBlindCount && calculatedBalance === 0) {
+    if (isIndividualDenominations && calculatedBalance === 0) {
       showSnackbar('Please enter denomination counts', 'error');
       return;
     }
