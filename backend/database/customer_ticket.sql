@@ -8,10 +8,50 @@ CREATE TABLE IF NOT EXISTS pawn_ticket (
   transaction_id VARCHAR(50),
   item_id VARCHAR(50),
   status VARCHAR(20) DEFAULT 'PAWN',
+  term_days INTEGER DEFAULT 90,
+  interest_rate DECIMAL(5,2) DEFAULT 2.9,
+  frequency_days INTEGER DEFAULT 30,
+  due_date DATE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 COMMENT ON COLUMN pawn_ticket.status IS 'Status of the pawn ticket: PAWN, REDEEMED, FORFEITED';
+COMMENT ON COLUMN pawn_ticket.term_days IS 'Pawn term in days (frozen at ticket creation)';
+COMMENT ON COLUMN pawn_ticket.interest_rate IS 'Interest rate percentage (frozen at ticket creation)';
+COMMENT ON COLUMN pawn_ticket.frequency_days IS 'Payment frequency in days (frozen at ticket creation)';
+COMMENT ON COLUMN pawn_ticket.due_date IS 'Due date for this pawn ticket';
+
+-- Add missing columns to existing pawn_ticket table if they don't exist
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'term_days'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN term_days INTEGER DEFAULT 90;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'interest_rate'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN interest_rate DECIMAL(5,2) DEFAULT 2.9;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'frequency_days'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN frequency_days INTEGER DEFAULT 30;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'due_date'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN due_date DATE;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS buy_ticket (
   id SERIAL PRIMARY KEY,
