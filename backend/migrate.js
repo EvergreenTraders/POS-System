@@ -1,7 +1,17 @@
-require('dotenv').config();
-const { Pool } = require('pg');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
+
+// Load environment variables - use .env.aws if it exists, otherwise use .env
+const envPath = path.join(__dirname, '.env.aws');
+if (fs.existsSync(envPath)) {
+  console.log('Loading AWS RDS configuration from .env.aws\n');
+  require('dotenv').config({ path: envPath });
+} else {
+  console.log('Loading local configuration from .env\n');
+  require('dotenv').config();
+}
+
+const { Pool } = require('pg');
 
 // Database configuration from environment variables
 const pool = new Pool({

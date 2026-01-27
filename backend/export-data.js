@@ -21,6 +21,7 @@ const TABLES = [
   'customers',
   'business_info',
   'system_config',
+  'user_preferences',
   'pawn_config',
   'tax_config',
   'cases_config',

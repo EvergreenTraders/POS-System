@@ -1,7 +1,26 @@
-require('dotenv').config();
-const { Pool } = require('pg');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
+
+// Load environment variables - use .env.aws if it exists, otherwise use .env
+const envPath = path.join(__dirname, '.env.aws');
+if (fs.existsSync(envPath)) {
+  console.log('Loading AWS RDS configuration from .env.aws\n');
+  require('dotenv').config({ path: envPath });
+} else {
+  console.log('Loading local configuration from .env\n');
+  require('dotenv').config();
+}
+
+const { Pool } = require('pg');
+
+// Handle uncaught errors
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled rejection:', error);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+});
 
 // Database configuration from environment variables
 const pool = new Pool({
@@ -13,7 +32,12 @@ const pool = new Pool({
   // Only use SSL for production (AWS RDS)
   ssl: process.env.NODE_ENV === 'production' ? {
     rejectUnauthorized: false
-  } : false
+  } : false,
+  // Increase timeouts for large imports
+  connectionTimeoutMillis: 60000,
+  idleTimeoutMillis: 60000,
+  statement_timeout: 120000,
+  query_timeout: 120000
 });
 
 // Migration files in order
@@ -120,6 +144,7 @@ async function importData() {
         'employees',
         'customers',
         'business_info',
+        'user_preferences',
         'pawn_config',
         'tax_config',
         'cases_config',
@@ -196,9 +221,10 @@ async function importData() {
 
         // Get column names from first row, excluding generated columns for specific tables
         const allColumns = Object.keys(tableData[0]);
-        // cash_denominations has a generated 'total_amount' column, but other tables don't
+        // cash_denominations has a generated 'total_amount' column, jewelry has 'total_weight'
         const generatedColumnsMap = {
-          'cash_denominations': ['total_amount']
+          'cash_denominations': ['total_amount'],
+          'jewelry': ['total_weight']
         };
         const generatedColumns = generatedColumnsMap[tableName] || [];
         const columns = allColumns.filter(col => !generatedColumns.includes(col));
@@ -215,17 +241,32 @@ async function importData() {
         }).join(', ');
         const columnNames = columns.join(', ');
 
-        // Insert data
+        // Insert data in batches to avoid connection timeouts
         let successCount = 0;
         let errorCount = 0;
         let firstError = null;
+        const BATCH_SIZE = 25; // Insert 25 rows at a time for better reliability
 
         // Columns that are JSON/JSONB type (not PostgreSQL arrays)
         const jsonColumns = ['images', 'changed_fields', 'old_value', 'new_value', 'metadata'];
         // Columns that are PostgreSQL array type
         const pgArrayColumns = ['attribute_options'];
 
-        for (const row of tableData) {
+        for (let i = 0; i < tableData.length; i += BATCH_SIZE) {
+          const batch = tableData.slice(i, i + BATCH_SIZE);
+
+          // Show progress for large tables
+          if (tableData.length > 100 && i % 100 === 0) {
+            console.log(`    Progress: ${i}/${tableData.length} rows...`);
+            // Keep connection alive for large tables
+            try {
+              await client.query('SELECT 1');
+            } catch (e) {
+              console.log(`    ⚠ Keepalive failed: ${e.message}`);
+            }
+          }
+
+          for (const row of batch) {
           // Handle special column types (JSON, JSONB, arrays)
           const values = columns.map(col => {
             const value = row[col];
@@ -261,12 +302,28 @@ async function importData() {
             if (errorCount <= 5) {
               console.log(`    ⚠ Row ${errorCount} failed for ${tableName}: ${error.message}`);
               if (errorCount === 1) {
-                console.log(`    Query: ${query}`);
-                console.log(`    Values (first 5): ${JSON.stringify(values.slice(0, 5))}`);
+                console.log(`    Columns: ${columns.join(', ')}`);
+                console.log(`    Query: ${query.substring(0, 200)}...`);
+                console.log(`    First value: ${JSON.stringify(values[0])}`);
               }
+            }
+            // For critical tables, continue anyway
+            if (tableName === 'jewelry' || tableName === 'transactions') {
+              // Don't break the entire import for data issues
+              continue;
             }
           }
         }
+
+        // Keep connection alive after each batch
+        if ((i + BATCH_SIZE) < tableData.length) {
+          try {
+            await client.query('SELECT 1');
+          } catch (e) {
+            console.log(`    ⚠ Keepalive query failed: ${e.message}`);
+          }
+        }
+      }
 
         tableResults.push({
           table: tableName,

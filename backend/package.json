@@ -7,6 +7,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "migrate": "node migrate.js",
+    "migrate-with-data": "node migrate-with-data.js",
+    "migrate-aws": "node migrate-with-data.js",
     "export-data": "node export-data.js",
     "import-data": "node import-data.js",
     "import-to-aws": "node import-to-aws.js"
