@@ -437,6 +437,8 @@ function Checkout() {
     // Always use checkoutItems if available, as it contains the items selected for checkout
     // Only fall back to cartItems if checkoutItems is empty (e.g., coming from estimator)
     const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
+    const taxRate = 0.13;
+    const isTaxExempt = selectedCustomer?.tax_exempt || false;
 
     return itemsToCalculate.reduce((total, item, index) => {
       let itemValue = 0;
@@ -471,9 +473,20 @@ function Checkout() {
         else if (item.totalAmount !== undefined) itemValue = parseFloat(item.totalAmount) || 0;
       }
 
+      // For sale items, apply quantity multiplication
+      if (transactionType === 'sale') {
+        const quantity = parseInt(item.quantity) || 1;
+        itemValue = itemValue * quantity;
+      }
+
       // Add protection plan (15% of item price) if enabled
       const protectionPlanAmount = item.protectionPlan ? itemValue * 0.15 : 0;
       itemValue = itemValue + protectionPlanAmount;
+
+      // For sale items, add tax (unless customer is tax-exempt)
+      if (transactionType === 'sale' && !isTaxExempt) {
+        itemValue = itemValue * (1 + taxRate);
+      }
 
       // Apply sign based on transaction type
       // Money going OUT (buy/pawn) = negative values
@@ -486,7 +499,7 @@ function Checkout() {
 
       return total + itemValue;
     }, 0);
-  }, [checkoutItems, cartItems]);
+  }, [checkoutItems, cartItems, selectedCustomer]);
 
   const calculateTax = useCallback(() => {
     // Tax is not calculated - all prices already include tax
@@ -2223,9 +2236,20 @@ function Checkout() {
                         else if (item.amount !== undefined) price = parseFloat(item.amount) || 0;
                       }
 
+                      // For sale items, multiply by quantity
+                      if (itemTransactionType === 'sale') {
+                        const quantity = parseInt(item.quantity) || 1;
+                        price = price * quantity;
+                      }
+
                       // Add protection plan (15% of item price) if enabled
                       const protectionPlanAmount = item.protectionPlan ? price * 0.15 : 0;
-                      const totalPrice = price + protectionPlanAmount;
+                      let totalPrice = price + protectionPlanAmount;
+
+                      // For sale items, add tax (unless customer is tax-exempt)
+                      if (itemTransactionType === 'sale' && !selectedCustomer?.tax_exempt) {
+                        totalPrice = totalPrice * 1.13;
+                      }
 
                       // Apply sign based on transaction type
                       // Money going OUT (buy/pawn) = negative values
@@ -2259,9 +2283,24 @@ function Checkout() {
                           <TableCell>
                             <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                               <span>{displayDescription}</span>
+                              {itemTransactionType === 'sale' && item.quantity > 1 && (
+                                <span style={{ fontSize: '0.85em', color: '#666', fontStyle: 'italic' }}>
+                                  Quantity: {item.quantity}
+                                </span>
+                              )}
                               {item.protectionPlan && (
                                 <span style={{ fontSize: '0.85em', color: '#666', fontStyle: 'italic' }}>
                                   + Protection Plan (15%): ${protectionPlanAmount.toFixed(2)}
+                                </span>
+                              )}
+                              {itemTransactionType === 'sale' && !selectedCustomer?.tax_exempt && (
+                                <span style={{ fontSize: '0.85em', color: '#666', fontStyle: 'italic' }}>
+                                  + Tax (13%): ${((price + protectionPlanAmount) * 0.13).toFixed(2)}
+                                </span>
+                              )}
+                              {itemTransactionType === 'sale' && selectedCustomer?.tax_exempt && (
+                                <span style={{ fontSize: '0.85em', color: '#666', fontStyle: 'italic' }}>
+                                  Tax: Exempt
                                 </span>
                               )}
                             </Box>

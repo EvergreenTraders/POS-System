@@ -2935,13 +2935,24 @@ app.get('/api/jewelry', async (req, res) => {
         ROUND(CAST(j.item_price AS NUMERIC), 2) as item_price,
         TO_CHAR(j.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
         TO_CHAR(j.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at,
-        TO_CHAR(st.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as sold_date
+        TO_CHAR(st.sale_created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as sold_date,
+        -- Age in days
+        CURRENT_DATE - j.created_at::date as age_days,
+        -- Sold price is item_price (always display)
+        ROUND(CAST(j.item_price AS NUMERIC), 2) as sold_price,
+        -- Days to sell (only for sold items)
+        CASE
+          WHEN j.status = 'SOLD' AND st.transaction_date IS NOT NULL
+          THEN st.transaction_date - j.created_at::date
+          ELSE NULL
+        END as days_to_sell
       FROM jewelry j
       LEFT JOIN LATERAL (
-        SELECT created_at
-        FROM sale_ticket
-        WHERE sale_ticket.item_id = j.item_id
-        ORDER BY created_at DESC
+        SELECT st.created_at as sale_created_at, t.transaction_date
+        FROM sale_ticket st
+        JOIN transactions t ON t.transaction_id = st.transaction_id
+        WHERE st.item_id = j.item_id
+        ORDER BY st.created_at DESC
         LIMIT 1
       ) st ON true
       ${whereClause}
@@ -3677,7 +3688,7 @@ app.get('/api/sale-ticket', async (req, res) => {
 app.post('/api/sale-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { sale_ticket_id, transaction_id, item_id } = req.body;
+    const { sale_ticket_id, transaction_id, item_id, quantity } = req.body;
 
     // Validate required fields
     if (!sale_ticket_id) {
@@ -3688,15 +3699,16 @@ app.post('/api/sale-ticket', async (req, res) => {
 
     // Insert new sale_ticket record
     const insertQuery = `
-      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id)
-      VALUES ($1, $2, $3)
+      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity)
+      VALUES ($1, $2, $3, $4)
       RETURNING *
     `;
 
     const result = await client.query(insertQuery, [
       sale_ticket_id,
       transaction_id || null,
-      item_id || null
+      item_id || null,
+      quantity || 1
     ]);
 
     await client.query('COMMIT');
