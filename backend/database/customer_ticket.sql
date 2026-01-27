@@ -26,8 +26,20 @@ CREATE TABLE IF NOT EXISTS sale_ticket (
   sale_ticket_id VARCHAR(50),
   transaction_id VARCHAR(50),
   item_id VARCHAR(50),
+  quantity INTEGER DEFAULT 1,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Add quantity column to existing sale_ticket table if it doesn't exist
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'sale_ticket' AND column_name = 'quantity'
+  ) THEN
+    ALTER TABLE sale_ticket ADD COLUMN quantity INTEGER DEFAULT 1;
+  END IF;
+END $$;
 
 -- Create indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_pawn_ticket_pawn_ticket_id ON pawn_ticket(pawn_ticket_id);

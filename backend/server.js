@@ -3677,7 +3677,7 @@ app.get('/api/sale-ticket', async (req, res) => {
 app.post('/api/sale-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { sale_ticket_id, transaction_id, item_id } = req.body;
+    const { sale_ticket_id, transaction_id, item_id, quantity } = req.body;
 
     // Validate required fields
     if (!sale_ticket_id) {
@@ -3688,15 +3688,16 @@ app.post('/api/sale-ticket', async (req, res) => {
 
     // Insert new sale_ticket record
     const insertQuery = `
-      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id)
-      VALUES ($1, $2, $3)
+      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity)
+      VALUES ($1, $2, $3, $4)
       RETURNING *
     `;
 
     const result = await client.query(insertQuery, [
       sale_ticket_id,
       transaction_id || null,
-      item_id || null
+      item_id || null,
+      quantity || 1
     ]);
 
     await client.query('COMMIT');

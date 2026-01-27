@@ -683,7 +683,7 @@ const CustomerTicket = () => {
   });
   
   const [saleItems, setSaleItems] = React.useState(() => {
-    return loadTicketItems('sale') || [{ id: 1, description: '', category: '', price: '', paymentMethod: '' }];
+    return loadTicketItems('sale') || [{ id: 1, description: '', category: '', price: '', quantity: 1, paymentMethod: '' }];
   });
   
   const [repairItems, setRepairItems] = React.useState(() => {
@@ -706,7 +706,7 @@ const CustomerTicket = () => {
   const createEmptyPawnItem = () => ({ id: Date.now(), description: '', category: '', value: '', location: '' });
   const createEmptyBuyItem = () => ({ id: Date.now(), description: '', category: '', price: '' });
   const createEmptyTradeItem = () => ({ id: Date.now(), tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' });
-  const createEmptySaleItem = () => ({ id: Date.now(), description: '', category: '', price: '', paymentMethod: '' });
+  const createEmptySaleItem = () => ({ id: Date.now(), description: '', category: '', price: '', quantity: 1, paymentMethod: '' });
   const createEmptyRepairItem = () => ({ id: Date.now(), description: '', issue: '', fee: '', completion: '' });
   const createEmptyPaymentItem = () => ({ id: Date.now(), pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] });
   const createEmptyRefundItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', reason: '' });
@@ -1629,8 +1629,9 @@ const CustomerTicket = () => {
     // Sale & Redeem are positive (money coming IN from customer)
     const saleTotal = saleItems.reduce((sum, item) => {
       const itemPrice = parseFloat(item.price) || 0;
+      const quantity = parseInt(item.quantity) || 1;
       const protectionPlanAmount = item.protectionPlan ? itemPrice * 0.15 : 0;
-      return sum + itemPrice + protectionPlanAmount;
+      return sum + (itemPrice * quantity) + protectionPlanAmount;
     }, 0);
     const repairTotal = repairItems.reduce((sum, item) => sum + (parseFloat(item.fee) || 0), 0);
     const paymentTotal = paymentItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
@@ -4660,12 +4661,13 @@ return (
                             <TableRow>
                               <TableCell width="12%" align="center">Inventory</TableCell>
                               <TableCell width="8%" align="center">Image</TableCell>
-                              <TableCell width="40%">Item Description</TableCell>
+                              <TableCell width="30%">Item Description</TableCell>
+                              <TableCell width="8%">Quantity</TableCell>
                               <TableCell width="10%">Sale Price</TableCell>
                               <TableCell width="10%">
                                 {customer?.tax_exempt ? 'Tax (Exempt)' : `Tax (${(taxRate * 100).toFixed(0)}%)`}
                               </TableCell>
-                              <TableCell width="20%" align="right" padding="none">
+                              <TableCell width="22%" align="right" padding="none">
                                 <Tooltip title="Add Item">
                                   <IconButton size="small" color="primary" onClick={handleAddRow}>
                                     <AddIcon />
@@ -4749,6 +4751,16 @@ return (
                                   <TableCell>
                                     <TextField
                                       variant="standard"
+                                      type="number"
+                                      fullWidth
+                                      value={item.quantity || 1}
+                                      onChange={(e) => handleItemChange(item.id, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                                      inputProps={{ min: 1, style: { textAlign: 'center' } }}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <TextField
+                                      variant="standard"
                                       fullWidth
                                       value={item.price}
                                       onChange={(e) => handleItemChange(item.id, 'price', e.target.value)}
@@ -4756,7 +4768,7 @@ return (
                                   </TableCell>
                                   <TableCell>
                                     <Typography variant="body2">
-                                      ${customer?.tax_exempt ? '0.00' : ((parseFloat(item.price) || 0) * taxRate).toFixed(2)}
+                                      ${customer?.tax_exempt ? '0.00' : ((parseFloat(item.price) || 0) * (parseInt(item.quantity) || 1) * taxRate).toFixed(2)}
                                     </Typography>
                                   </TableCell>
                                   <TableCell align="right">
