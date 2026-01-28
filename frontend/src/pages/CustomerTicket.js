@@ -19,7 +19,6 @@ import InventoryIcon from '@mui/icons-material/Inventory';
 import EditIcon from '@mui/icons-material/Edit';
 import SearchIcon from '@mui/icons-material/Search';
 import DeleteIcon from '@mui/icons-material/Delete';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import AddIcon from '@mui/icons-material/Add';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import DiamondIcon from '@mui/icons-material/Diamond';
@@ -684,7 +683,7 @@ const CustomerTicket = () => {
   });
   
   const [saleItems, setSaleItems] = React.useState(() => {
-    return loadTicketItems('sale') || [{ id: 1, description: '', category: '', price: '', paymentMethod: '' }];
+    return loadTicketItems('sale') || [{ id: 1, description: '', category: '', price: '', quantity: 1, paymentMethod: '' }];
   });
   
   const [repairItems, setRepairItems] = React.useState(() => {
@@ -707,7 +706,7 @@ const CustomerTicket = () => {
   const createEmptyPawnItem = () => ({ id: Date.now(), description: '', category: '', value: '', location: '' });
   const createEmptyBuyItem = () => ({ id: Date.now(), description: '', category: '', price: '' });
   const createEmptyTradeItem = () => ({ id: Date.now(), tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' });
-  const createEmptySaleItem = () => ({ id: Date.now(), description: '', category: '', price: '', paymentMethod: '' });
+  const createEmptySaleItem = () => ({ id: Date.now(), description: '', category: '', price: '', quantity: 1, paymentMethod: '' });
   const createEmptyRepairItem = () => ({ id: Date.now(), description: '', issue: '', fee: '', completion: '' });
   const createEmptyPaymentItem = () => ({ id: Date.now(), pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] });
   const createEmptyRefundItem = () => ({ id: Date.now(), amount: '', method: '', reference: '', reason: '' });
@@ -1630,8 +1629,9 @@ const CustomerTicket = () => {
     // Sale & Redeem are positive (money coming IN from customer)
     const saleTotal = saleItems.reduce((sum, item) => {
       const itemPrice = parseFloat(item.price) || 0;
+      const quantity = parseInt(item.quantity) || 1;
       const protectionPlanAmount = item.protectionPlan ? itemPrice * 0.15 : 0;
-      return sum + itemPrice + protectionPlanAmount;
+      return sum + (itemPrice * quantity) + protectionPlanAmount;
     }, 0);
     const repairTotal = repairItems.reduce((sum, item) => sum + (parseFloat(item.fee) || 0), 0);
     const paymentTotal = paymentItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
@@ -1903,60 +1903,7 @@ const CustomerTicket = () => {
       setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
     }
   };
-  
-  // Handle duplicating an item
-  const handleDuplicateItem = (id) => {
-    const { items, setItems } = getCurrentItems();
-    const itemToDuplicate = items.find(item => item.id === id);
-    if (!itemToDuplicate) return;
-    
-    // Create a new duplicate item with a new ID
-    const newId = Math.max(...items.map(item => item.id)) + 1;
-    const newItem = { ...itemToDuplicate, id: newId };
-    
-    // First add the duplicate to the current list
-    setItems([...items, newItem]);
-    
-    // We need to delete the duplicate to avoid having both the duplicate and the new item
-    setTimeout(() => {
-      const { items, setItems } = getCurrentItems();
-      setItems(items.filter(item => item.id !== newId));
-    }, 100); // Small delay to ensure state update completes
-    
-    // Then navigate to jewel-estimator if it's a jewelry item
-    if (itemToDuplicate.sourceEstimator === 'jewelry' && itemToDuplicate.originalData) {
-      // Include a special flag to identify this is a duplicate operation
-      navigate('/jewel-estimator', { 
-        state: { 
-          customer,
-          editMode: true, 
-          itemToEdit: itemToDuplicate.originalData,
-          // No returnToTicket flag, so user can manually add to ticket
-          fromDuplicate: true // Indicate this came from duplicating an item
-        } 
-      });
-    } else if (itemToDuplicate.category?.toLowerCase().includes('jewelry')) {
-      // If it's jewelry but not from estimator, still go to jewelry estimator
-      const description = itemToDuplicate.description || '';
-      navigate('/jewel-estimator', { 
-        state: { 
-          customer,
-          editMode: true, 
-          itemToEdit: {
-            free_text: description,
-            category: itemToDuplicate.category,
-            price: itemToDuplicate.price || itemToDuplicate.value,
-            transaction_type: activeTab === 0 ? 'pawn' : 
-                            activeTab === 1 ? 'buy' : 
-                            activeTab === 3 ? 'retail' : 'buy'
-          },
-          // No returnToTicket flag, so user can manually add to ticket
-          fromDuplicate: true // Indicate this came from duplicating an item
-        }
-      });
-    }
-  };
-  
+
   // Handle deleting an item
   const handleDeleteItem = (id) => {
     const { items, setItems } = getCurrentItems();
@@ -4398,11 +4345,6 @@ return (
                                       <SwapHorizIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
-                                  <Tooltip title="Duplicate">
-                                    <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
-                                      <ContentCopyIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
                                   <Tooltip title="Delete">
                                     <IconButton size="small" onClick={() => handleDeleteItem(item.id)}>
                                       <DeleteIcon fontSize="small" />
@@ -4533,11 +4475,6 @@ return (
                                   <Tooltip title="Convert">
                                     <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
                                       <SwapHorizIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Duplicate">
-                                    <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
-                                      <ContentCopyIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
                                   <Tooltip title="Delete">
@@ -4688,11 +4625,6 @@ return (
                                       <SwapHorizIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
-                                  <Tooltip title="Duplicate">
-                                    <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
-                                      <ContentCopyIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
                                   <Tooltip title="Delete">
                                     <IconButton size="small" onClick={() => handleDeleteItem(item.id)}>
                                       <DeleteIcon fontSize="small" />
@@ -4729,9 +4661,13 @@ return (
                             <TableRow>
                               <TableCell width="12%" align="center">Inventory</TableCell>
                               <TableCell width="8%" align="center">Image</TableCell>
-                              <TableCell width="50%">Item Description</TableCell>
+                              <TableCell width="30%">Item Description</TableCell>
+                              <TableCell width="8%">Quantity</TableCell>
                               <TableCell width="10%">Sale Price</TableCell>
-                              <TableCell width="20%" align="right" padding="none">
+                              <TableCell width="10%">
+                                {customer?.tax_exempt ? 'Tax (Exempt)' : `Tax (${(taxRate * 100).toFixed(0)}%)`}
+                              </TableCell>
+                              <TableCell width="22%" align="right" padding="none">
                                 <Tooltip title="Add Item">
                                   <IconButton size="small" color="primary" onClick={handleAddRow}>
                                     <AddIcon />
@@ -4815,10 +4751,25 @@ return (
                                   <TableCell>
                                     <TextField
                                       variant="standard"
+                                      type="number"
+                                      fullWidth
+                                      value={item.quantity || 1}
+                                      onChange={(e) => handleItemChange(item.id, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                                      inputProps={{ min: 1, style: { textAlign: 'center' } }}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <TextField
+                                      variant="standard"
                                       fullWidth
                                       value={item.price}
                                       onChange={(e) => handleItemChange(item.id, 'price', e.target.value)}
                                     />
+                                  </TableCell>
+                                  <TableCell>
+                                    <Typography variant="body2">
+                                      ${customer?.tax_exempt ? '0.00' : ((parseFloat(item.price) || 0) * (parseInt(item.quantity) || 1) * taxRate).toFixed(2)}
+                                    </Typography>
                                   </TableCell>
                                   <TableCell align="right">
                                     <Tooltip title="Edit">
@@ -4838,11 +4789,6 @@ return (
                                     <Tooltip title="Convert">
                                       <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
                                         <SwapHorizIcon fontSize="small" />
-                                      </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="Duplicate">
-                                      <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
-                                        <ContentCopyIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
                                     <Tooltip title="Delete">
@@ -4865,6 +4811,11 @@ return (
                                     <TableCell>
                                       <Typography variant="body2">
                                         ${((parseFloat(item.price) || 0) * 0.15).toFixed(2)}
+                                      </Typography>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Typography variant="body2">
+                                        ${customer?.tax_exempt ? '0.00' : (((parseFloat(item.price) || 0) * 0.15) * taxRate).toFixed(2)}
                                       </Typography>
                                     </TableCell>
                                     <TableCell />
@@ -5012,11 +4963,6 @@ return (
                                   <Tooltip title="Convert">
                                     <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
                                       <SwapHorizIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Duplicate">
-                                    <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
-                                      <ContentCopyIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
                                   <Tooltip title="Delete">
@@ -5351,11 +5297,6 @@ return (
                                   <Tooltip title="Convert">
                                     <IconButton size="small" onClick={(e) => handleConvertClick(e, item.id)}>
                                       <SwapHorizIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Duplicate">
-                                    <IconButton size="small" onClick={() => handleDuplicateItem(item.id)}>
-                                      <ContentCopyIcon fontSize="small" />
                                     </IconButton>
                                   </Tooltip>
                                   <Tooltip title="Delete">
@@ -5716,11 +5657,23 @@ return (
         open={Boolean(convertMenuAnchor)}
         onClose={handleConvertClose}
       >
-        {[0, 1, 2, 3, 4, 5, 6].filter(tabIndex => tabIndex !== activeTab).map(tabIndex => (
-          <MenuItem key={tabIndex} onClick={() => handleConvertItem(tabIndex)}>
-            {getTabName(tabIndex)}
-          </MenuItem>
-        ))}
+        {[0, 1, 2, 3, 4, 5, 6]
+          .filter(tabIndex => {
+            // Exclude current tab
+            if (tabIndex === activeTab) return false;
+
+            // For Sale tab (3), only allow conversion to Payment (5)
+            if (activeTab === 3) {
+              return tabIndex === 5; // Only Payment
+            }
+
+            return true;
+          })
+          .map(tabIndex => (
+            <MenuItem key={tabIndex} onClick={() => handleConvertItem(tabIndex)}>
+              {getTabName(tabIndex)}
+            </MenuItem>
+          ))}
       </Menu>
 
       {/* Camera Capture Dialog */}

@@ -964,9 +964,11 @@ function Jewelry() {
                   <TableCell sx={{ width: '100px' }}>ID</TableCell>
                   <TableCell>Description</TableCell>
                   <TableCell>Category</TableCell>
-                  <TableCell>Price</TableCell>
                   <TableCell>Weight</TableCell>
                   <TableCell>Status</TableCell>
+                  <TableCell>Age (Days)</TableCell>
+                  <TableCell>Sold Price</TableCell>
+                  <TableCell>Days to Sell</TableCell>
                   <TableCell>Date</TableCell>
                   <TableCell>Actions</TableCell>
                 </TableRow>
@@ -974,13 +976,13 @@ function Jewelry() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
+                    <TableCell colSpan={10} align="center">
                       <CircularProgress />
                     </TableCell>
                   </TableRow>
                 ) : filteredItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center">
+                    <TableCell colSpan={10} align="center">
                       No jewelry items found
                     </TableCell>
                   </TableRow>
@@ -1002,9 +1004,13 @@ function Jewelry() {
                           ? (item.category.category || item.category.value || item.category.name || '')
                           : (item.category || '')}
                       </TableCell>
-                      <TableCell>${formatPrice(item.item_price)}</TableCell>
                       <TableCell>{item.metal_weight}g</TableCell>
                       <TableCell>{item.inventory_status || item.status}</TableCell>
+                      <TableCell>{item.age_days || '-'}</TableCell>
+                      <TableCell>
+                        ${formatPrice(parseFloat(item.sold_price || item.item_price || 0))}
+                      </TableCell>
+                      <TableCell>{item.days_to_sell || '-'}</TableCell>
                       <TableCell>
                         {(item.status === 'SOLD' || item.inventory_status === 'SOLD') && item.sold_date
                           ? new Date(item.sold_date).toLocaleDateString()

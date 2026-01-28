@@ -83,13 +83,19 @@ function Cart({ open, onClose }) {
   // Money going OUT (buy/pawn) = negative values
   // Money coming IN (sale) = positive values
   const getItemValue = (item, type) => {
+    const taxRate = 0.13;
+    const isTaxExempt = item.customer?.tax_exempt || false;
+
     switch (type) {
       case 'pawn': return -parseFloat(item.value || 0); // Money going out (negative)
       case 'buy': return -parseFloat(item.price || 0); // Money going out (negative)
       case 'sale': {
         const itemPrice = parseFloat(item.price || 0); // Money coming in (positive)
+        const quantity = parseInt(item.quantity) || 1;
         const protectionPlanAmount = item.protectionPlan ? itemPrice * 0.15 : 0;
-        return itemPrice + protectionPlanAmount;
+        const subtotal = (itemPrice * quantity) + protectionPlanAmount;
+        // Add tax unless customer is tax-exempt
+        return isTaxExempt ? subtotal : subtotal * (1 + taxRate);
       }
       case 'trade': return parseFloat(item.priceDiff || 0);
       case 'repair': return parseFloat(item.fee || 0); // Money coming in (positive)
