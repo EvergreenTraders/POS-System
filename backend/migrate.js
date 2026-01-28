@@ -50,7 +50,8 @@ const MIGRATION_FILES = [
   'cash_drawer.sql',
   'add_performance_indexes.sql',
   'customer_headers_preferences.sql',
-  'pawn.sql'
+  'pawn.sql',
+  'hardgoods.sql'
 ];
 
 async function runMigrations() {

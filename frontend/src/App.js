@@ -28,6 +28,8 @@ import CustomerReporting from './pages/CustomerReporting';
 import CustomerDashboard from './pages/CustomerDashboard';
 import Cart from './pages/Cart';
 import JewelryEdit from './pages/JewelryEdit';
+import Hardgoods from './pages/Hardgoods';
+import HardgoodsEdit from './pages/HardgoodsEdit';
 import SalesHistory from './pages/SalesHistory';
 import Layaway from './pages/Layaway';
 import CashDrawer from './pages/CashDrawer';
@@ -373,6 +375,26 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <JewelryEdit />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/inventory/hardgoods"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <Hardgoods />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hardgoods-edit"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <HardgoodsEdit />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

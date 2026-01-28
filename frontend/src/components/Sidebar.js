@@ -218,6 +218,11 @@ function Sidebar() {
                 {isOpen && <ListItemText primary="Coins & Bullions" />}
               </StyledListItem>
             </StyledLink>
+            <StyledLink to="/inventory/hardgoods">
+              <StyledListItem active={isActive('/inventory/hardgoods')} sx={{ pl: 4 }}>
+                {isOpen && <ListItemText primary="Hardgoods" />}
+              </StyledListItem>
+            </StyledLink>
           </List>
         </Collapse>
 
