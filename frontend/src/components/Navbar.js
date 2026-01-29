@@ -24,26 +24,11 @@ import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
 import { useNavigate } from 'react-router-dom';
 import Cart from './Cart';
+import config from '../config';
 
 const StyledAppBar = styled(AppBar)({
   zIndex: 1201, // Higher than drawer's z-index
 });
-
-// Get timezone from coordinates using a simple API
-const getTimezoneFromLocation = async (lat, lng) => {
-  try {
-    const response = await fetch(
-      `https://timeapi.io/api/TimeZone/coordinate?latitude=${lat}&longitude=${lng}`
-    );
-    if (response.ok) {
-      const data = await response.json();
-      return data.timeZone || null;
-    }
-  } catch (error) {
-    // API failed, return null to use browser timezone
-  }
-  return null;
-};
 
 function Navbar() {
   const [cartOpen, setCartOpen] = useState(false);
@@ -60,25 +45,35 @@ function Navbar() {
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
 
-  // Get timezone from location
+  // Get timezone from business settings
   useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const timezone = await getTimezoneFromLocation(
-            position.coords.latitude,
-            position.coords.longitude
-          );
-          if (timezone) {
-            setTimezone(timezone);
+    const fetchTimezone = async () => {
+      try {
+        const response = await fetch(`${config.apiUrl}/business-info`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.timezone) {
+            setTimezone(data.timezone);
           }
-        },
-        () => {
-          // If geolocation fails, keep browser timezone
-        },
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-    }
+        }
+      } catch (error) {
+        // If API fails, keep browser timezone
+        console.error('Failed to fetch business timezone:', error);
+      }
+    };
+    fetchTimezone();
+
+    // Listen for timezone updates from SystemConfig
+    const handleBusinessSettingsUpdate = (event) => {
+      if (event.detail?.timezone) {
+        setTimezone(event.detail.timezone);
+      }
+    };
+    window.addEventListener('businessSettingsUpdated', handleBusinessSettingsUpdate);
+
+    return () => {
+      window.removeEventListener('businessSettingsUpdated', handleBusinessSettingsUpdate);
+    };
   }, []);
 
   // Update time every second

@@ -36,6 +36,34 @@ import config from '../config';
 
 const API_BASE_URL = config.apiUrl;
 
+// Common timezones for selection
+const TIMEZONES = [
+  { value: 'America/New_York', label: 'Eastern Time (ET)' },
+  { value: 'America/Chicago', label: 'Central Time (CT)' },
+  { value: 'America/Denver', label: 'Mountain Time (MT)' },
+  { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
+  { value: 'America/Anchorage', label: 'Alaska Time (AKT)' },
+  { value: 'Pacific/Honolulu', label: 'Hawaii Time (HT)' },
+  { value: 'America/Phoenix', label: 'Arizona (MST)' },
+  { value: 'America/Toronto', label: 'Toronto (ET)' },
+  { value: 'America/Vancouver', label: 'Vancouver (PT)' },
+  { value: 'America/Edmonton', label: 'Edmonton (MT)' },
+  { value: 'America/Winnipeg', label: 'Winnipeg (CT)' },
+  { value: 'America/Halifax', label: 'Halifax (AT)' },
+  { value: 'America/St_Johns', label: 'St. Johns (NT)' },
+  { value: 'Europe/London', label: 'London (GMT/BST)' },
+  { value: 'Europe/Paris', label: 'Paris (CET)' },
+  { value: 'Europe/Berlin', label: 'Berlin (CET)' },
+  { value: 'Asia/Tokyo', label: 'Tokyo (JST)' },
+  { value: 'Asia/Shanghai', label: 'Shanghai (CST)' },
+  { value: 'Asia/Kolkata', label: 'India (IST)' },
+  { value: 'Asia/Dubai', label: 'Dubai (GST)' },
+  { value: 'Australia/Sydney', label: 'Sydney (AEST)' },
+  { value: 'Australia/Melbourne', label: 'Melbourne (AEST)' },
+  { value: 'Pacific/Auckland', label: 'Auckland (NZST)' },
+  { value: 'UTC', label: 'UTC' },
+];
+
 const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
   margin: theme.spacing(2, 0),
@@ -747,6 +775,11 @@ function SystemConfig() {
         message: 'Business information saved successfully',
         severity: 'success'
       });
+
+      // Dispatch event to notify Navbar of timezone change
+      window.dispatchEvent(new CustomEvent('businessSettingsUpdated', {
+        detail: { timezone: generalSettings.timezone }
+      }));
 
       // Clear logo file after successful save
       setLogoFile(null);
@@ -1807,7 +1840,7 @@ function SystemConfig() {
                 </Box>
               </Grid>
 
-              {/* Row 2: Phone, Currency */}
+              {/* Row 2: Phone, Currency, Timezone */}
               <Grid item xs={12} sm={3}>
                 <TextField
                   fullWidth
@@ -1825,6 +1858,23 @@ function SystemConfig() {
                   value={generalSettings.currency}
                   onChange={handleGeneralSettingsChange}
                 />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Timezone</InputLabel>
+                  <Select
+                    name="timezone"
+                    value={generalSettings.timezone}
+                    onChange={handleGeneralSettingsChange}
+                    label="Timezone"
+                  >
+                    {TIMEZONES.map((tz) => (
+                      <MenuItem key={tz.value} value={tz.value}>
+                        {tz.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
               </Grid>
 
               {/* Row 3: Address (spans full width) */}
