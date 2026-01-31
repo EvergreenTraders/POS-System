@@ -3573,6 +3573,31 @@ const CustomerTicket = () => {
   };
   
   const handleCheckout = () => {
+    // Validate customer is selected
+    if (!customer) {
+      setSnackbarMessage({
+        open: true,
+        message: 'Please select a customer before proceeding to checkout',
+        severity: 'error'
+      });
+      return;
+    }
+
+    // Validate customer has all required fields
+    const isValid = validateCustomerFields();
+    if (!isValid) {
+      const errorMessage = customerValidationErrors.length > 0
+        ? `Cannot proceed: Missing required customer fields: ${customerValidationErrors.join(', ')}`
+        : 'Cannot proceed: Customer is missing required fields';
+
+      setSnackbarMessage({
+        open: true,
+        message: errorMessage,
+        severity: 'error'
+      });
+      return;
+    }
+
     // Helper function to generate buyTicketId for a transaction type
     const generateBuyTicketId = (transactionType) => {
       let ticketPrefix;
@@ -5514,7 +5539,12 @@ return (
                   >
                     Add to Cart
                   </Button>
-                  <Button variant="contained" color="success" onClick={handleCheckout}>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={handleCheckout}
+                    disabled={!customer || customerValidationErrors.length > 0}
+                  >
                     Checkout
                   </Button>
                 </Box>
