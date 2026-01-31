@@ -255,6 +255,15 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
     fetchDashboardStats();
   }, [getCurrentDate]);
 
+  // Handle new customer created from CustomerEditor - navigate to CustomerTicket
+  useEffect(() => {
+    if (location.state?.newCustomer) {
+      const newCustomer = location.state.newCustomer;
+      // Navigate to CustomerTicket with the new customer selected
+      navigate('/customer-ticket', { state: { customer: newCustomer } });
+    }
+  }, [location.state?.newCustomer, navigate]);
+
   const fetchCustomers = async () => {
     try {
       const response = await fetch(`${config.apiUrl}/customers`);
