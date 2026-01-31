@@ -4841,9 +4841,12 @@ app.get('/api/customers/search', async (req, res) => {
     params.push(limit);
 
     const result = await client.query(query, params);
+    const exactMatches = result.rows;
+    const exactIds = new Set(exactMatches.map(c => c.id));
 
-    // If no exact matches found, try fuzzy search with OR logic
-    if (result.rows.length === 0 && (first_name || last_name || phone || id_number)) {
+    // Always run fuzzy search to find similar matches (not just when no exact matches)
+    let similarMatches = [];
+    if (first_name || last_name || phone || id_number) {
       let fuzzyQuery = `SELECT
         id, first_name, last_name, email, phone, status,
         TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth,
@@ -4854,6 +4857,7 @@ app.get('/api/customers/search', async (req, res) => {
       let fuzzyParamCount = 1;
 
       if (first_name) {
+        // Match partial names, soundex-like matching (first or last name contains the search)
         fuzzyConditions.push(`(LOWER(first_name) LIKE $${fuzzyParamCount} OR LOWER(last_name) LIKE $${fuzzyParamCount})`);
         fuzzyParams.push(`%${first_name.toLowerCase()}%`);
         fuzzyParamCount++;
@@ -4885,12 +4889,14 @@ app.get('/api/customers/search', async (req, res) => {
         fuzzyParams.push(limit);
 
         const fuzzyResult = await client.query(fuzzyQuery, fuzzyParams);
-        res.json(fuzzyResult.rows);
-        return;
+        // Filter out exact matches to avoid duplicates
+        similarMatches = fuzzyResult.rows.filter(c => !exactIds.has(c.id));
       }
     }
 
-    res.json(result.rows);
+    // Combine results: exact matches first, then similar matches
+    const combinedResults = [...exactMatches, ...similarMatches].slice(0, limit);
+    res.json(combinedResults);
   } catch (err) {
     console.error('Error searching customers:', err);
     res.status(500).json({ error: 'Failed to search customers' });
