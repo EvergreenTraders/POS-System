@@ -1646,7 +1646,7 @@ function Checkout() {
           } else {
             // Navigate after a brief delay to show success message
             setTimeout(() => {
-              navigate('/jewel-estimator');
+              navigate('/');
             }, 1000);
           }
 
@@ -2440,7 +2440,7 @@ function Checkout() {
         onClose={() => {
           setLocationDialogOpen(false);
           setSelectedItemsForRedeem([]);
-          navigate('/jewel-estimator');
+          navigate('/');
         }}
         maxWidth="md"
         fullWidth
@@ -2499,7 +2499,7 @@ function Checkout() {
             onClick={() => {
               setLocationDialogOpen(false);
               setSelectedItemsForRedeem([]);
-              navigate('/jewel-estimator');
+              navigate('/');
             }}
             variant="outlined"
           >
@@ -2784,7 +2784,7 @@ function Checkout() {
 
                 setLocationDialogOpen(false);
                 setSelectedItemsForRedeem([]);
-                navigate('/jewel-estimator');
+                navigate('/');
               } catch (error) {
                 console.error('Error updating items:', error);
                 setSnackbar({

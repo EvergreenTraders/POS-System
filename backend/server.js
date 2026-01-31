@@ -4775,7 +4775,7 @@ app.get('/api/customers/search', async (req, res) => {
       // General search - search across all fields with OR
       const searchTerm = first_name.toLowerCase();
       const query = `
-        SELECT id, first_name, last_name, email, phone, status
+        SELECT id, first_name, last_name, email, phone, status, tax_exempt
         FROM customers
         WHERE LOWER(first_name) LIKE $1
            OR LOWER(last_name) LIKE $1
@@ -4800,7 +4800,7 @@ app.get('/api/customers/search', async (req, res) => {
     // Original logic for specific field searches (AND logic)
     // Return all customer fields including images for the search dialog
     let query = `SELECT
-      id, first_name, last_name, email, phone, status,
+      id, first_name, last_name, email, phone, status, tax_exempt,
       TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth,
       id_number, image, id_image_front, id_image_back
       FROM customers WHERE 1=1`;
@@ -4848,7 +4848,7 @@ app.get('/api/customers/search', async (req, res) => {
     let similarMatches = [];
     if (first_name || last_name || phone || id_number) {
       let fuzzyQuery = `SELECT
-        id, first_name, last_name, email, phone, status,
+        id, first_name, last_name, email, phone, status, tax_exempt,
         TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth,
         id_number, image, id_image_front, id_image_back
         FROM customers WHERE `;
