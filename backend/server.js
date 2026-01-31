@@ -648,7 +648,45 @@ app.post('/api/cash-drawer/open', async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error opening cash drawer:', error);
-    res.status(500).json({ error: 'Failed to open cash drawer' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23505') {
+      // Unique constraint violation
+      return res.status(400).json({
+        error: 'A session for this drawer is already open. Please close it first or use a different drawer.',
+        errorType: 'DUPLICATE_SESSION'
+      });
+    } else if (error.code === '23503') {
+      // Foreign key violation
+      return res.status(400).json({
+        error: 'Invalid drawer or employee selected. Please verify your selection and try again.',
+        errorType: 'INVALID_REFERENCE'
+      });
+    } else if (error.code === '22P02') {
+      // Invalid input syntax
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the opening balance and other values.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === '23514') {
+      // Check constraint violation
+      return res.status(400).json({
+        error: 'The values provided do not meet the required constraints. Please check your input.',
+        errorType: 'CONSTRAINT_VIOLATION'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      // Database connection error
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    // Generic system error for unhandled cases
+    res.status(500).json({
+      error: 'System error: Unable to open cash drawer. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   }
 });
 
@@ -697,7 +735,37 @@ app.post('/api/cash-drawer/:sessionId/adjustment', async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error adding cash drawer adjustment:', error);
-    res.status(500).json({ error: 'Failed to add adjustment' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23503') {
+      // Foreign key violation
+      return res.status(400).json({
+        error: 'Invalid session or employee reference. Please verify your selection and try again.',
+        errorType: 'INVALID_REFERENCE'
+      });
+    } else if (error.code === '22P02') {
+      // Invalid input syntax
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the adjustment amount and values.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === '23514') {
+      // Check constraint violation
+      return res.status(400).json({
+        error: 'The adjustment values do not meet the required constraints. Please check your input.',
+        errorType: 'CONSTRAINT_VIOLATION'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    res.status(500).json({
+      error: 'System error: Unable to add adjustment. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   }
 });
 
@@ -817,7 +885,34 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error processing cash transfer:', error);
-    res.status(500).json({ error: 'Failed to process transfer' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23503') {
+      return res.status(400).json({
+        error: 'Invalid session or employee reference. Please verify the source and target drawers.',
+        errorType: 'INVALID_REFERENCE'
+      });
+    } else if (error.code === '22P02') {
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the transfer amount.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === '23514') {
+      return res.status(400).json({
+        error: 'The transfer values do not meet the required constraints. Please check the amount.',
+        errorType: 'CONSTRAINT_VIOLATION'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    res.status(500).json({
+      error: 'System error: Unable to complete transfer. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   } finally {
     client.release();
   }
@@ -872,7 +967,34 @@ app.post('/api/cash-drawer/:sessionId/transaction', async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error linking transaction to drawer:', error);
-    res.status(500).json({ error: 'Failed to link transaction' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23505') {
+      return res.status(400).json({
+        error: 'This transaction has already been linked to a drawer session.',
+        errorType: 'DUPLICATE_TRANSACTION'
+      });
+    } else if (error.code === '23503') {
+      return res.status(400).json({
+        error: 'Invalid session or transaction reference. Please verify your selection.',
+        errorType: 'INVALID_REFERENCE'
+      });
+    } else if (error.code === '22P02') {
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the transaction amount and values.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    res.status(500).json({
+      error: 'System error: Unable to link transaction. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   }
 });
 
@@ -911,7 +1033,35 @@ app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error closing cash drawer:', error);
-    res.status(500).json({ error: 'Failed to close cash drawer' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23514') {
+      return res.status(400).json({
+        error: 'Invalid closing balance. The value does not meet the required constraints.',
+        errorType: 'CONSTRAINT_VIOLATION'
+      });
+    } else if (error.code === '22P02') {
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the actual balance value.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === '42883') {
+      // Function does not exist
+      return res.status(500).json({
+        error: 'Database configuration error: Expected balance calculation function is missing. Please contact support.',
+        errorType: 'CONFIGURATION_ERROR'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    res.status(500).json({
+      error: 'System error: Unable to close cash drawer. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   }
 });
 
@@ -942,7 +1092,29 @@ app.put('/api/cash-drawer/:sessionId/reconcile', async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error reconciling cash drawer:', error);
-    res.status(500).json({ error: 'Failed to reconcile cash drawer' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23503') {
+      return res.status(400).json({
+        error: 'Invalid employee reference. The reconciling employee could not be verified.',
+        errorType: 'INVALID_REFERENCE'
+      });
+    } else if (error.code === '22P02') {
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the values and try again.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    res.status(500).json({
+      error: 'System error: Unable to reconcile drawer. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   }
 });
 
