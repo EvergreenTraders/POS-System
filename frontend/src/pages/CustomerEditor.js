@@ -191,7 +191,12 @@ const CustomerEditor = () => {
       // Navigate back to the previous page or home
       setTimeout(() => {
         if (location.state?.returnTo) {
-          navigate(location.state.returnTo, { state: { customerUpdated: true } });
+          navigate(location.state.returnTo, {
+            state: {
+              customerUpdated: true,
+              newCustomer: !formData.id ? result : null  // Pass new customer data if creating
+            }
+          });
         } else {
           navigate('/');
         }

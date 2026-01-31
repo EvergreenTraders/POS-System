@@ -4841,6 +4841,55 @@ app.get('/api/customers/search', async (req, res) => {
     params.push(limit);
 
     const result = await client.query(query, params);
+
+    // If no exact matches found, try fuzzy search with OR logic
+    if (result.rows.length === 0 && (first_name || last_name || phone || id_number)) {
+      let fuzzyQuery = `SELECT
+        id, first_name, last_name, email, phone, status,
+        TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth,
+        id_number, image, id_image_front, id_image_back
+        FROM customers WHERE `;
+      const fuzzyConditions = [];
+      const fuzzyParams = [];
+      let fuzzyParamCount = 1;
+
+      if (first_name) {
+        fuzzyConditions.push(`(LOWER(first_name) LIKE $${fuzzyParamCount} OR LOWER(last_name) LIKE $${fuzzyParamCount})`);
+        fuzzyParams.push(`%${first_name.toLowerCase()}%`);
+        fuzzyParamCount++;
+      }
+
+      if (last_name) {
+        fuzzyConditions.push(`(LOWER(last_name) LIKE $${fuzzyParamCount} OR LOWER(first_name) LIKE $${fuzzyParamCount})`);
+        fuzzyParams.push(`%${last_name.toLowerCase()}%`);
+        fuzzyParamCount++;
+      }
+
+      if (id_number) {
+        fuzzyConditions.push(`CAST(id_number AS TEXT) ILIKE $${fuzzyParamCount}`);
+        fuzzyParams.push(`%${id_number}%`);
+        fuzzyParamCount++;
+      }
+
+      if (phone) {
+        // Remove non-digits for phone matching
+        const phoneDigits = phone.replace(/\D/g, '');
+        fuzzyConditions.push(`REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '(', '') LIKE $${fuzzyParamCount}`);
+        fuzzyParams.push(`%${phoneDigits}%`);
+        fuzzyParamCount++;
+      }
+
+      if (fuzzyConditions.length > 0) {
+        fuzzyQuery += fuzzyConditions.join(' OR ');
+        fuzzyQuery += ` ORDER BY created_at DESC LIMIT $${fuzzyParamCount}`;
+        fuzzyParams.push(limit);
+
+        const fuzzyResult = await client.query(fuzzyQuery, fuzzyParams);
+        res.json(fuzzyResult.rows);
+        return;
+      }
+    }
+
     res.json(result.rows);
   } catch (err) {
     console.error('Error searching customers:', err);
