@@ -4831,8 +4831,8 @@ app.get('/api/customers', async (req, res) => {
       created_from,
       created_to,
       id_type,
-      sort_by = 'created_at',
-      sort_order = 'desc'
+      sort_by = 'last_name',
+      sort_order = 'asc'
     } = req.query;
 
     // Calculate offset
@@ -4889,8 +4889,20 @@ app.get('/api/customers', async (req, res) => {
 
     // Validate sort_by to prevent SQL injection
     const allowedSortColumns = ['created_at', 'first_name', 'last_name', 'email', 'status', 'risk_level'];
-    const sortColumn = allowedSortColumns.includes(sort_by) ? sort_by : 'created_at';
+    const sortColumn = allowedSortColumns.includes(sort_by) ? sort_by : 'last_name';
     const sortDirection = sort_order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    // Build ORDER BY clause - add secondary sort for name columns
+    let orderByClause;
+    if (sortColumn === 'last_name') {
+      // Sort by last_name, then first_name (e.g., "Apple, Joe" before "Smith, Barb" before "Smith, Bob")
+      orderByClause = `last_name ${sortDirection}, first_name ${sortDirection}`;
+    } else if (sortColumn === 'first_name') {
+      // Sort by first_name, then last_name
+      orderByClause = `first_name ${sortDirection}, last_name ${sortDirection}`;
+    } else {
+      orderByClause = `${sortColumn} ${sortDirection}`;
+    }
 
     // Get total count
     const countQuery = `SELECT COUNT(*) as total FROM customers ${whereClause}`;
@@ -4911,7 +4923,7 @@ app.get('/api/customers', async (req, res) => {
         created_at, updated_at
       FROM customers
       ${whereClause}
-      ORDER BY ${sortColumn} ${sortDirection}
+      ORDER BY ${orderByClause}
       LIMIT $${paramCount} OFFSET $${paramCount + 1}
     `;
     params.push(parseInt(limit), offset);

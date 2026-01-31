@@ -54,8 +54,8 @@ const CustomerManager = () => {
     date_created_from: '',
     date_created_to: '',
     id_type: '',
-    sort_by: 'created_at',
-    sort_order: 'desc'
+    sort_by: 'last_name',
+    sort_order: 'asc'
   });
   const [quoteExpirationConfig, setQuoteExpirationConfig] = useState({ days: 30 });
   const [searchForm, setSearchForm] = useState({
@@ -337,8 +337,8 @@ const CustomerManager = () => {
       date_created_from: '',
       date_created_to: '',
       id_type: '',
-      sort_by: 'created_at',
-      sort_order: 'desc'
+      sort_by: 'last_name',
+      sort_order: 'asc'
     });
     // Reset to first page when clearing filters
     setPage(1);
