@@ -8235,6 +8235,930 @@ setInterval(checkPawnForfeitures, 21600000);
 // Run forfeiture check on startup
 checkPawnForfeitures();
 
+// ============================================
+// HARDGOODS INVENTORY ENDPOINTS
+// ============================================
+
+// Generate unique item ID for hardgoods
+async function generateHardgoodsItemId(categoryCode, trackingType, client, usedIds = new Set()) {
+  const prefixMap = {
+    'ELEC': { 'ITEM': 'ELEC', 'SKU': 'ELS', 'HYBRID': 'ELH', 'BUCKET': 'ELB' },
+    'TOOL': { 'ITEM': 'TOOL', 'SKU': 'TLS', 'HYBRID': 'TLH', 'BUCKET': 'TLB' },
+    'GENM': { 'ITEM': 'GENM', 'SKU': 'GMS', 'HYBRID': 'GMH', 'BUCKET': 'GMB' }
+  };
+
+  const prefix = prefixMap[categoryCode]?.[trackingType] || 'HRDG';
+
+  const existingIds = await client.query(
+    'SELECT item_id FROM hardgoods WHERE item_id LIKE $1 FOR UPDATE',
+    [prefix + '%']
+  );
+
+  const allUsedIds = new Set([...existingIds.rows.map(r => r.item_id), ...usedIds]);
+
+  let nextNumber = 1;
+  while (nextNumber <= 999) {
+    const newItemId = `${prefix}${nextNumber.toString().padStart(3, '0')}`;
+    if (!allUsedIds.has(newItemId)) {
+      return newItemId;
+    }
+    nextNumber++;
+  }
+
+  throw new Error(`No available sequence numbers for prefix ${prefix}`);
+}
+
+// GET /api/hardgoods/categories - List all categories
+app.get('/api/hardgoods/categories', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, category_code, category_name, description, id_prefix
+      FROM hardgoods_category
+      ORDER BY category_name
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching hardgoods categories:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/hardgoods/categories/:id/subcategories - Get subcategories for a category
+app.get('/api/hardgoods/categories/:id/subcategories', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(`
+      SELECT id, subcategory_code, subcategory_name
+      FROM hardgoods_subcategory
+      WHERE category_id = $1
+      ORDER BY subcategory_name
+    `, [id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching hardgoods subcategories:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/hardgoods - List all hardgoods items
+app.get('/api/hardgoods', async (req, res) => {
+  try {
+    const { status, category_id, tracking_type, sku_id, bucket_id } = req.query;
+    const conditions = [];
+    const params = [];
+    let paramCount = 1;
+
+    if (status) {
+      conditions.push(`h.status = $${paramCount}`);
+      params.push(status);
+      paramCount++;
+    }
+
+    if (category_id) {
+      conditions.push(`h.category_id = $${paramCount}`);
+      params.push(category_id);
+      paramCount++;
+    }
+
+    if (tracking_type) {
+      conditions.push(`h.tracking_type = $${paramCount}`);
+      params.push(tracking_type);
+      paramCount++;
+    }
+
+    if (sku_id) {
+      conditions.push(`h.sku_id = $${paramCount}`);
+      params.push(sku_id);
+      paramCount++;
+    }
+
+    if (bucket_id) {
+      conditions.push(`h.bucket_id = $${paramCount}`);
+      params.push(bucket_id);
+      paramCount++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const query = `
+      SELECT
+        h.*,
+        hc.category_name,
+        hc.category_code,
+        hs.subcategory_name,
+        sk.sku_name,
+        hb.bucket_name,
+        TO_CHAR(h.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
+        TO_CHAR(h.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at,
+        CURRENT_DATE - h.created_at::date as age_days
+      FROM hardgoods h
+      LEFT JOIN hardgoods_category hc ON h.category_id = hc.id
+      LEFT JOIN hardgoods_subcategory hs ON h.subcategory_id = hs.id
+      LEFT JOIN hardgoods_sku sk ON h.sku_id = sk.sku_id
+      LEFT JOIN hardgoods_bucket hb ON h.bucket_id = hb.bucket_id
+      ${whereClause}
+      ORDER BY h.created_at DESC
+    `;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching hardgoods items:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/hardgoods/:id - Get single hardgoods item
+app.get('/api/hardgoods/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(`
+      SELECT
+        h.*,
+        hc.category_name,
+        hc.category_code,
+        hs.subcategory_name,
+        sk.sku_name,
+        hb.bucket_name,
+        TO_CHAR(h.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_at,
+        TO_CHAR(h.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as updated_at
+      FROM hardgoods h
+      LEFT JOIN hardgoods_category hc ON h.category_id = hc.id
+      LEFT JOIN hardgoods_subcategory hs ON h.subcategory_id = hs.id
+      LEFT JOIN hardgoods_sku sk ON h.sku_id = sk.sku_id
+      LEFT JOIN hardgoods_bucket hb ON h.bucket_id = hb.bucket_id
+      WHERE h.item_id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching hardgoods item:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/hardgoods - Create new hardgoods item(s)
+app.post('/api/hardgoods', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const items = Array.isArray(req.body) ? req.body : [req.body];
+    const createdItems = [];
+    const usedIds = new Set();
+
+    for (const item of items) {
+      const {
+        tracking_type = 'ITEM',
+        sku_id,
+        bucket_id,
+        quantity = 1,
+        short_desc,
+        long_desc,
+        category_id,
+        subcategory_id,
+        brand,
+        model,
+        serial_number,
+        imei,
+        mac_address,
+        condition = 'GOOD',
+        condition_notes,
+        cost_price,
+        retail_price,
+        minimum_price,
+        status = 'HOLD',
+        location,
+        bin_location,
+        images = [],
+        notes,
+        source,
+        created_by
+      } = item;
+
+      // Get category code for ID generation
+      const catResult = await client.query(
+        'SELECT category_code FROM hardgoods_category WHERE id = $1',
+        [category_id]
+      );
+
+      if (catResult.rows.length === 0) {
+        throw new Error(`Invalid category_id: ${category_id}`);
+      }
+
+      const categoryCode = catResult.rows[0].category_code;
+      const item_id = await generateHardgoodsItemId(categoryCode, tracking_type, client, usedIds);
+      usedIds.add(item_id);
+
+      const insertQuery = `
+        INSERT INTO hardgoods (
+          item_id, tracking_type, sku_id, bucket_id, quantity, quantity_available,
+          short_desc, long_desc, category_id, subcategory_id, brand, model,
+          serial_number, imei, mac_address, condition, condition_notes,
+          cost_price, retail_price, minimum_price, status, location, bin_location,
+          images, notes, source, created_by, last_updated_by
+        ) VALUES (
+          $1, $2, $3, $4, $5, $5,
+          $6, $7, $8, $9, $10, $11,
+          $12, $13, $14, $15, $16,
+          $17, $18, $19, $20, $21, $22,
+          $23, $24, $25, $26, $26
+        ) RETURNING *
+      `;
+
+      const result = await client.query(insertQuery, [
+        item_id, tracking_type, sku_id || null, bucket_id || null, quantity,
+        short_desc, long_desc, category_id, subcategory_id || null, brand, model,
+        serial_number, imei, mac_address, condition, condition_notes,
+        cost_price, retail_price, minimum_price, status, location, bin_location,
+        JSON.stringify(images), notes, source, created_by
+      ]);
+
+      createdItems.push(result.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json(createdItems.length === 1 ? createdItems[0] : createdItems);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating hardgoods item:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/hardgoods/:id - Update hardgoods item
+app.put('/api/hardgoods/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params;
+    const allowedFields = [
+      'tracking_type', 'sku_id', 'bucket_id', 'quantity', 'quantity_available',
+      'short_desc', 'long_desc', 'category_id', 'subcategory_id', 'brand', 'model',
+      'serial_number', 'imei', 'mac_address', 'condition', 'condition_notes',
+      'cost_price', 'retail_price', 'minimum_price', 'status', 'location', 'bin_location',
+      'images', 'notes', 'source', 'last_updated_by'
+    ];
+
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    for (const [key, value] of Object.entries(req.body)) {
+      if (allowedFields.includes(key)) {
+        updates.push(`"${key}" = $${paramCount}`);
+        values.push(key === 'images' ? JSON.stringify(value) : value);
+        paramCount++;
+      }
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    values.push(id);
+    const query = `
+      UPDATE hardgoods
+      SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = $${paramCount}
+      RETURNING *
+    `;
+
+    const result = await client.query(query, values);
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating hardgoods item:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/hardgoods/:id/status - Update status only
+app.put('/api/hardgoods/:id/status', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params;
+    const { status, last_updated_by } = req.body;
+
+    const result = await client.query(`
+      UPDATE hardgoods
+      SET status = $1, last_updated_by = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = $3
+      RETURNING *
+    `, [status, last_updated_by, id]);
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating hardgoods status:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/hardgoods/:id - Delete hardgoods item
+app.delete('/api/hardgoods/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params;
+
+    const result = await client.query(
+      'DELETE FROM hardgoods WHERE item_id = $1 RETURNING item_id',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'Item deleted', item_id: id });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting hardgoods item:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/hardgoods/:id/history - Get item history
+app.get('/api/hardgoods/:id/history', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(`
+      SELECT h.*, e.first_name, e.last_name
+      FROM hardgoods_item_history h
+      LEFT JOIN employees e ON h.changed_by = e.employee_id
+      WHERE h.item_id = $1
+      ORDER BY h.version_number ASC
+    `, [id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching hardgoods history:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// HARDGOODS SKU ENDPOINTS
+// ============================================
+
+// GET /api/hardgoods/sku - List all SKUs
+app.get('/api/hardgoods/sku', async (req, res) => {
+  try {
+    const { category_id, is_active } = req.query;
+    const conditions = [];
+    const params = [];
+    let paramCount = 1;
+
+    if (category_id) {
+      conditions.push(`s.category_id = $${paramCount}`);
+      params.push(category_id);
+      paramCount++;
+    }
+
+    if (is_active !== undefined) {
+      conditions.push(`s.is_active = $${paramCount}`);
+      params.push(is_active === 'true');
+      paramCount++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const result = await pool.query(`
+      SELECT s.*, hc.category_name, hs.subcategory_name,
+             COALESCE(SUM(h.quantity), 0) as total_quantity,
+             COALESCE(SUM(h.quantity_available), 0) as available_quantity
+      FROM hardgoods_sku s
+      LEFT JOIN hardgoods_category hc ON s.category_id = hc.id
+      LEFT JOIN hardgoods_subcategory hs ON s.subcategory_id = hs.id
+      LEFT JOIN hardgoods h ON s.sku_id = h.sku_id AND h.status = 'ACTIVE'
+      ${whereClause}
+      GROUP BY s.sku_id, hc.category_name, hs.subcategory_name
+      ORDER BY s.sku_name
+    `, params);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching hardgoods SKUs:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/hardgoods/sku/:id - Get single SKU
+app.get('/api/hardgoods/sku/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(`
+      SELECT s.*, hc.category_name, hs.subcategory_name
+      FROM hardgoods_sku s
+      LEFT JOIN hardgoods_category hc ON s.category_id = hc.id
+      LEFT JOIN hardgoods_subcategory hs ON s.subcategory_id = hs.id
+      WHERE s.sku_id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'SKU not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching hardgoods SKU:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/hardgoods/sku - Create new SKU
+app.post('/api/hardgoods/sku', async (req, res) => {
+  try {
+    const {
+      sku_id,
+      sku_name,
+      category_id,
+      subcategory_id,
+      brand,
+      model,
+      description,
+      default_price,
+      cost_price,
+      reorder_level = 0,
+      images = [],
+      attributes = {}
+    } = req.body;
+
+    const result = await pool.query(`
+      INSERT INTO hardgoods_sku (
+        sku_id, sku_name, category_id, subcategory_id, brand, model,
+        description, default_price, cost_price, reorder_level, images, attributes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING *
+    `, [
+      sku_id, sku_name, category_id, subcategory_id || null, brand, model,
+      description, default_price, cost_price, reorder_level,
+      JSON.stringify(images), JSON.stringify(attributes)
+    ]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating hardgoods SKU:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/hardgoods/sku/:id - Update SKU
+app.put('/api/hardgoods/sku/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const allowedFields = [
+      'sku_name', 'category_id', 'subcategory_id', 'brand', 'model',
+      'description', 'default_price', 'cost_price', 'reorder_level',
+      'images', 'attributes', 'is_active'
+    ];
+
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    for (const [key, value] of Object.entries(req.body)) {
+      if (allowedFields.includes(key)) {
+        updates.push(`"${key}" = $${paramCount}`);
+        values.push(['images', 'attributes'].includes(key) ? JSON.stringify(value) : value);
+        paramCount++;
+      }
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    values.push(id);
+    const result = await pool.query(`
+      UPDATE hardgoods_sku
+      SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+      WHERE sku_id = $${paramCount}
+      RETURNING *
+    `, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'SKU not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating hardgoods SKU:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/hardgoods/sku/:id/receive - Receive quantity into SKU inventory
+app.post('/api/hardgoods/sku/:id/receive', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params;
+    const { quantity, cost_price, location, notes, created_by } = req.body;
+
+    // Get SKU details
+    const skuResult = await client.query(
+      'SELECT * FROM hardgoods_sku WHERE sku_id = $1',
+      [id]
+    );
+
+    if (skuResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'SKU not found' });
+    }
+
+    const sku = skuResult.rows[0];
+
+    // Get category code for ID generation
+    const catResult = await client.query(
+      'SELECT category_code FROM hardgoods_category WHERE id = $1',
+      [sku.category_id]
+    );
+
+    const categoryCode = catResult.rows[0].category_code;
+    const item_id = await generateHardgoodsItemId(categoryCode, 'SKU', client);
+
+    // Create inventory record
+    const result = await client.query(`
+      INSERT INTO hardgoods (
+        item_id, tracking_type, sku_id, quantity, quantity_available,
+        short_desc, category_id, subcategory_id, brand, model,
+        cost_price, retail_price, status, location, notes, source, created_by, last_updated_by
+      ) VALUES (
+        $1, 'SKU', $2, $3, $3,
+        $4, $5, $6, $7, $8,
+        $9, $10, 'ACTIVE', $11, $12, 'RECEIVE', $13, $13
+      ) RETURNING *
+    `, [
+      item_id, id, quantity,
+      sku.sku_name, sku.category_id, sku.subcategory_id, sku.brand, sku.model,
+      cost_price || sku.cost_price, sku.default_price, location, notes, created_by
+    ]);
+
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error receiving hardgoods SKU:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/hardgoods/sku/:id/adjust - Adjust quantity
+app.post('/api/hardgoods/sku/:id/adjust', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params;
+    const { item_id, adjustment, reason, adjusted_by } = req.body;
+
+    // Update quantity
+    const result = await client.query(`
+      UPDATE hardgoods
+      SET quantity = quantity + $1,
+          quantity_available = quantity_available + $1,
+          notes = COALESCE(notes, '') || E'\n' || $2,
+          last_updated_by = $3,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = $4 AND sku_id = $5
+      RETURNING *
+    `, [adjustment, `Adjustment: ${adjustment} - ${reason}`, adjusted_by, item_id, id]);
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error adjusting hardgoods quantity:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================
+// HARDGOODS BUCKET ENDPOINTS
+// ============================================
+
+// GET /api/hardgoods/bucket - List all buckets
+app.get('/api/hardgoods/bucket', async (req, res) => {
+  try {
+    const { status, category_id } = req.query;
+    const conditions = [];
+    const params = [];
+    let paramCount = 1;
+
+    if (status) {
+      conditions.push(`b.status = $${paramCount}`);
+      params.push(status);
+      paramCount++;
+    }
+
+    if (category_id) {
+      conditions.push(`b.category_id = $${paramCount}`);
+      params.push(category_id);
+      paramCount++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const result = await pool.query(`
+      SELECT b.*, hc.category_name, sl.name as location_name,
+             COUNT(h.item_id) as item_count,
+             COALESCE(SUM(h.quantity), 0) as total_quantity
+      FROM hardgoods_bucket b
+      LEFT JOIN hardgoods_category hc ON b.category_id = hc.id
+      LEFT JOIN storage_location sl ON b.location_id = sl.location_id
+      LEFT JOIN hardgoods h ON b.bucket_id = h.bucket_id
+      ${whereClause}
+      GROUP BY b.bucket_id, hc.category_name, sl.name
+      ORDER BY b.created_at DESC
+    `, params);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching hardgoods buckets:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/hardgoods/bucket/:id - Get single bucket with items
+app.get('/api/hardgoods/bucket/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get bucket info
+    const bucketResult = await pool.query(`
+      SELECT b.*, hc.category_name, sl.name as location_name
+      FROM hardgoods_bucket b
+      LEFT JOIN hardgoods_category hc ON b.category_id = hc.id
+      LEFT JOIN storage_location sl ON b.location_id = sl.location_id
+      WHERE b.bucket_id = $1
+    `, [id]);
+
+    if (bucketResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+
+    // Get items in bucket
+    const itemsResult = await pool.query(`
+      SELECT h.*, hc.category_name
+      FROM hardgoods h
+      LEFT JOIN hardgoods_category hc ON h.category_id = hc.id
+      WHERE h.bucket_id = $1
+      ORDER BY h.created_at DESC
+    `, [id]);
+
+    res.json({
+      ...bucketResult.rows[0],
+      items: itemsResult.rows
+    });
+  } catch (error) {
+    console.error('Error fetching hardgoods bucket:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/hardgoods/bucket - Create new bucket
+app.post('/api/hardgoods/bucket', async (req, res) => {
+  try {
+    const { bucket_name, location_id, description, category_id, notes, created_by } = req.body;
+
+    const result = await pool.query(`
+      INSERT INTO hardgoods_bucket (bucket_name, location_id, description, category_id, notes, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `, [bucket_name, location_id || null, description, category_id || null, notes, created_by]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating hardgoods bucket:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/hardgoods/bucket/:id - Update bucket
+app.put('/api/hardgoods/bucket/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const allowedFields = ['bucket_name', 'location_id', 'description', 'category_id', 'status', 'notes'];
+
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    for (const [key, value] of Object.entries(req.body)) {
+      if (allowedFields.includes(key)) {
+        updates.push(`"${key}" = $${paramCount}`);
+        values.push(value);
+        paramCount++;
+      }
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    values.push(id);
+    const result = await pool.query(`
+      UPDATE hardgoods_bucket
+      SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+      WHERE bucket_id = $${paramCount}
+      RETURNING *
+    `, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating hardgoods bucket:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/hardgoods/bucket/:id/add - Add item to bucket
+app.post('/api/hardgoods/bucket/:id/add', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params;
+    const {
+      quantity = 1,
+      short_desc,
+      category_id,
+      cost_price,
+      retail_price,
+      condition = 'GOOD',
+      notes,
+      created_by
+    } = req.body;
+
+    // Get bucket info
+    const bucketResult = await client.query(
+      'SELECT * FROM hardgoods_bucket WHERE bucket_id = $1',
+      [id]
+    );
+
+    if (bucketResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+
+    const bucket = bucketResult.rows[0];
+    const catId = category_id || bucket.category_id;
+
+    // Get category code for ID generation
+    const catResult = await client.query(
+      'SELECT category_code FROM hardgoods_category WHERE id = $1',
+      [catId]
+    );
+
+    const categoryCode = catResult.rows[0]?.category_code || 'GENM';
+    const item_id = await generateHardgoodsItemId(categoryCode, 'BUCKET', client);
+
+    // Create item in bucket
+    const result = await client.query(`
+      INSERT INTO hardgoods (
+        item_id, tracking_type, bucket_id, quantity, quantity_available,
+        short_desc, category_id, cost_price, retail_price, condition,
+        status, notes, created_by, last_updated_by
+      ) VALUES (
+        $1, 'BUCKET', $2, $3, $3,
+        $4, $5, $6, $7, $8,
+        'ACTIVE', $9, $10, $10
+      ) RETURNING *
+    `, [item_id, id, quantity, short_desc, catId, cost_price, retail_price, condition, notes, created_by]);
+
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error adding item to bucket:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/hardgoods/bucket/:id/remove - Remove item from bucket
+app.post('/api/hardgoods/bucket/:id/remove', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params;
+    const { item_id } = req.body;
+
+    // Remove bucket association (or delete item)
+    const result = await client.query(`
+      UPDATE hardgoods
+      SET bucket_id = NULL, tracking_type = 'ITEM', updated_at = CURRENT_TIMESTAMP
+      WHERE item_id = $1 AND bucket_id = $2
+      RETURNING *
+    `, [item_id, id]);
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found in bucket' });
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error removing item from bucket:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/hardgoods/bucket/:id - Delete empty bucket
+app.delete('/api/hardgoods/bucket/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params;
+
+    // Check if bucket has items
+    const itemCheck = await client.query(
+      'SELECT COUNT(*) as count FROM hardgoods WHERE bucket_id = $1',
+      [id]
+    );
+
+    if (parseInt(itemCheck.rows[0].count) > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Cannot delete bucket with items' });
+    }
+
+    const result = await client.query(
+      'DELETE FROM hardgoods_bucket WHERE bucket_id = $1 RETURNING bucket_id',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Bucket not found' });
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'Bucket deleted', bucket_id: id });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting hardgoods bucket:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================
+// END HARDGOODS ENDPOINTS
+// ============================================
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);
