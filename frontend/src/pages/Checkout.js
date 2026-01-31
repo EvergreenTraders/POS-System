@@ -508,7 +508,23 @@ function Checkout() {
       [field]: value,
     });
   };
-  
+
+  // Handle Enter key on payment amount field
+  const handlePaymentKeyDown = (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      // If payment field is empty, auto-fill with remaining balance
+      if (!paymentDetails.cashAmount || paymentDetails.cashAmount === '') {
+        const remainingBalance = parseFloat(Math.abs(remainingAmount).toFixed(2));
+        setPaymentDetails({
+          ...paymentDetails,
+          cashAmount: remainingBalance.toString(),
+        });
+      }
+      // Don't auto-submit - let user review and click the button
+    }
+  };
+
   // Handle input change for search form
   const handleLookupInputChange = (e) => {
     const { name, value } = e.target;
@@ -593,7 +609,7 @@ function Checkout() {
     });
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (overrideAmount = null) => {
     // Handle fast sale customer creation
     if (selectedCustomer?.isFastSale && !selectedCustomer?.id) {
       // Validate fast sale customer data
@@ -669,7 +685,7 @@ function Checkout() {
         throw new Error('Authentication token not found');
       }
 
-      const paymentAmount = parseFloat(paymentDetails.cashAmount) || 0;
+      const paymentAmount = overrideAmount !== null ? overrideAmount : (parseFloat(paymentDetails.cashAmount) || 0);
       // Compare absolute values - payment shouldn't exceed the absolute balance amount
       if (paymentAmount <= 0 || paymentAmount > Math.abs(remainingAmount)) {
         setSnackbar({
@@ -2345,6 +2361,8 @@ function Checkout() {
                 type="number"
                 value={paymentDetails.cashAmount}
                 onChange={handleInputChange('cashAmount')}
+                onKeyDown={handlePaymentKeyDown}
+                placeholder={`Press Enter for full amount ($${Math.abs(remainingAmount).toFixed(2)})`}
                 sx={{ mb: 2 }}
               />
 
