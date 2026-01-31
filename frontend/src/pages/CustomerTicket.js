@@ -3273,7 +3273,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3452,7 +3453,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3612,7 +3614,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3638,7 +3641,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3664,7 +3668,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3690,7 +3695,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3716,7 +3722,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3742,7 +3749,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3768,7 +3776,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3794,7 +3803,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
