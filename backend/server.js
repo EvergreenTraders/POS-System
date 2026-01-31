@@ -4927,7 +4927,10 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
 
     // Convert tax_exempt string to boolean (FormData sends "true"/"false" as strings)
     const taxExemptBool = tax_exempt === 'true' || tax_exempt === true;
-    
+
+    // Convert empty email to null to avoid unique constraint issues
+    const emailValue = email && email.trim() ? email.trim() : null;
+
     // Handle multiple image uploads
     let image = null;
     let id_image_front = null;
@@ -4960,7 +4963,7 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
         image, id_image_front, id_image_back, tax_exempt)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
       RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
-      [first_name, last_name, email, phone || '',
+      [first_name, last_name, emailValue, phone || '',
        address_line1, address_line2, city, state, postal_code, country,
        id_type, id_number, id_expiry_date || null,
        date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null,
@@ -4970,7 +4973,15 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
   } catch (err) {
     console.error('Error creating customer:', err);
     if (err.code === '23505') { // Unique violation
-      res.status(400).json({ error: 'Email already exists' });
+      // Check which field caused the violation
+      const detail = err.detail || '';
+      if (detail.includes('email')) {
+        res.status(400).json({ error: 'A customer with this email already exists' });
+      } else if (detail.includes('id_number')) {
+        res.status(400).json({ error: 'A customer with this ID number already exists' });
+      } else {
+        res.status(400).json({ error: 'A customer with these details already exists' });
+      }
     } else {
       res.status(500).json({ error: 'Failed to create customer' });
     }
@@ -4989,6 +5000,9 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
 
     // Convert tax_exempt string to boolean (FormData sends "true"/"false" as strings)
     const taxExemptBool = tax_exempt === 'true' || tax_exempt === true;
+
+    // Convert empty email to null to avoid unique constraint issues
+    const emailValue = email && email.trim() ? email.trim() : null;
 
     let query, values;
     
@@ -5052,7 +5066,7 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
     );
 
     updateValues.push(
-      first_name, last_name, email, phone,
+      first_name, last_name, emailValue, phone,
       address_line1, address_line2, city, state, postal_code, country,
       id_type, id_number, id_expiry_date || null,
       date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null,
@@ -5097,7 +5111,15 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
   } catch (err) {
     console.error('Error updating customer:', err);
     if (err.code === '23505') {
-      res.status(400).json({ error: 'Email already exists' });
+      // Check which field caused the violation
+      const detail = err.detail || '';
+      if (detail.includes('email')) {
+        res.status(400).json({ error: 'A customer with this email already exists' });
+      } else if (detail.includes('id_number')) {
+        res.status(400).json({ error: 'A customer with this ID number already exists' });
+      } else {
+        res.status(400).json({ error: 'A customer with these details already exists' });
+      }
     } else {
       res.status(500).json({ error: 'Failed to update customer' });
     }
