@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
+import { injectPDFScript } from '../utils/printUtils';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
@@ -2770,9 +2771,10 @@ function Checkout() {
                   </html>
                 `;
 
-                // Open receipt in new window
+                // Open receipt in new window (with PDF support for testing)
                 const printWindow = window.open('', '_blank');
-                printWindow.document.write(receiptHTML);
+                const pdfReadyHTML = injectPDFScript(receiptHTML, `redeem_receipt_${pawnTicketId}`);
+                printWindow.document.write(pdfReadyHTML);
                 printWindow.document.close();
 
                 setSnackbar({

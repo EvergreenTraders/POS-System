@@ -33,6 +33,7 @@ import { Avatar } from '@mui/material';
 import { pdf } from '@react-pdf/renderer';
 import PawnTicketTemplate from '../components/PawnTicketTemplate';
 import config from '../config';
+import { injectPDFScript } from '../utils/printUtils';
 
 function TransactionJournals() {
   const { getCurrentDateObject } = useWorkingDate();
@@ -580,9 +581,10 @@ function TransactionJournals() {
         </html>
       `;
 
-      // Open in new tab
+      // Open in new tab (with PDF support for testing)
       const printWindow = window.open('', '_blank');
-      printWindow.document.write(receiptHTML);
+      const pdfReadyHTML = injectPDFScript(receiptHTML, `ticket_${ticketId}`);
+      printWindow.document.write(pdfReadyHTML);
       printWindow.document.close();
     }
   };
@@ -848,9 +850,11 @@ function TransactionJournals() {
       </html>
     `;
 
-    // Open in new tab
+    // Open in new tab (with PDF support for testing)
     const printWindow = window.open('', '_blank');
-    printWindow.document.write(receiptHTML);
+    const transactionId = selectedTransaction.transaction_id || selectedTransaction.id;
+    const pdfReadyHTML = injectPDFScript(receiptHTML, `transaction_${transactionId}`);
+    printWindow.document.write(pdfReadyHTML);
     printWindow.document.close();
   };
 

@@ -34,6 +34,7 @@ import {
 } from '@mui/icons-material';
 import config from '../config';
 import axios from 'axios';
+import { injectPDFScript } from '../utils/printUtils';
 import AuthorizationFormDialog from './AuthorizationFormDialog';
 
 const API_BASE_URL = config.apiUrl;
@@ -434,7 +435,9 @@ const LinkedAccountsManager = ({ customerId, customerName, open, onClose }) => {
       </html>
     `;
 
-    printWindow.document.write(formHTML);
+    // Open with PDF support for testing
+    const pdfReadyHTML = injectPDFScript(formHTML, `authorization_form_${customerId}_${selectedCustomer.id}`);
+    printWindow.document.write(pdfReadyHTML);
     printWindow.document.close();
   };
 
