@@ -38,6 +38,15 @@ const CustomerEditor = () => {
   useEffect(() => {
     if (location.state?.customer) {
       setFormData(location.state.customer);
+    } else if (location.state?.prefillData) {
+      // Pre-fill form with search data when registering new customer
+      setFormData(prev => ({
+        ...prev,
+        first_name: location.state.prefillData.first_name || '',
+        last_name: location.state.prefillData.last_name || '',
+        phone: location.state.prefillData.phone || '',
+        id_number: location.state.prefillData.id_number || ''
+      }));
     }
   }, [location]);
   

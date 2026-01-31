@@ -4056,6 +4056,7 @@ return (
                         label="First Name"
                         value={searchForm.first_name}
                         onChange={handleLookupInputChange}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                         size="small"
                         sx={{ width: '48%' }}
                       />
@@ -4064,6 +4065,7 @@ return (
                         label="Last Name"
                         value={searchForm.last_name}
                         onChange={handleLookupInputChange}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                         size="small"
                         sx={{ width: '48%' }}
                       />
@@ -4075,6 +4077,7 @@ return (
                       label="ID Number"
                       value={searchForm.id_number}
                       onChange={handleLookupInputChange}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                       size="small"
                       sx={{ width: '90%' }}
                     />
@@ -4085,6 +4088,7 @@ return (
                       label="Phone Number"
                       value={searchForm.phone}
                       onChange={handleLookupInputChange}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                       size="small"
                       sx={{ width: '90%' }}
                     />
@@ -5650,7 +5654,17 @@ return (
                       size="small"
                       onClick={() => {
                         setOpenSearchDialog(false);
-                        navigate('/customer-editor', { state: { returnTo: '/customer-ticket' } });
+                        navigate('/customer-editor', {
+                          state: {
+                            returnTo: '/customer-ticket',
+                            prefillData: {
+                              first_name: searchForm.first_name || '',
+                              last_name: searchForm.last_name || '',
+                              phone: searchForm.phone || '',
+                              id_number: searchForm.id_number || ''
+                            }
+                          }
+                        });
                       }}
                       sx={{ minWidth: 160 }}
                     >
@@ -5670,7 +5684,17 @@ return (
                 color="primary"
                 onClick={() => {
                   setOpenSearchDialog(false);
-                  navigate('/customer-editor', { state: { returnTo: '/customer-ticket' } });
+                  navigate('/customer-editor', {
+                    state: {
+                      returnTo: '/customer-ticket',
+                      prefillData: {
+                        first_name: searchForm.first_name || '',
+                        last_name: searchForm.last_name || '',
+                        phone: searchForm.phone || '',
+                        id_number: searchForm.id_number || ''
+                      }
+                    }
+                  });
                 }}
               >
                 Register New Customer
