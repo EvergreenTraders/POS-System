@@ -138,17 +138,8 @@ const CustomerTicket = () => {
       const data = await response.json();
       
       setSearchResults(data);
-      
-      if (data.length === 0) {
-        showSnackbar('No customers found. You can register a new customer.', 'info');
-      } else if (data.length === 1) {
-        // If only one customer found, select them automatically
-        handleSelectCustomer(data[0]);
-      } else {
-        // If multiple customers, open dialog
-        setOpenSearchDialog(true);
-        setSelectedSearchIdx(0); // auto-select first
-      }
+      setOpenSearchDialog(true);
+      setSelectedSearchIdx(data.length > 0 ? 0 : -1);
     } catch (error) {
       showSnackbar(`Error searching customers: ${error.message}`, 'error');
     } finally {
@@ -538,6 +529,28 @@ const CustomerTicket = () => {
   // Reload customer data when returning from customer editor
   React.useEffect(() => {
     const reloadCustomer = async () => {
+      // Handle new customer created from CustomerEditor
+      if (location.state?.newCustomer) {
+        const newCustomer = location.state.newCustomer;
+        const formattedCustomer = {
+          ...newCustomer,
+          name: `${newCustomer.first_name || ''} ${newCustomer.last_name || ''}`.trim(),
+          image: newCustomer.image && typeof newCustomer.image === 'object' && newCustomer.image.type === 'Buffer'
+            ? bufferToDataUrl(newCustomer.image)
+            : newCustomer.image
+        };
+
+        setCustomer(formattedCustomer);
+        sessionStorage.setItem('selectedCustomer', JSON.stringify(formattedCustomer));
+        setShowLookupForm(false);
+        showSnackbar('New customer registered successfully', 'success');
+
+        // Clear the location state to prevent reprocessing
+        window.history.replaceState({}, document.title);
+        return;
+      }
+
+      // Handle existing customer updated
       if (location.state?.customerUpdated && customer?.id) {
         try {
           const response = await fetch(`${config.apiUrl}/customers/${customer.id}`, {
@@ -567,7 +580,7 @@ const CustomerTicket = () => {
     };
 
     reloadCustomer();
-  }, [location.state?.customerUpdated]);
+  }, [location.state?.customerUpdated, location.state?.newCustomer]);
 
   // State for convert dropdown menu
   const [convertMenuAnchor, setConvertMenuAnchor] = React.useState(null);
@@ -3260,7 +3273,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3439,7 +3453,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3558,6 +3573,31 @@ const CustomerTicket = () => {
   };
   
   const handleCheckout = () => {
+    // Validate customer is selected
+    if (!customer) {
+      setSnackbarMessage({
+        open: true,
+        message: 'Please select a customer before proceeding to checkout',
+        severity: 'error'
+      });
+      return;
+    }
+
+    // Validate customer has all required fields
+    const isValid = validateCustomerFields();
+    if (!isValid) {
+      const errorMessage = customerValidationErrors.length > 0
+        ? `Cannot proceed: Missing required customer fields: ${customerValidationErrors.join(', ')}`
+        : 'Cannot proceed: Customer is missing required fields';
+
+      setSnackbarMessage({
+        open: true,
+        message: errorMessage,
+        severity: 'error'
+      });
+      return;
+    }
+
     // Helper function to generate buyTicketId for a transaction type
     const generateBuyTicketId = (transactionType) => {
       let ticketPrefix;
@@ -3599,7 +3639,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3625,7 +3666,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3651,7 +3693,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3677,7 +3720,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3703,7 +3747,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3729,7 +3774,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3755,7 +3801,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3781,7 +3828,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3978,17 +4026,17 @@ return (
                         {customer ? `${customer.first_name} ${customer.last_name}` : 'No Customer Selected'}
                       </Typography>
                         <Box sx={{ display: 'flex', gap: 1 }}>
-                          <Button 
-                            variant="outlined" 
-                            size="small" 
+                          <Button
+                            variant="outlined"
+                            size="small"
                             startIcon={<SearchIcon />}
                             onClick={() => setShowLookupForm(true)}
                           >
                             Search
                           </Button>
-                          <Button 
-                            variant="outlined" 
-                            size="small" 
+                          <Button
+                            variant="outlined"
+                            size="small"
                             startIcon={<EditIcon />}
                             onClick={handleEditCustomer}
                             disabled={!customer}
@@ -4043,6 +4091,7 @@ return (
                         label="First Name"
                         value={searchForm.first_name}
                         onChange={handleLookupInputChange}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                         size="small"
                         sx={{ width: '48%' }}
                       />
@@ -4051,6 +4100,7 @@ return (
                         label="Last Name"
                         value={searchForm.last_name}
                         onChange={handleLookupInputChange}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                         size="small"
                         sx={{ width: '48%' }}
                       />
@@ -4062,6 +4112,7 @@ return (
                       label="ID Number"
                       value={searchForm.id_number}
                       onChange={handleLookupInputChange}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                       size="small"
                       sx={{ width: '90%' }}
                     />
@@ -4072,6 +4123,7 @@ return (
                       label="Phone Number"
                       value={searchForm.phone}
                       onChange={handleLookupInputChange}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                       size="small"
                       sx={{ width: '90%' }}
                     />
@@ -5487,7 +5539,12 @@ return (
                   >
                     Add to Cart
                   </Button>
-                  <Button variant="contained" color="success" onClick={handleCheckout}>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={handleCheckout}
+                    disabled={!customer || customerValidationErrors.length > 0}
+                  >
                     Checkout
                   </Button>
                 </Box>
@@ -5502,9 +5559,11 @@ return (
         open={openSearchDialog}
         onClose={() => setOpenSearchDialog(false)}
         fullWidth
-        maxWidth="md"
+        maxWidth={searchResults.length > 0 ? "md" : "sm"}
       >
-        <DialogTitle>Search Results</DialogTitle>
+        <DialogTitle>
+          {searchResults.length > 0 ? 'Search Results' : 'No Customers Found'}
+        </DialogTitle>
         <DialogContent>
           {loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
@@ -5626,12 +5685,60 @@ return (
                       Select
                     </Button>
                   </Box>
+
+                  {/* Right-aligned Register New Customer button */}
+                  <Box sx={{ position: 'absolute', right: 0, top: 0 }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      size="small"
+                      onClick={() => {
+                        setOpenSearchDialog(false);
+                        navigate('/customer-editor', {
+                          state: {
+                            returnTo: '/customer-ticket',
+                            prefillData: {
+                              first_name: searchForm.first_name || '',
+                              last_name: searchForm.last_name || '',
+                              phone: searchForm.phone || '',
+                              id_number: searchForm.id_number || ''
+                            }
+                          }
+                        });
+                      }}
+                      sx={{ minWidth: 160 }}
+                    >
+                      Register New Customer
+                    </Button>
+                  </Box>
                 </Box>
               )}
             </>
           ) : (
-            <Box sx={{ p: 2 }}>
-              <Typography>No customers found matching your search criteria.</Typography>
+            <Box sx={{ p: 2, textAlign: 'center' }}>
+              <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+                No customers found matching your search criteria.
+              </Typography>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={() => {
+                  setOpenSearchDialog(false);
+                  navigate('/customer-editor', {
+                    state: {
+                      returnTo: '/customer-ticket',
+                      prefillData: {
+                        first_name: searchForm.first_name || '',
+                        last_name: searchForm.last_name || '',
+                        phone: searchForm.phone || '',
+                        id_number: searchForm.id_number || ''
+                      }
+                    }
+                  });
+                }}
+              >
+                Register New Customer
+              </Button>
             </Box>
           )}
         </DialogContent>

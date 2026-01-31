@@ -575,7 +575,7 @@ const Cart = () => {
     } else {
       itemsToCheckout = filteredItems;
     }
-      
+
     // Make sure we're preserving all jewelry-specific fields for items from the gem estimator
     itemsToCheckout = itemsToCheckout.map(item => {
       // If this is a jewelry item from the gem estimator, ensure all fields are preserved
@@ -599,11 +599,34 @@ const Cart = () => {
       return item;
     });
 
+    // Use the customer from the cart items being checked out, not the global selectedCustomer
+    // This ensures the correct customer is used even if user switched customers in CustomerTicket
+    let checkoutCustomer = customer;
+    if (itemsToCheckout.length > 0 && itemsToCheckout[0].customer) {
+      // Get customer from the first item being checked out
+      const itemCustomer = itemsToCheckout[0].customer;
+      checkoutCustomer = {
+        id: itemCustomer.id,
+        first_name: itemCustomer.first_name || (itemCustomer.name ? itemCustomer.name.split(' ')[0] : ''),
+        last_name: itemCustomer.last_name || (itemCustomer.name ? itemCustomer.name.split(' ').slice(1).join(' ') : ''),
+        name: itemCustomer.name || `${itemCustomer.first_name || ''} ${itemCustomer.last_name || ''}`.trim(),
+        email: itemCustomer.email,
+        phone: itemCustomer.phone,
+        tax_exempt: itemCustomer.tax_exempt
+      };
+    }
+
+    // Update sessionStorage with the correct customer to keep things in sync
+    if (checkoutCustomer) {
+      sessionStorage.setItem('selectedCustomer', JSON.stringify(checkoutCustomer));
+    }
+    sessionStorage.setItem('checkoutItems', JSON.stringify(itemsToCheckout));
+
     navigate('/checkout', {
       state: {
         items: itemsToCheckout,
         allCartItems: cartItems,
-        customer,
+        customer: checkoutCustomer,
         from: 'cart'
       }
     });

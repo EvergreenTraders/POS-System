@@ -39,7 +39,6 @@ import {
   Add as AddIcon,
   History as HistoryIcon,
   AccountBalance as BankIcon,
-  ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -514,6 +513,30 @@ function CashDrawer() {
       setDrawerTypeFilter(null);
       resetOpenForm();
 
+      // If we came from checkout, automatically navigate back after opening drawer
+      if (location.state?.returnTo === '/checkout') {
+        // Small delay to show success message before navigating
+        setTimeout(() => {
+          // Get items and customer from sessionStorage before navigating
+          const checkoutItems = sessionStorage.getItem('checkoutItems');
+          const selectedCustomer = sessionStorage.getItem('selectedCustomer');
+          const cartItems = sessionStorage.getItem('cartItems');
+          const parsedItems = checkoutItems ? JSON.parse(checkoutItems) : null;
+          const parsedCustomer = selectedCustomer ? JSON.parse(selectedCustomer) : null;
+          const parsedCartItems = cartItems ? JSON.parse(cartItems) : null;
+
+          navigate('/checkout', {
+            state: {
+              items: parsedItems,
+              customer: parsedCustomer,
+              allCartItems: parsedCartItems,
+              from: 'cash-drawer'
+            }
+          });
+        }, 500);
+        return;
+      }
+
       // Refresh sessions and show the newly opened drawer type
       await checkActiveSession(drawerType);
     } catch (err) {
@@ -891,42 +914,11 @@ function CashDrawer() {
     );
   }
 
-  const handleBackToCheckout = () => {
-    // Get items and customer from sessionStorage before navigating
-    const checkoutItems = sessionStorage.getItem('checkoutItems');
-    const selectedCustomer = sessionStorage.getItem('selectedCustomer');
-    const cartItems = sessionStorage.getItem('cartItems');
-    const parsedItems = checkoutItems ? JSON.parse(checkoutItems) : null;
-    const parsedCustomer = selectedCustomer ? JSON.parse(selectedCustomer) : null;
-    const parsedCartItems = cartItems ? JSON.parse(cartItems) : null;
-
-    navigate('/checkout', {
-      state: {
-        items: parsedItems,
-        customer: parsedCustomer,
-        allCartItems: parsedCartItems,
-        from: 'cash-drawer'
-      }
-    });
-  };
-
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-        <Typography variant="h4">
-          Cash Drawer Management
-        </Typography>
-        {location.state?.returnTo === '/checkout' && (
-          <Button
-            variant="outlined"
-            color="primary"
-            startIcon={<ArrowBackIcon />}
-            onClick={handleBackToCheckout}
-          >
-            Back to Checkout
-          </Button>
-        )}
-      </Box>
+      <Typography variant="h4" mb={2}>
+        Cash Drawer Management
+      </Typography>
 
       <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ mb: 3 }}>
         <Tab label="Active Session" />

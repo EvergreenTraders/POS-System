@@ -255,6 +255,15 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
     fetchDashboardStats();
   }, [getCurrentDate]);
 
+  // Handle new customer created from CustomerEditor - navigate to CustomerTicket
+  useEffect(() => {
+    if (location.state?.newCustomer) {
+      const newCustomer = location.state.newCustomer;
+      // Navigate to CustomerTicket with the new customer selected
+      navigate('/customer-ticket', { state: { customer: newCustomer } });
+    }
+  }, [location.state?.newCustomer, navigate]);
+
   const fetchCustomers = async () => {
     try {
       const response = await fetch(`${config.apiUrl}/customers`);
@@ -510,18 +519,20 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
   };
 
   const handleRegisterNew = () => {
-    const newCustomer = { first_name: '', last_name: '', email: '', phone: '', status: 'active', created_at: new Date().toISOString(), image: '' };
-    setCustomer(newCustomer);
-    
-    // Navigate to the CustomerEditor page for a new customer
-    navigate('/customer-editor', { 
-      state: { 
-        customer: newCustomer,
+    // Navigate to the CustomerEditor page with search form data pre-filled
+    navigate('/customer-editor', {
+      state: {
         mode: 'create',
-        returnTo: location.pathname
+        returnTo: location.pathname,
+        prefillData: {
+          first_name: searchForm.first_name || '',
+          last_name: searchForm.last_name || '',
+          phone: searchForm.phone || '',
+          id_number: searchForm.id_number || ''
+        }
       }
     });
-    
+
     handleCloseSearchDialog();
   };
   const handleProceedAsGuest = () => {
