@@ -135,6 +135,7 @@ function Checkout() {
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const [redeemedLocations, setRedeemedLocations] = useState([]);
   const [selectedItemsForRedeem, setSelectedItemsForRedeem] = useState([]);
+  const [cashDrawerDialogOpen, setCashDrawerDialogOpen] = useState(false);
   // Pawn config - frozen at time of pawn creation
   const [pawnConfig, setPawnConfig] = useState({
     term_days: 90,
@@ -270,20 +271,16 @@ function Checkout() {
       try {
         const response = await axios.get(`${API_BASE_URL}/cash-drawer/employee/${user.id}/active`);
 
-        // Response is now an array - filter for physical drawer sessions only
+        // Response is an array of active sessions (physical drawers owned by employee + shared safe/master_safe)
         const sessions = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
-        const physicalSession = sessions.find(s => s.drawer_type === 'physical');
 
-        // If no active physical drawer session exists, redirect to cash drawer page
-        if (!physicalSession) {
-          setSnackbar({
-            open: true,
-            message: 'You must open a cash drawer before processing transactions',
-            severity: 'warning'
-          });
+        // Check if employee has their own physical drawer open (required for checkout)
+        // Safe/master_safe sessions are shared but don't count for cash transactions
+        const hasPhysicalDrawer = sessions.some(s => s.drawer_type === 'physical');
 
-          // Save current checkout state to sessionStorage before navigating
-          // Save checkoutItems if available, otherwise save cartItems as checkoutItems
+        // If no physical drawer session exists, show dialog with options
+        if (!hasPhysicalDrawer) {
+          // Save current checkout state to sessionStorage before showing dialog
           const itemsToSave = checkoutItems.length > 0 ? checkoutItems : cartItems;
           if (itemsToSave && itemsToSave.length > 0) {
             sessionStorage.setItem('checkoutItems', JSON.stringify(itemsToSave));
@@ -293,39 +290,23 @@ function Checkout() {
             sessionStorage.setItem('selectedCustomer', JSON.stringify(selectedCustomer));
           }
 
-          // Always save allCartItems if available, otherwise use cartItems from context
           const allItemsToSave = allCartItems.length > 0 ? allCartItems : cartItems;
           if (allItemsToSave && allItemsToSave.length > 0) {
             sessionStorage.setItem('cartItems', JSON.stringify(allItemsToSave));
           }
 
-          // Delay navigation slightly to show the snackbar
-          setTimeout(() => {
-            navigate('/cash-drawer', {
-              state: {
-                message: 'Please open a cash drawer to continue with transactions',
-                returnTo: '/checkout'
-              }
-            });
-          }, 1500);
+          // Show dialog instead of auto-redirecting
+          setCashDrawerDialogOpen(true);
         }
       } catch (error) {
         console.error('Error checking cash drawer session:', error);
-        // On error, also redirect to cash drawer page
-        setSnackbar({
-          open: true,
-          message: 'Unable to verify cash drawer session. Please open a drawer.',
-          severity: 'error'
-        });
-
-        setTimeout(() => {
-          navigate('/cash-drawer');
-        }, 1500);
+        // On error, show dialog as well
+        setCashDrawerDialogOpen(true);
       }
     };
 
     checkCashDrawerSession();
-  }, [user, navigate]);
+  }, [user]);
 
   // Fetch transaction types on component mount
   useEffect(() => {
@@ -2799,6 +2780,56 @@ function Checkout() {
             disabled={selectedItemsForRedeem.length === 0}
           >
             Complete Redemption & Print Receipt
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Cash Drawer Required Dialog */}
+      <Dialog
+        open={cashDrawerDialogOpen}
+        onClose={() => {}} // Prevent closing by clicking outside
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ bgcolor: 'warning.main', color: 'warning.contrastText' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="h6" fontWeight="bold">
+              No Active Cash Drawer
+            </Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2 }}>
+          <Typography variant="body1" gutterBottom>
+            You must have an open cash drawer to process transactions.
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            You can open a drawer yourself, or return to the cart and have another employee with an active drawer complete this transaction.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, gap: 1 }}>
+          <Button
+            variant="outlined"
+            onClick={() => {
+              setCashDrawerDialogOpen(false);
+              navigate('/cart');
+            }}
+          >
+            Return to Cart
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={() => {
+              setCashDrawerDialogOpen(false);
+              navigate('/cash-drawer', {
+                state: {
+                  message: 'Please open a cash drawer to continue with transactions',
+                  returnTo: '/checkout'
+                }
+              });
+            }}
+          >
+            Open a Drawer
           </Button>
         </DialogActions>
       </Dialog>
