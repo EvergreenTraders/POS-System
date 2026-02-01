@@ -1912,6 +1912,86 @@ const CustomerTicket = () => {
         }
         return item;
       }));
+    } else if (type === 'redeem') {
+      // For redeem items, auto-fill when pawnTicketId is entered
+      if (field === 'pawnTicketId' && value) {
+        try {
+          const token = localStorage.getItem('token');
+          const response = await fetch(`${config.apiUrl}/pawn-transactions`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          if (response.ok) {
+            const pawnTransactions = await response.json();
+            const pawnData = pawnTransactions.find(p => p.pawn_ticket_id === value);
+
+            if (pawnData) {
+              // Found matching pawn ticket, auto-fill all fields
+              const principalAmount = parseFloat(pawnData.item_price) || 0;
+              // Use pawn ticket's stored values, with fallbacks to current config
+              const termDaysValue = parseFloat(pawnData.term_days) || 90;
+              const frequency = parseFloat(pawnData.frequency_days) || frequencyDays || 30;
+              const rate = parseFloat(pawnData.interest_rate) || interestRate || 2.9;
+              const insuranceRateValue = parseFloat(pawnData.insurance_rate) || 1.0;
+
+              // Calculate number of interest periods (same formula as Pawns.js)
+              const interestPeriods = Math.ceil(termDaysValue / frequency);
+
+              // Calculate interest and insurance separately (same formula as Pawns.js)
+              const interestAmount = principalAmount * (rate / 100) * interestPeriods;
+              const insuranceFee = principalAmount * (insuranceRateValue / 100) * interestPeriods;
+              const totalAmount = principalAmount + interestAmount + insuranceFee;
+
+              // Fetch customer if available
+              if (pawnData.customer_id) {
+                try {
+                  const customerResponse = await fetch(`${config.apiUrl}/customers/${pawnData.customer_id}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                  });
+                  if (customerResponse.ok) {
+                    const customerData = await customerResponse.json();
+                    setCustomer(customerData);
+                    sessionStorage.setItem('selectedCustomer', JSON.stringify(customerData));
+                  }
+                } catch (error) {
+                  console.error('Error fetching customer:', error);
+                }
+              }
+
+              setItems(items.map(item => {
+                if (item.id === id) {
+                  return {
+                    ...item,
+                    pawnTicketId: value,
+                    description: pawnData.item_description || pawnData.item_id || '',
+                    principal: principalAmount.toFixed(2),
+                    interest: (interestAmount + insuranceFee).toFixed(2),
+                    totalAmount: totalAmount.toFixed(2),
+                    item_id: pawnData.item_id,
+                    location: pawnData.location || '',
+                    images: pawnData.images || []
+                  };
+                }
+                return item;
+              }));
+
+              showSnackbar('Pawn ticket found and fields auto-filled', 'success');
+              return;
+            } else {
+              showSnackbar('Pawn ticket not found', 'warning');
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching pawn data:', error);
+          showSnackbar('Error fetching pawn data', 'error');
+        }
+
+        // If pawn not found or error, just update the field
+        setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
+        return;
+      }
+
+      setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
     } else {
       setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
     }
@@ -5438,10 +5518,7 @@ return (
                                     fullWidth
                                     value={item.pawnTicketId}
                                     onChange={(e) => handleItemChange(item.id, 'pawnTicketId', e.target.value)}
-                                    InputProps={{
-                                      readOnly: true,
-                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
-                                    }}
+                                    placeholder="Enter Pawn Ticket ID"
                                   />
                                 </TableCell>
                                 <TableCell>
