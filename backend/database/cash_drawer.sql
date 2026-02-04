@@ -423,5 +423,5 @@ INSERT INTO discrepancy_threshold (threshold_amount)
 SELECT 0.00
 WHERE NOT EXISTS (SELECT 1 FROM discrepancy_threshold LIMIT 1);
 
--- Fix sequence after data migration (reset to max id + 1)
-SELECT setval('cash_drawer_sessions_session_id_seq', COALESCE((SELECT MAX(session_id) FROM cash_drawer_sessions), 0) + 1, false);
+-- Fix sequence after data migration - ensure 4-digit session IDs (start at 1000 minimum)
+SELECT setval('cash_drawer_sessions_session_id_seq', GREATEST(COALESCE((SELECT MAX(session_id) FROM cash_drawer_sessions), 0) + 1, 1000), false);
