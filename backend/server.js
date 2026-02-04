@@ -648,7 +648,45 @@ app.post('/api/cash-drawer/open', async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error opening cash drawer:', error);
-    res.status(500).json({ error: 'Failed to open cash drawer' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23505') {
+      // Unique constraint violation
+      return res.status(400).json({
+        error: 'A session for this drawer is already open. Please close it first or use a different drawer.',
+        errorType: 'DUPLICATE_SESSION'
+      });
+    } else if (error.code === '23503') {
+      // Foreign key violation
+      return res.status(400).json({
+        error: 'Invalid drawer or employee selected. Please verify your selection and try again.',
+        errorType: 'INVALID_REFERENCE'
+      });
+    } else if (error.code === '22P02') {
+      // Invalid input syntax
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the opening balance and other values.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === '23514') {
+      // Check constraint violation
+      return res.status(400).json({
+        error: 'The values provided do not meet the required constraints. Please check your input.',
+        errorType: 'CONSTRAINT_VIOLATION'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      // Database connection error
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    // Generic system error for unhandled cases
+    res.status(500).json({
+      error: 'System error: Unable to open cash drawer. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   }
 });
 
@@ -697,7 +735,37 @@ app.post('/api/cash-drawer/:sessionId/adjustment', async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error adding cash drawer adjustment:', error);
-    res.status(500).json({ error: 'Failed to add adjustment' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23503') {
+      // Foreign key violation
+      return res.status(400).json({
+        error: 'Invalid session or employee reference. Please verify your selection and try again.',
+        errorType: 'INVALID_REFERENCE'
+      });
+    } else if (error.code === '22P02') {
+      // Invalid input syntax
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the adjustment amount and values.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === '23514') {
+      // Check constraint violation
+      return res.status(400).json({
+        error: 'The adjustment values do not meet the required constraints. Please check your input.',
+        errorType: 'CONSTRAINT_VIOLATION'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    res.status(500).json({
+      error: 'System error: Unable to add adjustment. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   }
 });
 
@@ -817,7 +885,34 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error processing cash transfer:', error);
-    res.status(500).json({ error: 'Failed to process transfer' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23503') {
+      return res.status(400).json({
+        error: 'Invalid session or employee reference. Please verify the source and target drawers.',
+        errorType: 'INVALID_REFERENCE'
+      });
+    } else if (error.code === '22P02') {
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the transfer amount.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === '23514') {
+      return res.status(400).json({
+        error: 'The transfer values do not meet the required constraints. Please check the amount.',
+        errorType: 'CONSTRAINT_VIOLATION'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    res.status(500).json({
+      error: 'System error: Unable to complete transfer. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   } finally {
     client.release();
   }
@@ -872,7 +967,34 @@ app.post('/api/cash-drawer/:sessionId/transaction', async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error linking transaction to drawer:', error);
-    res.status(500).json({ error: 'Failed to link transaction' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23505') {
+      return res.status(400).json({
+        error: 'This transaction has already been linked to a drawer session.',
+        errorType: 'DUPLICATE_TRANSACTION'
+      });
+    } else if (error.code === '23503') {
+      return res.status(400).json({
+        error: 'Invalid session or transaction reference. Please verify your selection.',
+        errorType: 'INVALID_REFERENCE'
+      });
+    } else if (error.code === '22P02') {
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the transaction amount and values.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    res.status(500).json({
+      error: 'System error: Unable to link transaction. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   }
 });
 
@@ -911,7 +1033,35 @@ app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error closing cash drawer:', error);
-    res.status(500).json({ error: 'Failed to close cash drawer' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23514') {
+      return res.status(400).json({
+        error: 'Invalid closing balance. The value does not meet the required constraints.',
+        errorType: 'CONSTRAINT_VIOLATION'
+      });
+    } else if (error.code === '22P02') {
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the actual balance value.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === '42883') {
+      // Function does not exist
+      return res.status(500).json({
+        error: 'Database configuration error: Expected balance calculation function is missing. Please contact support.',
+        errorType: 'CONFIGURATION_ERROR'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    res.status(500).json({
+      error: 'System error: Unable to close cash drawer. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   }
 });
 
@@ -942,7 +1092,29 @@ app.put('/api/cash-drawer/:sessionId/reconcile', async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error reconciling cash drawer:', error);
-    res.status(500).json({ error: 'Failed to reconcile cash drawer' });
+
+    // Provide specific error messages based on error type
+    if (error.code === '23503') {
+      return res.status(400).json({
+        error: 'Invalid employee reference. The reconciling employee could not be verified.',
+        errorType: 'INVALID_REFERENCE'
+      });
+    } else if (error.code === '22P02') {
+      return res.status(400).json({
+        error: 'Invalid input provided. Please check the values and try again.',
+        errorType: 'INVALID_INPUT'
+      });
+    } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        error: 'Unable to connect to the database. Please try again or contact support.',
+        errorType: 'CONNECTION_ERROR'
+      });
+    }
+
+    res.status(500).json({
+      error: 'System error: Unable to reconcile drawer. Please try again or contact support if the problem persists.',
+      errorType: 'SYSTEM_ERROR'
+    });
   }
 });
 
@@ -3752,7 +3924,7 @@ app.get('/api/pawn-ticket', async (req, res) => {
 app.post('/api/pawn-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, frequency_days, due_date } = req.body;
+    const { pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date } = req.body;
 
     // Validate required fields
     if (!pawn_ticket_id) {
@@ -3785,8 +3957,8 @@ app.post('/api/pawn-ticket', async (req, res) => {
 
     // Insert new pawn_ticket record with pawn config values frozen at time of creation
     const insertQuery = `
-      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, frequency_days, due_date)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
     `;
 
@@ -3796,6 +3968,7 @@ app.post('/api/pawn-ticket', async (req, res) => {
       item_id || null,
       term_days || 90,
       interest_rate || 2.9,
+      insurance_rate || 1.0,
       frequency_days || 30,
       due_date || null
     ]);
@@ -3827,6 +4000,7 @@ app.get('/api/pawn-transactions', async (req, res) => {
         pt.created_at as pawn_created_at,
         pt.term_days,
         pt.interest_rate,
+        pt.insurance_rate,
         pt.frequency_days,
         pt.due_date,
         t.transaction_date,
@@ -4659,8 +4833,8 @@ app.get('/api/customers', async (req, res) => {
       created_from,
       created_to,
       id_type,
-      sort_by = 'created_at',
-      sort_order = 'desc'
+      sort_by = 'last_name',
+      sort_order = 'asc'
     } = req.query;
 
     // Calculate offset
@@ -4717,8 +4891,20 @@ app.get('/api/customers', async (req, res) => {
 
     // Validate sort_by to prevent SQL injection
     const allowedSortColumns = ['created_at', 'first_name', 'last_name', 'email', 'status', 'risk_level'];
-    const sortColumn = allowedSortColumns.includes(sort_by) ? sort_by : 'created_at';
+    const sortColumn = allowedSortColumns.includes(sort_by) ? sort_by : 'last_name';
     const sortDirection = sort_order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    // Build ORDER BY clause - add secondary sort for name columns
+    let orderByClause;
+    if (sortColumn === 'last_name') {
+      // Sort by last_name, then first_name (e.g., "Apple, Joe" before "Smith, Barb" before "Smith, Bob")
+      orderByClause = `last_name ${sortDirection}, first_name ${sortDirection}`;
+    } else if (sortColumn === 'first_name') {
+      // Sort by first_name, then last_name
+      orderByClause = `first_name ${sortDirection}, last_name ${sortDirection}`;
+    } else {
+      orderByClause = `${sortColumn} ${sortDirection}`;
+    }
 
     // Get total count
     const countQuery = `SELECT COUNT(*) as total FROM customers ${whereClause}`;
@@ -4739,7 +4925,7 @@ app.get('/api/customers', async (req, res) => {
         created_at, updated_at
       FROM customers
       ${whereClause}
-      ORDER BY ${sortColumn} ${sortDirection}
+      ORDER BY ${orderByClause}
       LIMIT $${paramCount} OFFSET $${paramCount + 1}
     `;
     params.push(parseInt(limit), offset);
@@ -4775,7 +4961,7 @@ app.get('/api/customers/search', async (req, res) => {
       // General search - search across all fields with OR
       const searchTerm = first_name.toLowerCase();
       const query = `
-        SELECT id, first_name, last_name, email, phone, status
+        SELECT id, first_name, last_name, email, phone, status, tax_exempt
         FROM customers
         WHERE LOWER(first_name) LIKE $1
            OR LOWER(last_name) LIKE $1
@@ -4800,7 +4986,7 @@ app.get('/api/customers/search', async (req, res) => {
     // Original logic for specific field searches (AND logic)
     // Return all customer fields including images for the search dialog
     let query = `SELECT
-      id, first_name, last_name, email, phone, status,
+      id, first_name, last_name, email, phone, status, tax_exempt,
       TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth,
       id_number, image, id_image_front, id_image_back
       FROM customers WHERE 1=1`;
@@ -4841,7 +5027,62 @@ app.get('/api/customers/search', async (req, res) => {
     params.push(limit);
 
     const result = await client.query(query, params);
-    res.json(result.rows);
+    const exactMatches = result.rows;
+    const exactIds = new Set(exactMatches.map(c => c.id));
+
+    // Always run fuzzy search to find similar matches (not just when no exact matches)
+    let similarMatches = [];
+    if (first_name || last_name || phone || id_number) {
+      let fuzzyQuery = `SELECT
+        id, first_name, last_name, email, phone, status, tax_exempt,
+        TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth,
+        id_number, image, id_image_front, id_image_back
+        FROM customers WHERE `;
+      const fuzzyConditions = [];
+      const fuzzyParams = [];
+      let fuzzyParamCount = 1;
+
+      if (first_name) {
+        // Match partial names, soundex-like matching (first or last name contains the search)
+        fuzzyConditions.push(`(LOWER(first_name) LIKE $${fuzzyParamCount} OR LOWER(last_name) LIKE $${fuzzyParamCount})`);
+        fuzzyParams.push(`%${first_name.toLowerCase()}%`);
+        fuzzyParamCount++;
+      }
+
+      if (last_name) {
+        fuzzyConditions.push(`(LOWER(last_name) LIKE $${fuzzyParamCount} OR LOWER(first_name) LIKE $${fuzzyParamCount})`);
+        fuzzyParams.push(`%${last_name.toLowerCase()}%`);
+        fuzzyParamCount++;
+      }
+
+      if (id_number) {
+        fuzzyConditions.push(`CAST(id_number AS TEXT) ILIKE $${fuzzyParamCount}`);
+        fuzzyParams.push(`%${id_number}%`);
+        fuzzyParamCount++;
+      }
+
+      if (phone) {
+        // Remove non-digits for phone matching
+        const phoneDigits = phone.replace(/\D/g, '');
+        fuzzyConditions.push(`REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '(', '') LIKE $${fuzzyParamCount}`);
+        fuzzyParams.push(`%${phoneDigits}%`);
+        fuzzyParamCount++;
+      }
+
+      if (fuzzyConditions.length > 0) {
+        fuzzyQuery += fuzzyConditions.join(' OR ');
+        fuzzyQuery += ` ORDER BY created_at DESC LIMIT $${fuzzyParamCount}`;
+        fuzzyParams.push(limit);
+
+        const fuzzyResult = await client.query(fuzzyQuery, fuzzyParams);
+        // Filter out exact matches to avoid duplicates
+        similarMatches = fuzzyResult.rows.filter(c => !exactIds.has(c.id));
+      }
+    }
+
+    // Combine results: exact matches first, then similar matches
+    const combinedResults = [...exactMatches, ...similarMatches].slice(0, limit);
+    res.json(combinedResults);
   } catch (err) {
     console.error('Error searching customers:', err);
     res.status(500).json({ error: 'Failed to search customers' });
@@ -4878,7 +5119,10 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
 
     // Convert tax_exempt string to boolean (FormData sends "true"/"false" as strings)
     const taxExemptBool = tax_exempt === 'true' || tax_exempt === true;
-    
+
+    // Convert empty email to null to avoid unique constraint issues
+    const emailValue = email && email.trim() ? email.trim() : null;
+
     // Handle multiple image uploads
     let image = null;
     let id_image_front = null;
@@ -4911,7 +5155,7 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
         image, id_image_front, id_image_back, tax_exempt)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
       RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
-      [first_name, last_name, email, phone || '',
+      [first_name, last_name, emailValue, phone || '',
        address_line1, address_line2, city, state, postal_code, country,
        id_type, id_number, id_expiry_date || null,
        date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null,
@@ -4921,7 +5165,15 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
   } catch (err) {
     console.error('Error creating customer:', err);
     if (err.code === '23505') { // Unique violation
-      res.status(400).json({ error: 'Email already exists' });
+      // Check which field caused the violation
+      const detail = err.detail || '';
+      if (detail.includes('email')) {
+        res.status(400).json({ error: 'A customer with this email already exists' });
+      } else if (detail.includes('id_number')) {
+        res.status(400).json({ error: 'A customer with this ID number already exists' });
+      } else {
+        res.status(400).json({ error: 'A customer with these details already exists' });
+      }
     } else {
       res.status(500).json({ error: 'Failed to create customer' });
     }
@@ -4940,6 +5192,9 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
 
     // Convert tax_exempt string to boolean (FormData sends "true"/"false" as strings)
     const taxExemptBool = tax_exempt === 'true' || tax_exempt === true;
+
+    // Convert empty email to null to avoid unique constraint issues
+    const emailValue = email && email.trim() ? email.trim() : null;
 
     let query, values;
     
@@ -5003,7 +5258,7 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
     );
 
     updateValues.push(
-      first_name, last_name, email, phone,
+      first_name, last_name, emailValue, phone,
       address_line1, address_line2, city, state, postal_code, country,
       id_type, id_number, id_expiry_date || null,
       date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null,
@@ -5048,7 +5303,15 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
   } catch (err) {
     console.error('Error updating customer:', err);
     if (err.code === '23505') {
-      res.status(400).json({ error: 'Email already exists' });
+      // Check which field caused the violation
+      const detail = err.detail || '';
+      if (detail.includes('email')) {
+        res.status(400).json({ error: 'A customer with this email already exists' });
+      } else if (detail.includes('id_number')) {
+        res.status(400).json({ error: 'A customer with this ID number already exists' });
+      } else {
+        res.status(400).json({ error: 'A customer with these details already exists' });
+      }
     } else {
       res.status(500).json({ error: 'Failed to update customer' });
     }

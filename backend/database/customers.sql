@@ -73,3 +73,6 @@ ALTER TABLE customers ALTER COLUMN id_number DROP NOT NULL;
 -- Add tax_exempt column for customers who are tax exempt
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_exempt BOOLEAN DEFAULT FALSE;
 COMMENT ON COLUMN customers.tax_exempt IS 'Whether the customer is exempt from sales tax';
+
+-- Fix sequence after data migration (reset to max id + 1)
+SELECT setval('customers_id_seq', COALESCE((SELECT MAX(id) FROM customers), 0) + 1, false);

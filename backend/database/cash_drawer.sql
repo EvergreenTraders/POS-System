@@ -422,3 +422,6 @@ COMMENT ON COLUMN discrepancy_threshold.threshold_amount IS 'Maximum acceptable 
 INSERT INTO discrepancy_threshold (threshold_amount)
 SELECT 0.00
 WHERE NOT EXISTS (SELECT 1 FROM discrepancy_threshold LIMIT 1);
+
+-- Fix sequence after data migration (reset to max id + 1)
+SELECT setval('cash_drawer_sessions_session_id_seq', COALESCE((SELECT MAX(session_id) FROM cash_drawer_sessions), 0) + 1, false);

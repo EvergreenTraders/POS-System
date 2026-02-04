@@ -138,17 +138,8 @@ const CustomerTicket = () => {
       const data = await response.json();
       
       setSearchResults(data);
-      
-      if (data.length === 0) {
-        showSnackbar('No customers found. You can register a new customer.', 'info');
-      } else if (data.length === 1) {
-        // If only one customer found, select them automatically
-        handleSelectCustomer(data[0]);
-      } else {
-        // If multiple customers, open dialog
-        setOpenSearchDialog(true);
-        setSelectedSearchIdx(0); // auto-select first
-      }
+      setOpenSearchDialog(true);
+      setSelectedSearchIdx(data.length > 0 ? 0 : -1);
     } catch (error) {
       showSnackbar(`Error searching customers: ${error.message}`, 'error');
     } finally {
@@ -538,6 +529,28 @@ const CustomerTicket = () => {
   // Reload customer data when returning from customer editor
   React.useEffect(() => {
     const reloadCustomer = async () => {
+      // Handle new customer created from CustomerEditor
+      if (location.state?.newCustomer) {
+        const newCustomer = location.state.newCustomer;
+        const formattedCustomer = {
+          ...newCustomer,
+          name: `${newCustomer.first_name || ''} ${newCustomer.last_name || ''}`.trim(),
+          image: newCustomer.image && typeof newCustomer.image === 'object' && newCustomer.image.type === 'Buffer'
+            ? bufferToDataUrl(newCustomer.image)
+            : newCustomer.image
+        };
+
+        setCustomer(formattedCustomer);
+        sessionStorage.setItem('selectedCustomer', JSON.stringify(formattedCustomer));
+        setShowLookupForm(false);
+        showSnackbar('New customer registered successfully', 'success');
+
+        // Clear the location state to prevent reprocessing
+        window.history.replaceState({}, document.title);
+        return;
+      }
+
+      // Handle existing customer updated
       if (location.state?.customerUpdated && customer?.id) {
         try {
           const response = await fetch(`${config.apiUrl}/customers/${customer.id}`, {
@@ -567,7 +580,7 @@ const CustomerTicket = () => {
     };
 
     reloadCustomer();
-  }, [location.state?.customerUpdated]);
+  }, [location.state?.customerUpdated, location.state?.newCustomer]);
 
   // State for convert dropdown menu
   const [convertMenuAnchor, setConvertMenuAnchor] = React.useState(null);
@@ -1899,6 +1912,86 @@ const CustomerTicket = () => {
         }
         return item;
       }));
+    } else if (type === 'redeem') {
+      // For redeem items, auto-fill when pawnTicketId is entered
+      if (field === 'pawnTicketId' && value) {
+        try {
+          const token = localStorage.getItem('token');
+          const response = await fetch(`${config.apiUrl}/pawn-transactions`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          if (response.ok) {
+            const pawnTransactions = await response.json();
+            const pawnData = pawnTransactions.find(p => p.pawn_ticket_id === value);
+
+            if (pawnData) {
+              // Found matching pawn ticket, auto-fill all fields
+              const principalAmount = parseFloat(pawnData.item_price) || 0;
+              // Use pawn ticket's stored values, with fallbacks to current config
+              const termDaysValue = parseFloat(pawnData.term_days) || 90;
+              const frequency = parseFloat(pawnData.frequency_days) || frequencyDays || 30;
+              const rate = parseFloat(pawnData.interest_rate) || interestRate || 2.9;
+              const insuranceRateValue = parseFloat(pawnData.insurance_rate) || 1.0;
+
+              // Calculate number of interest periods (same formula as Pawns.js)
+              const interestPeriods = Math.ceil(termDaysValue / frequency);
+
+              // Calculate interest and insurance separately (same formula as Pawns.js)
+              const interestAmount = principalAmount * (rate / 100) * interestPeriods;
+              const insuranceFee = principalAmount * (insuranceRateValue / 100) * interestPeriods;
+              const totalAmount = principalAmount + interestAmount + insuranceFee;
+
+              // Fetch customer if available
+              if (pawnData.customer_id) {
+                try {
+                  const customerResponse = await fetch(`${config.apiUrl}/customers/${pawnData.customer_id}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                  });
+                  if (customerResponse.ok) {
+                    const customerData = await customerResponse.json();
+                    setCustomer(customerData);
+                    sessionStorage.setItem('selectedCustomer', JSON.stringify(customerData));
+                  }
+                } catch (error) {
+                  console.error('Error fetching customer:', error);
+                }
+              }
+
+              setItems(items.map(item => {
+                if (item.id === id) {
+                  return {
+                    ...item,
+                    pawnTicketId: value,
+                    description: pawnData.item_description || pawnData.item_id || '',
+                    principal: principalAmount.toFixed(2),
+                    interest: (interestAmount + insuranceFee).toFixed(2),
+                    totalAmount: totalAmount.toFixed(2),
+                    item_id: pawnData.item_id,
+                    location: pawnData.location || '',
+                    images: pawnData.images || []
+                  };
+                }
+                return item;
+              }));
+
+              showSnackbar('Pawn ticket found and fields auto-filled', 'success');
+              return;
+            } else {
+              showSnackbar('Pawn ticket not found', 'warning');
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching pawn data:', error);
+          showSnackbar('Error fetching pawn data', 'error');
+        }
+
+        // If pawn not found or error, just update the field
+        setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
+        return;
+      }
+
+      setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
     } else {
       setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
     }
@@ -3260,7 +3353,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3439,7 +3533,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3558,6 +3653,31 @@ const CustomerTicket = () => {
   };
   
   const handleCheckout = () => {
+    // Validate customer is selected
+    if (!customer) {
+      setSnackbarMessage({
+        open: true,
+        message: 'Please select a customer before proceeding to checkout',
+        severity: 'error'
+      });
+      return;
+    }
+
+    // Validate customer has all required fields
+    const isValid = validateCustomerFields();
+    if (!isValid) {
+      const errorMessage = customerValidationErrors.length > 0
+        ? `Cannot proceed: Missing required customer fields: ${customerValidationErrors.join(', ')}`
+        : 'Cannot proceed: Customer is missing required fields';
+
+      setSnackbarMessage({
+        open: true,
+        message: errorMessage,
+        severity: 'error'
+      });
+      return;
+    }
+
     // Helper function to generate buyTicketId for a transaction type
     const generateBuyTicketId = (transactionType) => {
       let ticketPrefix;
@@ -3599,7 +3719,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3625,7 +3746,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3651,7 +3773,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3677,7 +3800,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3703,7 +3827,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3729,7 +3854,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3755,7 +3881,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3781,7 +3908,8 @@ const CustomerTicket = () => {
             last_name: customer.last_name,
             name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
             phone: customer.phone || 'N/A',
-            email: customer.email || 'N/A'
+            email: customer.email || 'N/A',
+            tax_exempt: customer.tax_exempt || false
           } : null,
           employee: user ? {
             id: user.id,
@@ -3978,17 +4106,17 @@ return (
                         {customer ? `${customer.first_name} ${customer.last_name}` : 'No Customer Selected'}
                       </Typography>
                         <Box sx={{ display: 'flex', gap: 1 }}>
-                          <Button 
-                            variant="outlined" 
-                            size="small" 
+                          <Button
+                            variant="outlined"
+                            size="small"
                             startIcon={<SearchIcon />}
                             onClick={() => setShowLookupForm(true)}
                           >
                             Search
                           </Button>
-                          <Button 
-                            variant="outlined" 
-                            size="small" 
+                          <Button
+                            variant="outlined"
+                            size="small"
                             startIcon={<EditIcon />}
                             onClick={handleEditCustomer}
                             disabled={!customer}
@@ -4043,6 +4171,7 @@ return (
                         label="First Name"
                         value={searchForm.first_name}
                         onChange={handleLookupInputChange}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                         size="small"
                         sx={{ width: '48%' }}
                       />
@@ -4051,6 +4180,7 @@ return (
                         label="Last Name"
                         value={searchForm.last_name}
                         onChange={handleLookupInputChange}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                         size="small"
                         sx={{ width: '48%' }}
                       />
@@ -4062,6 +4192,7 @@ return (
                       label="ID Number"
                       value={searchForm.id_number}
                       onChange={handleLookupInputChange}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                       size="small"
                       sx={{ width: '90%' }}
                     />
@@ -4072,6 +4203,7 @@ return (
                       label="Phone Number"
                       value={searchForm.phone}
                       onChange={handleLookupInputChange}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSearchCustomer()}
                       size="small"
                       sx={{ width: '90%' }}
                     />
@@ -5386,10 +5518,7 @@ return (
                                     fullWidth
                                     value={item.pawnTicketId}
                                     onChange={(e) => handleItemChange(item.id, 'pawnTicketId', e.target.value)}
-                                    InputProps={{
-                                      readOnly: true,
-                                      style: { color: 'rgba(0, 0, 0, 0.87)' }
-                                    }}
+                                    placeholder="Enter Pawn Ticket ID"
                                   />
                                 </TableCell>
                                 <TableCell>
@@ -5487,7 +5616,12 @@ return (
                   >
                     Add to Cart
                   </Button>
-                  <Button variant="contained" color="success" onClick={handleCheckout}>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={handleCheckout}
+                    disabled={!customer || customerValidationErrors.length > 0}
+                  >
                     Checkout
                   </Button>
                 </Box>
@@ -5502,9 +5636,11 @@ return (
         open={openSearchDialog}
         onClose={() => setOpenSearchDialog(false)}
         fullWidth
-        maxWidth="md"
+        maxWidth={searchResults.length > 0 ? "md" : "sm"}
       >
-        <DialogTitle>Search Results</DialogTitle>
+        <DialogTitle>
+          {searchResults.length > 0 ? 'Search Results' : 'No Customers Found'}
+        </DialogTitle>
         <DialogContent>
           {loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
@@ -5626,12 +5762,60 @@ return (
                       Select
                     </Button>
                   </Box>
+
+                  {/* Right-aligned Register New Customer button */}
+                  <Box sx={{ position: 'absolute', right: 0, top: 0 }}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      size="small"
+                      onClick={() => {
+                        setOpenSearchDialog(false);
+                        navigate('/customer-editor', {
+                          state: {
+                            returnTo: '/customer-ticket',
+                            prefillData: {
+                              first_name: searchForm.first_name || '',
+                              last_name: searchForm.last_name || '',
+                              phone: searchForm.phone || '',
+                              id_number: searchForm.id_number || ''
+                            }
+                          }
+                        });
+                      }}
+                      sx={{ minWidth: 160 }}
+                    >
+                      Register New Customer
+                    </Button>
+                  </Box>
                 </Box>
               )}
             </>
           ) : (
-            <Box sx={{ p: 2 }}>
-              <Typography>No customers found matching your search criteria.</Typography>
+            <Box sx={{ p: 2, textAlign: 'center' }}>
+              <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+                No customers found matching your search criteria.
+              </Typography>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={() => {
+                  setOpenSearchDialog(false);
+                  navigate('/customer-editor', {
+                    state: {
+                      returnTo: '/customer-ticket',
+                      prefillData: {
+                        first_name: searchForm.first_name || '',
+                        last_name: searchForm.last_name || '',
+                        phone: searchForm.phone || '',
+                        id_number: searchForm.id_number || ''
+                      }
+                    }
+                  });
+                }}
+              >
+                Register New Customer
+              </Button>
             </Box>
           )}
         </DialogContent>

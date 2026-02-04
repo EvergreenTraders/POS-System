@@ -50,6 +50,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import HistoryIcon from '@mui/icons-material/History';
 import axios from 'axios';
 import config from '../config';
+import { injectPDFScript } from '../utils/printUtils';
 import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
 
@@ -1422,12 +1423,16 @@ const Scrap = () => {
             <p>Total Cost: $${bucketItems.reduce((sum, item) => sum + parseFloat(item.item_price || item.buy_price || item.retail_price || 0), 0).toFixed(2)}</p>
           </div>
 
-          <button onclick="window.print()" style="margin-top: 20px; padding: 10px 20px; background: #1976d2; color: white; border: none; cursor: pointer;">Print</button>
+          <div class="no-print" style="margin-top: 20px;">
+            <button onclick="window.print()" style="padding: 10px 20px; background: #1976d2; color: white; border: none; cursor: pointer;">Print</button>
+          </div>
         </body>
       </html>
     `;
 
-    printWindow.document.write(printContent);
+    // Open in new tab (with PDF support for testing)
+    const pdfReadyHTML = injectPDFScript(printContent, `packing_list_${selectedBucket.bucket_name}`);
+    printWindow.document.write(pdfReadyHTML);
     printWindow.document.close();
   };
 

@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS pawn_ticket (
   status VARCHAR(20) DEFAULT 'PAWN',
   term_days INTEGER DEFAULT 90,
   interest_rate DECIMAL(5,2) DEFAULT 2.9,
+  insurance_rate DECIMAL(5,2) DEFAULT 1.0,
   frequency_days INTEGER DEFAULT 30,
   due_date DATE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS pawn_ticket (
 COMMENT ON COLUMN pawn_ticket.status IS 'Status of the pawn ticket: PAWN, REDEEMED, FORFEITED';
 COMMENT ON COLUMN pawn_ticket.term_days IS 'Pawn term in days (frozen at ticket creation)';
 COMMENT ON COLUMN pawn_ticket.interest_rate IS 'Interest rate percentage (frozen at ticket creation)';
+COMMENT ON COLUMN pawn_ticket.insurance_rate IS 'Insurance rate percentage per period (frozen at ticket creation)';
 COMMENT ON COLUMN pawn_ticket.frequency_days IS 'Payment frequency in days (frozen at ticket creation)';
 COMMENT ON COLUMN pawn_ticket.due_date IS 'Due date for this pawn ticket';
 
@@ -50,6 +52,13 @@ BEGIN
     WHERE table_name = 'pawn_ticket' AND column_name = 'due_date'
   ) THEN
     ALTER TABLE pawn_ticket ADD COLUMN due_date DATE;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'insurance_rate'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN insurance_rate DECIMAL(5,2) DEFAULT 1.0;
   END IF;
 END $$;
 
