@@ -8498,6 +8498,183 @@ setInterval(checkPawnForfeitures, 21600000);
 // Run forfeiture check on startup
 checkPawnForfeitures();
 
+// ==================== STORE SESSIONS ====================
+
+// Get current store status
+app.get('/api/store-status', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        s.session_id,
+        s.status,
+        s.opened_at,
+        s.closed_at,
+        s.opened_by,
+        e_open.first_name || ' ' || e_open.last_name AS opened_by_name,
+        s.closed_by,
+        e_close.first_name || ' ' || e_close.last_name AS closed_by_name,
+        s.opening_notes,
+        s.closing_notes
+      FROM store_sessions s
+      LEFT JOIN employees e_open ON s.opened_by = e_open.employee_id
+      LEFT JOIN employees e_close ON s.closed_by = e_close.employee_id
+      WHERE s.status = 'open'
+      ORDER BY s.opened_at DESC
+      LIMIT 1
+    `);
+
+    if (result.rows.length > 0) {
+      res.json({ status: 'open', session: result.rows[0] });
+    } else {
+      // Get last closed session for reference
+      const lastClosed = await pool.query(`
+        SELECT session_id, closed_at, closed_by,
+          e.first_name || ' ' || e.last_name AS closed_by_name
+        FROM store_sessions s
+        LEFT JOIN employees e ON s.closed_by = e.employee_id
+        WHERE s.status = 'closed'
+        ORDER BY s.closed_at DESC
+        LIMIT 1
+      `);
+      res.json({
+        status: 'closed',
+        session: null,
+        lastClosed: lastClosed.rows[0] || null
+      });
+    }
+  } catch (error) {
+    console.error('Error getting store status:', error);
+    res.status(500).json({ error: 'Failed to get store status' });
+  }
+});
+
+// Open store
+app.post('/api/store-sessions/open', async (req, res) => {
+  try {
+    const { employee_id, notes } = req.body;
+
+    if (!employee_id) {
+      return res.status(400).json({ error: 'Employee ID is required' });
+    }
+
+    // Check if store is already open
+    const existing = await pool.query(
+      "SELECT session_id FROM store_sessions WHERE status = 'open'"
+    );
+
+    if (existing.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Store is already open',
+        session_id: existing.rows[0].session_id
+      });
+    }
+
+    // Create new store session
+    const result = await pool.query(`
+      INSERT INTO store_sessions (opened_by, opening_notes, status)
+      VALUES ($1, $2, 'open')
+      RETURNING *
+    `, [employee_id, notes || null]);
+
+    // Get employee name for response
+    const employee = await pool.query(
+      'SELECT first_name, last_name FROM employees WHERE employee_id = $1',
+      [employee_id]
+    );
+
+    const session = result.rows[0];
+    session.opened_by_name = employee.rows[0]
+      ? `${employee.rows[0].first_name} ${employee.rows[0].last_name}`
+      : null;
+
+    res.status(201).json({
+      message: 'Store opened successfully',
+      session
+    });
+  } catch (error) {
+    console.error('Error opening store:', error);
+    res.status(500).json({ error: 'Failed to open store' });
+  }
+});
+
+// Close store
+app.post('/api/store-sessions/close', async (req, res) => {
+  try {
+    const { employee_id, notes } = req.body;
+
+    if (!employee_id) {
+      return res.status(400).json({ error: 'Employee ID is required' });
+    }
+
+    // Find open session
+    const existing = await pool.query(
+      "SELECT session_id FROM store_sessions WHERE status = 'open'"
+    );
+
+    if (existing.rows.length === 0) {
+      return res.status(400).json({ error: 'Store is not open' });
+    }
+
+    // Close the session
+    const result = await pool.query(`
+      UPDATE store_sessions
+      SET status = 'closed', closed_by = $1, closing_notes = $2
+      WHERE session_id = $3
+      RETURNING *
+    `, [employee_id, notes || null, existing.rows[0].session_id]);
+
+    // Get employee name for response
+    const employee = await pool.query(
+      'SELECT first_name, last_name FROM employees WHERE employee_id = $1',
+      [employee_id]
+    );
+
+    const session = result.rows[0];
+    session.closed_by_name = employee.rows[0]
+      ? `${employee.rows[0].first_name} ${employee.rows[0].last_name}`
+      : null;
+
+    res.json({
+      message: 'Store closed successfully',
+      session
+    });
+  } catch (error) {
+    console.error('Error closing store:', error);
+    res.status(500).json({ error: 'Failed to close store' });
+  }
+});
+
+// Get store session history
+app.get('/api/store-sessions', async (req, res) => {
+  try {
+    const { limit = 30 } = req.query;
+
+    const result = await pool.query(`
+      SELECT
+        s.session_id,
+        s.status,
+        s.opened_at,
+        s.closed_at,
+        s.opened_by,
+        e_open.first_name || ' ' || e_open.last_name AS opened_by_name,
+        s.closed_by,
+        e_close.first_name || ' ' || e_close.last_name AS closed_by_name,
+        s.opening_notes,
+        s.closing_notes
+      FROM store_sessions s
+      LEFT JOIN employees e_open ON s.opened_by = e_open.employee_id
+      LEFT JOIN employees e_close ON s.closed_by = e_close.employee_id
+      ORDER BY s.opened_at DESC
+      LIMIT $1
+    `, [parseInt(limit)]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error getting store sessions:', error);
+    res.status(500).json({ error: 'Failed to get store sessions' });
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);

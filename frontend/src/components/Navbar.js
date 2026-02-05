@@ -38,6 +38,8 @@ function Navbar() {
   const [timezone, setTimezone] = useState(() => {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
   });
+  const [businessName, setBusinessName] = useState('POS System');
+  const [storeStatus, setStoreStatus] = useState('closed');
   const { cartItems } = useCart();
   const { user, logout, lockScreen } = useAuth();
   const { workingDate, isWorkingDateEnabled } = useWorkingDate();
@@ -45,9 +47,22 @@ function Navbar() {
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
 
-  // Get timezone from business settings
+  // Fetch store status
+  const fetchStoreStatus = async () => {
+    try {
+      const response = await fetch(`${config.apiUrl}/store-status`);
+      if (response.ok) {
+        const data = await response.json();
+        setStoreStatus(data.status);
+      }
+    } catch (error) {
+      console.error('Failed to fetch store status:', error);
+    }
+  };
+
+  // Get timezone and business name from business settings
   useEffect(() => {
-    const fetchTimezone = async () => {
+    const fetchBusinessInfo = async () => {
       try {
         const response = await fetch(`${config.apiUrl}/business-info`);
         if (response.ok) {
@@ -55,24 +70,38 @@ function Navbar() {
           if (data.timezone) {
             setTimezone(data.timezone);
           }
+          if (data.business_name) {
+            setBusinessName(data.business_name);
+          }
         }
       } catch (error) {
-        // If API fails, keep browser timezone
-        console.error('Failed to fetch business timezone:', error);
+        // If API fails, keep defaults
+        console.error('Failed to fetch business info:', error);
       }
     };
-    fetchTimezone();
+    fetchBusinessInfo();
+    fetchStoreStatus();
 
     // Listen for timezone updates from SystemConfig
     const handleBusinessSettingsUpdate = (event) => {
       if (event.detail?.timezone) {
         setTimezone(event.detail.timezone);
       }
+      if (event.detail?.businessName) {
+        setBusinessName(event.detail.businessName);
+      }
     };
     window.addEventListener('businessSettingsUpdated', handleBusinessSettingsUpdate);
 
+    // Listen for store status changes
+    const handleStoreStatusChange = () => {
+      fetchStoreStatus();
+    };
+    window.addEventListener('storeStatusChanged', handleStoreStatusChange);
+
     return () => {
       window.removeEventListener('businessSettingsUpdated', handleBusinessSettingsUpdate);
+      window.removeEventListener('storeStatusChanged', handleStoreStatusChange);
     };
   }, []);
 
@@ -147,11 +176,30 @@ function Navbar() {
             variant="h6"
             sx={{
               cursor: 'pointer',
-              mr: 2
+              mr: 2,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              '&:hover': { opacity: 0.85 }
             }}
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/system-config/settings')}
           >
-            POS System
+            {businessName}
+            <Box
+              component="span"
+              sx={{
+                fontSize: '0.75rem',
+                fontWeight: 'bold',
+                px: 1,
+                py: 0.25,
+                borderRadius: 1,
+                bgcolor: storeStatus === 'open' ? 'success.main' : 'error.main',
+                color: 'white',
+                letterSpacing: '0.5px'
+              }}
+            >
+              {storeStatus === 'open' ? 'OPEN' : 'CLOSED'}
+            </Box>
           </Typography>
 
           {/* Analog Clock Display */}

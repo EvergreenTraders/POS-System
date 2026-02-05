@@ -27,9 +27,11 @@ import {
   FormControl,
   InputLabel,
   IconButton,
-  Avatar
+  Avatar,
+  Chip,
+  CircularProgress
 } from '@mui/material';
-import { CloudUpload as UploadIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import { CloudUpload as UploadIcon, Delete as DeleteIcon, Store as StoreIcon } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
 import config from '../config';
@@ -188,6 +190,9 @@ function SystemConfig() {
   const [isIndividualDenominationsSafe, setIsIndividualDenominationsSafe] = useState(false);
   const [minClose, setMinClose] = useState(0);
   const [maxClose, setMaxClose] = useState(0);
+  // Store status
+  const [storeStatus, setStoreStatus] = useState({ status: 'closed', session: null, lastClosed: null });
+  const [storeStatusLoading, setStoreStatusLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [customerColumns, setCustomerColumns] = useState([]);
   const [itemAttributes, setItemAttributes] = useState([]);
@@ -197,6 +202,51 @@ function SystemConfig() {
   const [selectedCustomerColumns, setSelectedCustomerColumns] = useState({});
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [customerColumnPreferences, setCustomerColumnPreferences] = useState({});
+
+  const fetchStoreStatus = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/store-status`);
+      setStoreStatus(response.data);
+    } catch (error) {
+      console.error('Error fetching store status:', error);
+    }
+  };
+
+  const handleOpenStore = async () => {
+    setStoreStatusLoading(true);
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      await axios.post(`${API_BASE_URL}/store-sessions/open`, {
+        employee_id: user.id || user.employee_id
+      });
+      await fetchStoreStatus();
+      // Notify navbar to update
+      window.dispatchEvent(new Event('storeStatusChanged'));
+      setSnackbar({ open: true, message: 'Store opened successfully', severity: 'success' });
+    } catch (error) {
+      setSnackbar({ open: true, message: error.response?.data?.error || 'Failed to open store', severity: 'error' });
+    } finally {
+      setStoreStatusLoading(false);
+    }
+  };
+
+  const handleCloseStore = async () => {
+    setStoreStatusLoading(true);
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      await axios.post(`${API_BASE_URL}/store-sessions/close`, {
+        employee_id: user.id || user.employee_id
+      });
+      await fetchStoreStatus();
+      // Notify navbar to update
+      window.dispatchEvent(new Event('storeStatusChanged'));
+      setSnackbar({ open: true, message: 'Store closed successfully', severity: 'success' });
+    } catch (error) {
+      setSnackbar({ open: true, message: error.response?.data?.error || 'Failed to close store', severity: 'error' });
+    } finally {
+      setStoreStatusLoading(false);
+    }
+  };
 
   const fetchDrawerConfig = async () => {
     try {
@@ -668,6 +718,7 @@ function SystemConfig() {
     fetchAuthorizationTemplate();
     fetchReceiptConfig();
     fetchPawnConfig();
+    fetchStoreStatus();
   }, []);
   
   const handleTabChange = (event, newValue) => {
@@ -776,9 +827,9 @@ function SystemConfig() {
         severity: 'success'
       });
 
-      // Dispatch event to notify Navbar of timezone change
+      // Dispatch event to notify Navbar of business settings change
       window.dispatchEvent(new CustomEvent('businessSettingsUpdated', {
-        detail: { timezone: generalSettings.timezone }
+        detail: { timezone: generalSettings.timezone, businessName: generalSettings.businessName }
       }));
 
       // Clear logo file after successful save
@@ -1898,6 +1949,59 @@ function SystemConfig() {
               >
                 Save Business Information
               </Button>
+            </Box>
+          </ConfigSection>
+
+          <ConfigSection id="store-status-section">
+            <Typography variant="h6" gutterBottom>
+              <StoreIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+              Store Status
+            </Typography>
+            <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                <Typography variant="body1">
+                  Current Status:
+                </Typography>
+                <Chip
+                  label={storeStatus.status === 'open' ? 'OPEN' : 'CLOSED'}
+                  color={storeStatus.status === 'open' ? 'success' : 'error'}
+                  variant="filled"
+                  sx={{ fontWeight: 'bold', fontSize: '0.9rem' }}
+                />
+                {storeStatus.status === 'open' && storeStatus.session && (
+                  <Typography variant="body2" color="text.secondary">
+                    Opened by {storeStatus.session.opened_by_name} at {new Date(storeStatus.session.opened_at).toLocaleString()}
+                  </Typography>
+                )}
+                {storeStatus.status === 'closed' && storeStatus.lastClosed && (
+                  <Typography variant="body2" color="text.secondary">
+                    Last closed by {storeStatus.lastClosed.closed_by_name} at {new Date(storeStatus.lastClosed.closed_at).toLocaleString()}
+                  </Typography>
+                )}
+              </Box>
+              <Box sx={{ mt: 2 }}>
+                {storeStatus.status === 'closed' ? (
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={handleOpenStore}
+                    disabled={storeStatusLoading}
+                    startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
+                  >
+                    Open Store
+                  </Button>
+                ) : (
+                  <Button
+                    variant="contained"
+                    color="error"
+                    onClick={handleCloseStore}
+                    disabled={storeStatusLoading}
+                    startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
+                  >
+                    Close Store
+                  </Button>
+                )}
+              </Box>
             </Box>
           </ConfigSection>
 
