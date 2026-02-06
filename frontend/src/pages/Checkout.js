@@ -6,6 +6,7 @@ import { injectPDFScript } from '../utils/printUtils';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
+import { useStoreStatus } from '../context/StoreStatusContext';
 import PersonSearchIcon from '@mui/icons-material/PersonSearch';
 import {
   Container,
@@ -93,6 +94,7 @@ function Checkout() {
   const { cartItems, addToCart, selectedCustomer, setCustomer, clearCart, removeMultipleItems } = useCart();
   const { user } = useAuth();
   const { getCurrentDate } = useWorkingDate();
+  const { isStoreClosed } = useStoreStatus();
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [customerSearchDialogOpen, setCustomerSearchDialogOpen] = useState(false);
@@ -611,6 +613,11 @@ function Checkout() {
   };
 
   const handleSubmit = async (overrideAmount = null) => {
+    if (isStoreClosed) {
+      setSnackbar({ open: true, message: 'Store is closed. Transactions cannot be processed.', severity: 'error' });
+      return;
+    }
+
     // Handle fast sale customer creation
     if (selectedCustomer?.isFastSale && !selectedCustomer?.id) {
       // Validate fast sale customer data
@@ -2389,7 +2396,7 @@ function Checkout() {
                   variant="outlined"
                   startIcon={<SaveIcon />}
                   onClick={handleSaveQuote}
-                  disabled={loading}
+                  disabled={loading || isStoreClosed}
                 >
                   {loading ? 'Saving...' : 'Save as Quote'}
                 </Button>
@@ -2398,6 +2405,7 @@ function Checkout() {
                   startIcon={<PaymentIcon />}
                   onClick={handleSubmit}
                   color="primary"
+                  disabled={isStoreClosed}
                 >
                   {parseFloat(paymentDetails.cashAmount || 0) >= Math.abs(remainingAmount)
                     ? 'Process Payment'

@@ -22,6 +22,7 @@ import {
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
+import { useStoreStatus } from '../context/StoreStatusContext';
 import { useNavigate } from 'react-router-dom';
 import Cart from './Cart';
 import config from '../config';
@@ -39,26 +40,13 @@ function Navbar() {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
   });
   const [businessName, setBusinessName] = useState('POS System');
-  const [storeStatus, setStoreStatus] = useState('closed');
   const { cartItems } = useCart();
   const { user, logout, lockScreen } = useAuth();
   const { workingDate, isWorkingDateEnabled } = useWorkingDate();
+  const { storeStatus } = useStoreStatus();
   const navigate = useNavigate();
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
-
-  // Fetch store status
-  const fetchStoreStatus = async () => {
-    try {
-      const response = await fetch(`${config.apiUrl}/store-status`);
-      if (response.ok) {
-        const data = await response.json();
-        setStoreStatus(data.status);
-      }
-    } catch (error) {
-      console.error('Failed to fetch store status:', error);
-    }
-  };
 
   // Get timezone and business name from business settings
   useEffect(() => {
@@ -80,9 +68,8 @@ function Navbar() {
       }
     };
     fetchBusinessInfo();
-    fetchStoreStatus();
 
-    // Listen for timezone updates from SystemConfig
+    // Listen for business settings updates from SystemConfig
     const handleBusinessSettingsUpdate = (event) => {
       if (event.detail?.timezone) {
         setTimezone(event.detail.timezone);
@@ -93,15 +80,8 @@ function Navbar() {
     };
     window.addEventListener('businessSettingsUpdated', handleBusinessSettingsUpdate);
 
-    // Listen for store status changes
-    const handleStoreStatusChange = () => {
-      fetchStoreStatus();
-    };
-    window.addEventListener('storeStatusChanged', handleStoreStatusChange);
-
     return () => {
       window.removeEventListener('businessSettingsUpdated', handleBusinessSettingsUpdate);
-      window.removeEventListener('storeStatusChanged', handleStoreStatusChange);
     };
   }, []);
 

@@ -217,6 +217,84 @@ pool.connect()
     console.error('Database connection error:', err.message);
   });
 
+// ==================== STORE CLOSED MIDDLEWARE ====================
+// In-memory store status cache
+let storeStatusCache = { isOpen: null, lastChecked: 0 };
+const STORE_STATUS_CACHE_TTL = 5000; // 5 seconds
+
+async function isStoreOpen() {
+  const now = Date.now();
+  if (storeStatusCache.isOpen !== null && (now - storeStatusCache.lastChecked) < STORE_STATUS_CACHE_TTL) {
+    return storeStatusCache.isOpen;
+  }
+  const result = await pool.query(
+    "SELECT session_id FROM store_sessions WHERE status = 'open' LIMIT 1"
+  );
+  storeStatusCache = { isOpen: result.rows.length > 0, lastChecked: now };
+  return storeStatusCache.isOpen;
+}
+
+// Middleware: block financial write operations when store is closed
+const storeClosedMiddleware = async (req, res, next) => {
+  // Always allow GET requests (read-only)
+  if (req.method === 'GET') return next();
+
+  // Paths always allowed regardless of store status
+  const alwaysAllowedPaths = [
+    '/api/auth/',
+    '/api/store-sessions/',
+    '/api/store-status',
+    '/api/employees',
+    '/api/customers',
+    '/api/business-info',
+    '/api/drawer-config',
+    '/api/safe-drawers-config',
+    '/api/master-safe-config',
+    '/api/cases-config',
+    '/api/discrepancy-threshold',
+    '/api/pawn-config',
+    '/api/receipt-config',
+    '/api/tax-config',
+    '/api/quote-expiration/config',
+    '/api/inventory-hold-period/config',
+    '/api/customer-preferences/',
+    '/api/diamond_estimates',
+    '/api/user_preferences',
+    '/api/live_pricing',
+    '/api/live_spot_prices',
+    '/api/spot_prices',
+    '/api/price_estimates',
+    '/api/carat-conversion',
+    '/api/attribute-config',
+    '/api/item-attributes/',
+    '/api/linked-account-authorization',
+    '/api/inventory-status',
+    '/api/migrate',
+    '/api/pawn/check-forfeitures',
+  ];
+
+  const isAllowed = alwaysAllowedPaths.some(path => req.path.startsWith(path));
+  if (isAllowed) return next();
+
+  // For all other write operations, check store status
+  try {
+    const open = await isStoreOpen();
+    if (!open) {
+      return res.status(403).json({
+        error: 'Store is currently closed. This operation is not available.',
+        code: 'STORE_CLOSED'
+      });
+    }
+    next();
+  } catch (error) {
+    console.error('Error checking store status in middleware:', error);
+    // Fail open to prevent lockout
+    next();
+  }
+};
+
+app.use(storeClosedMiddleware);
+
 // Authentication route
 app.post('/api/auth/login', async (req, res) => {
   try {
@@ -8587,6 +8665,9 @@ app.post('/api/store-sessions/open', async (req, res) => {
       ? `${employee.rows[0].first_name} ${employee.rows[0].last_name}`
       : null;
 
+    // Invalidate store status cache
+    storeStatusCache = { isOpen: null, lastChecked: 0 };
+
     res.status(201).json({
       message: 'Store opened successfully',
       session
@@ -8633,6 +8714,9 @@ app.post('/api/store-sessions/close', async (req, res) => {
     session.closed_by_name = employee.rows[0]
       ? `${employee.rows[0].first_name} ${employee.rows[0].last_name}`
       : null;
+
+    // Invalidate store status cache
+    storeStatusCache = { isOpen: null, lastChecked: 0 };
 
     res.json({
       message: 'Store closed successfully',

@@ -42,11 +42,13 @@ import {
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
+import { useStoreStatus } from '../context/StoreStatusContext';
 
 function CashDrawer() {
   const API_BASE_URL = config.apiUrl;
   const location = useLocation();
   const navigate = useNavigate();
+  const { isStoreClosed } = useStoreStatus();
 
   const [activeSession, setActiveSession] = useState(null);
   const [activeSessions, setActiveSessions] = useState([]); // All active sessions (physical, safe, and master_safe)
@@ -1038,6 +1040,7 @@ function CashDrawer() {
                       <Button
                         variant="contained"
                         color="primary"
+                        disabled={isStoreClosed}
                         onClick={async () => {
                           // If Individual Denominations mode or Open Count mode, fetch opening denominations for comparison
                           if ((isIndividualDenominations || !isBlindCount) && activeSession) {
@@ -1074,6 +1077,7 @@ function CashDrawer() {
                       <Button
                         variant="outlined"
                         startIcon={<AddIcon />}
+                        disabled={isStoreClosed}
                         onClick={() => setAdjustmentDialog(true)}
                       >
                         Add Adjustment
@@ -1091,6 +1095,7 @@ function CashDrawer() {
                           variant="contained"
                           color="primary"
                           startIcon={<AddIcon />}
+                          disabled={isStoreClosed}
                           onClick={() => {
                             setDrawerTypeFilter('physical');
                             setOpenDrawerDialog(true);
@@ -1105,6 +1110,7 @@ function CashDrawer() {
                           variant="outlined"
                           color="secondary"
                           startIcon={<AddIcon />}
+                          disabled={isStoreClosed}
                           onClick={() => {
                             setDrawerTypeFilter('safe');
                             setOpenDrawerDialog(true);
@@ -1119,6 +1125,7 @@ function CashDrawer() {
                           variant="outlined"
                           color="secondary"
                           startIcon={<AddIcon />}
+                          disabled={isStoreClosed}
                           onClick={() => {
                             setDrawerTypeFilter('master_safe');
                             setOpenDrawerDialog(true);
@@ -1147,6 +1154,7 @@ function CashDrawer() {
                   variant="contained"
                   color="primary"
                   startIcon={<AddIcon />}
+                  disabled={isStoreClosed}
                   onClick={() => {
                     setDrawerTypeFilter('physical');
                     setOpenDrawerDialog(true);
@@ -1159,6 +1167,7 @@ function CashDrawer() {
                     variant="outlined"
                     color="primary"
                     startIcon={<AddIcon />}
+                    disabled={isStoreClosed}
                     onClick={() => {
                       setDrawerTypeFilter('safe');
                       setOpenDrawerDialog(true);
@@ -1172,6 +1181,7 @@ function CashDrawer() {
                     variant="outlined"
                     color="primary"
                     startIcon={<AddIcon />}
+                    disabled={isStoreClosed}
                     onClick={() => {
                       setDrawerTypeFilter('master_safe');
                       setOpenDrawerDialog(true);
@@ -1317,7 +1327,7 @@ function CashDrawer() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenDrawerDialog(false)}>Cancel</Button>
-          <Button onClick={handleOpenDrawer} variant="contained" color="primary">
+          <Button onClick={handleOpenDrawer} variant="contained" color="primary" disabled={isStoreClosed}>
             Open Drawer
           </Button>
         </DialogActions>
@@ -1492,7 +1502,7 @@ function CashDrawer() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCloseDrawerDialog(false)}>Cancel</Button>
-          <Button onClick={() => handleCloseDrawer(false)} variant="contained" color="primary">
+          <Button onClick={() => handleCloseDrawer(false)} variant="contained" color="primary" disabled={isStoreClosed}>
             Close Drawer
           </Button>
         </DialogActions>
@@ -1545,6 +1555,7 @@ function CashDrawer() {
             }}
             variant="contained"
             color="warning"
+            disabled={isStoreClosed}
           >
             Request Manager Approval
           </Button>
@@ -1623,7 +1634,7 @@ function CashDrawer() {
             onClick={handleManagerApproval}
             variant="contained"
             color="primary"
-            disabled={managerApprovalLoading}
+            disabled={managerApprovalLoading || isStoreClosed}
           >
             {managerApprovalLoading ? 'Verifying...' : 'Approve & Close'}
           </Button>
@@ -1754,7 +1765,7 @@ function CashDrawer() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setAdjustmentDialog(false)}>Cancel</Button>
-          <Button onClick={handleAddAdjustment} variant="contained" color="primary">
+          <Button onClick={handleAddAdjustment} variant="contained" color="primary" disabled={isStoreClosed}>
             Add Adjustment
           </Button>
         </DialogActions>
