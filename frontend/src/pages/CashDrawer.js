@@ -31,6 +31,8 @@ import {
   MenuItem,
   Tab,
   Tabs,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import {
   AttachMoney as MoneyIcon,
@@ -39,6 +41,7 @@ import {
   Add as AddIcon,
   History as HistoryIcon,
   AccountBalance as BankIcon,
+  Store as StoreIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -61,6 +64,13 @@ function CashDrawer() {
   const [history, setHistory] = useState([]);
   const [sessionDetails, setSessionDetails] = useState(null);
   const [overviewData, setOverviewData] = useState({ safes: [], drawers: [] });
+
+  // Store status states
+  const [storeStatus, setStoreStatus] = useState({ status: 'closed', session: null, lastClosed: null });
+  const [storeStatusLoading, setStoreStatusLoading] = useState(false);
+  const [closeStoreDialogOpen, setCloseStoreDialogOpen] = useState(false);
+  const [isBackupComputer, setIsBackupComputer] = useState(false);
+  const [clockedInEmployees, setClockedInEmployees] = useState([]);
 
   // Dialog states
   const [openDrawerDialog, setOpenDrawerDialog] = useState(false);
@@ -125,6 +135,7 @@ function CashDrawer() {
     fetchMinMaxClose();
     fetchBlindCountPreference();
     fetchOverview();
+    fetchStoreStatus();
     checkActiveSession();
     fetchHistory();
   }, []);
@@ -308,6 +319,92 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching drawer overview:', err);
       setOverviewData({ safes: [], drawers: [] });
+    }
+  };
+
+  const fetchStoreStatus = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/store-sessions/status`);
+      setStoreStatus(response.data);
+    } catch (error) {
+      console.error('Error fetching store status:', error);
+    }
+  };
+
+  const handleOpenStore = async () => {
+    setStoreStatusLoading(true);
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      await axios.post(`${API_BASE_URL}/store-sessions/open`, {
+        employee_id: user.id || user.employee_id
+      });
+      await fetchStoreStatus();
+      // Notify navbar to update
+      window.dispatchEvent(new Event('storeStatusChanged'));
+      setSnackbar({ open: true, message: 'Store opened successfully', severity: 'success' });
+    } catch (error) {
+      console.error('Error opening store:', error);
+      setSnackbar({ open: true, message: error.response?.data?.error || 'Failed to open store', severity: 'error' });
+    } finally {
+      setStoreStatusLoading(false);
+    }
+  };
+
+  const handleCloseStoreClick = async () => {
+    setStoreStatusLoading(true);
+    try {
+      // First check for open drawers/safes
+      await axios.get(`${API_BASE_URL}/store-sessions/check-open-drawers`);
+
+      // Check for clocked-in employees
+      const clockedInResponse = await axios.get(`${API_BASE_URL}/employee-sessions/clocked-in`);
+      setClockedInEmployees(clockedInResponse.data || []);
+
+      // Broadcast notification to clocked-in employees
+      if (clockedInResponse.data && clockedInResponse.data.length > 0) {
+        console.log('Broadcasting store closing notification to', clockedInResponse.data.length, 'clocked-in employees');
+        await axios.post(`${API_BASE_URL}/employee-sessions/notify-closing`);
+      }
+
+      setCloseStoreDialogOpen(true);
+    } catch (error) {
+      console.error('Error checking store closure prerequisites:', error);
+      if (error.response?.data?.error) {
+        setSnackbar({
+          open: true,
+          message: error.response.data.error,
+          severity: 'error'
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: 'Failed to check store closure prerequisites',
+          severity: 'error'
+        });
+      }
+    } finally {
+      setStoreStatusLoading(false);
+    }
+  };
+
+  const handleCloseStore = async () => {
+    setCloseStoreDialogOpen(false);
+    setStoreStatusLoading(true);
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      await axios.post(`${API_BASE_URL}/store-sessions/close`, {
+        employee_id: user.id || user.employee_id
+      });
+      await fetchStoreStatus();
+      // Notify navbar to update
+      window.dispatchEvent(new Event('storeStatusChanged'));
+      setSnackbar({ open: true, message: 'Store closed successfully', severity: 'success' });
+      setIsBackupComputer(false);
+    } catch (error) {
+      console.error('Error closing store:', error);
+      setSnackbar({ open: true, message: error.response?.data?.error || 'Failed to close store', severity: 'error' });
+    } finally {
+      setStoreStatusLoading(false);
     }
   };
 
@@ -939,6 +1036,62 @@ function CashDrawer() {
       {/* Overview Section */}
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" mb={2}>Drawer & Safe Overview</Typography>
+
+        {/* Store Status Section */}
+        <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+            <StoreIcon sx={{ color: 'text.secondary' }} />
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+              Store Status
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 2 }}>
+            <Typography variant="body2">
+              Current Status:
+            </Typography>
+            <Chip
+              label={storeStatus.status === 'open' ? 'OPEN' : 'CLOSED'}
+              color={storeStatus.status === 'open' ? 'success' : 'error'}
+              variant="filled"
+              sx={{ fontWeight: 'bold' }}
+            />
+            {storeStatus.status === 'open' && storeStatus.session && (
+              <Typography variant="body2" color="text.secondary">
+                Opened by {storeStatus.session.opened_by_name} at {new Date(storeStatus.session.opened_at).toLocaleString()}
+              </Typography>
+            )}
+            {storeStatus.status === 'closed' && storeStatus.lastClosed && (
+              <Typography variant="body2" color="text.secondary">
+                Last closed by {storeStatus.lastClosed.closed_by_name} at {new Date(storeStatus.lastClosed.closed_at).toLocaleString()}
+              </Typography>
+            )}
+          </Box>
+          <Box>
+            {storeStatus.status === 'closed' ? (
+              <Button
+                variant="contained"
+                color="success"
+                onClick={handleOpenStore}
+                disabled={storeStatusLoading}
+                startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
+              >
+                Open Store
+              </Button>
+            ) : (
+              <Button
+                variant="contained"
+                color="error"
+                onClick={handleCloseStoreClick}
+                disabled={storeStatusLoading}
+                startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
+              >
+                Close Store
+              </Button>
+            )}
+          </Box>
+        </Box>
+
+        <Divider sx={{ mb: 3 }} />
 
         {/* SAFE Section */}
         <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>SAFE</Typography>
@@ -1945,6 +2098,85 @@ function CashDrawer() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDetailsDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Close Store Confirmation Dialog */}
+      <Dialog
+        open={closeStoreDialogOpen}
+        onClose={() => setCloseStoreDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Close Store</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Closing the store will disable all financial transactions until it is reopened.
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Before closing the store, ensure:
+          </Typography>
+          <Box component="ul" sx={{ pl: 2, mb: 2 }}>
+            <Typography component="li" variant="body2">All cash drawers and safes (except the master safe) are closed</Typography>
+            <Typography component="li" variant="body2">End-of-day reports have been generated</Typography>
+            <Typography component="li" variant="body2">All pending transactions are complete</Typography>
+          </Box>
+
+          {clockedInEmployees.length > 0 && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                Currently Clocked-In Employees ({clockedInEmployees.length}):
+              </Typography>
+              <Box sx={{ mb: 1 }}>
+                {clockedInEmployees.map((emp) => (
+                  <Box
+                    key={emp.session_id}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      py: 0.5,
+                      borderBottom: clockedInEmployees.length > 1 ? '1px solid rgba(0,0,0,0.1)' : 'none',
+                      '&:last-child': { borderBottom: 'none' }
+                    }}
+                  >
+                    <Typography variant="body2">
+                      {emp.employee_name} - {emp.role} (since {new Date(emp.clock_in_time).toLocaleTimeString()})
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+            </Alert>
+          )}
+
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={isBackupComputer}
+                onChange={(e) => setIsBackupComputer(e.target.checked)}
+                color="primary"
+              />
+            }
+            label={
+              <Typography variant="body2">
+                I confirm this is the designated backup computer for end-of-day procedures
+              </Typography>
+            }
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCloseStoreDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleCloseStore}
+            disabled={!isBackupComputer || storeStatusLoading}
+            startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
+          >
+            Close Store
+          </Button>
         </DialogActions>
       </Dialog>
 
