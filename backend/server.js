@@ -494,6 +494,149 @@ app.delete('/api/employees/:id', async (req, res) => {
 });
 
 // ============================================================================
+// Employee Sessions (Clock-In/Clock-Out) API Routes
+// ============================================================================
+
+// Clock in employee
+app.post('/api/employee-sessions/clock-in', async (req, res) => {
+  try {
+    const { employee_id, notes } = req.body;
+
+    if (!employee_id) {
+      return res.status(400).json({ error: 'Employee ID is required' });
+    }
+
+    // Check if employee is already clocked in
+    const existingSession = await pool.query(
+      "SELECT session_id FROM employee_sessions WHERE employee_id = $1 AND status = 'clocked_in'",
+      [employee_id]
+    );
+
+    if (existingSession.rows.length > 0) {
+      return res.status(400).json({ error: 'Employee is already clocked in' });
+    }
+
+    // Create new clock-in session
+    const result = await pool.query(`
+      INSERT INTO employee_sessions (employee_id, clock_in_notes, status)
+      VALUES ($1, $2, 'clocked_in')
+      RETURNING *
+    `, [employee_id, notes || null]);
+
+    // Get employee details for response
+    const employee = await pool.query(
+      'SELECT first_name, last_name FROM employees WHERE employee_id = $1',
+      [employee_id]
+    );
+
+    const session = result.rows[0];
+    session.employee_name = employee.rows[0]
+      ? `${employee.rows[0].first_name} ${employee.rows[0].last_name}`
+      : 'Unknown';
+
+    res.status(201).json(session);
+  } catch (error) {
+    console.error('Error clocking in employee:', error);
+    res.status(500).json({ error: 'Failed to clock in employee' });
+  }
+});
+
+// Clock out employee
+app.post('/api/employee-sessions/clock-out', async (req, res) => {
+  try {
+    const { employee_id, notes } = req.body;
+
+    if (!employee_id) {
+      return res.status(400).json({ error: 'Employee ID is required' });
+    }
+
+    // Find active clock-in session
+    const existingSession = await pool.query(
+      "SELECT session_id FROM employee_sessions WHERE employee_id = $1 AND status = 'clocked_in' ORDER BY clock_in_time DESC LIMIT 1",
+      [employee_id]
+    );
+
+    if (existingSession.rows.length === 0) {
+      return res.status(400).json({ error: 'Employee is not clocked in' });
+    }
+
+    // Update session to clock out
+    const result = await pool.query(`
+      UPDATE employee_sessions
+      SET status = 'clocked_out', clock_out_time = CURRENT_TIMESTAMP, clock_out_notes = $1
+      WHERE session_id = $2
+      RETURNING *
+    `, [notes || null, existingSession.rows[0].session_id]);
+
+    // Get employee details for response
+    const employee = await pool.query(
+      'SELECT first_name, last_name FROM employees WHERE employee_id = $1',
+      [employee_id]
+    );
+
+    const session = result.rows[0];
+    session.employee_name = employee.rows[0]
+      ? `${employee.rows[0].first_name} ${employee.rows[0].last_name}`
+      : 'Unknown';
+
+    res.json(session);
+  } catch (error) {
+    console.error('Error clocking out employee:', error);
+    res.status(500).json({ error: 'Failed to clock out employee' });
+  }
+});
+
+// Get all currently clocked-in employees
+app.get('/api/employee-sessions/clocked-in', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        es.session_id,
+        es.employee_id,
+        es.clock_in_time,
+        es.clock_in_notes,
+        e.first_name,
+        e.last_name,
+        e.role,
+        CONCAT(e.first_name, ' ', e.last_name) AS employee_name
+      FROM employee_sessions es
+      JOIN employees e ON es.employee_id = e.employee_id
+      WHERE es.status = 'clocked_in'
+      ORDER BY es.clock_in_time DESC
+    `);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching clocked-in employees:', error);
+    res.status(500).json({ error: 'Failed to fetch clocked-in employees' });
+  }
+});
+
+// Get employee sessions for a specific employee
+app.get('/api/employee-sessions/employee/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit = 50 } = req.query;
+
+    const result = await pool.query(`
+      SELECT
+        es.*,
+        CONCAT(e.first_name, ' ', e.last_name) AS employee_name
+      FROM employee_sessions es
+      JOIN employees e ON es.employee_id = e.employee_id
+      WHERE es.employee_id = $1
+      ORDER BY es.clock_in_time DESC
+      LIMIT $2
+    `, [id, limit]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching employee sessions:', error);
+    res.status(500).json({ error: 'Failed to fetch employee sessions' });
+  }
+});
+
+// ============================================================================
 // Cash Drawer API Routes
 // ============================================================================
 

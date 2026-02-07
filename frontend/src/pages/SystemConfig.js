@@ -199,6 +199,7 @@ function SystemConfig() {
   const [storeStatusLoading, setStoreStatusLoading] = useState(false);
   const [closeStoreDialogOpen, setCloseStoreDialogOpen] = useState(false);
   const [isBackupComputer, setIsBackupComputer] = useState(false);
+  const [clockedInEmployees, setClockedInEmployees] = useState([]);
   const [loading, setLoading] = useState(false);
   const [customerColumns, setCustomerColumns] = useState([]);
   const [itemAttributes, setItemAttributes] = useState([]);
@@ -241,6 +242,11 @@ function SystemConfig() {
     try {
       // First check for open drawers/safes
       await axios.get(`${API_BASE_URL}/store-sessions/check-open-drawers`);
+
+      // Check for clocked-in employees
+      const clockedInResponse = await axios.get(`${API_BASE_URL}/employee-sessions/clocked-in`);
+      setClockedInEmployees(clockedInResponse.data || []);
+
       // If no open drawers, show confirmation dialog
       setIsBackupComputer(false);
       setCloseStoreDialogOpen(true);
@@ -3463,6 +3469,25 @@ function SystemConfig() {
             <Typography component="li" variant="body2">End-of-day reports have been generated</Typography>
             <Typography component="li" variant="body2">All pending transactions are complete</Typography>
           </Box>
+
+          {clockedInEmployees.length > 0 && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                Currently Clocked-In Employees ({clockedInEmployees.length}):
+              </Typography>
+              <Box component="ul" sx={{ pl: 2, mb: 0 }}>
+                {clockedInEmployees.map((emp) => (
+                  <Typography key={emp.session_id} component="li" variant="body2">
+                    {emp.employee_name} - {emp.role} (since {new Date(emp.clock_in_time).toLocaleTimeString()})
+                  </Typography>
+                ))}
+              </Box>
+              <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
+                These employees can stay clocked in for after-hours activities (e.g., training, inventory).
+              </Typography>
+            </Alert>
+          )}
+
           <FormControlLabel
             control={
               <Checkbox

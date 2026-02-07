@@ -40,6 +40,9 @@ function Navbar() {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
   });
   const [businessName, setBusinessName] = useState('POS System');
+  const [clockedIn, setClockedIn] = useState(false);
+  const [clockInTime, setClockInTime] = useState(null);
+  const [clockLoading, setClockLoading] = useState(false);
   const { cartItems } = useCart();
   const { user, logout, lockScreen } = useAuth();
   const { workingDate, isWorkingDateEnabled } = useWorkingDate();
@@ -47,6 +50,35 @@ function Navbar() {
   const navigate = useNavigate();
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
+
+  // Check employee clock-in status
+  useEffect(() => {
+    const checkClockStatus = async () => {
+      if (!user || !user.id) return;
+
+      try {
+        const response = await fetch(`${config.apiUrl}/employee-sessions/clocked-in`);
+        if (response.ok) {
+          const clockedInEmployees = await response.json();
+          const currentEmployeeSession = clockedInEmployees.find(
+            emp => emp.employee_id === user.id
+          );
+
+          if (currentEmployeeSession) {
+            setClockedIn(true);
+            setClockInTime(new Date(currentEmployeeSession.clock_in_time));
+          } else {
+            setClockedIn(false);
+            setClockInTime(null);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to check clock status:', error);
+      }
+    };
+
+    checkClockStatus();
+  }, [user]);
 
   // Get timezone and business name from business settings
   useEffect(() => {
@@ -146,6 +178,67 @@ function Navbar() {
   const handleLockScreen = () => {
     handleClose();
     lockScreen();
+  };
+
+  const handleClockIn = async () => {
+    if (!user || !user.id) return;
+
+    setClockLoading(true);
+    try {
+      const response = await fetch(`${config.apiUrl}/employee-sessions/clock-in`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          employee_id: user.id
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setClockedIn(true);
+        setClockInTime(new Date(data.clock_in_time));
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to clock in');
+      }
+    } catch (error) {
+      console.error('Error clocking in:', error);
+      alert('Failed to clock in');
+    } finally {
+      setClockLoading(false);
+    }
+  };
+
+  const handleClockOut = async () => {
+    if (!user || !user.id) return;
+
+    setClockLoading(true);
+    try {
+      const response = await fetch(`${config.apiUrl}/employee-sessions/clock-out`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          employee_id: user.id
+        })
+      });
+
+      if (response.ok) {
+        setClockedIn(false);
+        setClockInTime(null);
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to clock out');
+      }
+    } catch (error) {
+      console.error('Error clocking out:', error);
+      alert('Failed to clock out');
+    } finally {
+      setClockLoading(false);
+    }
   };
 
   return (
@@ -300,6 +393,49 @@ function Navbar() {
 
           {user && (
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {/* Clock In/Out Button */}
+              {clockedIn ? (
+                <Chip
+                  icon={<ClockIcon />}
+                  label={`Clocked in: ${clockInTime?.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`}
+                  onClick={handleClockOut}
+                  disabled={clockLoading}
+                  sx={{
+                    mr: 2,
+                    bgcolor: 'success.main',
+                    color: 'white',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    '&:hover': {
+                      bgcolor: 'success.dark',
+                    },
+                    '& .MuiChip-icon': {
+                      color: 'white'
+                    }
+                  }}
+                />
+              ) : (
+                <Chip
+                  icon={<ClockIcon />}
+                  label="Clock In"
+                  onClick={handleClockIn}
+                  disabled={clockLoading}
+                  sx={{
+                    mr: 2,
+                    bgcolor: 'rgba(255, 255, 255, 0.2)',
+                    color: 'white',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    '&:hover': {
+                      bgcolor: 'rgba(255, 255, 255, 0.3)',
+                    },
+                    '& .MuiChip-icon': {
+                      color: 'white'
+                    }
+                  }}
+                />
+              )}
+
               <IconButton
                 color="inherit"
                 onClick={() => setCartOpen(true)}
