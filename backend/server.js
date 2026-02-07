@@ -636,6 +636,45 @@ app.get('/api/employee-sessions/employee/:id', async (req, res) => {
   }
 });
 
+// Store closing notification flag (in-memory)
+let storeClosingNotification = {
+  active: false,
+  timestamp: null
+};
+
+// POST /api/employee-sessions/notify-closing - Set store closing notification
+app.post('/api/employee-sessions/notify-closing', async (req, res) => {
+  try {
+    storeClosingNotification = {
+      active: true,
+      timestamp: new Date()
+    };
+
+    // Auto-clear after 30 seconds
+    setTimeout(() => {
+      storeClosingNotification.active = false;
+    }, 30000);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error setting store closing notification:', error);
+    res.status(500).json({ error: 'Failed to set notification' });
+  }
+});
+
+// GET /api/employee-sessions/closing-notification - Check if store closing notification is active
+app.get('/api/employee-sessions/closing-notification', async (req, res) => {
+  try {
+    res.json({
+      active: storeClosingNotification.active,
+      timestamp: storeClosingNotification.timestamp
+    });
+  } catch (error) {
+    console.error('Error checking store closing notification:', error);
+    res.status(500).json({ error: 'Failed to check notification' });
+  }
+});
+
 // ============================================================================
 // Cash Drawer API Routes
 // ============================================================================

@@ -11,6 +11,11 @@ import {
   MenuItem,
   Box,
   Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
 } from '@mui/material';
 import {
   ShoppingCart as CartIcon,
@@ -43,6 +48,8 @@ function Navbar() {
   const [clockedIn, setClockedIn] = useState(false);
   const [clockInTime, setClockInTime] = useState(null);
   const [clockLoading, setClockLoading] = useState(false);
+  const [clockOutDialogOpen, setClockOutDialogOpen] = useState(false);
+  const [storeClosingPromptOpen, setStoreClosingPromptOpen] = useState(false);
   const { cartItems } = useCart();
   const { user, logout, lockScreen } = useAuth();
   const { workingDate, isWorkingDateEnabled } = useWorkingDate();
@@ -79,6 +86,43 @@ function Navbar() {
 
     checkClockStatus();
   }, [user]);
+
+  // Poll for store closing notification
+  useEffect(() => {
+    if (!user || !clockedIn) return;
+
+    let lastNotificationTime = null;
+
+    const checkStoreClosingNotification = async () => {
+      try {
+        const response = await fetch(`${config.apiUrl}/employee-sessions/closing-notification`);
+        if (response.ok) {
+          const data = await response.json();
+
+          // Only show prompt if notification is active and we haven't seen this one yet
+          if (data.active && data.timestamp) {
+            const notificationTime = new Date(data.timestamp).getTime();
+
+            // Check if this is a new notification
+            if (!lastNotificationTime || notificationTime > lastNotificationTime) {
+              setStoreClosingPromptOpen(true);
+              lastNotificationTime = notificationTime;
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to check store closing notification:', error);
+      }
+    };
+
+    // Check immediately and then every 3 seconds
+    checkStoreClosingNotification();
+    const interval = setInterval(checkStoreClosingNotification, 3000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [user, clockedIn]);
 
   // Get timezone and business name from business settings
   useEffect(() => {
@@ -211,10 +255,15 @@ function Navbar() {
     }
   };
 
-  const handleClockOut = async () => {
+  const handleClockOut = () => {
+    setClockOutDialogOpen(true);
+  };
+
+  const confirmClockOut = async () => {
     if (!user || !user.id) return;
 
     setClockLoading(true);
+    setClockOutDialogOpen(false);
     try {
       const response = await fetch(`${config.apiUrl}/employee-sessions/clock-out`, {
         method: 'POST',
@@ -500,6 +549,100 @@ function Navbar() {
         </Toolbar>
       </StyledAppBar>
       <Cart open={cartOpen} onClose={() => setCartOpen(false)} />
+
+      {/* Clock Out Confirmation Dialog */}
+      <Dialog
+        open={clockOutDialogOpen}
+        onClose={() => setClockOutDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Confirm Clock Out</DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            Are you sure you want to clock out?
+          </Typography>
+          {clockInTime && (
+            <Typography variant="body2" color="text.secondary">
+              You clocked in at {clockInTime.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+              })}
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setClockOutDialogOpen(false)}
+            color="inherit"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmClockOut}
+            variant="contained"
+            color="primary"
+            disabled={clockLoading}
+          >
+            Confirm Clock Out
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Store Closing - Clock Out Reminder Dialog */}
+      <Dialog
+        open={storeClosingPromptOpen}
+        onClose={() => setStoreClosingPromptOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: '#fff3cd',
+            border: '2px solid #ff9800'
+          }
+        }}
+      >
+        <DialogTitle sx={{ bgcolor: '#ff9800', color: 'white', fontWeight: 'bold' }}>
+          Store Closing - Please Clock Out
+        </DialogTitle>
+        <DialogContent sx={{ pt: 3 }}>
+          <Typography variant="body1" sx={{ mb: 2, fontWeight: 600 }}>
+            The store is being closed. Please clock out now.
+          </Typography>
+          {clockInTime && (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              You clocked in at {clockInTime.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+              })}
+            </Typography>
+          )}
+          <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+            If you need to stay for after-hours activities (training, inventory, etc.), you may dismiss this notification.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => setStoreClosingPromptOpen(false)}
+            color="inherit"
+          >
+            Stay Clocked In
+          </Button>
+          <Button
+            onClick={async () => {
+              setStoreClosingPromptOpen(false);
+              await confirmClockOut();
+            }}
+            variant="contained"
+            color="warning"
+            disabled={clockLoading}
+          >
+            Clock Out Now
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }

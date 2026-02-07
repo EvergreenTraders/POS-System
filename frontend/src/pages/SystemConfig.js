@@ -247,6 +247,17 @@ function SystemConfig() {
       const clockedInResponse = await axios.get(`${API_BASE_URL}/employee-sessions/clocked-in`);
       setClockedInEmployees(clockedInResponse.data || []);
 
+      // Notify clocked-in employees to clock out via server
+      if (clockedInResponse.data && clockedInResponse.data.length > 0) {
+
+        // Use server-based notification (works across all browsers, tabs, and machines)
+        try {
+          await axios.post(`${API_BASE_URL}/employee-sessions/notify-closing`);
+        } catch (error) {
+          console.error('Failed to send closing notification:', error);
+        }
+      }
+
       // If no open drawers, show confirmation dialog
       setIsBackupComputer(false);
       setCloseStoreDialogOpen(true);
@@ -3471,20 +3482,30 @@ function SystemConfig() {
           </Box>
 
           {clockedInEmployees.length > 0 && (
-            <Alert severity="info" sx={{ mb: 2 }}>
+            <Alert severity="warning" sx={{ mb: 2 }}>
               <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
                 Currently Clocked-In Employees ({clockedInEmployees.length}):
               </Typography>
-              <Box component="ul" sx={{ pl: 2, mb: 0 }}>
+              <Box sx={{ mb: 1 }}>
                 {clockedInEmployees.map((emp) => (
-                  <Typography key={emp.session_id} component="li" variant="body2">
-                    {emp.employee_name} - {emp.role} (since {new Date(emp.clock_in_time).toLocaleTimeString()})
-                  </Typography>
+                  <Box
+                    key={emp.session_id}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      py: 0.5,
+                      borderBottom: clockedInEmployees.length > 1 ? '1px solid rgba(0,0,0,0.1)' : 'none',
+                      '&:last-child': { borderBottom: 'none' }
+                    }}
+                  >
+                    <Typography variant="body2">
+                      {emp.employee_name} - {emp.role} (since {new Date(emp.clock_in_time).toLocaleTimeString()})
+                    </Typography>
+                  </Box>
                 ))}
               </Box>
-              <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
-                These employees can stay clocked in for after-hours activities (e.g., training, inventory).
-              </Typography>
+
             </Alert>
           )}
 
