@@ -693,6 +693,62 @@ app.get('/api/cash-drawer/active', async (req, res) => {
   }
 });
 
+// GET /api/cash-drawer/overview - Get overview of all safes and drawers with their status
+app.get('/api/cash-drawer/overview', async (req, res) => {
+  try {
+    // Get all drawers
+    const drawersResult = await pool.query(`
+      SELECT
+        d.drawer_id,
+        d.drawer_name,
+        d.drawer_type,
+        CASE
+          WHEN (SELECT COUNT(*) FROM active_drawer_sessions ads WHERE ads.drawer_id = d.drawer_id) > 1 THEN 'Shared'
+          ELSE 'Single'
+        END as type,
+        CASE
+          WHEN EXISTS (SELECT 1 FROM active_drawer_sessions ads WHERE ads.drawer_id = d.drawer_id) THEN 'OPEN'
+          ELSE 'CLOSED'
+        END as status,
+        COALESCE(
+          (SELECT SUM(ads2.current_expected_balance)
+           FROM active_drawer_sessions ads2
+           WHERE ads2.drawer_id = d.drawer_id),
+          0
+        ) as balance,
+        COALESCE(
+          (SELECT STRING_AGG(CONCAT(e.first_name, ' ', e.last_name, ' (', e.username, ')'), ', ')
+           FROM active_drawer_sessions ads2
+           JOIN employees e ON ads2.employee_id = e.employee_id
+           WHERE ads2.drawer_id = d.drawer_id),
+          ''
+        ) as connected_employees
+      FROM drawers d
+      WHERE d.is_active = TRUE
+        AND d.drawer_type IN ('physical', 'safe', 'master_safe')
+      ORDER BY
+        CASE d.drawer_type
+          WHEN 'master_safe' THEN 1
+          WHEN 'safe' THEN 2
+          WHEN 'physical' THEN 3
+        END,
+        d.drawer_name
+    `);
+
+    // Separate safes and drawers
+    const safes = drawersResult.rows.filter(d => d.drawer_type === 'safe' || d.drawer_type === 'master_safe');
+    const drawers = drawersResult.rows.filter(d => d.drawer_type === 'physical');
+
+    res.json({
+      safes,
+      drawers
+    });
+  } catch (error) {
+    console.error('Error fetching drawer overview:', error);
+    res.status(500).json({ error: 'Failed to fetch drawer overview' });
+  }
+});
+
 // GET /api/cash-drawer/employee/:employeeId/active - Get all active drawer sessions for an employee
 app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
   const { employeeId } = req.params;

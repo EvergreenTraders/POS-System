@@ -60,6 +60,7 @@ function CashDrawer() {
   const [drawers, setDrawers] = useState([]);
   const [history, setHistory] = useState([]);
   const [sessionDetails, setSessionDetails] = useState(null);
+  const [overviewData, setOverviewData] = useState({ safes: [], drawers: [] });
 
   // Dialog states
   const [openDrawerDialog, setOpenDrawerDialog] = useState(false);
@@ -123,6 +124,7 @@ function CashDrawer() {
     fetchDiscrepancyThreshold();
     fetchMinMaxClose();
     fetchBlindCountPreference();
+    fetchOverview();
     checkActiveSession();
     fetchHistory();
   }, []);
@@ -296,6 +298,16 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching all active sessions:', err);
       setAllActiveSessions([]);
+    }
+  };
+
+  const fetchOverview = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/cash-drawer/overview`);
+      setOverviewData(response.data);
+    } catch (err) {
+      console.error('Error fetching drawer overview:', err);
+      setOverviewData({ safes: [], drawers: [] });
     }
   };
 
@@ -539,7 +551,8 @@ function CashDrawer() {
         return;
       }
 
-      // Refresh sessions and show the newly opened drawer type
+      // Refresh sessions and overview
+      await fetchOverview();
       await checkActiveSession(drawerType);
     } catch (err) {
       console.error('Error opening drawer:', err);
@@ -647,6 +660,7 @@ function CashDrawer() {
       setCloseDrawerDialog(false);
       setDiscrepancyWarningDialog(false);
       resetCloseForm();
+      fetchOverview();
       checkActiveSession();
       fetchHistory();
     } catch (err) {
@@ -921,6 +935,81 @@ function CashDrawer() {
       <Typography variant="h4" mb={2}>
         Cash Drawer Management
       </Typography>
+
+      {/* Overview Section */}
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" mb={2}>Drawer & Safe Overview</Typography>
+
+        {/* SAFE Section */}
+        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>SAFE</Typography>
+        <TableContainer sx={{ mb: 3 }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow sx={{ bgcolor: '#1976d2' }}>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>SAFE</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {overviewData.safes.map((safe) => (
+                <TableRow
+                  key={safe.drawer_id}
+                  sx={{
+                    bgcolor: safe.status === 'OPEN' ? '#e3f2fd' : 'white',
+                    '&:hover': { bgcolor: safe.status === 'OPEN' ? '#bbdefb' : '#f5f5f5' }
+                  }}
+                >
+                  <TableCell>{safe.drawer_name}</TableCell>
+                  <TableCell>{safe.status}</TableCell>
+                  <TableCell>
+                    {safe.status === 'OPEN' && safe.balance !== null
+                      ? `$${parseFloat(safe.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : '—'}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+
+        {/* DRAWER Section */}
+        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>DRAWER</Typography>
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow sx={{ bgcolor: '#1976d2' }}>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>DRAWER</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Connected Employees</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {overviewData.drawers.map((drawer) => (
+                <TableRow
+                  key={drawer.drawer_id}
+                  sx={{
+                    bgcolor: drawer.status === 'OPEN' ? '#e3f2fd' : 'white',
+                    '&:hover': { bgcolor: drawer.status === 'OPEN' ? '#bbdefb' : '#f5f5f5' }
+                  }}
+                >
+                  <TableCell>{drawer.drawer_name}</TableCell>
+                  <TableCell>{drawer.status}</TableCell>
+                  <TableCell>{drawer.type}</TableCell>
+                  <TableCell>
+                    {drawer.status === 'OPEN' && drawer.balance !== null
+                      ? `$${parseFloat(drawer.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : '—'}
+                  </TableCell>
+                  <TableCell>{drawer.connected_employees || '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
 
       <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ mb: 3 }}>
         <Tab label="Active Session" />
