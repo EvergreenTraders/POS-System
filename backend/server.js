@@ -8678,6 +8678,32 @@ app.post('/api/store-sessions/open', async (req, res) => {
   }
 });
 
+// Check for open drawers/safes before closing store
+app.get('/api/store-sessions/check-open-drawers', async (req, res) => {
+  try {
+    const openDrawers = await pool.query(`
+      SELECT cds.session_id, d.drawer_name, d.drawer_type
+      FROM cash_drawer_sessions cds
+      JOIN drawers d ON cds.drawer_id = d.drawer_id
+      WHERE cds.status = 'open' AND d.drawer_type != 'master_safe'
+    `);
+
+    if (openDrawers.rows.length > 0) {
+      const drawerNames = openDrawers.rows.map(d => d.drawer_name).join(', ');
+      return res.status(400).json({
+        error: `Cannot close store. The following drawers/safes are still open: ${drawerNames}. Please close all drawers and safes before closing the store.`,
+        code: 'OPEN_DRAWERS',
+        openDrawers: openDrawers.rows
+      });
+    }
+
+    res.json({ success: true, message: 'No open drawers found' });
+  } catch (error) {
+    console.error('Error checking open drawers:', error);
+    res.status(500).json({ error: 'Failed to check drawer status' });
+  }
+});
+
 // Close store
 app.post('/api/store-sessions/close', async (req, res) => {
   try {
@@ -8694,6 +8720,23 @@ app.post('/api/store-sessions/close', async (req, res) => {
 
     if (existing.rows.length === 0) {
       return res.status(400).json({ error: 'Store is not open' });
+    }
+
+    // Check for open drawers/safes (excluding master safe)
+    const openDrawers = await pool.query(`
+      SELECT cds.session_id, d.drawer_name, d.drawer_type
+      FROM cash_drawer_sessions cds
+      JOIN drawers d ON cds.drawer_id = d.drawer_id
+      WHERE cds.status = 'open' AND d.drawer_type != 'master_safe'
+    `);
+
+    if (openDrawers.rows.length > 0) {
+      const drawerNames = openDrawers.rows.map(d => d.drawer_name).join(', ');
+      return res.status(400).json({
+        error: `Cannot close store. The following drawers/safes are still open: ${drawerNames}. Please close all drawers and safes before closing the store.`,
+        code: 'OPEN_DRAWERS',
+        openDrawers: openDrawers.rows
+      });
     }
 
     // Close the session

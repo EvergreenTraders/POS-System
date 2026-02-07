@@ -29,7 +29,11 @@ import {
   IconButton,
   Avatar,
   Chip,
-  CircularProgress
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import { CloudUpload as UploadIcon, Delete as DeleteIcon, Store as StoreIcon } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
@@ -193,6 +197,8 @@ function SystemConfig() {
   // Store status
   const [storeStatus, setStoreStatus] = useState({ status: 'closed', session: null, lastClosed: null });
   const [storeStatusLoading, setStoreStatusLoading] = useState(false);
+  const [closeStoreDialogOpen, setCloseStoreDialogOpen] = useState(false);
+  const [isBackupComputer, setIsBackupComputer] = useState(false);
   const [loading, setLoading] = useState(false);
   const [customerColumns, setCustomerColumns] = useState([]);
   const [itemAttributes, setItemAttributes] = useState([]);
@@ -230,7 +236,28 @@ function SystemConfig() {
     }
   };
 
+  const handleCloseStoreClick = async () => {
+    setStoreStatusLoading(true);
+    try {
+      // First check for open drawers/safes
+      await axios.get(`${API_BASE_URL}/store-sessions/check-open-drawers`);
+      // If no open drawers, show confirmation dialog
+      setIsBackupComputer(false);
+      setCloseStoreDialogOpen(true);
+    } catch (error) {
+      // Show error if drawers are open
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to verify drawer status',
+        severity: 'error'
+      });
+    } finally {
+      setStoreStatusLoading(false);
+    }
+  };
+
   const handleCloseStore = async () => {
+    setCloseStoreDialogOpen(false);
     setStoreStatusLoading(true);
     try {
       const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -1994,7 +2021,7 @@ function SystemConfig() {
                   <Button
                     variant="contained"
                     color="error"
-                    onClick={handleCloseStore}
+                    onClick={handleCloseStoreClick}
                     disabled={storeStatusLoading}
                     startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
                   >
@@ -3415,6 +3442,57 @@ function SystemConfig() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {/* Close Store Confirmation Dialog */}
+      <Dialog
+        open={closeStoreDialogOpen}
+        onClose={() => setCloseStoreDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Close Store</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Closing the store will disable all financial transactions until it is reopened.
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Before closing the store, ensure:
+          </Typography>
+          <Box component="ul" sx={{ pl: 2, mb: 2 }}>
+            <Typography component="li" variant="body2">All cash drawers and safes (except the master safe) are closed</Typography>
+            <Typography component="li" variant="body2">End-of-day reports have been generated</Typography>
+            <Typography component="li" variant="body2">All pending transactions are complete</Typography>
+          </Box>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={isBackupComputer}
+                onChange={(e) => setIsBackupComputer(e.target.checked)}
+                color="primary"
+              />
+            }
+            label={
+              <Typography variant="body2">
+                I confirm this is the designated backup computer for end-of-day procedures
+              </Typography>
+            }
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCloseStoreDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleCloseStore}
+            disabled={!isBackupComputer || storeStatusLoading}
+            startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
+          >
+            Close Store
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }

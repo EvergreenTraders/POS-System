@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useCart } from '../context/CartContext';
+import { useStoreStatus } from '../context/StoreStatusContext';
 import {
   Container,
   Paper,
@@ -44,6 +45,7 @@ const API_BASE_URL = config.apiUrl;
 function QuoteManager() {
   const navigate = useNavigate();
   const { addToCart, setCustomer } = useCart();
+  const { isStoreClosed } = useStoreStatus();
   const [quotes, setQuotes] = useState([]);
   const [selectedQuote, setSelectedQuote] = useState(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
@@ -645,6 +647,7 @@ function QuoteManager() {
                             size="small"
                             onClick={() => handleProceedToCheckout(quote)}
                             color="primary"
+                            disabled={isStoreClosed}
                           >
                             <ShoppingCartIcon />
                           </IconButton>
@@ -655,6 +658,7 @@ function QuoteManager() {
                           size="small"
                           onClick={() => handleDeleteClick(quote)}
                           color="error"
+                          disabled={isStoreClosed}
                         >
                           <DeleteIcon />
                         </IconButton>
@@ -922,11 +926,12 @@ function QuoteManager() {
 </TableCell>
                         <TableCell align="right">
                           {editingItem?.item_id === item.item_id ? (
-                            <IconButton 
+                            <IconButton
                               onClick={handleSaveItemChanges}
                               color="primary"
                               size="small"
                               title="Save Changes"
+                              disabled={isStoreClosed}
                             >
                               <SaveIcon />
                             </IconButton>
@@ -937,7 +942,7 @@ function QuoteManager() {
                                 color="primary"
                                 size="small"
                                 title="Edit Quote Item"
-                                disabled={!selectedQuote.days_remaining || selectedQuote.days_remaining <= 0}
+                                disabled={!selectedQuote.days_remaining || selectedQuote.days_remaining <= 0 || isStoreClosed}
                               >
                                 <EditIcon />
                               </IconButton>
@@ -946,7 +951,7 @@ function QuoteManager() {
                                 color="error"
                                 size="small"
                                 title="Delete Quote Item"
-                                disabled={!selectedQuote.days_remaining || selectedQuote.days_remaining <= 0}
+                                disabled={!selectedQuote.days_remaining || selectedQuote.days_remaining <= 0 || isStoreClosed}
                               >
                                 <DeleteIcon />
                               </IconButton>
@@ -976,11 +981,12 @@ function QuoteManager() {
                 Close
               </Button>
               {selectedQuote && selectedQuote.days_remaining > 0 && (
-                <Button 
+                <Button
                   onClick={() => handleProceedToCheckout(selectedQuote)}
-                  variant="contained" 
+                  variant="contained"
                   color="primary"
                   startIcon={<ShoppingCartIcon />}
+                  disabled={isStoreClosed}
                 >
                   Proceed to Checkout
                 </Button>
@@ -1000,7 +1006,7 @@ function QuoteManager() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleDelete} color="error" variant="contained">
+          <Button onClick={handleDelete} color="error" variant="contained" disabled={isStoreClosed}>
             Delete
           </Button>
         </DialogActions>
