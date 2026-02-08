@@ -104,6 +104,8 @@ function CashDrawer() {
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [selectedDrawer, setSelectedDrawer] = useState('');
   const [selectedDrawerType, setSelectedDrawerType] = useState(null);
+  const [selectedSharingMode, setSelectedSharingMode] = useState(null); // null = not selected, 'single' or 'shared'
+  const [sharingModeRequired, setSharingModeRequired] = useState(false); // true when drawer needs sharing mode config
   const [openingBalance, setOpeningBalance] = useState('');
   const [openingNotes, setOpeningNotes] = useState('');
   const [actualBalance, setActualBalance] = useState('');
@@ -588,6 +590,14 @@ function CashDrawer() {
 
     const drawerType = selectedDrawerInfo.drawer_type;
     const isSafe = drawerType === 'safe' || drawerType === 'master_safe';
+    const drawerIsShared = selectedDrawerInfo.is_shared;
+
+    // For physical drawers with no sharing mode configured, require selection
+    if (drawerType === 'physical' && drawerIsShared === null && selectedSharingMode === null) {
+      setSharingModeRequired(true);
+      showSnackbar('Please select whether this drawer is Single or Shared', 'warning');
+      return;
+    }
 
     // Check if there's already an active session for this EXACT drawer type
     // Each drawer type (physical, safe, master_safe) can have its own session
@@ -609,13 +619,21 @@ function CashDrawer() {
     }
 
     try {
-      // Open the drawer
-      const openResponse = await axios.post(`${API_BASE_URL}/cash-drawer/open`, {
+      // Prepare request payload
+      const payload = {
         drawer_id: selectedDrawer,
         employee_id: employeeId,
         opening_balance: calculatedBalance,
         opening_notes: openingNotes || null
-      });
+      };
+
+      // Include sharing mode for physical drawers that need it
+      if (drawerType === 'physical' && (drawerIsShared === null || selectedSharingMode !== null)) {
+        payload.is_shared = selectedSharingMode === 'shared';
+      }
+
+      // Open the drawer
+      const openResponse = await axios.post(`${API_BASE_URL}/cash-drawer/open`, payload);
 
       const sessionId = openResponse.data.session_id;
 
@@ -659,11 +677,20 @@ function CashDrawer() {
         return;
       }
 
-      // Refresh sessions and overview
+      // Refresh sessions, overview, and drawers (to get updated is_shared value)
       await fetchOverview();
+      await fetchDrawers();
       await checkActiveSession(drawerType);
     } catch (err) {
       console.error('Error opening drawer:', err);
+
+      // Check if sharing mode selection is required
+      if (err.response?.data?.errorType === 'SHARING_MODE_REQUIRED') {
+        setSharingModeRequired(true);
+        showSnackbar('Please select whether this drawer is Single or Shared', 'warning');
+        return;
+      }
+
       showSnackbar(err.response?.data?.error || 'Failed to open drawer', 'error');
     }
   };
@@ -869,6 +896,8 @@ function CashDrawer() {
     setSelectedDrawer('');
     setSelectedDrawerType(null);
     setDrawerTypeFilter(null);
+    setSelectedSharingMode(null);
+    setSharingModeRequired(false);
     setOpeningBalance('');
     setOpeningNotes('');
     setOpeningDenominations({
@@ -1542,6 +1571,12 @@ function CashDrawer() {
                     const isSafe = drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe';
                     setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
                     setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
+                    // Reset sharing mode when drawer changes
+                    // Check if sharing mode is required for this drawer
+                    const needsSharingMode = drawer.drawer_type === 'physical' && drawer.is_shared === null;
+                    setSharingModeRequired(needsSharingMode);
+                    // Default to 'shared' when sharing mode is required
+                    setSelectedSharingMode(needsSharingMode ? 'shared' : null);
                   }
                 }}
               >
@@ -1565,6 +1600,28 @@ function CashDrawer() {
                   ))}
               </Select>
             </FormControl>
+
+            {/* Sharing Mode dropdown for physical drawers that haven't been configured */}
+            {selectedDrawer && selectedDrawerType === 'physical' && sharingModeRequired && (
+              <FormControl fullWidth required>
+                <InputLabel>Drawer Mode</InputLabel>
+                <Select
+                  value={selectedSharingMode || ''}
+                  label="Drawer Mode"
+                  onChange={(e) => setSelectedSharingMode(e.target.value)}
+                >
+                  <MenuItem value="single">
+                    Single - Only one employee can use this drawer at a time
+                  </MenuItem>
+                  <MenuItem value="shared">
+                    Shared - Multiple employees can connect to this drawer
+                  </MenuItem>
+                </Select>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                  This setting will be saved for future use of this drawer
+                </Typography>
+              </FormControl>
+            )}
 
             {isIndividualDenominations ? (
               <>

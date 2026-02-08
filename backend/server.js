@@ -697,15 +697,17 @@ app.get('/api/cash-drawer/active', async (req, res) => {
 // GET /api/cash-drawer/overview - Get overview of all safes and drawers with their status
 app.get('/api/cash-drawer/overview', async (req, res) => {
   try {
-    // Get all drawers
+    // Get all drawers with their open sessions
     const drawersResult = await pool.query(`
       SELECT
         d.drawer_id,
         d.drawer_name,
         d.drawer_type,
+        d.is_shared,
         CASE
-          WHEN (SELECT COUNT(*) FROM active_drawer_sessions ads WHERE ads.drawer_id = d.drawer_id) > 1 THEN 'Shared'
-          ELSE 'Single'
+          WHEN d.is_shared = TRUE OR d.drawer_type IN ('safe', 'master_safe') THEN 'Shared'
+          WHEN d.is_shared = FALSE THEN 'Single'
+          ELSE 'Not Configured'
         END as type,
         CASE
           WHEN EXISTS (SELECT 1 FROM active_drawer_sessions ads WHERE ads.drawer_id = d.drawer_id) THEN 'OPEN'
@@ -717,13 +719,7 @@ app.get('/api/cash-drawer/overview', async (req, res) => {
            WHERE ads2.drawer_id = d.drawer_id),
           0
         ) as balance,
-        COALESCE(
-          (SELECT STRING_AGG(CONCAT(e.first_name, ' ', e.last_name, ' (', e.username, ')'), ', ')
-           FROM active_drawer_sessions ads2
-           JOIN employees e ON ads2.employee_id = e.employee_id
-           WHERE ads2.drawer_id = d.drawer_id),
-          ''
-        ) as connected_employees
+        (SELECT ads3.session_id FROM active_drawer_sessions ads3 WHERE ads3.drawer_id = d.drawer_id LIMIT 1) as session_id
       FROM drawers d
       WHERE d.is_active = TRUE
         AND d.drawer_type IN ('physical', 'safe', 'master_safe')
@@ -736,9 +732,43 @@ app.get('/api/cash-drawer/overview', async (req, res) => {
         d.drawer_name
     `);
 
+    // For each open drawer, get all connected employees (opener + connections)
+    const drawersWithEmployees = await Promise.all(drawersResult.rows.map(async (drawer) => {
+      if (drawer.status !== 'OPEN' || !drawer.session_id) {
+        return { ...drawer, connected_employees: '' };
+      }
+
+      // Get opener
+      const openerResult = await pool.query(`
+        SELECT e.first_name, e.last_name, e.username
+        FROM cash_drawer_sessions s
+        JOIN employees e ON s.employee_id = e.employee_id
+        WHERE s.session_id = $1
+      `, [drawer.session_id]);
+
+      // Get connected employees (for shared drawers)
+      let connectedEmployees = [];
+      const isShared = drawer.is_shared === true || drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe';
+      if (isShared) {
+        const connectionsResult = await pool.query(`
+          SELECT e.first_name, e.last_name, e.username
+          FROM drawer_session_connections c
+          JOIN employees e ON c.employee_id = e.employee_id
+          WHERE c.session_id = $1 AND c.is_active = TRUE
+        `, [drawer.session_id]);
+        connectedEmployees = connectionsResult.rows;
+      }
+
+      // Combine opener and connections
+      const allEmployees = [...openerResult.rows, ...connectedEmployees];
+      const employeeNames = allEmployees.map(e => `${e.first_name} ${e.last_name} (${e.username})`).join(', ');
+
+      return { ...drawer, connected_employees: employeeNames };
+    }));
+
     // Separate safes and drawers
-    const safes = drawersResult.rows.filter(d => d.drawer_type === 'safe' || d.drawer_type === 'master_safe');
-    const drawers = drawersResult.rows.filter(d => d.drawer_type === 'physical');
+    const safes = drawersWithEmployees.filter(d => d.drawer_type === 'safe' || d.drawer_type === 'master_safe');
+    const drawers = drawersWithEmployees.filter(d => d.drawer_type === 'physical');
 
     res.json({
       safes,
@@ -763,18 +793,31 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
         calculate_expected_balance(s.session_id) AS current_expected_balance,
         (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS transaction_count,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
-        (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments
+        (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments,
+        CASE
+          WHEN s.employee_id = $1 THEN TRUE
+          ELSE FALSE
+        END AS is_opener,
+        CASE
+          WHEN s.employee_id != $1 AND d.drawer_type IN ('safe', 'master_safe') THEN
+            (SELECT c.connection_id FROM drawer_session_connections c
+             WHERE c.session_id = s.session_id AND c.employee_id = $1 AND c.is_active = TRUE)
+          ELSE NULL
+        END AS connection_id
       FROM cash_drawer_sessions s
       JOIN drawers d ON s.drawer_id = d.drawer_id
       WHERE s.status = 'open'
         AND (
-          s.employee_id = $1  -- Employee's own physical drawer sessions
-          OR d.drawer_type IN ('safe', 'master_safe')  -- All shared safe/master_safe sessions
+          s.employee_id = $1  -- Employee's own drawer sessions (opener)
+          OR (d.drawer_type IN ('safe', 'master_safe') AND EXISTS (
+            SELECT 1 FROM drawer_session_connections c
+            WHERE c.session_id = s.session_id AND c.employee_id = $1 AND c.is_active = TRUE
+          ))  -- Shared drawers where employee is connected
         )
       ORDER BY s.opened_at DESC
     `, [employeeId]);
 
-    // Return all active sessions (employee's physical drawers + shared safe drawers)
+    // Return all active sessions (employee's own drawers + shared drawers they're connected to)
     res.json(result.rows);
   } catch (error) {
     console.error('Error checking active drawer:', error);
@@ -886,7 +929,7 @@ app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
 
 // POST /api/cash-drawer/open - Open a new cash drawer session for an employee
 app.post('/api/cash-drawer/open', async (req, res) => {
-  const { drawer_id, employee_id, opening_balance, opening_notes } = req.body;
+  const { drawer_id, employee_id, opening_balance, opening_notes, is_shared } = req.body;
 
   // Validation
   if (!drawer_id || !employee_id || opening_balance === undefined) {
@@ -898,59 +941,165 @@ app.post('/api/cash-drawer/open', async (req, res) => {
   }
 
   try {
-    // Check if employee already has an open drawer of the same type
-    // Get the drawer type for the drawer being opened
-    const drawerTypeResult = await pool.query(
-      'SELECT drawer_type FROM drawers WHERE drawer_id = $1',
+    // Get the drawer info including type and sharing mode
+    const drawerInfoResult = await pool.query(
+      'SELECT drawer_id, drawer_name, drawer_type, is_shared FROM drawers WHERE drawer_id = $1',
       [drawer_id]
     );
 
-    if (drawerTypeResult.rows.length === 0) {
+    if (drawerInfoResult.rows.length === 0) {
       return res.status(404).json({ error: 'Drawer not found' });
     }
 
-    const drawerType = drawerTypeResult.rows[0].drawer_type;
+    const drawerInfo = drawerInfoResult.rows[0];
+    const drawerType = drawerInfo.drawer_type;
+    let drawerIsShared = drawerInfo.is_shared;
 
-    // For safe and master_safe: check globally for any existing open session (shared across all employees)
-    // For physical drawers: check only for this employee
-    let existingDrawer;
+    // For physical drawers, check if sharing mode needs to be configured
+    if (drawerType === 'physical' && drawerIsShared === null) {
+      // First time opening this drawer - need to set sharing mode
+      if (is_shared === undefined || is_shared === null) {
+        // Return a response indicating sharing mode selection is required
+        return res.status(400).json({
+          error: 'Sharing mode must be selected for first-time drawer setup',
+          errorType: 'SHARING_MODE_REQUIRED',
+          drawer_id: drawer_id,
+          drawer_name: drawerInfo.drawer_name,
+          requiresSharingMode: true
+        });
+      }
+
+      // Update the drawer with the selected sharing mode
+      await pool.query(
+        'UPDATE drawers SET is_shared = $1, updated_at = CURRENT_TIMESTAMP WHERE drawer_id = $2',
+        [is_shared, drawer_id]
+      );
+      drawerIsShared = is_shared;
+    }
+
+    // Safe and master_safe are always shared
     if (drawerType === 'safe' || drawerType === 'master_safe') {
-      // Safe and master safe are shared - check if ANY employee has it open
+      drawerIsShared = true;
+    }
+
+    // Determine behavior based on is_shared value
+    let existingDrawer;
+    if (drawerIsShared) {
+      // Shared drawer - check if ANY employee has this specific drawer open
       existingDrawer = await pool.query(
-        `SELECT s.session_id, s.employee_id, e.first_name, e.last_name
+        `SELECT s.session_id, s.employee_id, s.opening_balance, s.opened_at, e.first_name, e.last_name
          FROM cash_drawer_sessions s
          JOIN drawers d ON s.drawer_id = d.drawer_id
          LEFT JOIN employees e ON s.employee_id = e.employee_id
          WHERE s.status = $1
-           AND d.drawer_type = $2`,
-        ['open', drawerType]
+           AND s.drawer_id = $2`,
+        ['open', drawer_id]
       );
 
       if (existingDrawer.rows.length > 0) {
         const existingSession = existingDrawer.rows[0];
-        const drawerTypeName = drawerType === 'safe' ? 'safe drawer' : 'master safe';
-        const openedBy = `${existingSession.first_name} ${existingSession.last_name}`;
-        return res.status(400).json({
-          error: `The ${drawerTypeName} is already open (opened by ${openedBy})`,
-          session_id: existingSession.session_id
+
+        // Check if this employee is already connected to this session
+        const existingConnection = await pool.query(
+          `SELECT connection_id FROM drawer_session_connections
+           WHERE session_id = $1 AND employee_id = $2 AND is_active = TRUE`,
+          [existingSession.session_id, employee_id]
+        );
+
+        // Check if this employee is the one who opened the session
+        if (existingSession.employee_id === employee_id) {
+          // Employee is the opener, just return the session
+          return res.status(200).json({
+            ...existingSession,
+            drawer_id,
+            status: 'open',
+            is_connection: false,
+            is_shared: true,
+            message: 'Already connected to this drawer session'
+          });
+        }
+
+        if (existingConnection.rows.length > 0) {
+          // Already connected, just return the session info
+          return res.status(200).json({
+            ...existingSession,
+            drawer_id,
+            status: 'open',
+            is_connection: true,
+            is_shared: true,
+            connection_id: existingConnection.rows[0].connection_id,
+            message: 'Already connected to this drawer session'
+          });
+        }
+
+        // Connect to the existing shared drawer session (no count required)
+        const connectionResult = await pool.query(
+          `INSERT INTO drawer_session_connections (session_id, employee_id)
+           VALUES ($1, $2)
+           RETURNING *`,
+          [existingSession.session_id, employee_id]
+        );
+
+        // Return the existing session with connection info
+        return res.status(200).json({
+          ...existingSession,
+          drawer_id,
+          status: 'open',
+          is_connection: true,
+          is_shared: true,
+          connection_id: connectionResult.rows[0].connection_id,
+          connected_at: connectionResult.rows[0].connected_at,
+          message: 'Connected to existing drawer session'
         });
       }
     } else {
-      // Physical drawers are per-employee
+      // Single drawer - check if THIS SPECIFIC drawer is already open by anyone
       existingDrawer = await pool.query(
-        `SELECT s.session_id
+        `SELECT s.session_id, s.employee_id, e.first_name, e.last_name
+         FROM cash_drawer_sessions s
+         LEFT JOIN employees e ON s.employee_id = e.employee_id
+         WHERE s.drawer_id = $1
+           AND s.status = $2`,
+        [drawer_id, 'open']
+      );
+
+      if (existingDrawer.rows.length > 0) {
+        const existingSession = existingDrawer.rows[0];
+        // If the same employee has this drawer open, return the session
+        if (existingSession.employee_id === employee_id) {
+          return res.status(200).json({
+            session_id: existingSession.session_id,
+            drawer_id,
+            employee_id,
+            status: 'open',
+            is_shared: false,
+            message: 'You already have this drawer open'
+          });
+        }
+        // Different employee has this drawer open - cannot connect to single drawer
+        const openedBy = `${existingSession.first_name} ${existingSession.last_name}`;
+        return res.status(400).json({
+          error: `This drawer is already in use by ${openedBy}`,
+          session_id: existingSession.session_id
+        });
+      }
+
+      // For single physical drawers, check if this employee already has ANY single physical drawer open
+      const employeeOpenDrawer = await pool.query(
+        `SELECT s.session_id, d.drawer_name
          FROM cash_drawer_sessions s
          JOIN drawers d ON s.drawer_id = d.drawer_id
          WHERE s.employee_id = $1
            AND s.status = $2
-           AND d.drawer_type = $3`,
-        [employee_id, 'open', drawerType]
+           AND d.drawer_type = $3
+           AND d.is_shared = FALSE`,
+        [employee_id, 'open', 'physical']
       );
 
-      if (existingDrawer.rows.length > 0) {
+      if (employeeOpenDrawer.rows.length > 0) {
         return res.status(400).json({
-          error: `Employee already has an open physical drawer session`,
-          session_id: existingDrawer.rows[0].session_id
+          error: `You already have ${employeeOpenDrawer.rows[0].drawer_name} open. Please close it first.`,
+          session_id: employeeOpenDrawer.rows[0].session_id
         });
       }
     }
@@ -962,7 +1111,11 @@ app.post('/api/cash-drawer/open', async (req, res) => {
       RETURNING *
     `, [drawer_id, employee_id, opening_balance, opening_notes || null]);
 
-    res.status(201).json(result.rows[0]);
+    res.status(201).json({
+      ...result.rows[0],
+      is_shared: drawerIsShared,
+      is_connection: false
+    });
   } catch (error) {
     console.error('Error opening cash drawer:', error);
 
@@ -1004,6 +1157,120 @@ app.post('/api/cash-drawer/open', async (req, res) => {
       error: 'System error: Unable to open cash drawer. Please try again or contact support if the problem persists.',
       errorType: 'SYSTEM_ERROR'
     });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/connections - Get all employees connected to a drawer session
+app.get('/api/cash-drawer/:sessionId/connections', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    // Get the session opener
+    const sessionResult = await pool.query(
+      `SELECT s.session_id, s.employee_id, s.opened_at, e.first_name, e.last_name
+       FROM cash_drawer_sessions s
+       LEFT JOIN employees e ON s.employee_id = e.employee_id
+       WHERE s.session_id = $1`,
+      [sessionId]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const opener = sessionResult.rows[0];
+
+    // Get all active connections
+    const connectionsResult = await pool.query(
+      `SELECT c.connection_id, c.employee_id, c.connected_at, e.first_name, e.last_name
+       FROM drawer_session_connections c
+       LEFT JOIN employees e ON c.employee_id = e.employee_id
+       WHERE c.session_id = $1 AND c.is_active = TRUE
+       ORDER BY c.connected_at`,
+      [sessionId]
+    );
+
+    res.json({
+      session_id: parseInt(sessionId),
+      opener: {
+        employee_id: opener.employee_id,
+        name: `${opener.first_name} ${opener.last_name}`,
+        connected_at: opener.opened_at,
+        is_opener: true
+      },
+      connections: connectionsResult.rows.map(c => ({
+        connection_id: c.connection_id,
+        employee_id: c.employee_id,
+        name: `${c.first_name} ${c.last_name}`,
+        connected_at: c.connected_at,
+        is_opener: false
+      }))
+    });
+  } catch (error) {
+    console.error('Error getting drawer connections:', error);
+    res.status(500).json({ error: 'Failed to get drawer connections' });
+  }
+});
+
+// POST /api/cash-drawer/:sessionId/disconnect - Disconnect an employee from a shared drawer session
+app.post('/api/cash-drawer/:sessionId/disconnect', async (req, res) => {
+  const { sessionId } = req.params;
+  const { employee_id } = req.body;
+
+  if (!employee_id) {
+    return res.status(400).json({ error: 'employee_id is required' });
+  }
+
+  try {
+    // Check if this is the session opener
+    const sessionResult = await pool.query(
+      `SELECT s.employee_id, d.drawer_type
+       FROM cash_drawer_sessions s
+       JOIN drawers d ON s.drawer_id = d.drawer_id
+       WHERE s.session_id = $1 AND s.status = 'open'`,
+      [sessionId]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Active session not found' });
+    }
+
+    const session = sessionResult.rows[0];
+
+    // Only allow disconnect for shared drawers
+    if (session.drawer_type === 'physical') {
+      return res.status(400).json({
+        error: 'Cannot disconnect from a physical drawer. Use close instead.'
+      });
+    }
+
+    // If this is the opener, they cannot disconnect - they must close the drawer
+    if (session.employee_id === employee_id) {
+      return res.status(400).json({
+        error: 'The drawer opener cannot disconnect. You must close the drawer instead.'
+      });
+    }
+
+    // Disconnect the employee
+    const result = await pool.query(
+      `UPDATE drawer_session_connections
+       SET is_active = FALSE, disconnected_at = CURRENT_TIMESTAMP
+       WHERE session_id = $1 AND employee_id = $2 AND is_active = TRUE
+       RETURNING *`,
+      [sessionId, employee_id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No active connection found for this employee' });
+    }
+
+    res.json({
+      message: 'Successfully disconnected from drawer session',
+      connection: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error disconnecting from drawer:', error);
+    res.status(500).json({ error: 'Failed to disconnect from drawer session' });
   }
 });
 
@@ -1347,6 +1614,13 @@ app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
       return res.status(404).json({ error: 'Session not found or already closed' });
     }
 
+    // Disconnect all connected employees when drawer is closed
+    await pool.query(`
+      UPDATE drawer_session_connections
+      SET is_active = FALSE, disconnected_at = CURRENT_TIMESTAMP
+      WHERE session_id = $1 AND is_active = TRUE
+    `, [sessionId]);
+
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error closing cash drawer:', error);
@@ -1652,6 +1926,63 @@ app.get('/api/drawers', async (req, res) => {
   } catch (error) {
     console.error('Error fetching drawers:', error);
     res.status(500).json({ error: 'Failed to fetch drawers' });
+  }
+});
+
+// PUT /api/drawers/:drawerId/sharing-mode - Update drawer sharing mode
+app.put('/api/drawers/:drawerId/sharing-mode', async (req, res) => {
+  const { drawerId } = req.params;
+  const { is_shared } = req.body;
+
+  if (is_shared === undefined || typeof is_shared !== 'boolean') {
+    return res.status(400).json({ error: 'is_shared must be a boolean value' });
+  }
+
+  try {
+    // Check if drawer exists and is a physical drawer
+    const drawerCheck = await pool.query(
+      'SELECT drawer_id, drawer_type, drawer_name FROM drawers WHERE drawer_id = $1',
+      [drawerId]
+    );
+
+    if (drawerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Drawer not found' });
+    }
+
+    const drawer = drawerCheck.rows[0];
+
+    // Only physical drawers can have their sharing mode changed
+    if (drawer.drawer_type !== 'physical') {
+      return res.status(400).json({
+        error: 'Sharing mode can only be changed for physical drawers. Safe and master safe are always shared.'
+      });
+    }
+
+    // Check if drawer has any active sessions
+    const activeSession = await pool.query(
+      'SELECT session_id FROM cash_drawer_sessions WHERE drawer_id = $1 AND status = $2',
+      [drawerId, 'open']
+    );
+
+    if (activeSession.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Cannot change sharing mode while drawer has an active session. Please close the drawer first.'
+      });
+    }
+
+    // Update the sharing mode
+    const result = await pool.query(
+      'UPDATE drawers SET is_shared = $1, updated_at = CURRENT_TIMESTAMP WHERE drawer_id = $2 RETURNING *',
+      [is_shared, drawerId]
+    );
+
+    res.json({
+      message: `Drawer "${drawer.drawer_name}" sharing mode updated to ${is_shared ? 'Shared' : 'Single'}`,
+      drawer: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error updating drawer sharing mode:', error);
+    res.status(500).json({ error: 'Failed to update drawer sharing mode' });
   }
 });
 

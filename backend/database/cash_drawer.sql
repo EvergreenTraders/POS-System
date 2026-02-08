@@ -443,6 +443,24 @@ END $$;
 COMMENT ON COLUMN drawers.min_close IS 'Minimum allowed closing balance for this drawer type';
 COMMENT ON COLUMN drawers.max_close IS 'Maximum allowed closing balance for this drawer type';
 
+-- Add is_shared column to allow configuring sharing mode for physical drawers
+-- TRUE = shared (multiple employees can connect) - DEFAULT
+-- FALSE = single (only one employee can use at a time)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'drawers' AND column_name = 'is_shared'
+    ) THEN
+        ALTER TABLE drawers ADD COLUMN is_shared BOOLEAN DEFAULT NULL;
+    END IF;
+END $$;
+
+-- Set default sharing mode for all drawers (shared by default)
+UPDATE drawers SET is_shared = TRUE WHERE is_shared IS NULL;
+
+COMMENT ON COLUMN drawers.is_shared IS 'Sharing mode: NULL=not configured, TRUE=shared (multiple employees), FALSE=single (one employee). Safe/master_safe are always shared.';
+
 -- Migrate existing min/max values from user_preferences to drawers table
 DO $$
 DECLARE
@@ -481,3 +499,30 @@ BEGIN
     -- Remove old preferences from user_preferences
     DELETE FROM user_preferences WHERE preference_name IN ('minClose', 'maxClose', 'minCloseSafe', 'maxCloseSafe');
 END $$;
+
+-- Create drawer_session_connections table to track employees connected to shared drawer sessions
+-- When an employee connects to an already-open shared drawer, a connection record is created
+-- instead of a new session. This allows multiple employees to work with the same shared drawer.
+CREATE TABLE IF NOT EXISTS drawer_session_connections (
+    connection_id SERIAL PRIMARY KEY,
+    session_id INTEGER NOT NULL,
+    employee_id INTEGER NOT NULL,
+    connected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    disconnected_at TIMESTAMP,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+    FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(employee_id),
+
+    -- Ensure an employee can only have one active connection per session
+    CONSTRAINT unique_active_connection UNIQUE (session_id, employee_id, is_active)
+);
+
+-- Create indexes for performance
+CREATE INDEX IF NOT EXISTS idx_drawer_connections_session ON drawer_session_connections(session_id);
+CREATE INDEX IF NOT EXISTS idx_drawer_connections_employee ON drawer_session_connections(employee_id);
+CREATE INDEX IF NOT EXISTS idx_drawer_connections_active ON drawer_session_connections(is_active);
+
+-- Add comments for documentation
+COMMENT ON TABLE drawer_session_connections IS 'Tracks employees connected to shared drawer sessions (safe/master_safe). When an employee opens a shared drawer that is already open, they connect to the existing session.';
+COMMENT ON COLUMN drawer_session_connections.is_active IS 'Whether this connection is currently active. Set to FALSE when employee disconnects.';
