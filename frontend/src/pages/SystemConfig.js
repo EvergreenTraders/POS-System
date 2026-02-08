@@ -183,7 +183,6 @@ function SystemConfig() {
   const [numberOfDrawers, setNumberOfDrawers] = useState({ count: 0, id: null });
   const [drawers, setDrawers] = useState([]);
   const [numberOfSafeDrawers, setNumberOfSafeDrawers] = useState({ count: 0, id: null });
-  const [hasMasterSafe, setHasMasterSafe] = useState(false);
   const [numberOfCases, setNumberOfCases] = useState({ count: 0, id: null, label: '' });
   const [cases, setCases] = useState([]);
   // Closing drawer mode (Open Count vs Blind Count)
@@ -192,8 +191,10 @@ function SystemConfig() {
   // Opening drawer mode (Individual Denominations vs Drawer Total)
   const [isIndividualDenominationsDrawers, setIsIndividualDenominationsDrawers] = useState(false);
   const [isIndividualDenominationsSafe, setIsIndividualDenominationsSafe] = useState(false);
-  const [minClose, setMinClose] = useState(0);
-  const [maxClose, setMaxClose] = useState(0);
+  const [minClose, setMinClose] = useState(0); // For physical drawers
+  const [maxClose, setMaxClose] = useState(0); // For physical drawers
+  const [minCloseSafe, setMinCloseSafe] = useState(0); // For safes
+  const [maxCloseSafe, setMaxCloseSafe] = useState(0); // For safes
   const [loading, setLoading] = useState(false);
   const [customerColumns, setCustomerColumns] = useState([]);
   const [itemAttributes, setItemAttributes] = useState([]);
@@ -227,9 +228,6 @@ function SystemConfig() {
         // Count safe drawers (excluding master_safe)
         const safeDrawers = response.data.filter(d => d.drawer_type === 'safe');
         setNumberOfSafeDrawers({ count: safeDrawers.length, id: null });
-        // Check if master safe exists
-        const masterSafe = response.data.find(d => d.drawer_type === 'master_safe');
-        setHasMasterSafe(!!masterSafe);
       }
     } catch (error) {
       console.error('Error fetching drawers:', error);
@@ -290,15 +288,23 @@ function SystemConfig() {
 
   const fetchMinMaxClose = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/user_preferences`);
-      const minClosePreference = response.data.find(pref => pref.preference_name === 'minClose');
-      const maxClosePreference = response.data.find(pref => pref.preference_name === 'maxClose');
-      setMinClose(minClosePreference ? parseFloat(minClosePreference.preference_value) || 0 : 0);
-      setMaxClose(maxClosePreference ? parseFloat(maxClosePreference.preference_value) || 0 : 0);
+      const response = await axios.get(`${API_BASE_URL}/drawer-type-config`);
+
+      // Physical drawer min/max
+      const physicalConfig = response.data.find(config => config.drawer_type === 'physical');
+      setMinClose(physicalConfig ? parseFloat(physicalConfig.min_close) || 0 : 0);
+      setMaxClose(physicalConfig ? parseFloat(physicalConfig.max_close) || 0 : 0);
+
+      // Safe min/max (using safe config for both safe and master_safe)
+      const safeConfig = response.data.find(config => config.drawer_type === 'safe');
+      setMinCloseSafe(safeConfig ? parseFloat(safeConfig.min_close) || 0 : 0);
+      setMaxCloseSafe(safeConfig ? parseFloat(safeConfig.max_close) || 0 : 0);
     } catch (error) {
       console.error('Error fetching min/max close:', error);
       setMinClose(0);
       setMaxClose(0);
+      setMinCloseSafe(0);
+      setMaxCloseSafe(0);
     }
   };
 
@@ -1266,34 +1272,6 @@ function SystemConfig() {
     }
   };
 
-  const handleMasterSafeToggle = async (event) => {
-    const enabled = event.target.checked;
-    
-    try {
-      const response = await axios.put(`${API_BASE_URL}/master-safe-config`, {
-        enabled: enabled
-      });
-
-      setHasMasterSafe(enabled);
-
-      // Refresh the drawers list
-      await fetchDrawers();
-
-      setSnackbar({
-        open: true,
-        message: enabled ? 'Master safe enabled.' : 'Master safe disabled.',
-        severity: 'success'
-      });
-    } catch (error) {
-      console.error('Error updating master safe:', error);
-      setSnackbar({
-        open: true,
-        message: 'Failed to update master safe configuration',
-        severity: 'error'
-      });
-    }
-  };
-
   const handleNumberOfCasesChange = async (event) => {
     const casesToAdd = parseInt(event.target.value);
 
@@ -1457,9 +1435,9 @@ function SystemConfig() {
     const newValue = parseFloat(event.target.value) || 0;
     setMinClose(newValue);
     try {
-      await axios.put(`${API_BASE_URL}/user_preferences`, {
-        preference_name: 'minClose',
-        preference_value: newValue.toString()
+      await axios.put(`${API_BASE_URL}/drawer-type-config/physical`, {
+        min_close: newValue,
+        max_close: maxClose
       });
     } catch (error) {
       console.error('Error updating min close:', error);
@@ -1470,12 +1448,40 @@ function SystemConfig() {
     const newValue = parseFloat(event.target.value) || 0;
     setMaxClose(newValue);
     try {
-      await axios.put(`${API_BASE_URL}/user_preferences`, {
-        preference_name: 'maxClose',
-        preference_value: newValue.toString()
+      await axios.put(`${API_BASE_URL}/drawer-type-config/physical`, {
+        min_close: minClose,
+        max_close: newValue
       });
     } catch (error) {
       console.error('Error updating max close:', error);
+    }
+  };
+
+  const handleMinCloseSafeChange = async (event) => {
+    const newValue = parseFloat(event.target.value) || 0;
+    setMinCloseSafe(newValue);
+    try {
+      // Backend automatically updates both safe and master_safe
+      await axios.put(`${API_BASE_URL}/drawer-type-config/safe`, {
+        min_close: newValue,
+        max_close: maxCloseSafe
+      });
+    } catch (error) {
+      console.error('Error updating min close for safe:', error);
+    }
+  };
+
+  const handleMaxCloseSafeChange = async (event) => {
+    const newValue = parseFloat(event.target.value) || 0;
+    setMaxCloseSafe(newValue);
+    try {
+      // Backend automatically updates both safe and master_safe
+      await axios.put(`${API_BASE_URL}/drawer-type-config/safe`, {
+        min_close: minCloseSafe,
+        max_close: newValue
+      });
+    } catch (error) {
+      console.error('Error updating max close for safe:', error);
     }
   };
 
@@ -2067,39 +2073,53 @@ function SystemConfig() {
                     }}
                     inputProps={{ min: 0, max: 50 }}
                   />
-                  <Box sx={{ display: 'flex', alignItems: 'center', flex: '0 0 auto' }}>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={hasMasterSafe}
-                          onChange={handleMasterSafeToggle}
-                          color="primary"
-                        />
-                      }
-                      label="Master Safe"
-                    />
-                  </Box>
                   <TextField
-                    label="Min Close"
+                    label="Min Close (Physical Drawers)"
                     type="number"
                     value={minClose}
                     onChange={(e) => setMinClose(parseFloat(e.target.value) || 0)}
                     onBlur={handleMinCloseChange}
                     size="small"
-                    sx={{ flex: '1 1 120px', minWidth: '120px' }}
+                    sx={{ flex: '1 1 180px', minWidth: '180px' }}
                     InputProps={{
                       startAdornment: <InputAdornment position="start">$</InputAdornment>,
                     }}
                     inputProps={{ min: 0, step: 0.01 }}
                   />
                   <TextField
-                    label="Max Close"
+                    label="Max Close (Physical Drawers)"
                     type="number"
                     value={maxClose}
                     onChange={(e) => setMaxClose(parseFloat(e.target.value) || 0)}
                     onBlur={handleMaxCloseChange}
                     size="small"
-                    sx={{ flex: '1 1 120px', minWidth: '120px' }}
+                    sx={{ flex: '1 1 180px', minWidth: '180px' }}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                    }}
+                    inputProps={{ min: 0, step: 0.01 }}
+                  />
+                  <TextField
+                    label="Min Close (Safes)"
+                    type="number"
+                    value={minCloseSafe}
+                    onChange={(e) => setMinCloseSafe(parseFloat(e.target.value) || 0)}
+                    onBlur={handleMinCloseSafeChange}
+                    size="small"
+                    sx={{ flex: '1 1 150px', minWidth: '150px' }}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                    }}
+                    inputProps={{ min: 0, step: 0.01 }}
+                  />
+                  <TextField
+                    label="Max Close (Safes)"
+                    type="number"
+                    value={maxCloseSafe}
+                    onChange={(e) => setMaxCloseSafe(parseFloat(e.target.value) || 0)}
+                    onBlur={handleMaxCloseSafeChange}
+                    size="small"
+                    sx={{ flex: '1 1 150px', minWidth: '150px' }}
                     InputProps={{
                       startAdornment: <InputAdornment position="start">$</InputAdornment>,
                     }}

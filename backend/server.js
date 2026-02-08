@@ -260,6 +260,7 @@ const storeClosedMiddleware = async (req, res, next) => {
     '/api/customer-preferences/',
     '/api/diamond_estimates',
     '/api/user_preferences',
+    '/api/drawer-type-config',
     '/api/live_pricing',
     '/api/live_spot_prices',
     '/api/spot_prices',
@@ -2426,6 +2427,93 @@ app.put('/api/user_preferences', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error updating user preferences:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Drawer Type Configuration API Endpoints
+// GET all drawer type configurations (grouped by drawer_type from drawers table)
+app.get('/api/drawer-type-config', async (req, res) => {
+  try {
+    // Get distinct drawer types with their min/max values
+    // Note: master_safe uses the same values as safe, so we only return physical and safe
+    const result = await pool.query(`
+      SELECT DISTINCT ON (drawer_type)
+        drawer_type,
+        min_close,
+        max_close
+      FROM drawers
+      WHERE drawer_type IN ('physical', 'safe')
+      ORDER BY drawer_type
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching drawer type config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET specific drawer type configuration
+app.get('/api/drawer-type-config/:drawerType', async (req, res) => {
+  try {
+    let { drawerType } = req.params;
+
+    // master_safe uses the same values as safe
+    if (drawerType === 'master_safe') {
+      drawerType = 'safe';
+    }
+
+    const result = await pool.query(
+      `SELECT drawer_type, min_close, max_close
+       FROM drawers
+       WHERE drawer_type = $1
+       LIMIT 1`,
+      [drawerType]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Drawer type configuration not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching drawer type config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PUT update drawer type configuration (updates all drawers of that type)
+app.put('/api/drawer-type-config/:drawerType', async (req, res) => {
+  try {
+    const { drawerType } = req.params;
+    const { min_close, max_close } = req.body;
+
+    // Determine which drawer types to update
+    let drawerTypes = [drawerType];
+
+    // If updating safe, also update master_safe to keep them in sync
+    if (drawerType === 'safe') {
+      drawerTypes = ['safe', 'master_safe'];
+    }
+
+    // Update all drawers of these types
+    const result = await pool.query(
+      `UPDATE drawers
+       SET min_close = $1, max_close = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE drawer_type = ANY($3)
+       RETURNING drawer_type, min_close, max_close`,
+      [min_close, max_close, drawerTypes]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No drawers found for this type' });
+    }
+
+    // Return safe type values (or the requested type if it's physical)
+    const returnRow = result.rows.find(row => row.drawer_type === drawerType) || result.rows[0];
+    res.json(returnRow);
+  } catch (error) {
+    console.error('Error updating drawer type config:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

@@ -377,16 +377,9 @@ ON CONFLICT (preference_name) DO NOTHING;
 
 -- Add individualDenominations preferences for cash drawer opening mode (separate for drawers and safe)
 INSERT INTO user_preferences (preference_name, preference_value)
-VALUES 
+VALUES
   ('individualDenominations_drawers', 'false'),
   ('individualDenominations_safe', 'false')
-ON CONFLICT (preference_name) DO NOTHING;
-
--- Add minClose and maxClose preferences for physical drawer closing balance validation
-INSERT INTO user_preferences (preference_name, preference_value)
-VALUES 
-  ('minClose', '0'),
-  ('maxClose', '0')
 ON CONFLICT (preference_name) DO NOTHING;
 
 -- Migrate existing blindCount preference to blindCount_drawers if it exists
@@ -425,3 +418,66 @@ WHERE NOT EXISTS (SELECT 1 FROM discrepancy_threshold LIMIT 1);
 
 -- Fix sequence after data migration - ensure 4-digit session IDs (start at 1000 minimum)
 SELECT setval('cash_drawer_sessions_session_id_seq', GREATEST(COALESCE((SELECT MAX(session_id) FROM cash_drawer_sessions), 0) + 1, 1000), false);
+
+-- Add min_close and max_close columns to drawers table
+DO $$
+BEGIN
+    -- Add min_close column if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'drawers' AND column_name = 'min_close'
+    ) THEN
+        ALTER TABLE drawers ADD COLUMN min_close DECIMAL(10, 2) NOT NULL DEFAULT 0;
+    END IF;
+
+    -- Add max_close column if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'drawers' AND column_name = 'max_close'
+    ) THEN
+        ALTER TABLE drawers ADD COLUMN max_close DECIMAL(10, 2) NOT NULL DEFAULT 0;
+    END IF;
+END $$;
+
+-- Add comments for the new columns
+COMMENT ON COLUMN drawers.min_close IS 'Minimum allowed closing balance for this drawer type';
+COMMENT ON COLUMN drawers.max_close IS 'Maximum allowed closing balance for this drawer type';
+
+-- Migrate existing min/max values from user_preferences to drawers table
+DO $$
+DECLARE
+    v_min_close DECIMAL(10,2) := 0;
+    v_max_close DECIMAL(10,2) := 0;
+    v_min_close_safe DECIMAL(10,2) := 0;
+    v_max_close_safe DECIMAL(10,2) := 0;
+BEGIN
+    -- Get existing values from user_preferences if they exist (use COALESCE to handle NULL)
+    SELECT COALESCE(preference_value::DECIMAL(10,2), 0) INTO v_min_close
+    FROM user_preferences WHERE preference_name = 'minClose';
+    v_min_close := COALESCE(v_min_close, 0);
+
+    SELECT COALESCE(preference_value::DECIMAL(10,2), 0) INTO v_max_close
+    FROM user_preferences WHERE preference_name = 'maxClose';
+    v_max_close := COALESCE(v_max_close, 0);
+
+    SELECT COALESCE(preference_value::DECIMAL(10,2), 0) INTO v_min_close_safe
+    FROM user_preferences WHERE preference_name = 'minCloseSafe';
+    v_min_close_safe := COALESCE(v_min_close_safe, 0);
+
+    SELECT COALESCE(preference_value::DECIMAL(10,2), 0) INTO v_max_close_safe
+    FROM user_preferences WHERE preference_name = 'maxCloseSafe';
+    v_max_close_safe := COALESCE(v_max_close_safe, 0);
+
+    -- Update all physical drawers with physical min/max values
+    UPDATE drawers
+    SET min_close = COALESCE(v_min_close, 0), max_close = COALESCE(v_max_close, 0)
+    WHERE drawer_type = 'physical';
+
+    -- Update all safe and master_safe drawers with safe min/max values
+    UPDATE drawers
+    SET min_close = COALESCE(v_min_close_safe, 0), max_close = COALESCE(v_max_close_safe, 0)
+    WHERE drawer_type IN ('safe', 'master_safe');
+
+    -- Remove old preferences from user_preferences
+    DELETE FROM user_preferences WHERE preference_name IN ('minClose', 'maxClose', 'minCloseSafe', 'maxCloseSafe');
+END $$;

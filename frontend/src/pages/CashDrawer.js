@@ -80,6 +80,7 @@ function CashDrawer() {
   const [detailsDialog, setDetailsDialog] = useState(false);
   const [discrepancyWarningDialog, setDiscrepancyWarningDialog] = useState(false);
   const [managerApprovalDialog, setManagerApprovalDialog] = useState(false);
+  const [minMaxWarningDialog, setMinMaxWarningDialog] = useState(false);
 
   // Manager approval form states
   const [managerUsername, setManagerUsername] = useState('');
@@ -89,8 +90,10 @@ function CashDrawer() {
 
   // Configuration
   const [discrepancyThreshold, setDiscrepancyThreshold] = useState(0.00);
-  const [minClose, setMinClose] = useState(0);
-  const [maxClose, setMaxClose] = useState(0);
+  const [minClose, setMinClose] = useState(0); // For physical drawers
+  const [maxClose, setMaxClose] = useState(0); // For physical drawers
+  const [minCloseSafe, setMinCloseSafe] = useState(0); // For safes
+  const [maxCloseSafe, setMaxCloseSafe] = useState(0); // For safes
   const [isBlindCount, setIsBlindCount] = useState(true); // For closing drawer mode
   const [isIndividualDenominations, setIsIndividualDenominations] = useState(false); // For opening drawer mode
   const [drawerBlindCountPrefs, setDrawerBlindCountPrefs] = useState({ drawers: true, safe: true }); // Closing mode preferences
@@ -247,15 +250,23 @@ function CashDrawer() {
 
   const fetchMinMaxClose = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/user_preferences`);
-      const minClosePreference = response.data.find(pref => pref.preference_name === 'minClose');
-      const maxClosePreference = response.data.find(pref => pref.preference_name === 'maxClose');
-      setMinClose(minClosePreference ? parseFloat(minClosePreference.preference_value) || 0 : 0);
-      setMaxClose(maxClosePreference ? parseFloat(maxClosePreference.preference_value) || 0 : 0);
+      const response = await axios.get(`${API_BASE_URL}/drawer-type-config`);
+
+      // Physical drawer min/max
+      const physicalConfig = response.data.find(config => config.drawer_type === 'physical');
+      setMinClose(physicalConfig ? parseFloat(physicalConfig.min_close) || 0 : 0);
+      setMaxClose(physicalConfig ? parseFloat(physicalConfig.max_close) || 0 : 0);
+
+      // Safe min/max (using safe config for both safe and master_safe)
+      const safeConfig = response.data.find(config => config.drawer_type === 'safe');
+      setMinCloseSafe(safeConfig ? parseFloat(safeConfig.min_close) || 0 : 0);
+      setMaxCloseSafe(safeConfig ? parseFloat(safeConfig.max_close) || 0 : 0);
     } catch (err) {
       console.error('Error fetching min/max close:', err);
       setMinClose(0);
       setMaxClose(0);
+      setMinCloseSafe(0);
+      setMaxCloseSafe(0);
     }
   };
 
@@ -657,7 +668,7 @@ function CashDrawer() {
     }
   };
 
-  const handleCloseDrawer = async (forceClose = false) => {
+  const handleCloseDrawer = async (forceClose = false, bypassMinMaxWarning = false) => {
     // Get current logged-in user
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = currentUser.id;
@@ -678,31 +689,48 @@ function CashDrawer() {
       return;
     }
 
-    // For physical drawers, validate closing balance is within min/max range
-    if (activeSession?.drawer_type === 'physical') {
-      const minCloseValue = parseFloat(minClose || 0);
-      const maxCloseValue = parseFloat(maxClose || 0);
-      
-      // Only validate if both min and max are set (greater than 0)
-      if (minCloseValue > 0 && maxCloseValue > 0) {
-        if (calculatedBalance < minCloseValue || calculatedBalance > maxCloseValue) {
+    // Check min/max range for both physical drawers and safes
+    const isSafe = activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe';
+
+    // Use appropriate min/max based on drawer type
+    const minCloseValue = isSafe ? parseFloat(minCloseSafe || 0) : parseFloat(minClose || 0);
+    const maxCloseValue = isSafe ? parseFloat(maxCloseSafe || 0) : parseFloat(maxClose || 0);
+
+    // Check if balance is outside range
+    let isOutsideRange = false;
+    if (minCloseValue > 0 && maxCloseValue > 0) {
+      isOutsideRange = calculatedBalance < minCloseValue || calculatedBalance > maxCloseValue;
+    } else if (minCloseValue > 0) {
+      isOutsideRange = calculatedBalance < minCloseValue;
+    } else if (maxCloseValue > 0) {
+      isOutsideRange = calculatedBalance > maxCloseValue;
+    }
+
+    if (isOutsideRange && !bypassMinMaxWarning) {
+      if (activeSession?.drawer_type === 'physical') {
+        // For physical drawers, show error and prevent closing
+        if (minCloseValue > 0 && maxCloseValue > 0) {
           showSnackbar(
             `Closing balance $${calculatedBalance.toFixed(2)} is outside the allowed range ($${minCloseValue.toFixed(2)} - $${maxCloseValue.toFixed(2)})`,
             'error'
           );
-          return;
+        } else if (minCloseValue > 0) {
+          showSnackbar(
+            `Closing balance $${calculatedBalance.toFixed(2)} is below the minimum allowed ($${minCloseValue.toFixed(2)})`,
+            'error'
+          );
+        } else if (maxCloseValue > 0) {
+          showSnackbar(
+            `Closing balance $${calculatedBalance.toFixed(2)} exceeds the maximum allowed ($${maxCloseValue.toFixed(2)})`,
+            'error'
+          );
         }
-      } else if (minCloseValue > 0 && calculatedBalance < minCloseValue) {
-        showSnackbar(
-          `Closing balance $${calculatedBalance.toFixed(2)} is below the minimum allowed ($${minCloseValue.toFixed(2)})`,
-          'error'
-        );
         return;
-      } else if (maxCloseValue > 0 && calculatedBalance > maxCloseValue) {
-        showSnackbar(
-          `Closing balance $${calculatedBalance.toFixed(2)} exceeds the maximum allowed ($${maxCloseValue.toFixed(2)})`,
-          'error'
-        );
+      } else if (isSafe) {
+        // For safes, show warning dialog but allow proceeding
+        setCalculatedClosingBalance(calculatedBalance);
+        setCloseDrawerDialog(false);
+        setMinMaxWarningDialog(true);
         return;
       }
     }
@@ -1800,6 +1828,60 @@ function CashDrawer() {
             disabled={isStoreClosed}
           >
             Request Manager Approval
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Min/Max Warning Dialog for Safes */}
+      <Dialog open={minMaxWarningDialog} onClose={() => setMinMaxWarningDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarningIcon color="warning" />
+            <Typography variant="h6">Balance Outside Recommended Range</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="warning">
+              The closing balance is outside the recommended range.
+            </Alert>
+            <Box>
+              <Typography variant="body1" gutterBottom>
+                <strong>Actual Balance:</strong> {formatCurrency(calculatedClosingBalance)}
+              </Typography>
+              {parseFloat((activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? minCloseSafe : minClose) || 0) > 0 && (
+                <Typography variant="body1" gutterBottom>
+                  <strong>Minimum Recommended:</strong> {formatCurrency((activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? minCloseSafe : minClose) || 0)}
+                </Typography>
+              )}
+              {parseFloat((activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? maxCloseSafe : maxClose) || 0) > 0 && (
+                <Typography variant="body1" gutterBottom>
+                  <strong>Maximum Recommended:</strong> {formatCurrency((activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? maxCloseSafe : maxClose) || 0)}
+                </Typography>
+              )}
+            </Box>
+            <Typography variant="body2" color="text.secondary">
+              This is a warning only. You can proceed with closing the safe if the count is correct, or recount to verify the balance.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setMinMaxWarningDialog(false);
+            setCloseDrawerDialog(true);
+          }}>
+            Recount
+          </Button>
+          <Button
+            onClick={() => {
+              setMinMaxWarningDialog(false);
+              handleCloseDrawer(false, true);
+            }}
+            variant="contained"
+            color="warning"
+            disabled={isStoreClosed}
+          >
+            Proceed Anyway
           </Button>
         </DialogActions>
       </Dialog>
