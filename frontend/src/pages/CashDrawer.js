@@ -46,12 +46,14 @@ import {
 import axios from 'axios';
 import config from '../config';
 import { useStoreStatus } from '../context/StoreStatusContext';
+import { useAuth } from '../context/AuthContext';
 
 function CashDrawer() {
   const API_BASE_URL = config.apiUrl;
   const location = useLocation();
   const navigate = useNavigate();
   const { isStoreClosed } = useStoreStatus();
+  const { user: currentUser } = useAuth();
 
   const [activeSession, setActiveSession] = useState(null);
   const [activeSessions, setActiveSessions] = useState([]); // All active sessions (physical, safe, and master_safe)
@@ -84,6 +86,9 @@ function CashDrawer() {
   const [minMaxWarningDialog, setMinMaxWarningDialog] = useState(false);
   const [physicalTenderWarningDialog, setPhysicalTenderWarningDialog] = useState(false);
   const [showManagerOverrideView, setShowManagerOverrideView] = useState(false); // For showing expected values
+  const [balanceViewDialog, setBalanceViewDialog] = useState(false);
+  const [balanceViewData, setBalanceViewData] = useState(null);
+  const [balanceViewLoading, setBalanceViewLoading] = useState(false);
 
   // Manager approval form states
   const [managerUsername, setManagerUsername] = useState('');
@@ -1344,6 +1349,65 @@ function CashDrawer() {
     setManagerApprovalLoading(false);
   };
 
+  // Check if employee has security permission to view balance
+  const hasSecurityPermission = () => {
+    if (!currentUser) return false;
+    // Store Manager, Store Owner, or roles with security access
+    const allowedRoles = ['Store Manager', 'Store Owner', 'Assistant Manager'];
+    return allowedRoles.includes(currentUser.role);
+  };
+
+  // Handle viewing balance for a drawer/safe
+  const handleViewBalance = async (drawerId, sessionId, drawerName, drawerType) => {
+    if (!hasSecurityPermission()) {
+      showSnackbar('You do not have permission to view drawer/safe balances', 'error');
+      return;
+    }
+
+    if (!sessionId) {
+      showSnackbar('No active session found for this drawer/safe', 'error');
+      return;
+    }
+
+    setBalanceViewLoading(true);
+    setBalanceViewDialog(true);
+    setBalanceViewData(null);
+
+    try {
+      // Fetch session details and balance
+      const sessionResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${sessionId}/details`);
+      const session = sessionResponse.data;
+
+      // Fetch denominations if available
+      let denominations = null;
+      try {
+        const denomResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${sessionId}/denominations/opening`);
+        if (denomResponse.data) {
+          denominations = denomResponse.data;
+        }
+      } catch (err) {
+        // Denominations may not exist, that's okay
+        console.log('No denominations found for this session');
+      }
+
+      setBalanceViewData({
+        drawerId,
+        sessionId,
+        drawerName,
+        drawerType,
+        balance: session.current_expected_balance || 0,
+        actualBalance: session.actual_balance || null,
+        denominations
+      });
+    } catch (err) {
+      console.error('Error fetching balance:', err);
+      showSnackbar('Failed to fetch balance information', 'error');
+      setBalanceViewDialog(false);
+    } finally {
+      setBalanceViewLoading(false);
+    }
+  };
+
   const handleManagerApproval = async () => {
     if (!managerUsername || !managerPassword) {
       setManagerApprovalError('Please enter both username and password');
@@ -1573,6 +1637,7 @@ function CashDrawer() {
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>SAFE</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Action</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1591,6 +1656,18 @@ function CashDrawer() {
                       ? `$${parseFloat(safe.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                       : '—'}
                   </TableCell>
+                  <TableCell>
+                    {safe.status === 'OPEN' && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => handleViewBalance(safe.drawer_id, safe.session_id, safe.drawer_name, 'safe')}
+                        disabled={!hasSecurityPermission()}
+                      >
+                        View Balance
+                      </Button>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -1608,6 +1685,7 @@ function CashDrawer() {
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Connected Employees</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Action</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1628,6 +1706,18 @@ function CashDrawer() {
                       : '—'}
                   </TableCell>
                   <TableCell>{drawer.connected_employees || '—'}</TableCell>
+                  <TableCell>
+                    {drawer.status === 'OPEN' && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => handleViewBalance(drawer.drawer_id, drawer.session_id, drawer.drawer_name, drawer.type)}
+                        disabled={!hasSecurityPermission()}
+                      >
+                        View Balance
+                      </Button>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -2235,9 +2325,8 @@ function CashDrawer() {
         </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2 }}>
-            {/* Physical Drawer - Split Layout */}
-            {activeSession?.drawer_type === 'physical' ? (
-              <Grid container spacing={2}>
+            {/* Drawer Close - Split Layout (Physical and Safe) */}
+            <Grid container spacing={2}>
                 {/* Left Side - Physical Tenders */}
                 <Grid item xs={12} md={6}>
                   <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2 }}>
@@ -2460,99 +2549,18 @@ function CashDrawer() {
                   </Box>
                 </Grid>
               </Grid>
-            ) : (
-              /* Safe/Master Safe - Original simpler layout */
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {(minCloseSafe > 0 || maxCloseSafe > 0) && (
-                  <Alert severity="info">
-                    Allowed Closing Balance Range: {minCloseSafe > 0 ? formatCurrency(minCloseSafe) : 'No minimum'} - {maxCloseSafe > 0 ? formatCurrency(maxCloseSafe) : 'No maximum'}
-                  </Alert>
-                )}
 
-                <Alert severity="info">
-                  Transaction Count: {activeSession?.transaction_count || 0}
-                </Alert>
+            {/* Closing Notes - Common for both physical and safe */}
+            <TextField
+              label="Closing Notes (Optional)"
+              fullWidth
+              multiline
+              rows={2}
+              value={closingNotes}
+              onChange={(e) => setClosingNotes(e.target.value)}
+              sx={{ mt: 2 }}
+            />
 
-                {isIndividualDenominations ? (
-                  <>
-                    {renderDenominationEntry(closingDenominations, setClosingDenominations, calculateDenominationTotal(closingDenominations))}
-                    {!isBlindCount && activeSession && (() => {
-                      const balance = calculateDenominationTotal(closingDenominations);
-                      const discrepancy = balance - activeSession.current_expected_balance;
-                      const hasDiscrepancy = Math.abs(discrepancy) > 0.01;
-                      return (
-                        <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: hasDiscrepancy ? 'warning.main' : 'success.main', mt: 1 }}>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Counted Total: {formatCurrency(balance)}
-                          </Typography>
-                          <Typography variant="body1" color={hasDiscrepancy ? 'error.main' : 'success.main'}>
-                            <strong>Discrepancy: {formatCurrency(discrepancy)}</strong>
-                            {hasDiscrepancy && ` (${discrepancy > 0 ? 'Overage' : 'Shortage'})`}
-                          </Typography>
-                        </Box>
-                      );
-                    })()}
-                  </>
-                ) : (
-                  <>
-                    <TextField
-                      label="Actual Balance (Counted)"
-                      type="number"
-                      fullWidth
-                      value={actualBalance}
-                      onChange={(e) => setActualBalance(e.target.value)}
-                      required
-                      inputProps={{ step: '0.01', min: '0' }}
-                      autoFocus
-                    />
-                    {actualBalance && activeSession && !isBlindCount && (() => {
-                      const balance = parseFloat(actualBalance);
-                      const discrepancy = balance - activeSession.current_expected_balance;
-                      const hasDiscrepancy = Math.abs(discrepancy) > 0.01;
-                      return (
-                        <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: hasDiscrepancy ? 'warning.main' : 'success.main', mt: 1 }}>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Actual Balance: {formatCurrency(balance)}
-                          </Typography>
-                          <Typography variant="body1" color={hasDiscrepancy ? 'error.main' : 'success.main'}>
-                            <strong>Discrepancy: {formatCurrency(discrepancy)}</strong>
-                            {hasDiscrepancy && ` (${discrepancy > 0 ? 'Overage' : 'Shortage'})`}
-                          </Typography>
-                        </Box>
-                      );
-                    })()}
-                  </>
-                )}
-
-                <TextField
-                  label="Closing Notes (Optional)"
-                  fullWidth
-                  multiline
-                  rows={2}
-                  value={closingNotes}
-                  onChange={(e) => setClosingNotes(e.target.value)}
-                />
-              </Box>
-            )}
-
-            {/* Closing Notes for Physical Drawers */}
-            {activeSession?.drawer_type === 'physical' && (
-              <TextField
-                label="Closing Notes (Optional)"
-                fullWidth
-                multiline
-                rows={2}
-                value={closingNotes}
-                onChange={(e) => setClosingNotes(e.target.value)}
-                sx={{ mt: 2 }}
-              />
-            )}
           </Box>
         </DialogContent>
         <DialogActions sx={{ justifyContent: 'space-between', px: 3, pb: 2 }}>
@@ -3404,6 +3412,136 @@ function CashDrawer() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {/* Balance View Dialog */}
+      <Dialog open={balanceViewDialog} onClose={() => setBalanceViewDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          {balanceViewData ? `${balanceViewData.drawerName} - Balance` : 'View Balance'}
+        </DialogTitle>
+        <DialogContent>
+          {balanceViewLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : balanceViewData ? (
+            <Box sx={{ pt: 2 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={12}>
+                  <Typography variant="h6" gutterBottom>
+                    Balance Information
+                  </Typography>
+                  <Divider sx={{ mb: 2 }} />
+                </Grid>
+                
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="body2" color="text.secondary">
+                    Drawer/Safe Name:
+                  </Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
+                    {balanceViewData.drawerName}
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="body2" color="text.secondary">
+                    Type:
+                  </Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
+                    {balanceViewData.drawerType === 'safe' ? 'Safe' : 
+                     balanceViewData.drawerType === 'master_safe' ? 'Master Safe' : 
+                     'Physical Drawer'}
+                  </Typography>
+                </Grid>
+                
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="body2" color="text.secondary">
+                    Expected Balance:
+                  </Typography>
+                  <Typography variant="h6" color="primary" sx={{ fontWeight: 'bold' }}>
+                    {formatCurrency(balanceViewData.balance)}
+                  </Typography>
+                </Grid>
+                
+                {balanceViewData.actualBalance !== null && (
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">
+                      Actual Balance:
+                    </Typography>
+                    <Typography variant="h6" color="success.main" sx={{ fontWeight: 'bold' }}>
+                      {formatCurrency(balanceViewData.actualBalance)}
+                    </Typography>
+                  </Grid>
+                )}
+
+                {balanceViewData.denominations && (
+                  <>
+                    <Grid item xs={12}>
+                      <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+                        Denominations
+                      </Typography>
+                      <Divider sx={{ mb: 2 }} />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <TableContainer component={Paper} variant="outlined">
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 'bold' }}>Denomination</TableCell>
+                              <TableCell align="center" sx={{ fontWeight: 'bold' }}>Quantity</TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 'bold' }}>Amount</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {[
+                              { label: '$100', field: 'bill_100', value: 100 },
+                              { label: '$50', field: 'bill_50', value: 50 },
+                              { label: '$20', field: 'bill_20', value: 20 },
+                              { label: '$10', field: 'bill_10', value: 10 },
+                              { label: '$5', field: 'bill_5', value: 5 },
+                              { label: '$2', field: 'coin_2', value: 2 },
+                              { label: '$1', field: 'coin_1', value: 1 },
+                              { label: '$0.25', field: 'coin_0_25', value: 0.25 },
+                              { label: '$0.10', field: 'coin_0_10', value: 0.10 },
+                              { label: '$0.05', field: 'coin_0_05', value: 0.05 },
+                            ].map(item => {
+                              const qty = balanceViewData.denominations[item.field] || 0;
+                              const amount = qty * item.value;
+                              return qty > 0 ? (
+                                <TableRow key={item.field}>
+                                  <TableCell>{item.label}</TableCell>
+                                  <TableCell align="center">{qty}</TableCell>
+                                  <TableCell align="right">{formatCurrency(amount)}</TableCell>
+                                </TableRow>
+                              ) : null;
+                            })}
+                            <TableRow sx={{ borderTop: '2px solid', borderColor: 'divider', '& td': { fontWeight: 'bold' } }}>
+                              <TableCell>Total:</TableCell>
+                              <TableCell align="center">
+                                {Object.values([
+                                  'bill_100', 'bill_50', 'bill_20', 'bill_10', 'bill_5',
+                                  'coin_2', 'coin_1', 'coin_0_25', 'coin_0_10', 'coin_0_05'
+                                ]).reduce((sum, field) => sum + (balanceViewData.denominations[field] || 0), 0)}
+                              </TableCell>
+                              <TableCell align="right">
+                                {formatCurrency(calculateDenominationTotal(balanceViewData.denominations))}
+                              </TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Grid>
+                  </>
+                )}
+              </Grid>
+            </Box>
+          ) : (
+            <Typography>No balance data available</Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBalanceViewDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }
