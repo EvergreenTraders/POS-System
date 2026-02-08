@@ -790,6 +790,7 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
         s.*,
         d.drawer_type,
         d.drawer_name,
+        d.is_shared,
         calculate_expected_balance(s.session_id) AS current_expected_balance,
         (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS transaction_count,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
@@ -799,11 +800,14 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
           ELSE FALSE
         END AS is_opener,
         CASE
-          WHEN s.employee_id != $1 AND d.drawer_type IN ('safe', 'master_safe') THEN
+          WHEN s.employee_id != $1 THEN
             (SELECT c.connection_id FROM drawer_session_connections c
              WHERE c.session_id = s.session_id AND c.employee_id = $1 AND c.is_active = TRUE)
           ELSE NULL
-        END AS connection_id
+        END AS connection_id,
+        -- Count of OTHER active connections (excluding current user)
+        (SELECT COUNT(*) FROM drawer_session_connections c
+         WHERE c.session_id = s.session_id AND c.is_active = TRUE AND c.employee_id != $1) AS other_connections_count
       FROM cash_drawer_sessions s
       JOIN drawers d ON s.drawer_id = d.drawer_id
       WHERE s.status = 'open'
@@ -812,7 +816,11 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
           OR (d.drawer_type IN ('safe', 'master_safe') AND EXISTS (
             SELECT 1 FROM drawer_session_connections c
             WHERE c.session_id = s.session_id AND c.employee_id = $1 AND c.is_active = TRUE
-          ))  -- Shared drawers where employee is connected
+          ))  -- Safe/master_safe drawers where employee is connected
+          OR (d.drawer_type = 'physical' AND d.is_shared = TRUE AND EXISTS (
+            SELECT 1 FROM drawer_session_connections c
+            WHERE c.session_id = s.session_id AND c.employee_id = $1 AND c.is_active = TRUE
+          ))  -- Shared physical drawers where employee is connected
         )
       ORDER BY s.opened_at DESC
     `, [employeeId]);
@@ -1238,9 +1246,9 @@ app.post('/api/cash-drawer/:sessionId/disconnect', async (req, res) => {
   }
 
   try {
-    // Check if this is the session opener
+    // Check if this is the session opener and drawer info
     const sessionResult = await pool.query(
-      `SELECT s.employee_id, d.drawer_type
+      `SELECT s.employee_id, d.drawer_type, d.is_shared
        FROM cash_drawer_sessions s
        JOIN drawers d ON s.drawer_id = d.drawer_id
        WHERE s.session_id = $1 AND s.status = 'open'`,
@@ -1253,10 +1261,10 @@ app.post('/api/cash-drawer/:sessionId/disconnect', async (req, res) => {
 
     const session = sessionResult.rows[0];
 
-    // Only allow disconnect for shared drawers
-    if (session.drawer_type === 'physical') {
+    // For physical drawers, only allow disconnect if it's a shared drawer
+    if (session.drawer_type === 'physical' && !session.is_shared) {
       return res.status(400).json({
-        error: 'Cannot disconnect from a physical drawer. Use close instead.'
+        error: 'Cannot disconnect from a single-use physical drawer. Use close instead.'
       });
     }
 
@@ -1287,6 +1295,52 @@ app.post('/api/cash-drawer/:sessionId/disconnect', async (req, res) => {
   } catch (error) {
     console.error('Error disconnecting from drawer:', error);
     res.status(500).json({ error: 'Failed to disconnect from drawer session' });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/connection-count - Get the count of active connections (including opener)
+app.get('/api/cash-drawer/:sessionId/connection-count', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    // Get session info
+    const sessionResult = await pool.query(
+      `SELECT s.session_id, s.employee_id as opener_id, d.drawer_type, d.is_shared
+       FROM cash_drawer_sessions s
+       JOIN drawers d ON s.drawer_id = d.drawer_id
+       WHERE s.session_id = $1 AND s.status = 'open'`,
+      [sessionId]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Active session not found' });
+    }
+
+    const session = sessionResult.rows[0];
+
+    // Count active connections (excluding opener who is tracked separately)
+    const connectionsResult = await pool.query(
+      `SELECT COUNT(*) as connection_count
+       FROM drawer_session_connections
+       WHERE session_id = $1 AND is_active = TRUE`,
+      [sessionId]
+    );
+
+    const connectionCount = parseInt(connectionsResult.rows[0].connection_count) || 0;
+    // Total = opener (1) + connected employees
+    const totalCount = 1 + connectionCount;
+
+    res.json({
+      session_id: parseInt(sessionId),
+      opener_id: session.opener_id,
+      drawer_type: session.drawer_type,
+      is_shared: session.is_shared,
+      connection_count: connectionCount,
+      total_count: totalCount
+    });
+  } catch (error) {
+    console.error('Error getting connection count:', error);
+    res.status(500).json({ error: 'Failed to get connection count' });
   }
 });
 

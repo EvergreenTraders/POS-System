@@ -1007,6 +1007,29 @@ function CashDrawer() {
     }
   };
 
+  // Handle disconnecting from a shared drawer (for connected employees, not opener)
+  const handleDisconnectFromDrawer = async () => {
+    if (!activeSession) return;
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      await axios.post(
+        `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/disconnect`,
+        { employee_id: currentUser.id }
+      );
+
+      showSnackbar('Successfully disconnected from shared drawer', 'success');
+      fetchOverview();
+      checkActiveSession();
+      fetchHistory();
+    } catch (err) {
+      console.error('Error disconnecting from drawer:', err);
+      const errorMessage = err.response?.data?.error || err.message || 'Failed to disconnect from drawer';
+      showSnackbar(errorMessage, 'error');
+    }
+  };
+
   const handleAddAdjustment = async () => {
     if (!adjustmentAmount || !adjustmentReason) {
       showSnackbar('Please fill in all required fields', 'error');
@@ -1492,7 +1515,22 @@ function CashDrawer() {
                           Active {activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe' ? 'Safe' : 'Drawer'} Session
                           {activeSession.drawer_name && ` - ${activeSession.drawer_name}`}
                         </Typography>
-                        {getStatusChip(activeSession.status)}
+                        <Box display="flex" gap={1} alignItems="center">
+                          {getStatusChip(activeSession.status)}
+                          {activeSession.connection_id && !activeSession.is_opener && (
+                            <Chip label="Connected" color="info" size="small" />
+                          )}
+                          {activeSession.is_shared && activeSession.drawer_type === 'physical' && (
+                            <Chip label="Shared" color="secondary" size="small" variant="outlined" />
+                          )}
+                          {parseInt(activeSession.other_connections_count || 0) > 0 && (
+                            <Chip
+                              label={`${activeSession.other_connections_count} other${parseInt(activeSession.other_connections_count) > 1 ? 's' : ''} connected`}
+                              color="warning"
+                              size="small"
+                            />
+                          )}
+                        </Box>
                       </Box>
 
                     <Grid container spacing={2}>
@@ -1530,6 +1568,22 @@ function CashDrawer() {
                         color="primary"
                         disabled={isStoreClosed}
                         onClick={async () => {
+                          // For shared drawers: check if others are connected
+                          const othersConnected = parseInt(activeSession.other_connections_count || 0) > 0;
+                          const isConnectedEmployee = activeSession.connection_id && !activeSession.is_opener;
+
+                          // If user is a connected employee (not opener), just disconnect
+                          if (isConnectedEmployee) {
+                            handleDisconnectFromDrawer();
+                            return;
+                          }
+
+                          // If opener and others are still connected, prevent closing
+                          if (activeSession.is_opener && othersConnected) {
+                            showSnackbar('Other employees are still connected to this drawer. They must disconnect before you can close it.', 'warning');
+                            return;
+                          }
+
                           // If Individual Denominations mode or Open Count mode, fetch opening denominations for comparison
                           if ((isIndividualDenominations || !isBlindCount) && activeSession) {
                             try {
@@ -1560,7 +1614,10 @@ function CashDrawer() {
                           setCloseDrawerDialog(true);
                         }}
                       >
-                        Close {activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe' ? 'Safe' : 'Drawer'}
+                        {/* Show 'Disconnect' for connected employees on shared drawers, 'Close' for opener */}
+                        {activeSession.connection_id && !activeSession.is_opener
+                          ? 'Disconnect'
+                          : `Close ${activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe' ? 'Safe' : 'Drawer'}`}
                       </Button>
                       <Button
                         variant="outlined"
