@@ -996,15 +996,15 @@ app.post('/api/cash-drawer/open', async (req, res) => {
       // Shared drawer - check if ANY employee has this specific drawer open
       existingDrawer = await pool.query(
         `SELECT s.session_id, s.employee_id, s.opening_balance, s.opened_at, e.first_name, e.last_name
-         FROM cash_drawer_sessions s
-         JOIN drawers d ON s.drawer_id = d.drawer_id
+       FROM cash_drawer_sessions s
+       JOIN drawers d ON s.drawer_id = d.drawer_id
          LEFT JOIN employees e ON s.employee_id = e.employee_id
          WHERE s.status = $1
            AND s.drawer_id = $2`,
         ['open', drawer_id]
-      );
+    );
 
-      if (existingDrawer.rows.length > 0) {
+    if (existingDrawer.rows.length > 0) {
         const existingSession = existingDrawer.rows[0];
 
         // Check if this employee is already connected to this session
@@ -1086,7 +1086,7 @@ app.post('/api/cash-drawer/open', async (req, res) => {
         }
         // Different employee has this drawer open - cannot connect to single drawer
         const openedBy = `${existingSession.first_name} ${existingSession.last_name}`;
-        return res.status(400).json({
+      return res.status(400).json({
           error: `This drawer is already in use by ${openedBy}`,
           session_id: existingSession.session_id
         });
@@ -4436,9 +4436,9 @@ app.delete('/api/jewelry/:item_id', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error deleting jewelry item:', error);
     res.status(500).json({ error: 'Failed to delete jewelry item' });
-  } finally {
-    client.release();
-  }
+    } finally {
+        client.release();
+    }
 });
 
 // Inventory Status API Endpoints
@@ -5999,7 +5999,7 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
 
     // Convert empty email to null to avoid unique constraint issues
     const emailValue = email && email.trim() ? email.trim() : null;
-
+    
     // Handle multiple image uploads
     let image = null;
     let id_image_front = null;
@@ -7687,6 +7687,58 @@ app.get('/api/payment-methods/electronic', async (req, res) => {
 
 // Get expected electronic tender totals for a drawer session
 // Returns the expected qty and amount for each electronic payment method based on transactions
+// GET /api/cash-drawer/:sessionId/tender-balances - Get tender balances for a session
+app.get('/api/cash-drawer/:sessionId/tender-balances', async (req, res) => {
+  const { sessionId } = req.params;
+  const { type } = req.query; // 'open' or 'close', defaults to 'close'
+
+  try {
+    const balanceType = type || 'close';
+    
+    // Get tender balances from the session
+    const result = await pool.query(`
+      SELECT 
+        tb.payment_method,
+        tb.closing_balance,
+        pm.method_name,
+        pm.is_physical
+      FROM drawer_tender_balances tb
+      JOIN payment_methods pm ON tb.payment_method = pm.method_value
+      WHERE tb.session_id = $1 
+        AND tb.balance_type = $2
+        AND tb.closing_balance > 0
+      ORDER BY pm.id
+    `, [sessionId, balanceType]);
+
+    const tenderBalances = {};
+    result.rows.forEach(row => {
+      tenderBalances[row.payment_method] = {
+        methodName: row.method_name,
+        balance: parseFloat(row.closing_balance),
+        isPhysical: row.is_physical
+      };
+    });
+
+    res.json({
+      tenderBalances,
+      physicalTenders: result.rows.filter(r => r.is_physical).map(r => ({
+        paymentMethod: r.payment_method,
+        methodName: r.method_name,
+        balance: parseFloat(r.closing_balance)
+      })),
+      electronicTenders: result.rows.filter(r => !r.is_physical).map(r => ({
+        paymentMethod: r.payment_method,
+        methodName: r.method_name,
+        balance: parseFloat(r.closing_balance)
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching tender balances:', error);
+    res.status(500).json({ error: 'Failed to fetch tender balances' });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/electronic-tender-expected - Get expected totals for electronic payment methods
 app.get('/api/cash-drawer/:sessionId/electronic-tender-expected', async (req, res) => {
   const { sessionId } = req.params;
 
@@ -7721,6 +7773,40 @@ app.get('/api/cash-drawer/:sessionId/electronic-tender-expected', async (req, re
   } catch (error) {
     console.error('Error fetching electronic tender expected:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/cash-drawer/drawer/:drawerId/last-session - Get the last session (open or closed) for a drawer
+app.get('/api/cash-drawer/drawer/:drawerId/last-session', async (req, res) => {
+  const { drawerId } = req.params;
+
+  try {
+    // Get the most recent session (open or closed) for this drawer
+    const result = await pool.query(`
+      SELECT 
+        session_id,
+        status,
+        opened_at,
+        closed_at,
+        actual_balance,
+        expected_balance,
+        opening_balance
+      FROM cash_drawer_sessions
+      WHERE drawer_id = $1
+      ORDER BY 
+        CASE WHEN status = 'open' THEN 0 ELSE 1 END,
+        COALESCE(closed_at, opened_at) DESC
+      LIMIT 1
+    `, [drawerId]);
+
+    if (result.rows.length === 0) {
+      return res.json({ session_id: null });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching last session:', error);
+    res.status(500).json({ error: 'Failed to fetch last session' });
   }
 });
 

@@ -228,7 +228,7 @@ function CashDrawer() {
 
       // Fetch all active sessions to check for shared drawers
       fetchAllActiveSessions();
-
+      
       // Auto-select current user if not already selected
       if (!selectedEmployee) {
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -236,14 +236,14 @@ function CashDrawer() {
           setSelectedEmployee(currentUser.id);
         }
       }
-
+      
       // Set closing mode (blind count) based on drawer type filter
       if (drawerTypeFilter === 'safe' || drawerTypeFilter === 'master_safe') {
         setIsBlindCount(drawerBlindCountPrefs.safe);
       } else if (drawerTypeFilter === 'physical') {
         setIsBlindCount(drawerBlindCountPrefs.drawers);
       }
-
+      
       // Set opening mode (individual denominations) based on drawer type filter
       if (drawerTypeFilter === 'safe' || drawerTypeFilter === 'master_safe') {
         setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
@@ -965,7 +965,7 @@ function CashDrawer() {
 
     // Check if balance is outside range
     let isOutsideRange = false;
-    if (minCloseValue > 0 && maxCloseValue > 0) {
+      if (minCloseValue > 0 && maxCloseValue > 0) {
       isOutsideRange = calculatedBalance < minCloseValue || calculatedBalance > maxCloseValue;
     } else if (minCloseValue > 0) {
       isOutsideRange = calculatedBalance < minCloseValue;
@@ -982,15 +982,15 @@ function CashDrawer() {
             'error'
           );
         } else if (minCloseValue > 0) {
-          showSnackbar(
-            `Closing balance $${calculatedBalance.toFixed(2)} is below the minimum allowed ($${minCloseValue.toFixed(2)})`,
-            'error'
-          );
+        showSnackbar(
+          `Closing balance $${calculatedBalance.toFixed(2)} is below the minimum allowed ($${minCloseValue.toFixed(2)})`,
+          'error'
+        );
         } else if (maxCloseValue > 0) {
-          showSnackbar(
-            `Closing balance $${calculatedBalance.toFixed(2)} exceeds the maximum allowed ($${maxCloseValue.toFixed(2)})`,
-            'error'
-          );
+        showSnackbar(
+          `Closing balance $${calculatedBalance.toFixed(2)} exceeds the maximum allowed ($${maxCloseValue.toFixed(2)})`,
+          'error'
+        );
         }
         return;
       } else if (isSafe) {
@@ -1020,7 +1020,7 @@ function CashDrawer() {
 
     // Calculate discrepancies separately for Physical and Electronic
     const threshold = parseFloat(discrepancyThreshold || 0);
-    
+
     // Physical discrepancy (cash + physical tenders like checks)
     const otherPhysicalTenderTotal = activeSession?.drawer_type === 'physical'
       ? Object.values(closingTenderBalances).reduce((sum, val) => sum + (parseFloat(val) || 0), 0)
@@ -1117,9 +1117,9 @@ function CashDrawer() {
         });
         setCalculatedClosingBalance(calculatedBalance);
         setCloseDrawerDialog(false);
-        setDiscrepancyWarningDialog(true);
+      setDiscrepancyWarningDialog(true);
         setShowManagerOverrideView(false); // Reset view state
-        return;
+      return;
       }
     }
 
@@ -1364,40 +1364,170 @@ function CashDrawer() {
       return;
     }
 
-    if (!sessionId) {
-      showSnackbar('No active session found for this drawer/safe', 'error');
-      return;
-    }
-
     setBalanceViewLoading(true);
     setBalanceViewDialog(true);
     setBalanceViewData(null);
 
     try {
-      // Fetch session details and balance
-      const sessionResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${sessionId}/details`);
-      const session = sessionResponse.data;
-
-      // Fetch denominations if available
+      let session = null;
+      let balance = 0;
+      let actualBalance = null;
       let denominations = null;
-      try {
-        const denomResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${sessionId}/denominations/opening`);
-        if (denomResponse.data) {
-          denominations = denomResponse.data;
+      let physicalTenderBalances = {};
+      let electronicTenderBalances = {};
+
+      // If there's an active session, use it
+      if (sessionId) {
+        const sessionResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${sessionId}/details`);
+        session = sessionResponse.data;
+        balance = session.current_expected_balance || 0;
+        actualBalance = session.actual_balance || null;
+
+        // Fetch denominations if available
+        try {
+          const denomResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${sessionId}/denominations/opening`);
+          if (denomResponse.data) {
+            denominations = denomResponse.data;
+          }
+        } catch (err) {
+          console.log('No denominations found for this session');
         }
-      } catch (err) {
-        // Denominations may not exist, that's okay
-        console.log('No denominations found for this session');
+
+        // For safes, fetch physical and electronic tender balances
+        if (drawerType === 'safe' || drawerType === 'master_safe') {
+          try {
+            // Fetch tender balances (both physical and electronic)
+            const tenderResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${sessionId}/tender-balances?type=close`);
+            if (tenderResponse.data) {
+              // Physical tenders
+              if (tenderResponse.data.physicalTenders && tenderResponse.data.physicalTenders.length > 0) {
+                const physicalMap = {};
+                tenderResponse.data.physicalTenders.forEach(t => {
+                  physicalMap[t.paymentMethod] = t.balance;
+                });
+                physicalTenderBalances = physicalMap;
+              }
+              // Electronic tenders - also get expected totals for comparison
+              if (tenderResponse.data.electronicTenders && tenderResponse.data.electronicTenders.length > 0) {
+                electronicTenderBalances = tenderResponse.data.electronicTenders.map(t => ({
+                  payment_method: t.paymentMethod,
+                  method_name: t.methodName,
+                  expected_qty: 0,
+                  expected_amount: t.balance
+                }));
+              }
+            }
+          } catch (err) {
+            console.log('No tender balances found, trying electronic-tender-expected');
+            // Fallback: try to get electronic tender expected
+            try {
+              const electronicResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${sessionId}/electronic-tender-expected`);
+              if (electronicResponse.data) {
+                // Convert object to array format
+                electronicTenderBalances = Object.entries(electronicResponse.data).map(([key, value]) => ({
+                  payment_method: key,
+                  method_name: value.method_name,
+                  expected_qty: value.expected_qty || 0,
+                  expected_amount: value.expected_amount || 0
+                }));
+              }
+            } catch (err2) {
+              console.log('No electronic tender balances found');
+            }
+          }
+        }
+      } else {
+        // No active session - fetch last closed session
+        try {
+          const lastSessionResponse = await axios.get(`${API_BASE_URL}/cash-drawer/drawer/${drawerId}/last-session`);
+          if (lastSessionResponse.data && lastSessionResponse.data.session_id) {
+            const lastSessionId = lastSessionResponse.data.session_id;
+            const sessionResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${lastSessionId}/details`);
+            session = sessionResponse.data;
+            balance = session.actual_balance || session.expected_balance || 0;
+            actualBalance = session.actual_balance || null;
+
+            // Fetch denominations from closing if available
+            try {
+              const denomResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${lastSessionId}/denominations/closing`);
+              if (denomResponse.data) {
+                denominations = denomResponse.data;
+              } else {
+                // Try opening denominations as fallback
+                const denomResponse2 = await axios.get(`${API_BASE_URL}/cash-drawer/${lastSessionId}/denominations/opening`);
+                if (denomResponse2.data) {
+                  denominations = denomResponse2.data;
+                }
+              }
+            } catch (err) {
+              console.log('No denominations found for last session');
+            }
+
+            // For safes, fetch physical and electronic tender balances from last session
+            if (drawerType === 'safe' || drawerType === 'master_safe') {
+              try {
+                // Fetch tender balances (both physical and electronic)
+                const tenderResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${lastSessionId}/tender-balances?type=close`);
+                if (tenderResponse.data) {
+                  // Physical tenders
+                  if (tenderResponse.data.physicalTenders && tenderResponse.data.physicalTenders.length > 0) {
+                    const physicalMap = {};
+                    tenderResponse.data.physicalTenders.forEach(t => {
+                      physicalMap[t.paymentMethod] = t.balance;
+                    });
+                    physicalTenderBalances = physicalMap;
+                  }
+                  // Electronic tenders
+                  if (tenderResponse.data.electronicTenders && tenderResponse.data.electronicTenders.length > 0) {
+                    electronicTenderBalances = tenderResponse.data.electronicTenders.map(t => ({
+                      payment_method: t.paymentMethod,
+                      method_name: t.methodName,
+                      expected_qty: 0,
+                      expected_amount: t.balance
+                    }));
+                  }
+                }
+              } catch (err) {
+                console.log('No tender balances found, trying electronic-tender-expected');
+                // Fallback: try to get electronic tender expected
+                try {
+                  const electronicResponse = await axios.get(`${API_BASE_URL}/cash-drawer/${lastSessionId}/electronic-tender-expected`);
+                  if (electronicResponse.data) {
+                    // Convert object to array format
+                    electronicTenderBalances = Object.entries(electronicResponse.data).map(([key, value]) => ({
+                      payment_method: key,
+                      method_name: value.method_name,
+                      expected_qty: value.expected_qty || 0,
+                      expected_amount: value.expected_amount || 0
+                    }));
+                  }
+                } catch (err2) {
+                  console.log('No electronic tender balances found');
+                }
+              }
+            }
+          } else {
+            // No previous session found
+            balance = 0;
+            actualBalance = null;
+          }
+        } catch (err) {
+          console.error('Error fetching last session:', err);
+          // Continue with empty data
+        }
       }
 
       setBalanceViewData({
         drawerId,
-        sessionId,
+        sessionId: session?.session_id || null,
         drawerName,
         drawerType,
-        balance: session.current_expected_balance || 0,
-        actualBalance: session.actual_balance || null,
-        denominations
+        balance,
+        actualBalance,
+        denominations,
+        physicalTenderBalances,
+        electronicTenderBalances,
+        isActiveSession: !!sessionId
       });
     } catch (err) {
       console.error('Error fetching balance:', err);
@@ -1637,7 +1767,6 @@ function CashDrawer() {
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>SAFE</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Action</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1656,18 +1785,6 @@ function CashDrawer() {
                       ? `$${parseFloat(safe.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                       : '—'}
                   </TableCell>
-                  <TableCell>
-                    {safe.status === 'OPEN' && (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => handleViewBalance(safe.drawer_id, safe.session_id, safe.drawer_name, 'safe')}
-                        disabled={!hasSecurityPermission()}
-                      >
-                        View Balance
-                      </Button>
-                    )}
-                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -1685,7 +1802,6 @@ function CashDrawer() {
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Connected Employees</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Action</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1706,18 +1822,6 @@ function CashDrawer() {
                       : '—'}
                   </TableCell>
                   <TableCell>{drawer.connected_employees || '—'}</TableCell>
-                  <TableCell>
-                    {drawer.status === 'OPEN' && (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={() => handleViewBalance(drawer.drawer_id, drawer.session_id, drawer.drawer_name, drawer.type)}
-                        disabled={!hasSecurityPermission()}
-                      >
-                        View Balance
-                      </Button>
-                    )}
-                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -1808,7 +1912,7 @@ function CashDrawer() {
                           {activeSession.drawer_name && ` - ${activeSession.drawer_name}`}
                         </Typography>
                         <Box display="flex" gap={1} alignItems="center">
-                          {getStatusChip(activeSession.status)}
+                        {getStatusChip(activeSession.status)}
                           {activeSession.connection_id && !activeSession.is_opener && (
                             <Chip label="Connected" color="info" size="small" />
                           )}
@@ -2199,23 +2303,23 @@ function CashDrawer() {
                   </FormControl>
                 )}
 
-                {isIndividualDenominations ? (
-                  <>
-                    {renderDenominationEntry(openingDenominations, setOpeningDenominations, calculateDenominationTotal(openingDenominations))}
-                    <Alert severity="info" sx={{ mt: 1 }}>
-                      Opening balance will be automatically set to the total of counted denominations: {formatCurrency(calculateDenominationTotal(openingDenominations))}
-                    </Alert>
-                  </>
-                ) : (
-                  <TextField
-                    label="Opening Balance"
-                    type="number"
-                    fullWidth
-                    value={openingBalance}
-                    onChange={(e) => setOpeningBalance(e.target.value)}
-                    required
-                    inputProps={{ step: '0.01', min: '0' }}
-                  />
+            {isIndividualDenominations ? (
+              <>
+                {renderDenominationEntry(openingDenominations, setOpeningDenominations, calculateDenominationTotal(openingDenominations))}
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  Opening balance will be automatically set to the total of counted denominations: {formatCurrency(calculateDenominationTotal(openingDenominations))}
+                </Alert>
+              </>
+            ) : (
+              <TextField
+                label="Opening Balance"
+                type="number"
+                fullWidth
+                value={openingBalance}
+                onChange={(e) => setOpeningBalance(e.target.value)}
+                required
+                inputProps={{ step: '0.01', min: '0' }}
+              />
                 )}
               </>
             )}
@@ -2251,14 +2355,14 @@ function CashDrawer() {
 
             {/* Only show notes field when opening a new session, not when connecting */}
             {!existingSharedSession && (
-              <TextField
-                label="Notes (Optional)"
-                fullWidth
-                multiline
-                rows={3}
-                value={openingNotes}
-                onChange={(e) => setOpeningNotes(e.target.value)}
-              />
+            <TextField
+              label="Notes (Optional)"
+              fullWidth
+              multiline
+              rows={3}
+              value={openingNotes}
+              onChange={(e) => setOpeningNotes(e.target.value)}
+            />
             )}
           </Box>
         </DialogContent>
@@ -2269,8 +2373,8 @@ function CashDrawer() {
               Connect to Drawer
             </Button>
           ) : (
-            <Button onClick={handleOpenDrawer} variant="contained" color="primary" disabled={isStoreClosed}>
-              Open Drawer
+          <Button onClick={handleOpenDrawer} variant="contained" color="primary" disabled={isStoreClosed}>
+            Open Drawer
             </Button>
           )}
         </DialogActions>
@@ -2356,7 +2460,7 @@ function CashDrawer() {
                           { label: '$0.25', field: 'coin_0_25', value: 0.25 },
                           { label: '$0.10', field: 'coin_0_10', value: 0.10 },
                           { label: '$0.05', field: 'coin_0_05', value: 0.05 },
-                        ].map(item => (
+                      ].map(item => (
                           <tr key={item.field}>
                             <td>{item.label}</td>
                             <td style={{ textAlign: 'center' }}>
@@ -2385,7 +2489,7 @@ function CashDrawer() {
                           </td>
                         </tr>
                       </tbody>
-                    </Box>
+                  </Box>
 
                     {/* Other Physical Tenders */}
                     {physicalPaymentMethods.length > 0 && (
@@ -2437,7 +2541,7 @@ function CashDrawer() {
                     )}
 
                     {/* Physical Discrepancy Message */}
-                    {(() => {
+                {(() => {
                       const physicalActual = calculateDenominationTotal(closingDenominations) +
                         physicalPaymentMethods.reduce((sum, m) => sum + (parseFloat(closingTenderBalances[m.method_value]) || 0), 0);
                       const physicalExpected = parseFloat(activeSession?.current_expected_balance || 0);
@@ -2446,21 +2550,21 @@ function CashDrawer() {
                       const isOverLimit = Math.abs(physicalDiscrepancy) > threshold;
 
                       if (isBlindCount && isOverLimit) {
-                        return (
+                    return (
                           <Typography variant="body2" color="error" sx={{ mt: 2, fontWeight: 'bold' }}>
                             Physical discrepancy is over employee limit.
                           </Typography>
                         );
                       } else if (!isBlindCount && Math.abs(physicalDiscrepancy) > 0.01) {
-                        return (
+                    return (
                           <Typography variant="body2" color={isOverLimit ? 'error' : 'warning.main'} sx={{ mt: 2 }}>
                             Physical discrepancy: {formatCurrency(physicalDiscrepancy)} ({physicalDiscrepancy > 0 ? 'Overage' : 'Shortage'})
                             {isOverLimit && ' - Over employee limit'}
-                          </Typography>
+                        </Typography>
                         );
                       }
-                      return null;
-                    })()}
+                  return null;
+                })()}
                   </Box>
                 </Grid>
 
@@ -2494,8 +2598,8 @@ function CashDrawer() {
                             <tr key={method.method_value}>
                               <td>{method.method_name}</td>
                               <td style={{ textAlign: 'center' }}>
-                                <TextField
-                                  type="number"
+                <TextField
+                  type="number"
                                   size="small"
                                   value={actual.qty || ''}
                                   onChange={(e) => setElectronicTenderActuals(prev => ({
@@ -2538,14 +2642,14 @@ function CashDrawer() {
                       const electronicDiscrepancy = electronicActualTotal - electronicExpectedTotal;
 
                       if (Math.abs(electronicDiscrepancy) > 0.01) {
-                        return (
+                    return (
                           <Typography variant="body2" color="primary" sx={{ mt: 2 }}>
                             Electronic discrepancy is {formatCurrency(Math.abs(electronicDiscrepancy))}
-                          </Typography>
+                        </Typography>
                         );
                       }
-                      return null;
-                    })()}
+                  return null;
+                })()}
                   </Box>
                 </Grid>
               </Grid>
@@ -2639,9 +2743,9 @@ function CashDrawer() {
                         </Button>
                       </>
                     )}
-                    <Button onClick={() => handleCloseDrawer(false)} variant="contained" color="primary" disabled={isStoreClosed}>
+          <Button onClick={() => handleCloseDrawer(false)} variant="contained" color="primary" disabled={isStoreClosed}>
                       Close
-                    </Button>
+          </Button>
                   </Box>
                 );
               }
@@ -2867,9 +2971,9 @@ function CashDrawer() {
               </Typography>
               {openingDiscrepancyData.showAmount && (
                 <>
-                  <Typography variant="body1" gutterBottom>
+              <Typography variant="body1" gutterBottom>
                     <strong>Previous Closing Balance:</strong> {formatCurrency(openingDiscrepancyData.previousClosingBalance)}
-                  </Typography>
+              </Typography>
                   <Typography variant="body1" color={openingDiscrepancyData.discrepancy > 0 ? 'info.main' : 'error.main'} gutterBottom>
                     <strong>Discrepancy:</strong> {formatCurrency(Math.abs(openingDiscrepancyData.discrepancy))}
                     {' '}({openingDiscrepancyData.discrepancy > 0 ? 'Overage' : 'Shortage'})
@@ -2918,12 +3022,12 @@ function CashDrawer() {
               {parseFloat((activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? minCloseSafe : minClose) || 0) > 0 && (
                 <Typography variant="body1" gutterBottom>
                   <strong>Minimum Recommended:</strong> {formatCurrency((activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? minCloseSafe : minClose) || 0)}
-                </Typography>
+              </Typography>
               )}
               {parseFloat((activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? maxCloseSafe : maxClose) || 0) > 0 && (
-                <Typography variant="body1" gutterBottom>
+              <Typography variant="body1" gutterBottom>
                   <strong>Maximum Recommended:</strong> {formatCurrency((activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? maxCloseSafe : maxClose) || 0)}
-                </Typography>
+              </Typography>
               )}
             </Box>
             <Typography variant="body2" color="text.secondary">
@@ -3040,18 +3144,18 @@ function CashDrawer() {
             <Box sx={{ p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
               {/* In blind count mode, don't show expected balance or discrepancy to employee */}
               {!isBlindCount && (
-                <Typography variant="body2" gutterBottom>
-                  <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
-                </Typography>
+              <Typography variant="body2" gutterBottom>
+                <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
+              </Typography>
               )}
               <Typography variant="body2" gutterBottom>
                 <strong>Actual Balance:</strong> {formatCurrency(calculatedClosingBalance)}
               </Typography>
               {!isBlindCount && (
-                <Typography variant="body2" color="error">
-                  <strong>Discrepancy:</strong> {formatCurrency(Math.abs(calculatedClosingBalance - parseFloat(activeSession?.current_expected_balance || 0)))}
-                  {' '}({calculatedClosingBalance > parseFloat(activeSession?.current_expected_balance || 0) ? 'Overage' : 'Shortage'})
-                </Typography>
+              <Typography variant="body2" color="error">
+                <strong>Discrepancy:</strong> {formatCurrency(Math.abs(calculatedClosingBalance - parseFloat(activeSession?.current_expected_balance || 0)))}
+                {' '}({calculatedClosingBalance > parseFloat(activeSession?.current_expected_balance || 0) ? 'Overage' : 'Shortage'})
+              </Typography>
               )}
               {isBlindCount && (
                 <Typography variant="body2" color="error">
@@ -3477,7 +3581,7 @@ function CashDrawer() {
                   <>
                     <Grid item xs={12}>
                       <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                        Denominations
+                        Cash Denominations
                       </Typography>
                       <Divider sx={{ mb: 2 }} />
                     </Grid>
@@ -3526,6 +3630,79 @@ function CashDrawer() {
                                 {formatCurrency(calculateDenominationTotal(balanceViewData.denominations))}
                               </TableCell>
                             </TableRow>
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Grid>
+                  </>
+                )}
+
+                {/* Physical Tender Balances (for safes) */}
+                {balanceViewData.physicalTenderBalances && Object.keys(balanceViewData.physicalTenderBalances).length > 0 && (
+                  <>
+                    <Grid item xs={12}>
+                      <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+                        Physical Tender Balances
+                      </Typography>
+                      <Divider sx={{ mb: 2 }} />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <TableContainer component={Paper} variant="outlined">
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 'bold' }}>Type</TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 'bold' }}>Balance</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {Object.entries(balanceViewData.physicalTenderBalances).map(([method, balance]) => (
+                              <TableRow key={method}>
+                                <TableCell>{method}</TableCell>
+                                <TableCell align="right">{formatCurrency(parseFloat(balance) || 0)}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Grid>
+                  </>
+                )}
+
+                {/* Electronic Tender Balances (for safes) */}
+                {balanceViewData.electronicTenderBalances && Array.isArray(balanceViewData.electronicTenderBalances) && balanceViewData.electronicTenderBalances.length > 0 && (
+                  <>
+                    <Grid item xs={12}>
+                      <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+                        Electronic Tender Balances
+                      </Typography>
+                      <Divider sx={{ mb: 2 }} />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <TableContainer component={Paper} variant="outlined">
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 'bold' }}>Type</TableCell>
+                              <TableCell align="center" sx={{ fontWeight: 'bold' }}>Quantity</TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 'bold' }}>Amount</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {(() => {
+                              // Handle both array and object formats
+                              const electronicTenders = Array.isArray(balanceViewData.electronicTenderBalances)
+                                ? balanceViewData.electronicTenderBalances
+                                : Object.values(balanceViewData.electronicTenderBalances || {});
+                              
+                              return electronicTenders.map((tender) => (
+                                <TableRow key={tender.payment_method || tender.paymentMethod}>
+                                  <TableCell>{tender.method_name || tender.methodName}</TableCell>
+                                  <TableCell align="center">{tender.expected_qty || tender.qty || 0}</TableCell>
+                                  <TableCell align="right">{formatCurrency(tender.expected_amount || tender.amount || tender.balance || 0)}</TableCell>
+                                </TableRow>
+                              ));
+                            })()}
                           </TableBody>
                         </Table>
                       </TableContainer>
