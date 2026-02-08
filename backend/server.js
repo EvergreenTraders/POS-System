@@ -7669,6 +7669,61 @@ app.get('/api/payment-methods/physical', async (req, res) => {
   }
 });
 
+// Get electronic payment methods (credit cards, debit cards, e-transfers, etc.)
+app.get('/api/payment-methods/electronic', async (req, res) => {
+  try {
+    const query = `
+      SELECT * FROM payment_methods
+      WHERE is_active = true AND is_physical = false
+      ORDER BY id
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching electronic payment methods:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get expected electronic tender totals for a drawer session
+// Returns the expected qty and amount for each electronic payment method based on transactions
+app.get('/api/cash-drawer/:sessionId/electronic-tender-expected', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    // Get totals for each electronic payment method from transactions in this session
+    const result = await pool.query(`
+      SELECT
+        p.payment_method,
+        pm.method_name,
+        COUNT(*) as expected_qty,
+        SUM(CASE WHEN p.action = 'in' THEN p.amount ELSE -p.amount END) as expected_amount
+      FROM payments p
+      JOIN transactions t ON p.transaction_id = t.transaction_id
+      JOIN payment_methods pm ON p.payment_method = pm.method_value
+      WHERE t.session_id = $1
+        AND pm.is_physical = false
+      GROUP BY p.payment_method, pm.method_name, pm.id
+      ORDER BY pm.id
+    `, [sessionId]);
+
+    // Convert to object keyed by payment method
+    const expected = {};
+    result.rows.forEach(row => {
+      expected[row.payment_method] = {
+        method_name: row.method_name,
+        expected_qty: parseInt(row.expected_qty) || 0,
+        expected_amount: parseFloat(row.expected_amount) || 0
+      };
+    });
+
+    res.json(expected);
+  } catch (error) {
+    console.error('Error fetching electronic tender expected:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Get previous tender balances for a drawer (from last closed session)
 // Used when opening a drawer to determine what tender balances need to be counted
 app.get('/api/cash-drawer/:drawerId/previous-tender-balances', async (req, res) => {

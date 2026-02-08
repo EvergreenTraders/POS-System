@@ -83,6 +83,7 @@ function CashDrawer() {
   const [managerApprovalDialog, setManagerApprovalDialog] = useState(false);
   const [minMaxWarningDialog, setMinMaxWarningDialog] = useState(false);
   const [physicalTenderWarningDialog, setPhysicalTenderWarningDialog] = useState(false);
+  const [showManagerOverrideView, setShowManagerOverrideView] = useState(false); // For showing expected values
 
   // Manager approval form states
   const [managerUsername, setManagerUsername] = useState('');
@@ -129,6 +130,22 @@ function CashDrawer() {
   });
   const [openingDenominationsFromDB, setOpeningDenominationsFromDB] = useState(null); // Opening denominations from database
   const [calculatedClosingBalance, setCalculatedClosingBalance] = useState(0); // Store calculated balance for discrepancy dialog
+  const [closingDiscrepancyData, setClosingDiscrepancyData] = useState({
+    physicalActual: 0,
+    physicalExpected: 0,
+    physicalDiscrepancy: 0,
+    physicalShowAmount: false,
+    closingDenominations: {},
+    closingTenderBalances: {},
+    expectedDenominations: {}, // Store expected denominations for display
+    electronicActual: 0,
+    electronicExpected: 0,
+    electronicDiscrepancy: 0,
+    electronicTenderActuals: {},
+    electronicTenderExpected: {},
+    isBalanced: false,
+    isWithinLimit: false
+  }); // Store closing discrepancy data
   const [openingDiscrepancyData, setOpeningDiscrepancyData] = useState({
     openingBalance: 0,
     previousClosingBalance: null,
@@ -143,6 +160,12 @@ function CashDrawer() {
   const [closingTenderBalances, setClosingTenderBalances] = useState({}); // Tender balances when closing
   const [tenderDiscrepancyDialog, setTenderDiscrepancyDialog] = useState(false); // Dialog for tender discrepancies
   const [tenderDiscrepancies, setTenderDiscrepancies] = useState([]); // List of tender discrepancies
+
+  // Electronic tender states (for credit cards, debit cards, e-transfers, etc.)
+  const [electronicPaymentMethods, setElectronicPaymentMethods] = useState([]); // Electronic payment methods
+  const [electronicTenderActuals, setElectronicTenderActuals] = useState({}); // User's actual counts { method: { qty: 0, amount: 0 } }
+  const [electronicTenderExpected, setElectronicTenderExpected] = useState({}); // Expected totals from transactions
+  const [isElectronicBlindCount, setIsElectronicBlindCount] = useState(false); // Blind count mode for electronic tenders
 
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -161,6 +184,7 @@ function CashDrawer() {
     checkActiveSession();
     fetchHistory();
     fetchPhysicalPaymentMethods();
+    fetchElectronicPaymentMethods();
   }, []);
 
   // Update count mode when active session changes
@@ -252,6 +276,36 @@ function CashDrawer() {
       setPhysicalPaymentMethods(response.data);
     } catch (err) {
       console.error('Error fetching physical payment methods:', err);
+    }
+  };
+
+  const fetchElectronicPaymentMethods = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/payment-methods/electronic`);
+      setElectronicPaymentMethods(response.data);
+    } catch (err) {
+      console.error('Error fetching electronic payment methods:', err);
+    }
+  };
+
+  const fetchElectronicTenderExpected = async (sessionId) => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/cash-drawer/${sessionId}/electronic-tender-expected`);
+      setElectronicTenderExpected(response.data);
+      // Initialize actuals with zeros for all expected methods
+      const initialActuals = {};
+      Object.keys(response.data).forEach(method => {
+        initialActuals[method] = { qty: 0, amount: 0 };
+      });
+      // Also add any electronic methods that don't have expected values
+      electronicPaymentMethods.forEach(method => {
+        if (!initialActuals[method.method_value]) {
+          initialActuals[method.method_value] = { qty: 0, amount: 0 };
+        }
+      });
+      setElectronicTenderActuals(initialActuals);
+    } catch (err) {
+      console.error('Error fetching electronic tender expected:', err);
     }
   };
 
@@ -957,18 +1011,91 @@ function CashDrawer() {
       }
     }
 
-    // Calculate discrepancy before closing
-    const expected = parseFloat(activeSession?.current_expected_balance || 0);
-    const actual = calculatedBalance;
-    const discrepancyAmount = Math.abs(actual - expected);
+    // Calculate discrepancies separately for Physical and Electronic
     const threshold = parseFloat(discrepancyThreshold || 0);
+    
+    // Physical discrepancy (cash + physical tenders like checks)
+    const otherPhysicalTenderTotal = activeSession?.drawer_type === 'physical'
+      ? Object.values(closingTenderBalances).reduce((sum, val) => sum + (parseFloat(val) || 0), 0)
+      : 0;
+    const physicalActual = calculatedBalance + otherPhysicalTenderTotal;
+    const physicalExpected = parseFloat(activeSession?.current_expected_balance || 0);
+    const physicalDiscrepancy = physicalActual - physicalExpected;
+    const physicalDiscrepancyAmount = Math.abs(physicalDiscrepancy);
+    const physicalShowAmount = physicalDiscrepancyAmount <= threshold;
+    const physicalIsOverLimit = physicalDiscrepancyAmount > threshold;
 
-    // Check if discrepancy exceeds threshold and not forcing close
-    if (!forceClose && discrepancyAmount > threshold) {
-      setCalculatedClosingBalance(calculatedBalance); // Store calculated balance for the warning dialog
-      setCloseDrawerDialog(false); // Close the original dialog
-      setDiscrepancyWarningDialog(true);
-      return;
+    // Electronic discrepancy (debit, visa, mastercard, etc.)
+    const electronicActualTotal = Object.values(electronicTenderActuals).reduce(
+      (sum, t) => sum + (parseFloat(t?.amount) || 0), 0
+    );
+    const electronicExpectedTotal = Object.values(electronicTenderExpected).reduce(
+      (sum, t) => sum + (parseFloat(t?.expected_amount) || 0), 0
+    );
+    const electronicDiscrepancy = electronicActualTotal - electronicExpectedTotal;
+    const electronicDiscrepancyAmount = Math.abs(electronicDiscrepancy);
+    const hasElectronicDiscrepancy = electronicDiscrepancyAmount > 0.01;
+
+    // Check if drawer is balanced or within limits
+    const isBalanced = physicalDiscrepancyAmount <= 0.01 && !hasElectronicDiscrepancy;
+    const isWithinLimit = !physicalIsOverLimit && (!hasElectronicDiscrepancy || electronicDiscrepancyAmount <= threshold);
+
+    // If not forcing close, check for discrepancies
+    if (!forceClose) {
+      // Show discrepancy dialog if there's any discrepancy
+      if (physicalDiscrepancyAmount > 0.01 || hasElectronicDiscrepancy) {
+        // Ensure we have opening denominations - fetch if not already available
+        let expectedDenoms = openingDenominationsFromDB ? { ...openingDenominationsFromDB } : {};
+        
+        // If opening denominations not available, try to fetch them
+        if (!openingDenominationsFromDB && activeSession?.session_id) {
+          try {
+            const denomResponse = await axios.get(
+              `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/denominations/opening`
+            );
+            if (denomResponse.data) {
+              expectedDenoms = {
+                bill_100: denomResponse.data.bill_100 || 0,
+                bill_50: denomResponse.data.bill_50 || 0,
+                bill_20: denomResponse.data.bill_20 || 0,
+                bill_10: denomResponse.data.bill_10 || 0,
+                bill_5: denomResponse.data.bill_5 || 0,
+                coin_2: denomResponse.data.coin_2 || 0,
+                coin_1: denomResponse.data.coin_1 || 0,
+                coin_0_25: denomResponse.data.coin_0_25 || 0,
+                coin_0_10: denomResponse.data.coin_0_10 || 0,
+                coin_0_05: denomResponse.data.coin_0_05 || 0
+              };
+              setOpeningDenominationsFromDB(expectedDenoms);
+            }
+          } catch (err) {
+            console.error('Error fetching opening denominations for discrepancy dialog:', err);
+            // Continue with empty expected denominations
+          }
+        }
+        
+        setClosingDiscrepancyData({
+          physicalActual,
+          physicalExpected,
+          physicalDiscrepancy,
+          physicalShowAmount,
+          closingDenominations: { ...closingDenominations },
+          closingTenderBalances: { ...closingTenderBalances },
+          expectedDenominations: expectedDenoms,
+          electronicActual: electronicActualTotal,
+          electronicExpected: electronicExpectedTotal,
+          electronicDiscrepancy,
+          electronicTenderActuals: { ...electronicTenderActuals },
+          electronicTenderExpected: { ...electronicTenderExpected },
+          isBalanced,
+          isWithinLimit
+        });
+        setCalculatedClosingBalance(calculatedBalance);
+        setCloseDrawerDialog(false);
+        setDiscrepancyWarningDialog(true);
+        setShowManagerOverrideView(false); // Reset view state
+        return;
+      }
     }
 
     try {
@@ -1666,6 +1793,10 @@ function CashDrawer() {
                           } else {
                             setOpeningDenominationsFromDB(null);
                           }
+                          // Fetch electronic tender expected totals for physical drawers
+                          if (activeSession?.drawer_type === 'physical') {
+                            fetchElectronicTenderExpected(activeSession.session_id);
+                          }
                           setCloseDrawerDialog(true);
                         }}
                       >
@@ -2078,263 +2209,612 @@ function CashDrawer() {
       <Dialog open={closeDrawerDialog} onClose={() => {
         setCloseDrawerDialog(false);
         resetCloseForm();
-      }} maxWidth={isIndividualDenominations ? "md" : "sm"} fullWidth>
-        <DialogTitle>
-          Close {activeSession?.drawer_type === 'safe' || activeSession?.drawer_type === 'master_safe' ? 'Safe' : 'Cash Drawer'}
-          {!isBlindCount && ' (Open Count)'}
-          {isIndividualDenominations && ' - Individual Denominations'}
+      }} maxWidth={activeSession?.drawer_type === 'physical' ? "lg" : (isIndividualDenominations ? "md" : "sm")} fullWidth>
+        <DialogTitle sx={{ bgcolor: 'success.main', color: 'white' }}>
+          Drawer CLOSE: {activeSession?.drawer_name || 'Cash Drawer'}
         </DialogTitle>
         <DialogContent>
-          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {activeSession?.drawer_type === 'physical' && (minClose > 0 || maxClose > 0) && (
-              <Alert severity="info">
-                Allowed Closing Balance Range: {minClose > 0 ? formatCurrency(minClose) : 'No minimum'} - {maxClose > 0 ? formatCurrency(maxClose) : 'No maximum'}
-              </Alert>
-            )}
-
-            <Alert severity="info">
-              Transaction Count: {activeSession?.transaction_count || 0}
-            </Alert>
-
-            {/* Individual Denominations mode - show denomination entry fields */}
-            {isIndividualDenominations ? (
-              <>
-                {renderDenominationEntry(closingDenominations, setClosingDenominations, calculateDenominationTotal(closingDenominations))}
-                {!isBlindCount && openingDenominationsFromDB && (
-                  <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
-                    <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold' }}>
-                      Opening Denominations (for reference):
+          <Box sx={{ pt: 2 }}>
+            {/* Physical Drawer - Split Layout */}
+            {activeSession?.drawer_type === 'physical' ? (
+              <Grid container spacing={2}>
+                {/* Left Side - Physical Tenders */}
+                <Grid item xs={12} md={6}>
+                  <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2 }}>
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ borderBottom: '2px solid', borderColor: 'success.main', pb: 1 }}>
+                      Physical
                     </Typography>
-                    <Grid container spacing={1}>
-                      {[
-                        { label: '$100', field: 'bill_100' },
-                        { label: '$50', field: 'bill_50' },
-                        { label: '$20', field: 'bill_20' },
-                        { label: '$10', field: 'bill_10' },
-                        { label: '$5', field: 'bill_5' },
-                        { label: '$2', field: 'coin_2' },
-                        { label: '$1', field: 'coin_1' },
-                        { label: '$0.25', field: 'coin_0_25' },
-                        { label: '$0.10', field: 'coin_0_10' },
-                        { label: '$0.05', field: 'coin_0_05' },
-                      ].map(item => (
-                        openingDenominationsFromDB[item.field] > 0 && (
-                          <Grid item xs={6} sm={4} md={3} key={item.field}>
-                            <Typography variant="body2" color="text.secondary">
-                              {item.label}: {openingDenominationsFromDB[item.field]}
-                            </Typography>
-                          </Grid>
-                        )
-                      ))}
-                    </Grid>
+
+                    {/* Cash Section */}
+                    <Typography variant="subtitle2" sx={{ mt: 1, mb: 1 }}>Cash</Typography>
+                    <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', '& td, & th': { p: 0.5, fontSize: '0.85rem' } }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: 'left' }}>Type</th>
+                          <th style={{ textAlign: 'center' }}>Actual</th>
+                          <th style={{ textAlign: 'right' }}>Expected</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          { label: '$100', field: 'bill_100', value: 100 },
+                          { label: '$50', field: 'bill_50', value: 50 },
+                          { label: '$20', field: 'bill_20', value: 20 },
+                          { label: '$10', field: 'bill_10', value: 10 },
+                          { label: '$5', field: 'bill_5', value: 5 },
+                          { label: '$2', field: 'coin_2', value: 2 },
+                          { label: '$1', field: 'coin_1', value: 1 },
+                          { label: '$0.25', field: 'coin_0_25', value: 0.25 },
+                          { label: '$0.10', field: 'coin_0_10', value: 0.10 },
+                          { label: '$0.05', field: 'coin_0_05', value: 0.05 },
+                        ].map(item => (
+                          <tr key={item.field}>
+                            <td>{item.label}</td>
+                            <td style={{ textAlign: 'center' }}>
+                              <TextField
+                                type="number"
+                                size="small"
+                                value={closingDenominations[item.field] || 0}
+                                onChange={(e) => setClosingDenominations(prev => ({
+                                  ...prev,
+                                  [item.field]: parseInt(e.target.value) || 0
+                                }))}
+                                inputProps={{ min: 0, style: { textAlign: 'center', width: '50px', padding: '4px' } }}
+                                sx={{ '& .MuiInputBase-root': { height: '28px' } }}
+                              />
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              {isBlindCount ? '-' : (openingDenominationsFromDB ? openingDenominationsFromDB[item.field] || 0 : '-')}
+                            </td>
+                          </tr>
+                        ))}
+                        <tr style={{ borderTop: '2px solid #ccc', fontWeight: 'bold' }}>
+                          <td>Total:</td>
+                          <td style={{ textAlign: 'center' }}>{formatCurrency(calculateDenominationTotal(closingDenominations))}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            {isBlindCount ? '-' : (openingDenominationsFromDB ? formatCurrency(calculateDenominationTotal(openingDenominationsFromDB)) : '-')}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </Box>
+
+                    {/* Other Physical Tenders */}
+                    {physicalPaymentMethods.length > 0 && (
+                      <>
+                        <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>Other Physical Tenders</Typography>
+                        <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', '& td, & th': { p: 0.5, fontSize: '0.85rem' } }}>
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: 'left' }}>Type</th>
+                              <th style={{ textAlign: 'center' }}>Qty</th>
+                              <th style={{ textAlign: 'right' }}>Amt</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {physicalPaymentMethods.map((method) => (
+                              <tr key={method.method_value}>
+                                <td>{method.method_name}</td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <TextField
+                                    type="number"
+                                    size="small"
+                                    value={closingTenderBalances[`${method.method_value}_qty`] || ''}
+                                    onChange={(e) => setClosingTenderBalances(prev => ({
+                                      ...prev,
+                                      [`${method.method_value}_qty`]: e.target.value
+                                    }))}
+                                    inputProps={{ min: 0, style: { textAlign: 'center', width: '40px', padding: '4px' } }}
+                                    sx={{ '& .MuiInputBase-root': { height: '28px' } }}
+                                  />
+                                </td>
+                                <td style={{ textAlign: 'right' }}>
+                                  <TextField
+                                    type="number"
+                                    size="small"
+                                    value={closingTenderBalances[method.method_value] || ''}
+                                    onChange={(e) => setClosingTenderBalances(prev => ({
+                                      ...prev,
+                                      [method.method_value]: e.target.value
+                                    }))}
+                                    inputProps={{ min: 0, step: '0.01', style: { textAlign: 'right', width: '70px', padding: '4px' } }}
+                                    sx={{ '& .MuiInputBase-root': { height: '28px' } }}
+                                  />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </Box>
+                      </>
+                    )}
+
+                    {/* Physical Discrepancy Message */}
+                    {(() => {
+                      const physicalActual = calculateDenominationTotal(closingDenominations) +
+                        physicalPaymentMethods.reduce((sum, m) => sum + (parseFloat(closingTenderBalances[m.method_value]) || 0), 0);
+                      const physicalExpected = parseFloat(activeSession?.current_expected_balance || 0);
+                      const physicalDiscrepancy = physicalActual - physicalExpected;
+                      const threshold = parseFloat(discrepancyThreshold || 0);
+                      const isOverLimit = Math.abs(physicalDiscrepancy) > threshold;
+
+                      if (isBlindCount && isOverLimit) {
+                        return (
+                          <Typography variant="body2" color="error" sx={{ mt: 2, fontWeight: 'bold' }}>
+                            Physical discrepancy is over employee limit.
+                          </Typography>
+                        );
+                      } else if (!isBlindCount && Math.abs(physicalDiscrepancy) > 0.01) {
+                        return (
+                          <Typography variant="body2" color={isOverLimit ? 'error' : 'warning.main'} sx={{ mt: 2 }}>
+                            Physical discrepancy: {formatCurrency(physicalDiscrepancy)} ({physicalDiscrepancy > 0 ? 'Overage' : 'Shortage'})
+                            {isOverLimit && ' - Over employee limit'}
+                          </Typography>
+                        );
+                      }
+                      return null;
+                    })()}
                   </Box>
-                )}
-                {(() => {
-                  const balance = calculateDenominationTotal(closingDenominations);
+                </Grid>
 
-                  // Check min/max range for physical drawers
-                  const isPhysical = activeSession?.drawer_type === 'physical';
-                  const minCloseValue = parseFloat(minClose || 0);
-                  const maxCloseValue = parseFloat(maxClose || 0);
-                  const isOutOfRange = isPhysical && (
-                    (minCloseValue > 0 && balance < minCloseValue) ||
-                    (maxCloseValue > 0 && balance > maxCloseValue)
-                  );
+                {/* Right Side - Electronic Tenders */}
+                <Grid item xs={12} md={6}>
+                  <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2 }}>
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ borderBottom: '2px solid', borderColor: 'success.main', pb: 1 }}>
+                      Electronic
+                    </Typography>
 
-                  if (isOutOfRange) {
-                    return (
-                      <Alert severity="error">
-                        <strong>Closing balance is outside allowed range ({minCloseValue > 0 ? formatCurrency(minCloseValue) : 'No min'} - {maxCloseValue > 0 ? formatCurrency(maxCloseValue) : 'No max'})</strong>
-                      </Alert>
-                    );
-                  }
+                    <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', '& td, & th': { p: 0.5, fontSize: '0.85rem' } }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: 'left' }}>Type</th>
+                          <th colSpan={2} style={{ textAlign: 'center' }}>Actual</th>
+                          <th colSpan={2} style={{ textAlign: 'center' }}>Expected</th>
+                        </tr>
+                        <tr>
+                          <th></th>
+                          <th style={{ textAlign: 'center', fontSize: '0.75rem' }}>Qty</th>
+                          <th style={{ textAlign: 'right', fontSize: '0.75rem' }}>Amt</th>
+                          <th style={{ textAlign: 'center', fontSize: '0.75rem' }}>Qty</th>
+                          <th style={{ textAlign: 'right', fontSize: '0.75rem' }}>Amt</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {electronicPaymentMethods.map((method) => {
+                          const expected = electronicTenderExpected[method.method_value] || { expected_qty: 0, expected_amount: 0 };
+                          const actual = electronicTenderActuals[method.method_value] || { qty: 0, amount: 0 };
+                          return (
+                            <tr key={method.method_value}>
+                              <td>{method.method_name}</td>
+                              <td style={{ textAlign: 'center' }}>
+                                <TextField
+                                  type="number"
+                                  size="small"
+                                  value={actual.qty || ''}
+                                  onChange={(e) => setElectronicTenderActuals(prev => ({
+                                    ...prev,
+                                    [method.method_value]: { ...prev[method.method_value], qty: parseInt(e.target.value) || 0 }
+                                  }))}
+                                  inputProps={{ min: 0, style: { textAlign: 'center', width: '40px', padding: '4px' } }}
+                                  sx={{ '& .MuiInputBase-root': { height: '28px' } }}
+                                />
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <TextField
+                                  type="number"
+                                  size="small"
+                                  value={actual.amount || ''}
+                                  onChange={(e) => setElectronicTenderActuals(prev => ({
+                                    ...prev,
+                                    [method.method_value]: { ...prev[method.method_value], amount: parseFloat(e.target.value) || 0 }
+                                  }))}
+                                  inputProps={{ min: 0, step: '0.01', style: { textAlign: 'right', width: '70px', padding: '4px' } }}
+                                  sx={{ '& .MuiInputBase-root': { height: '28px' } }}
+                                />
+                              </td>
+                              <td style={{ textAlign: 'center' }}>{expected.expected_qty}</td>
+                              <td style={{ textAlign: 'right' }}>{formatCurrency(expected.expected_amount)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </Box>
 
-                  // In open count mode, show discrepancy info
-                  if (!isBlindCount && activeSession) {
-                    const discrepancy = balance - activeSession.current_expected_balance;
-                    const hasDiscrepancy = Math.abs(discrepancy) > 0.01;
-                    return (
-                      <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: hasDiscrepancy ? 'warning.main' : 'success.main', mt: 1 }}>
-                        <Typography variant="body2" color="text.secondary" gutterBottom>
-                          Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" gutterBottom>
-                          Counted Total: {formatCurrency(balance)}
-                        </Typography>
-                        <Typography variant="body1" color={hasDiscrepancy ? 'error.main' : 'success.main'}>
-                          <strong>Discrepancy: {formatCurrency(discrepancy)}</strong>
-                          {hasDiscrepancy && ` (${discrepancy > 0 ? 'Overage' : 'Shortage'})`}
-                        </Typography>
-                      </Box>
-                    );
-                  }
+                    {/* Electronic Discrepancy Message */}
+                    {(() => {
+                      const electronicActualTotal = Object.values(electronicTenderActuals).reduce(
+                        (sum, t) => sum + (parseFloat(t?.amount) || 0), 0
+                      );
+                      const electronicExpectedTotal = Object.values(electronicTenderExpected).reduce(
+                        (sum, t) => sum + (parseFloat(t?.expected_amount) || 0), 0
+                      );
+                      const electronicDiscrepancy = electronicActualTotal - electronicExpectedTotal;
 
-                  return null;
-                })()}
-              </>
+                      if (Math.abs(electronicDiscrepancy) > 0.01) {
+                        return (
+                          <Typography variant="body2" color="primary" sx={{ mt: 2 }}>
+                            Electronic discrepancy is {formatCurrency(Math.abs(electronicDiscrepancy))}
+                          </Typography>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </Box>
+                </Grid>
+              </Grid>
             ) : (
-              /* Simple total balance entry */
-              <>
+              /* Safe/Master Safe - Original simpler layout */
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {(minCloseSafe > 0 || maxCloseSafe > 0) && (
+                  <Alert severity="info">
+                    Allowed Closing Balance Range: {minCloseSafe > 0 ? formatCurrency(minCloseSafe) : 'No minimum'} - {maxCloseSafe > 0 ? formatCurrency(maxCloseSafe) : 'No maximum'}
+                  </Alert>
+                )}
+
+                <Alert severity="info">
+                  Transaction Count: {activeSession?.transaction_count || 0}
+                </Alert>
+
+                {isIndividualDenominations ? (
+                  <>
+                    {renderDenominationEntry(closingDenominations, setClosingDenominations, calculateDenominationTotal(closingDenominations))}
+                    {!isBlindCount && activeSession && (() => {
+                      const balance = calculateDenominationTotal(closingDenominations);
+                      const discrepancy = balance - activeSession.current_expected_balance;
+                      const hasDiscrepancy = Math.abs(discrepancy) > 0.01;
+                      return (
+                        <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: hasDiscrepancy ? 'warning.main' : 'success.main', mt: 1 }}>
+                          <Typography variant="body2" color="text.secondary" gutterBottom>
+                            Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" gutterBottom>
+                            Counted Total: {formatCurrency(balance)}
+                          </Typography>
+                          <Typography variant="body1" color={hasDiscrepancy ? 'error.main' : 'success.main'}>
+                            <strong>Discrepancy: {formatCurrency(discrepancy)}</strong>
+                            {hasDiscrepancy && ` (${discrepancy > 0 ? 'Overage' : 'Shortage'})`}
+                          </Typography>
+                        </Box>
+                      );
+                    })()}
+                  </>
+                ) : (
+                  <>
+                    <TextField
+                      label="Actual Balance (Counted)"
+                      type="number"
+                      fullWidth
+                      value={actualBalance}
+                      onChange={(e) => setActualBalance(e.target.value)}
+                      required
+                      inputProps={{ step: '0.01', min: '0' }}
+                      autoFocus
+                    />
+                    {actualBalance && activeSession && !isBlindCount && (() => {
+                      const balance = parseFloat(actualBalance);
+                      const discrepancy = balance - activeSession.current_expected_balance;
+                      const hasDiscrepancy = Math.abs(discrepancy) > 0.01;
+                      return (
+                        <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: hasDiscrepancy ? 'warning.main' : 'success.main', mt: 1 }}>
+                          <Typography variant="body2" color="text.secondary" gutterBottom>
+                            Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" gutterBottom>
+                            Actual Balance: {formatCurrency(balance)}
+                          </Typography>
+                          <Typography variant="body1" color={hasDiscrepancy ? 'error.main' : 'success.main'}>
+                            <strong>Discrepancy: {formatCurrency(discrepancy)}</strong>
+                            {hasDiscrepancy && ` (${discrepancy > 0 ? 'Overage' : 'Shortage'})`}
+                          </Typography>
+                        </Box>
+                      );
+                    })()}
+                  </>
+                )}
+
                 <TextField
-                  label="Actual Balance (Counted)"
-                  type="number"
+                  label="Closing Notes (Optional)"
                   fullWidth
-                  value={actualBalance}
-                  onChange={(e) => setActualBalance(e.target.value)}
-                  required
-                  inputProps={{ step: '0.01', min: '0' }}
-                  autoFocus
+                  multiline
+                  rows={2}
+                  value={closingNotes}
+                  onChange={(e) => setClosingNotes(e.target.value)}
                 />
-                {actualBalance && activeSession && (() => {
-                  const balance = parseFloat(actualBalance);
-
-                  // Check min/max range for physical drawers
-                  const isPhysical = activeSession.drawer_type === 'physical';
-                  const minCloseValue = parseFloat(minClose || 0);
-                  const maxCloseValue = parseFloat(maxClose || 0);
-                  const isOutOfRange = isPhysical && (
-                    (minCloseValue > 0 && balance < minCloseValue) ||
-                    (maxCloseValue > 0 && balance > maxCloseValue)
-                  );
-
-                  if (isOutOfRange) {
-                    return (
-                      <Alert severity="error">
-                        <strong>Closing balance is outside allowed range ({minCloseValue > 0 ? formatCurrency(minCloseValue) : 'No min'} - {maxCloseValue > 0 ? formatCurrency(maxCloseValue) : 'No max'})</strong>
-                      </Alert>
-                    );
-                  }
-
-                  // In open count mode, show discrepancy info
-                  if (!isBlindCount) {
-                    const discrepancy = balance - activeSession.current_expected_balance;
-                    const hasDiscrepancy = Math.abs(discrepancy) > 0.01;
-                    return (
-                      <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: hasDiscrepancy ? 'warning.main' : 'success.main', mt: 1 }}>
-                        <Typography variant="body2" color="text.secondary" gutterBottom>
-                          Expected Balance: {formatCurrency(activeSession.current_expected_balance)}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" gutterBottom>
-                          Actual Balance: {formatCurrency(balance)}
-                        </Typography>
-                        <Typography variant="body1" color={hasDiscrepancy ? 'error.main' : 'success.main'}>
-                          <strong>Discrepancy: {formatCurrency(discrepancy)}</strong>
-                          {hasDiscrepancy && ` (${discrepancy > 0 ? 'Overage' : 'Shortage'})`}
-                        </Typography>
-                      </Box>
-                    );
-                  }
-
-                  // In blind count mode, don't show any hint about whether the count matches expected
-                  return null;
-                })()}
-              </>
-            )}
-
-            {/* Physical Tender Balances Section - for physical drawers */}
-            {activeSession?.drawer_type === 'physical' && physicalPaymentMethods.length > 0 && (
-              <Box sx={{ mt: 2, p: 2, bgcolor: 'info.light', borderRadius: 1 }}>
-                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                  Other Physical Tenders in Drawer
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Enter the balance of any non-cash physical tenders left in the drawer (e.g., checks, gift cards).
-                  Leave at 0 if none.
-                </Typography>
-                {physicalPaymentMethods.map((method) => (
-                  <TextField
-                    key={method.method_value}
-                    label={`${method.method_name} Balance`}
-                    type="number"
-                    fullWidth
-                    value={closingTenderBalances[method.method_value] || ''}
-                    onChange={(e) => setClosingTenderBalances(prev => ({
-                      ...prev,
-                      [method.method_value]: e.target.value
-                    }))}
-                    inputProps={{ step: '0.01', min: '0' }}
-                    sx={{ mb: 1 }}
-                  />
-                ))}
               </Box>
             )}
 
-            <TextField
-              label="Closing Notes (Optional)"
-              fullWidth
-              multiline
-              rows={3}
-              value={closingNotes}
-              onChange={(e) => setClosingNotes(e.target.value)}
-            />
+            {/* Closing Notes for Physical Drawers */}
+            {activeSession?.drawer_type === 'physical' && (
+              <TextField
+                label="Closing Notes (Optional)"
+                fullWidth
+                multiline
+                rows={2}
+                value={closingNotes}
+                onChange={(e) => setClosingNotes(e.target.value)}
+                sx={{ mt: 2 }}
+              />
+            )}
           </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCloseDrawerDialog(false)}>Cancel</Button>
-          <Button onClick={() => handleCloseDrawer(false)} variant="contained" color="primary" disabled={isStoreClosed}>
-            Close Drawer
-          </Button>
+        <DialogActions sx={{ justifyContent: 'space-between', px: 3, pb: 2 }}>
+          <Box>
+            <Button onClick={() => {
+              // Reset and re-open for recount
+              setClosingDenominations({
+                bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+                coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+              });
+              setElectronicTenderActuals({});
+              setClosingTenderBalances({});
+            }} color="inherit">
+              Re-count
+            </Button>
+            <Button onClick={() => setCloseDrawerDialog(false)} color="inherit">Cancel</Button>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {/* Manager Override Section */}
+            {(() => {
+              const physicalActual = activeSession?.drawer_type === 'physical'
+                ? calculateDenominationTotal(closingDenominations) +
+                  physicalPaymentMethods.reduce((sum, m) => sum + (parseFloat(closingTenderBalances[m.method_value]) || 0), 0)
+                : (isIndividualDenominations ? calculateDenominationTotal(closingDenominations) : parseFloat(actualBalance) || 0);
+              const physicalExpected = parseFloat(activeSession?.current_expected_balance || 0);
+              const physicalDiscrepancy = Math.abs(physicalActual - physicalExpected);
+              const threshold = parseFloat(discrepancyThreshold || 0);
+              const isOverLimit = physicalDiscrepancy > threshold;
+
+              if (isOverLimit) {
+                return (
+                  <>
+                    <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>Manager Override:</Typography>
+                    {isBlindCount && (
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => {
+                          // Show expected values by temporarily disabling blind count
+                          setIsBlindCount(false);
+                        }}
+                      >
+                        View
+                      </Button>
+                    )}
+                    <Button
+                      variant="contained"
+                      color="warning"
+                      size="small"
+                      onClick={() => {
+                        setCloseDrawerDialog(false);
+                        setManagerApprovalDialog(true);
+                      }}
+                      disabled={isStoreClosed}
+                    >
+                      Force Close
+                    </Button>
+                  </>
+                );
+              } else {
+                // Within limit - show normal Close button with View option
+                return (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {isBlindCount && (
+                      <>
+                        <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>Manager Override:</Typography>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => {
+                            // Show expected values by temporarily disabling blind count
+                            setIsBlindCount(false);
+                          }}
+                        >
+                          View
+                        </Button>
+                      </>
+                    )}
+                    <Button onClick={() => handleCloseDrawer(false)} variant="contained" color="primary" disabled={isStoreClosed}>
+                      Close
+                    </Button>
+                  </Box>
+                );
+              }
+            })()}
+          </Box>
         </DialogActions>
       </Dialog>
 
       {/* Discrepancy Warning Dialog */}
-      <Dialog open={discrepancyWarningDialog} onClose={() => setDiscrepancyWarningDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={discrepancyWarningDialog} onClose={() => setDiscrepancyWarningDialog(false)} maxWidth="lg" fullWidth>
         <DialogTitle>
           <Box display="flex" alignItems="center" gap={1}>
             <WarningIcon color="warning" />
-            <Typography variant="h6">Discrepancy Warning</Typography>
+            <Typography variant="h6">Drawer CLOSE : till -2</Typography>
           </Box>
         </DialogTitle>
         <DialogContent>
-          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Alert severity="warning">
-              {isBlindCount
-                ? 'There is a discrepancy. Please recount or request manager approval.'
-                : `The discrepancy amount exceeds the acceptable threshold of ${formatCurrency(discrepancyThreshold || 0)}. Please recount.`}
-            </Alert>
-            <Box>
-              <Typography variant="body1" gutterBottom>
-                <strong>Transaction Count:</strong> {activeSession?.transaction_count || 0}
-              </Typography>
-              {/* In blind count mode, only show transaction count - hide all balance info to prevent calculating expected */}
-              {!isBlindCount && (
-                <>
-                  <Typography variant="body1" gutterBottom>
-                    <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
+          <Box sx={{ pt: 2 }}>
+            <Grid container spacing={3}>
+              {/* Physical Section */}
+              <Grid item xs={12} md={6}>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', mb: 2 }}>
+                  Physical
+                </Typography>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Denomination</TableCell>
+                        <TableCell align="center" sx={{ fontWeight: 'bold' }}>Actual</TableCell>
+                        <TableCell align="center" sx={{ fontWeight: 'bold' }}>Expected</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {[
+                        { label: '$100', field: 'bill_100', value: 100 },
+                        { label: '$50', field: 'bill_50', value: 50 },
+                        { label: '$20', field: 'bill_20', value: 20 },
+                        { label: '$10', field: 'bill_10', value: 10 },
+                        { label: '$5', field: 'bill_5', value: 5 },
+                        { label: '$2', field: 'coin_2', value: 2 },
+                        { label: '$1', field: 'coin_1', value: 1 },
+                        { label: '$0.25', field: 'coin_0_25', value: 0.25 },
+                        { label: '$0.10', field: 'coin_0_10', value: 0.10 },
+                        { label: '$0.05', field: 'coin_0_05', value: 0.05 },
+                      ].map(item => {
+                        // Get expected quantity from stored data
+                        const expectedQty = closingDiscrepancyData.expectedDenominations?.[item.field] || 0;
+                        // Calculate expected amount: quantity * denomination value
+                        // Example: 2 $100 bills = 2 * 100 = $200.00
+                        // Example: 2 $10 bills = 2 * 10 = $20.00
+                        const expectedAmount = parseFloat(expectedQty) * parseFloat(item.value);
+                        return (
+                          <TableRow key={item.field}>
+                            <TableCell>{item.label}</TableCell>
+                            <TableCell align="center">{closingDiscrepancyData.closingDenominations?.[item.field] || 0}</TableCell>
+                            <TableCell align="center">
+                              {showManagerOverrideView && closingDiscrepancyData.expectedDenominations && Object.keys(closingDiscrepancyData.expectedDenominations).length > 0
+                                ? formatCurrency(expectedAmount)
+                                : '-'}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                      {/* Check row */}
+                      {physicalPaymentMethods.some(m => m.method_value === 'CHECK') && (
+                        <>
+                          <TableRow>
+                            <TableCell>Check</TableCell>
+                            <TableCell align="center">
+                              {closingDiscrepancyData.closingTenderBalances?.['CHECK_qty'] || 0}
+                            </TableCell>
+                            <TableCell align="center">-</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell></TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                              {formatCurrency(parseFloat(closingDiscrepancyData.closingTenderBalances?.['CHECK'] || 0))}
+                            </TableCell>
+                            <TableCell align="center">-</TableCell>
+                          </TableRow>
+                        </>
+                      )}
+                      <TableRow sx={{ borderTop: '2px solid', borderColor: 'divider', '& td': { fontWeight: 'bold' } }}>
+                        <TableCell>Total:</TableCell>
+                        <TableCell align="center">{formatCurrency(closingDiscrepancyData.physicalActual)}</TableCell>
+                        <TableCell align="center">
+                          {showManagerOverrideView ? formatCurrency(closingDiscrepancyData.physicalExpected) : '-'}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                {/* Physical Discrepancy Message */}
+                {closingDiscrepancyData.physicalShowAmount ? (
+                  <Typography variant="body2" color={closingDiscrepancyData.physicalDiscrepancy > 0 ? 'info.main' : 'error.main'} sx={{ mt: 1, fontWeight: 'bold' }}>
+                    Physical discrepancy: {formatCurrency(Math.abs(closingDiscrepancyData.physicalDiscrepancy))}
+                    {' '}({closingDiscrepancyData.physicalDiscrepancy > 0 ? 'Overage' : 'Shortage'})
                   </Typography>
-                  <Typography variant="body1" gutterBottom>
-                    <strong>Actual Balance:</strong> {formatCurrency(calculatedClosingBalance)}
+                ) : (
+                  <Typography variant="body2" color="error" sx={{ mt: 1, fontWeight: 'bold' }}>
+                    Physical discrepancy is over employee limit.
                   </Typography>
-                  <Typography variant="body1" color="error" gutterBottom>
-                    <strong>Discrepancy:</strong> {formatCurrency(calculatedClosingBalance - parseFloat(activeSession?.current_expected_balance || 0))}
-                    {' '}({calculatedClosingBalance > parseFloat(activeSession?.current_expected_balance || 0) ? 'Overage' : 'Shortage'})
+                )}
+              </Grid>
+
+              {/* Electronic Section */}
+              <Grid item xs={12} md={6}>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', mb: 2 }}>
+                  Electronic
+                </Typography>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Type</TableCell>
+                        <TableCell colSpan={2} align="center" sx={{ fontWeight: 'bold' }}>Actual</TableCell>
+                        <TableCell colSpan={2} align="center" sx={{ fontWeight: 'bold' }}>Expected</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell></TableCell>
+                        <TableCell align="center" sx={{ fontSize: '0.75rem', fontWeight: 'bold' }}>Qty</TableCell>
+                        <TableCell align="right" sx={{ fontSize: '0.75rem', fontWeight: 'bold' }}>Amt</TableCell>
+                        <TableCell align="center" sx={{ fontSize: '0.75rem', fontWeight: 'bold' }}>Qty</TableCell>
+                        <TableCell align="right" sx={{ fontSize: '0.75rem', fontWeight: 'bold' }}>Amt</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {electronicPaymentMethods.map((method) => {
+                        const expected = closingDiscrepancyData.electronicTenderExpected?.[method.method_value] || { expected_qty: 0, expected_amount: 0 };
+                        const actual = closingDiscrepancyData.electronicTenderActuals?.[method.method_value] || { qty: 0, amount: 0 };
+                        return (
+                          <TableRow key={method.method_value}>
+                            <TableCell>{method.method_name}</TableCell>
+                            <TableCell align="center">{actual.qty || 0}</TableCell>
+                            <TableCell align="right">{formatCurrency(actual.amount || 0)}</TableCell>
+                            <TableCell align="center">{expected.expected_qty || 0}</TableCell>
+                            <TableCell align="right">{formatCurrency(expected.expected_amount || 0)}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                {/* Electronic Discrepancy Message */}
+                {Math.abs(closingDiscrepancyData.electronicDiscrepancy) > 0.01 && (
+                  <Typography variant="body2" color="primary" sx={{ mt: 1, fontWeight: 'bold' }}>
+                    Electronic discrepancy is {formatCurrency(Math.abs(closingDiscrepancyData.electronicDiscrepancy))}
                   </Typography>
-                  <Typography variant="body1" gutterBottom>
-                    <strong>Threshold:</strong> {formatCurrency(discrepancyThreshold || 0)}
-                  </Typography>
-                </>
-              )}
-            </Box>
-            <Typography variant="body2" color="text.secondary">
-              Please recount the cash drawer to verify the balance. If the discrepancy is correct, request manager approval to close the drawer.
-            </Typography>
+                )}
+              </Grid>
+            </Grid>
           </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDiscrepancyWarningDialog(false)}>
-            Recount
-          </Button>
-          <Button
-            onClick={() => {
-              setDiscrepancyWarningDialog(false);
-              setManagerApprovalDialog(true);
-            }}
-            variant="contained"
-            color="warning"
-            disabled={isStoreClosed}
-          >
-            Request Manager Approval
-          </Button>
+        <DialogActions sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box>
+            <Button onClick={() => setDiscrepancyWarningDialog(false)} variant="contained" color="success">
+              Re-count
+            </Button>
+            <Button onClick={() => setDiscrepancyWarningDialog(false)} color="inherit" sx={{ ml: 1 }}>
+              Cancel
+            </Button>
+            {closingDiscrepancyData.isBalanced || closingDiscrepancyData.isWithinLimit ? (
+              <Button
+                onClick={() => {
+                  setDiscrepancyWarningDialog(false);
+                  handleCloseDrawer(false);
+                }}
+                variant="contained"
+                color="primary"
+                disabled={isStoreClosed}
+                sx={{ ml: 1 }}
+              >
+                Close
+              </Button>
+            ) : null}
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2" color="text.secondary">Manager Override:</Typography>
+            {!showManagerOverrideView && (
+              <Button
+                variant="outlined"
+                color="success"
+                size="small"
+                onClick={() => setShowManagerOverrideView(true)}
+              >
+                View
+              </Button>
+            )}
+            <Button
+              onClick={() => {
+                setDiscrepancyWarningDialog(false);
+                setManagerApprovalDialog(true);
+              }}
+              variant="contained"
+              color="success"
+              disabled={isStoreClosed}
+            >
+              Force Close
+            </Button>
+          </Box>
         </DialogActions>
       </Dialog>
 
