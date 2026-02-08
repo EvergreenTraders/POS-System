@@ -2457,28 +2457,33 @@ function CashDrawer() {
             <Alert severity="warning">
               There is physical tender remaining in the drawer. This should normally be transferred to a safe before closing.
             </Alert>
-            <Box>
-              <Typography variant="subtitle2" gutterBottom>
-                <strong>Tender in Drawer:</strong>
-              </Typography>
-              {calculatedClosingBalance > 0 && (
-                <Typography variant="body2">
-                  Cash: {formatCurrency(calculatedClosingBalance)}
+            {/* In blind count mode, hide specific amounts - same as opening discrepancy handling */}
+            {!isBlindCount && (
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>Tender in Drawer:</strong>
                 </Typography>
-              )}
-              {Object.entries(closingTenderBalances)
-                .filter(([_, balance]) => parseFloat(balance) > 0)
-                .map(([method, balance]) => {
-                  const methodInfo = physicalPaymentMethods.find(m => m.method_value === method);
-                  return (
-                    <Typography key={method} variant="body2">
-                      {methodInfo?.method_name || method}: {formatCurrency(parseFloat(balance))}
-                    </Typography>
-                  );
-                })}
-            </Box>
+                {calculatedClosingBalance > 0 && (
+                  <Typography variant="body2">
+                    Cash: {formatCurrency(calculatedClosingBalance)}
+                  </Typography>
+                )}
+                {Object.entries(closingTenderBalances)
+                  .filter(([_, balance]) => parseFloat(balance) > 0)
+                  .map(([method, balance]) => {
+                    const methodInfo = physicalPaymentMethods.find(m => m.method_value === method);
+                    return (
+                      <Typography key={method} variant="body2">
+                        {methodInfo?.method_name || method}: {formatCurrency(parseFloat(balance))}
+                      </Typography>
+                    );
+                  })}
+              </Box>
+            )}
             <Typography variant="body2" color="text.secondary">
-              Are you sure you want to close the drawer with physical tender still inside?
+              {isBlindCount
+                ? 'Physical tender should be transferred to the safe before closing. You can go back to adjust or proceed with closing.'
+                : 'Are you sure you want to close the drawer with physical tender still inside?'}
             </Typography>
           </Box>
         </DialogContent>

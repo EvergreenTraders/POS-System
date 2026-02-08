@@ -1707,6 +1707,62 @@ app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
       WHERE session_id = $1 AND is_active = TRUE
     `, [sessionId]);
 
+    // Transfer electronic tenders to master safe (for physical drawers only)
+    // Electronic tenders are payment methods where is_physical = false (credit cards, debit cards, etc.)
+    const drawerTypeResult = await pool.query(`
+      SELECT d.drawer_type FROM cash_drawer_sessions s
+      JOIN drawers d ON s.drawer_id = d.drawer_id
+      WHERE s.session_id = $1
+    `, [sessionId]);
+
+    if (drawerTypeResult.rows[0]?.drawer_type === 'physical') {
+      // Get totals for each electronic payment method from transactions in this session
+      const electronicTendersResult = await pool.query(`
+        SELECT
+          p.payment_method,
+          pm.method_name,
+          SUM(CASE WHEN p.action = 'in' THEN p.amount ELSE -p.amount END) as total_amount
+        FROM payments p
+        JOIN transactions t ON p.transaction_id = t.transaction_id
+        JOIN payment_methods pm ON p.payment_method = pm.method_value
+        WHERE t.session_id = $1
+          AND pm.is_physical = false
+        GROUP BY p.payment_method, pm.method_name
+        HAVING SUM(CASE WHEN p.action = 'in' THEN p.amount ELSE -p.amount END) != 0
+      `, [sessionId]);
+
+      // Find the open master safe session
+      if (electronicTendersResult.rows.length > 0) {
+        const masterSafeSession = await pool.query(`
+          SELECT s.session_id FROM cash_drawer_sessions s
+          JOIN drawers d ON s.drawer_id = d.drawer_id
+          WHERE d.drawer_type = 'master_safe' AND s.status = 'open'
+          LIMIT 1
+        `);
+
+        if (masterSafeSession.rows.length > 0) {
+          const masterSafeSessionId = masterSafeSession.rows[0].session_id;
+
+          // Record each electronic tender total as an adjustment in the master safe
+          for (const tender of electronicTendersResult.rows) {
+            if (parseFloat(tender.total_amount) !== 0) {
+              await pool.query(`
+                INSERT INTO cash_drawer_adjustments
+                  (session_id, amount, adjustment_type, reason, performed_by, source_session_id)
+                VALUES ($1, $2, 'transfer', $3, $4, $5)
+              `, [
+                masterSafeSessionId,
+                parseFloat(tender.total_amount),
+                `Electronic tender transfer (${tender.method_name}) from drawer session #${sessionId}`,
+                employee_id || null,
+                sessionId
+              ]);
+            }
+          }
+        }
+      }
+    }
+
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error closing cash drawer:', error);

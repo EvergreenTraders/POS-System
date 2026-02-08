@@ -34,6 +34,25 @@ INSERT INTO payment_methods (method_name, method_value) VALUES
     ('Store Credit', 'store_credit')
 ON CONFLICT (method_value) DO NOTHING;
 
+-- Add is_physical column to payment_methods table
+-- Physical tenders are kept in the drawer (cash, checks, gift cards)
+-- Non-physical (electronic) tenders are credit/debit cards, store credit, etc.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'payment_methods' AND column_name = 'is_physical'
+    ) THEN
+        ALTER TABLE payment_methods ADD COLUMN is_physical BOOLEAN NOT NULL DEFAULT false;
+    END IF;
+END $$;
+
+-- Set is_physical flag for each payment method
+UPDATE payment_methods SET is_physical = true WHERE method_value IN ('cash', 'check', 'gift_card');
+UPDATE payment_methods SET is_physical = false WHERE method_value IN ('credit_card', 'debit_card', 'store_credit');
+
+COMMENT ON COLUMN payment_methods.is_physical IS 'Whether this payment method results in physical tender in the drawer (cash, checks, gift cards) vs electronic (credit cards, debit cards)';
+
 -- Create transaction_type table
 CREATE TABLE IF NOT EXISTS transaction_type (
     id SERIAL PRIMARY KEY,
