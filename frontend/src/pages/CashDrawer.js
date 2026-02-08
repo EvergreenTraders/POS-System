@@ -143,6 +143,8 @@ function CashDrawer() {
     electronicDiscrepancy: 0,
     electronicTenderActuals: {},
     electronicTenderExpected: {},
+    totalCumulativeDiscrepancy: 0, // Sum of absolute discrepancies from all tender types
+    totalElectronicDiscrepancyAmount: 0, // Cumulative electronic discrepancies
     isBalanced: false,
     isWithinLimit: false
   }); // Store closing discrepancy data
@@ -1026,19 +1028,35 @@ function CashDrawer() {
     const physicalIsOverLimit = physicalDiscrepancyAmount > threshold;
 
     // Electronic discrepancy (debit, visa, mastercard, etc.)
+    // Calculate discrepancy for each electronic tender type separately
+    const electronicDiscrepancies = electronicPaymentMethods.map(method => {
+      const expected = electronicTenderExpected[method.method_value] || { expected_qty: 0, expected_amount: 0 };
+      const actual = electronicTenderActuals[method.method_value] || { qty: 0, amount: 0 };
+      const discrepancy = (parseFloat(actual.amount) || 0) - (parseFloat(expected.expected_amount) || 0);
+      return Math.abs(discrepancy); // Use absolute value for each tender type
+    });
+    
+    // Sum all electronic discrepancies (cumulative - each error counts)
+    const totalElectronicDiscrepancyAmount = electronicDiscrepancies.reduce((sum, disc) => sum + disc, 0);
+    const hasElectronicDiscrepancy = totalElectronicDiscrepancyAmount > 0.01;
+    
+    // Calculate total electronic actual and expected for display
     const electronicActualTotal = Object.values(electronicTenderActuals).reduce(
       (sum, t) => sum + (parseFloat(t?.amount) || 0), 0
     );
     const electronicExpectedTotal = Object.values(electronicTenderExpected).reduce(
       (sum, t) => sum + (parseFloat(t?.expected_amount) || 0), 0
     );
-    const electronicDiscrepancy = electronicActualTotal - electronicExpectedTotal;
-    const electronicDiscrepancyAmount = Math.abs(electronicDiscrepancy);
-    const hasElectronicDiscrepancy = electronicDiscrepancyAmount > 0.01;
+    const electronicDiscrepancy = electronicActualTotal - electronicExpectedTotal; // Net discrepancy for display
+
+    // Total cumulative discrepancy = sum of absolute discrepancies from all tender types
+    // Example: -$100 in debit and +$100 in visa = $200 total discrepancy
+    const totalCumulativeDiscrepancy = physicalDiscrepancyAmount + totalElectronicDiscrepancyAmount;
+    const isOverTotalLimit = totalCumulativeDiscrepancy > threshold;
 
     // Check if drawer is balanced or within limits
     const isBalanced = physicalDiscrepancyAmount <= 0.01 && !hasElectronicDiscrepancy;
-    const isWithinLimit = !physicalIsOverLimit && (!hasElectronicDiscrepancy || electronicDiscrepancyAmount <= threshold);
+    const isWithinLimit = !isOverTotalLimit;
 
     // If not forcing close, check for discrepancies
     if (!forceClose) {
@@ -1087,6 +1105,8 @@ function CashDrawer() {
           electronicDiscrepancy,
           electronicTenderActuals: { ...electronicTenderActuals },
           electronicTenderExpected: { ...electronicTenderExpected },
+          totalCumulativeDiscrepancy: totalCumulativeDiscrepancy,
+          totalElectronicDiscrepancyAmount: totalElectronicDiscrepancyAmount,
           isBalanced,
           isWithinLimit
         });
