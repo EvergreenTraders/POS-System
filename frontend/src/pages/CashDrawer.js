@@ -79,6 +79,7 @@ function CashDrawer() {
   const [adjustmentDialog, setAdjustmentDialog] = useState(false);
   const [detailsDialog, setDetailsDialog] = useState(false);
   const [discrepancyWarningDialog, setDiscrepancyWarningDialog] = useState(false);
+  const [openingDiscrepancyDialog, setOpeningDiscrepancyDialog] = useState(false);
   const [managerApprovalDialog, setManagerApprovalDialog] = useState(false);
   const [minMaxWarningDialog, setMinMaxWarningDialog] = useState(false);
 
@@ -126,6 +127,20 @@ function CashDrawer() {
   });
   const [openingDenominationsFromDB, setOpeningDenominationsFromDB] = useState(null); // Opening denominations from database
   const [calculatedClosingBalance, setCalculatedClosingBalance] = useState(0); // Store calculated balance for discrepancy dialog
+  const [openingDiscrepancyData, setOpeningDiscrepancyData] = useState({
+    openingBalance: 0,
+    previousClosingBalance: null,
+    discrepancy: 0,
+    showAmount: false
+  }); // Store opening discrepancy data
+
+  // Physical tender states (for non-cash tenders like checks, gift cards)
+  const [physicalPaymentMethods, setPhysicalPaymentMethods] = useState([]); // Physical payment methods (excluding cash)
+  const [previousTenderBalances, setPreviousTenderBalances] = useState(null); // Tender balances from previous session
+  const [openingTenderCounts, setOpeningTenderCounts] = useState({}); // User's tender counts when opening
+  const [closingTenderBalances, setClosingTenderBalances] = useState({}); // Tender balances when closing
+  const [tenderDiscrepancyDialog, setTenderDiscrepancyDialog] = useState(false); // Dialog for tender discrepancies
+  const [tenderDiscrepancies, setTenderDiscrepancies] = useState([]); // List of tender discrepancies
 
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -143,6 +158,7 @@ function CashDrawer() {
     fetchStoreStatus();
     checkActiveSession();
     fetchHistory();
+    fetchPhysicalPaymentMethods();
   }, []);
 
   // Update count mode when active session changes
@@ -221,6 +237,37 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching drawers:', err);
       showSnackbar('Failed to load drawers', 'error');
+    }
+  };
+
+  const fetchPhysicalPaymentMethods = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/payment-methods/physical`);
+      setPhysicalPaymentMethods(response.data);
+    } catch (err) {
+      console.error('Error fetching physical payment methods:', err);
+    }
+  };
+
+  const fetchPreviousTenderBalances = async (drawerId) => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/cash-drawer/${drawerId}/previous-tender-balances`);
+      if (response.data.hasPreviousTenderBalances) {
+        setPreviousTenderBalances(response.data);
+        // Initialize opening tender counts with 0 for each tender type
+        const initialCounts = {};
+        response.data.tenderBalances.forEach(tb => {
+          initialCounts[tb.paymentMethod] = '';
+        });
+        setOpeningTenderCounts(initialCounts);
+      } else {
+        setPreviousTenderBalances(null);
+        setOpeningTenderCounts({});
+      }
+    } catch (err) {
+      console.error('Error fetching previous tender balances:', err);
+      setPreviousTenderBalances(null);
+      setOpeningTenderCounts({});
     }
   };
 
@@ -555,7 +602,7 @@ function CashDrawer() {
     }
   };
 
-  const handleOpenDrawer = async () => {
+  const handleOpenDrawer = async (skipTenderVerification = false) => {
     // Get current logged-in user
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = selectedEmployee || currentUser.id;
@@ -599,6 +646,46 @@ function CashDrawer() {
       return;
     }
 
+    // Check if there are previous tender balances that need verification
+    if (drawerType === 'physical' && previousTenderBalances && previousTenderBalances.tenderBalances.length > 0 && !skipTenderVerification) {
+      // Validate that all tender counts are entered
+      const missingCounts = previousTenderBalances.tenderBalances.filter(
+        tb => !openingTenderCounts[tb.paymentMethod] && openingTenderCounts[tb.paymentMethod] !== 0
+      );
+      if (missingCounts.length > 0) {
+        showSnackbar('Please enter counts for all previous tender balances', 'error');
+        return;
+      }
+
+      // Check for discrepancies
+      const discrepancies = [];
+      for (const tender of previousTenderBalances.tenderBalances) {
+        const counted = parseFloat(openingTenderCounts[tender.paymentMethod]) || 0;
+        const expected = tender.expectedBalance;
+        const discrepancy = counted - expected;
+
+        if (Math.abs(discrepancy) > 0.01) {
+          const threshold = parseFloat(discrepancyThreshold || 0);
+          const exceedsThreshold = Math.abs(discrepancy) > threshold;
+
+          discrepancies.push({
+            paymentMethod: tender.paymentMethod,
+            methodName: tender.methodName,
+            counted,
+            expected: exceedsThreshold ? null : expected,
+            discrepancy: exceedsThreshold ? null : discrepancy,
+            exceedsThreshold
+          });
+        }
+      }
+
+      if (discrepancies.length > 0) {
+        setTenderDiscrepancies(discrepancies);
+        setTenderDiscrepancyDialog(true);
+        return; // Don't proceed until user confirms
+      }
+    }
+
     // Check if there's already an active session for this EXACT drawer type
     // Each drawer type (physical, safe, master_safe) can have its own session
     const existingSession = activeSessions.find(s => {
@@ -635,8 +722,62 @@ function CashDrawer() {
       // Open the drawer
       const openResponse = await axios.post(`${API_BASE_URL}/cash-drawer/open`, payload);
 
-      const sessionId = openResponse.data.session_id;
+      // Check for blind count discrepancy for physical drawers
+      // Only check if not using individual denominations (which would show the total anyway)
+      if (drawerType === 'physical' && !isIndividualDenominations) {
+        const previousClosingBalance = openResponse.data.previous_closing_balance;
+        
+        if (previousClosingBalance !== null && previousClosingBalance !== undefined) {
+          const discrepancy = Math.abs(calculatedBalance - previousClosingBalance);
+          const threshold = parseFloat(discrepancyThreshold || 0);
+          
+          // If there's any discrepancy, show the dialog
+          if (discrepancy > 0.01) {
+            // Only show the amount if it's within the employee's over/short limit
+            const showAmount = discrepancy <= threshold;
+            
+            setOpeningDiscrepancyData({
+              openingBalance: calculatedBalance,
+              previousClosingBalance: previousClosingBalance,
+              discrepancy: calculatedBalance - previousClosingBalance, // Positive = overage, negative = shortage
+              showAmount: showAmount,
+              sessionId: openResponse.data.session_id,
+              payload: payload // Store payload for retry
+            });
+            setOpeningDiscrepancyDialog(true);
+            return; // Don't proceed with opening yet
+          }
+        }
+      }
 
+      // Complete the opening process (called after discrepancy check or directly)
+      // Pass tender counts if there were previous tender balances
+      const hasTenderCounts = previousTenderBalances && Object.keys(openingTenderCounts).length > 0;
+      await completeDrawerOpening(
+        openResponse.data.session_id,
+        isIndividualDenominations,
+        employeeId,
+        openingNotes,
+        openingDenominations,
+        isSafe,
+        hasTenderCounts ? openingTenderCounts : null
+      );
+    } catch (err) {
+      console.error('Error opening drawer:', err);
+
+      // Check if sharing mode selection is required
+      if (err.response?.data?.errorType === 'SHARING_MODE_REQUIRED') {
+        setSharingModeRequired(true);
+        showSnackbar('Please select whether this drawer is Single or Shared', 'warning');
+        return;
+      }
+
+      showSnackbar(err.response?.data?.error || 'Failed to open drawer', 'error');
+    }
+  };
+
+  const completeDrawerOpening = async (sessionId, isIndividualDenominations, employeeId, openingNotes, openingDenominations, isSafe, tenderCounts = null) => {
+    try {
       // If Individual Denominations mode, save denominations
       if (isIndividualDenominations) {
         await axios.post(`${API_BASE_URL}/cash-drawer/${sessionId}/denominations`, {
@@ -647,11 +788,28 @@ function CashDrawer() {
         });
       }
 
+      // Save opening tender counts if any
+      if (tenderCounts && Object.keys(tenderCounts).length > 0) {
+        const tenderCountsArray = Object.entries(tenderCounts).map(([method, count]) => ({
+          paymentMethod: method,
+          count: parseFloat(count) || 0
+        }));
+        await axios.post(`${API_BASE_URL}/cash-drawer/${sessionId}/opening-tender-counts`, {
+          tenderCounts: tenderCountsArray,
+          employeeId
+        });
+      }
+
       const drawerTypeName = isSafe ? 'Safe' : 'Cash drawer';
       showSnackbar(`${drawerTypeName} opened successfully`, 'success');
       setOpenDrawerDialog(false);
       setDrawerTypeFilter(null);
       resetOpenForm();
+
+      // Refresh sessions, overview, and drawers
+      await fetchOverview();
+      await fetchDrawers();
+      await checkActiveSession();
 
       // If we came from checkout, automatically navigate back after opening drawer
       if (location.state?.returnTo === '/checkout') {
@@ -674,24 +832,39 @@ function CashDrawer() {
             }
           });
         }, 500);
-        return;
       }
-
-      // Refresh sessions, overview, and drawers (to get updated is_shared value)
-      await fetchOverview();
-      await fetchDrawers();
-      await checkActiveSession(drawerType);
     } catch (err) {
-      console.error('Error opening drawer:', err);
+      console.error('Error completing drawer opening:', err);
+      showSnackbar('Error completing drawer opening', 'error');
+    }
+  };
 
-      // Check if sharing mode selection is required
-      if (err.response?.data?.errorType === 'SHARING_MODE_REQUIRED') {
-        setSharingModeRequired(true);
-        showSnackbar('Please select whether this drawer is Single or Shared', 'warning');
-        return;
+  const handleOpeningDiscrepancyRecount = async () => {
+    // Delete the session that was created and allow user to re-enter
+    try {
+      if (openingDiscrepancyData.sessionId) {
+        await axios.post(`${API_BASE_URL}/cash-drawer/${openingDiscrepancyData.sessionId}/close`, {
+          actual_balance: openingDiscrepancyData.openingBalance,
+          closing_notes: 'Session cancelled due to recount request'
+        });
       }
+    } catch (err) {
+      console.error('Error closing session for recount:', err);
+    }
+    
+    // Close the discrepancy dialog and keep the open drawer dialog open
+    setOpeningDiscrepancyDialog(false);
+    // User can now change the opening balance and submit again
+  };
 
-      showSnackbar(err.response?.data?.error || 'Failed to open drawer', 'error');
+  const handleOpeningDiscrepancyProceed = async () => {
+    // Proceed with opening using the entered totals
+    setOpeningDiscrepancyDialog(false);
+
+    const { sessionId, isIndividualDenominations, employeeId, openingNotes, openingDenominations, isSafe, tenderCounts } = openingDiscrepancyData;
+
+    if (sessionId) {
+      await completeDrawerOpening(sessionId, isIndividualDenominations, employeeId, openingNotes, openingDenominations, isSafe, tenderCounts || null);
     }
   };
 
@@ -777,12 +950,24 @@ function CashDrawer() {
     }
 
     try {
+      // Prepare tender balances array for physical drawers
+      const tenderBalancesArray = activeSession?.drawer_type === 'physical'
+        ? Object.entries(closingTenderBalances)
+            .filter(([_, balance]) => balance && parseFloat(balance) > 0)
+            .map(([method, balance]) => ({
+              paymentMethod: method,
+              balance: parseFloat(balance)
+            }))
+        : [];
+
       // Close the drawer
       const response = await axios.put(
         `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/close`,
         {
           actual_balance: calculatedBalance,
-          closing_notes: closingNotes || null
+          closing_notes: closingNotes || null,
+          tender_balances: tenderBalancesArray,
+          employee_id: employeeId
         }
       );
 
@@ -904,6 +1089,9 @@ function CashDrawer() {
       bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
       coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
     });
+    setPreviousTenderBalances(null);
+    setOpeningTenderCounts({});
+    setTenderDiscrepancies([]);
   };
 
   const resetCloseForm = () => {
@@ -914,6 +1102,7 @@ function CashDrawer() {
       coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
     });
     setOpeningDenominationsFromDB(null);
+    setClosingTenderBalances({});
   };
 
   const resetAdjustmentForm = () => {
@@ -1571,12 +1760,18 @@ function CashDrawer() {
                     const isSafe = drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe';
                     setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
                     setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
-                    // Reset sharing mode when drawer changes
                     // Check if sharing mode is required for this drawer
                     const needsSharingMode = drawer.drawer_type === 'physical' && drawer.is_shared === null;
                     setSharingModeRequired(needsSharingMode);
                     // Default to 'shared' when sharing mode is required
                     setSelectedSharingMode(needsSharingMode ? 'shared' : null);
+                    // For physical drawers, fetch previous tender balances
+                    if (drawer.drawer_type === 'physical') {
+                      fetchPreviousTenderBalances(drawerId);
+                    } else {
+                      setPreviousTenderBalances(null);
+                      setOpeningTenderCounts({});
+                    }
                   }
                 }}
               >
@@ -1642,6 +1837,35 @@ function CashDrawer() {
               />
             )}
 
+            {/* Previous Tender Balances Section - for physical drawers with leftover tenders */}
+            {selectedDrawerType === 'physical' && previousTenderBalances && previousTenderBalances.tenderBalances.length > 0 && (
+              <Box sx={{ mt: 2, p: 2, bgcolor: 'warning.light', borderRadius: 1 }}>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                  Previous Tender Balances to Count
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  The previous session left these tenders in the drawer. Please count and enter the amounts.
+                  {isBlindCount && ' (Blind count - expected amounts are hidden)'}
+                </Typography>
+                {previousTenderBalances.tenderBalances.map((tender) => (
+                  <TextField
+                    key={tender.paymentMethod}
+                    label={`${tender.methodName} Balance`}
+                    type="number"
+                    fullWidth
+                    value={openingTenderCounts[tender.paymentMethod] || ''}
+                    onChange={(e) => setOpeningTenderCounts(prev => ({
+                      ...prev,
+                      [tender.paymentMethod]: e.target.value
+                    }))}
+                    inputProps={{ step: '0.01', min: '0' }}
+                    sx={{ mb: 1 }}
+                    helperText={!isBlindCount ? `Expected: ${formatCurrency(tender.expectedBalance)}` : undefined}
+                  />
+                ))}
+              </Box>
+            )}
+
             <TextField
               label="Notes (Optional)"
               fullWidth
@@ -1656,6 +1880,45 @@ function CashDrawer() {
           <Button onClick={() => setOpenDrawerDialog(false)}>Cancel</Button>
           <Button onClick={handleOpenDrawer} variant="contained" color="primary" disabled={isStoreClosed}>
             Open Drawer
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Tender Discrepancy Dialog */}
+      <Dialog open={tenderDiscrepancyDialog} onClose={() => setTenderDiscrepancyDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Tender Count Discrepancy</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            There is a discrepancy in one or more tender counts.
+          </Alert>
+          {tenderDiscrepancies.map((disc, index) => (
+            <Box key={index} sx={{ mb: 1, p: 1, bgcolor: 'grey.100', borderRadius: 1 }}>
+              <Typography variant="subtitle2">{disc.methodName}</Typography>
+              <Typography variant="body2">
+                Counted: {formatCurrency(disc.counted)}
+                {disc.exceedsThreshold ? (
+                  <Typography component="span" color="error"> - Discrepancy exceeds your threshold</Typography>
+                ) : (
+                  <Typography component="span" color="warning.main">
+                    {' '}(Expected: {formatCurrency(disc.expected)}, Discrepancy: {formatCurrency(disc.discrepancy)})
+                  </Typography>
+                )}
+              </Typography>
+            </Box>
+          ))}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTenderDiscrepancyDialog(false)}>Re-count</Button>
+          <Button
+            onClick={() => {
+              setTenderDiscrepancyDialog(false);
+              // Proceed with opening the drawer despite discrepancy
+              handleOpenDrawer(true); // Pass flag to skip tender verification
+            }}
+            variant="contained"
+            color="warning"
+          >
+            Proceed Anyway
           </Button>
         </DialogActions>
       </Dialog>
@@ -1817,6 +2080,34 @@ function CashDrawer() {
               </>
             )}
 
+            {/* Physical Tender Balances Section - for physical drawers */}
+            {activeSession?.drawer_type === 'physical' && physicalPaymentMethods.length > 0 && (
+              <Box sx={{ mt: 2, p: 2, bgcolor: 'info.light', borderRadius: 1 }}>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                  Other Physical Tenders in Drawer
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Enter the balance of any non-cash physical tenders left in the drawer (e.g., checks, gift cards).
+                  Leave at 0 if none.
+                </Typography>
+                {physicalPaymentMethods.map((method) => (
+                  <TextField
+                    key={method.method_value}
+                    label={`${method.method_name} Balance`}
+                    type="number"
+                    fullWidth
+                    value={closingTenderBalances[method.method_value] || ''}
+                    onChange={(e) => setClosingTenderBalances(prev => ({
+                      ...prev,
+                      [method.method_value]: e.target.value
+                    }))}
+                    inputProps={{ step: '0.01', min: '0' }}
+                    sx={{ mb: 1 }}
+                  />
+                ))}
+              </Box>
+            )}
+
             <TextField
               label="Closing Notes (Optional)"
               fullWidth
@@ -1846,25 +2137,32 @@ function CashDrawer() {
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Alert severity="warning">
-              The discrepancy amount exceeds the acceptable threshold of {formatCurrency(discrepancyThreshold || 0)}. Please recount.
+              {isBlindCount
+                ? 'There is a discrepancy. Please recount or request manager approval.'
+                : `The discrepancy amount exceeds the acceptable threshold of ${formatCurrency(discrepancyThreshold || 0)}. Please recount.`}
             </Alert>
             <Box>
               <Typography variant="body1" gutterBottom>
                 <strong>Transaction Count:</strong> {activeSession?.transaction_count || 0}
               </Typography>
-              <Typography variant="body1" gutterBottom>
-                <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
-              </Typography>
-              <Typography variant="body1" gutterBottom>
-                <strong>Actual Balance:</strong> {formatCurrency(calculatedClosingBalance)}
-              </Typography>
-              <Typography variant="body1" color="error" gutterBottom>
-                <strong>Discrepancy:</strong> {formatCurrency(calculatedClosingBalance - parseFloat(activeSession?.current_expected_balance || 0))}
-                {' '}({calculatedClosingBalance > parseFloat(activeSession?.current_expected_balance || 0) ? 'Overage' : 'Shortage'})
-              </Typography>
-              <Typography variant="body1" gutterBottom>
-                <strong>Threshold:</strong> {formatCurrency(discrepancyThreshold || 0)}
-              </Typography>
+              {/* In blind count mode, only show transaction count - hide all balance info to prevent calculating expected */}
+              {!isBlindCount && (
+                <>
+                  <Typography variant="body1" gutterBottom>
+                    <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
+                  </Typography>
+                  <Typography variant="body1" gutterBottom>
+                    <strong>Actual Balance:</strong> {formatCurrency(calculatedClosingBalance)}
+                  </Typography>
+                  <Typography variant="body1" color="error" gutterBottom>
+                    <strong>Discrepancy:</strong> {formatCurrency(calculatedClosingBalance - parseFloat(activeSession?.current_expected_balance || 0))}
+                    {' '}({calculatedClosingBalance > parseFloat(activeSession?.current_expected_balance || 0) ? 'Overage' : 'Shortage'})
+                  </Typography>
+                  <Typography variant="body1" gutterBottom>
+                    <strong>Threshold:</strong> {formatCurrency(discrepancyThreshold || 0)}
+                  </Typography>
+                </>
+              )}
             </Box>
             <Typography variant="body2" color="text.secondary">
               Please recount the cash drawer to verify the balance. If the discrepancy is correct, request manager approval to close the drawer.
@@ -1885,6 +2183,58 @@ function CashDrawer() {
             disabled={isStoreClosed}
           >
             Request Manager Approval
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Opening Discrepancy Dialog for Physical Drawers */}
+      <Dialog open={openingDiscrepancyDialog} onClose={() => setOpeningDiscrepancyDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarningIcon color="warning" />
+            <Typography variant="h6">Opening Balance Discrepancy</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="warning">
+              {openingDiscrepancyData.showAmount 
+                ? `The opening balance does not match the previous closing balance. Discrepancy: ${formatCurrency(Math.abs(openingDiscrepancyData.discrepancy))} (${openingDiscrepancyData.discrepancy > 0 ? 'Overage' : 'Shortage'}).`
+                : 'The opening balance does not match the previous closing balance.'}
+            </Alert>
+            <Box>
+              <Typography variant="body1" gutterBottom>
+                <strong>Entered Opening Balance:</strong> {formatCurrency(openingDiscrepancyData.openingBalance)}
+              </Typography>
+              {openingDiscrepancyData.showAmount && (
+                <>
+                  <Typography variant="body1" gutterBottom>
+                    <strong>Previous Closing Balance:</strong> {formatCurrency(openingDiscrepancyData.previousClosingBalance)}
+                  </Typography>
+                  <Typography variant="body1" color={openingDiscrepancyData.discrepancy > 0 ? 'info.main' : 'error.main'} gutterBottom>
+                    <strong>Discrepancy:</strong> {formatCurrency(Math.abs(openingDiscrepancyData.discrepancy))}
+                    {' '}({openingDiscrepancyData.discrepancy > 0 ? 'Overage' : 'Shortage'})
+                  </Typography>
+                </>
+              )}
+            </Box>
+            <Typography variant="body2" color="text.secondary">
+              {openingDiscrepancyData.showAmount 
+                ? 'Please verify the count. You can recount or proceed with the entered totals.'
+                : 'The discrepancy amount is outside your over/short limit. Please verify the count carefully.'}
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleOpeningDiscrepancyRecount}>
+            Re-count
+          </Button>
+          <Button
+            onClick={handleOpeningDiscrepancyProceed}
+            variant="contained"
+            color="primary"
+          >
+            Open with Totals Entered
           </Button>
         </DialogActions>
       </Dialog>
@@ -1965,16 +2315,26 @@ function CashDrawer() {
               A Store Manager or Store Owner must approve closing this drawer with discrepancy.
             </Alert>
             <Box sx={{ p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
-              <Typography variant="body2" gutterBottom>
-                <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
-              </Typography>
+              {/* In blind count mode, don't show expected balance or discrepancy to employee */}
+              {!isBlindCount && (
+                <Typography variant="body2" gutterBottom>
+                  <strong>Expected Balance:</strong> {formatCurrency(activeSession?.current_expected_balance)}
+                </Typography>
+              )}
               <Typography variant="body2" gutterBottom>
                 <strong>Actual Balance:</strong> {formatCurrency(calculatedClosingBalance)}
               </Typography>
-              <Typography variant="body2" color="error">
-                <strong>Discrepancy:</strong> {formatCurrency(Math.abs(calculatedClosingBalance - parseFloat(activeSession?.current_expected_balance || 0)))}
-                {' '}({calculatedClosingBalance > parseFloat(activeSession?.current_expected_balance || 0) ? 'Overage' : 'Shortage'})
-              </Typography>
+              {!isBlindCount && (
+                <Typography variant="body2" color="error">
+                  <strong>Discrepancy:</strong> {formatCurrency(Math.abs(calculatedClosingBalance - parseFloat(activeSession?.current_expected_balance || 0)))}
+                  {' '}({calculatedClosingBalance > parseFloat(activeSession?.current_expected_balance || 0) ? 'Overage' : 'Shortage'})
+                </Typography>
+              )}
+              {isBlindCount && (
+                <Typography variant="body2" color="error">
+                  <strong>Status:</strong> Discrepancy exceeds threshold
+                </Typography>
+              )}
             </Box>
             <TextField
               label="Manager Username"

@@ -1104,6 +1104,21 @@ app.post('/api/cash-drawer/open', async (req, res) => {
       }
     }
 
+    // Get previous closing balance for this drawer (most recent closed session)
+    const previousSessionResult = await pool.query(`
+      SELECT actual_balance, closed_at
+      FROM cash_drawer_sessions
+      WHERE drawer_id = $1
+        AND status = 'closed'
+        AND actual_balance IS NOT NULL
+      ORDER BY closed_at DESC
+      LIMIT 1
+    `, [drawer_id]);
+
+    const previousClosingBalance = previousSessionResult.rows.length > 0
+      ? parseFloat(previousSessionResult.rows[0].actual_balance)
+      : null;
+
     // Create new drawer session
     const result = await pool.query(`
       INSERT INTO cash_drawer_sessions (drawer_id, employee_id, opening_balance, opening_notes, status)
@@ -1114,7 +1129,8 @@ app.post('/api/cash-drawer/open', async (req, res) => {
     res.status(201).json({
       ...result.rows[0],
       is_shared: drawerIsShared,
-      is_connection: false
+      is_connection: false,
+      previous_closing_balance: previousClosingBalance
     });
   } catch (error) {
     console.error('Error opening cash drawer:', error);
@@ -1585,7 +1601,8 @@ app.post('/api/cash-drawer/:sessionId/transaction', async (req, res) => {
 // PUT /api/cash-drawer/:sessionId/close - Close a cash drawer session
 app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
   const { sessionId } = req.params;
-  const { actual_balance, closing_notes } = req.body;
+  const { actual_balance, closing_notes, tender_balances, employee_id } = req.body;
+  // tender_balances: [{ paymentMethod: 'check', balance: 150.00 }, ...]
 
   // Validation
   if (actual_balance === undefined) {
@@ -1612,6 +1629,21 @@ app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Session not found or already closed' });
+    }
+
+    // Save tender balances if provided (for physical tenders like checks, gift cards)
+    if (tender_balances && Array.isArray(tender_balances) && tender_balances.length > 0) {
+      for (const tender of tender_balances) {
+        if (tender.balance > 0) {
+          await pool.query(`
+            INSERT INTO drawer_tender_balances
+              (session_id, payment_method, closing_balance, balance_type, counted_by)
+            VALUES ($1, $2, $3, 'close', $4)
+            ON CONFLICT (session_id, payment_method, balance_type)
+            DO UPDATE SET closing_balance = $3, counted_by = $4, counted_at = CURRENT_TIMESTAMP
+          `, [sessionId, tender.paymentMethod, parseFloat(tender.balance), employee_id || null]);
+        }
+      }
     }
 
     // Disconnect all connected employees when drawer is closed
@@ -7508,6 +7540,205 @@ app.get('/api/payment-methods', async (req, res) => {
   } catch (error) {
     console.error('Error fetching payment methods:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get physical payment methods (tenders kept in drawer, excluding cash which has separate handling)
+app.get('/api/payment-methods/physical', async (req, res) => {
+  try {
+    const query = `
+      SELECT * FROM payment_methods
+      WHERE is_active = true AND is_physical = true AND method_value != 'cash'
+      ORDER BY id
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching physical payment methods:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get previous tender balances for a drawer (from last closed session)
+// Used when opening a drawer to determine what tender balances need to be counted
+app.get('/api/cash-drawer/:drawerId/previous-tender-balances', async (req, res) => {
+  const { drawerId } = req.params;
+
+  try {
+    // Find the most recent closed session for this drawer
+    const lastSessionResult = await pool.query(`
+      SELECT s.session_id, s.closed_at, s.employee_id,
+             e.first_name || ' ' || e.last_name as closed_by
+      FROM cash_drawer_sessions s
+      LEFT JOIN employees e ON s.employee_id = e.employee_id
+      WHERE s.drawer_id = $1 AND s.status IN ('closed', 'reconciled')
+      ORDER BY s.closed_at DESC
+      LIMIT 1
+    `, [drawerId]);
+
+    if (lastSessionResult.rows.length === 0) {
+      // No previous session, no tender balances to count
+      return res.json({ hasPreviousTenderBalances: false, tenderBalances: [] });
+    }
+
+    const lastSession = lastSessionResult.rows[0];
+
+    // Get tender balances from the last closed session
+    const tenderBalancesResult = await pool.query(`
+      SELECT tb.payment_method, tb.closing_balance, pm.method_name
+      FROM drawer_tender_balances tb
+      JOIN payment_methods pm ON tb.payment_method = pm.method_value
+      WHERE tb.session_id = $1 AND tb.balance_type = 'close' AND tb.closing_balance > 0
+      ORDER BY pm.id
+    `, [lastSession.session_id]);
+
+    res.json({
+      hasPreviousTenderBalances: tenderBalancesResult.rows.length > 0,
+      previousSessionId: lastSession.session_id,
+      closedAt: lastSession.closed_at,
+      closedBy: lastSession.closed_by,
+      tenderBalances: tenderBalancesResult.rows.map(tb => ({
+        paymentMethod: tb.payment_method,
+        methodName: tb.method_name,
+        expectedBalance: parseFloat(tb.closing_balance)
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching previous tender balances:', error);
+    res.status(500).json({ error: 'Failed to fetch previous tender balances' });
+  }
+});
+
+// Verify opening tender counts against previous close balances
+// Returns discrepancy info based on blind count rules
+app.post('/api/cash-drawer/:sessionId/verify-tender-counts', async (req, res) => {
+  const { sessionId } = req.params;
+  const { tenderCounts, employeeId } = req.body;
+  // tenderCounts: [{ paymentMethod: 'check', count: 150.00 }, ...]
+
+  if (!tenderCounts || !Array.isArray(tenderCounts)) {
+    return res.status(400).json({ error: 'tenderCounts array is required' });
+  }
+
+  try {
+    // Get the drawer_id from the session
+    const sessionResult = await pool.query(
+      'SELECT drawer_id FROM cash_drawer_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const drawerId = sessionResult.rows[0].drawer_id;
+
+    // Get the previous session's closing tender balances
+    const previousBalancesResult = await pool.query(`
+      SELECT tb.payment_method, tb.closing_balance
+      FROM drawer_tender_balances tb
+      JOIN cash_drawer_sessions s ON tb.session_id = s.session_id
+      WHERE s.drawer_id = $1
+        AND s.session_id != $2
+        AND s.status IN ('closed', 'reconciled')
+        AND tb.balance_type = 'close'
+      ORDER BY s.closed_at DESC
+    `, [drawerId, sessionId]);
+
+    // Build a map of expected balances
+    const expectedBalances = {};
+    previousBalancesResult.rows.forEach(row => {
+      expectedBalances[row.payment_method] = parseFloat(row.closing_balance);
+    });
+
+    // Get employee's discrepancy threshold
+    let employeeThreshold = 0;
+    if (employeeId) {
+      const employeeResult = await pool.query(
+        'SELECT discrepancy_threshold FROM employees WHERE employee_id = $1',
+        [employeeId]
+      );
+      if (employeeResult.rows.length > 0 && employeeResult.rows[0].discrepancy_threshold !== null) {
+        employeeThreshold = parseFloat(employeeResult.rows[0].discrepancy_threshold);
+      }
+    }
+
+    // If no employee threshold, get system default
+    if (employeeThreshold === 0) {
+      const thresholdResult = await pool.query(
+        'SELECT threshold_amount FROM discrepancy_threshold LIMIT 1'
+      );
+      if (thresholdResult.rows.length > 0) {
+        employeeThreshold = parseFloat(thresholdResult.rows[0].threshold_amount);
+      }
+    }
+
+    // Calculate discrepancies
+    const discrepancies = [];
+    let hasDiscrepancy = false;
+    let withinThreshold = true;
+
+    for (const tender of tenderCounts) {
+      const expected = expectedBalances[tender.paymentMethod] || 0;
+      const counted = parseFloat(tender.count) || 0;
+      const discrepancy = counted - expected;
+
+      if (Math.abs(discrepancy) > 0.001) {
+        hasDiscrepancy = true;
+        const exceedsThreshold = Math.abs(discrepancy) > employeeThreshold;
+        if (exceedsThreshold) {
+          withinThreshold = false;
+        }
+
+        discrepancies.push({
+          paymentMethod: tender.paymentMethod,
+          counted,
+          // Only reveal expected and discrepancy if within threshold
+          expected: exceedsThreshold ? null : expected,
+          discrepancy: exceedsThreshold ? null : discrepancy,
+          exceedsThreshold
+        });
+      }
+    }
+
+    res.json({
+      hasDiscrepancy,
+      withinThreshold,
+      discrepancies,
+      employeeThreshold
+    });
+  } catch (error) {
+    console.error('Error verifying tender counts:', error);
+    res.status(500).json({ error: 'Failed to verify tender counts' });
+  }
+});
+
+// Save opening tender counts
+app.post('/api/cash-drawer/:sessionId/opening-tender-counts', async (req, res) => {
+  const { sessionId } = req.params;
+  const { tenderCounts, employeeId } = req.body;
+  // tenderCounts: [{ paymentMethod: 'check', count: 150.00 }, ...]
+
+  if (!tenderCounts || !Array.isArray(tenderCounts) || !employeeId) {
+    return res.status(400).json({ error: 'tenderCounts array and employeeId are required' });
+  }
+
+  try {
+    // Save each tender count as an opening balance
+    for (const tender of tenderCounts) {
+      await pool.query(`
+        INSERT INTO drawer_tender_balances
+          (session_id, payment_method, closing_balance, opening_balance, balance_type, counted_by)
+        VALUES ($1, $2, 0, $3, 'open', $4)
+        ON CONFLICT (session_id, payment_method, balance_type)
+        DO UPDATE SET opening_balance = $3, counted_by = $4, counted_at = CURRENT_TIMESTAMP
+      `, [sessionId, tender.paymentMethod, parseFloat(tender.count) || 0, employeeId]);
+    }
+
+    res.json({ message: 'Opening tender counts saved successfully' });
+  } catch (error) {
+    console.error('Error saving opening tender counts:', error);
+    res.status(500).json({ error: 'Failed to save opening tender counts' });
   }
 });
 
