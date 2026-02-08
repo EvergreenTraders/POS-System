@@ -82,6 +82,7 @@ function CashDrawer() {
   const [openingDiscrepancyDialog, setOpeningDiscrepancyDialog] = useState(false);
   const [managerApprovalDialog, setManagerApprovalDialog] = useState(false);
   const [minMaxWarningDialog, setMinMaxWarningDialog] = useState(false);
+  const [physicalTenderWarningDialog, setPhysicalTenderWarningDialog] = useState(false);
 
   // Manager approval form states
   const [managerUsername, setManagerUsername] = useState('');
@@ -107,6 +108,7 @@ function CashDrawer() {
   const [selectedDrawerType, setSelectedDrawerType] = useState(null);
   const [selectedSharingMode, setSelectedSharingMode] = useState(null); // null = not selected, 'single' or 'shared'
   const [sharingModeRequired, setSharingModeRequired] = useState(false); // true when drawer needs sharing mode config
+  const [existingSharedSession, setExistingSharedSession] = useState(null); // Existing session on shared drawer (for connecting)
   const [openingBalance, setOpeningBalance] = useState('');
   const [openingNotes, setOpeningNotes] = useState('');
   const [actualBalance, setActualBalance] = useState('');
@@ -187,11 +189,15 @@ function CashDrawer() {
       setSelectedDrawer('');
       setOpeningBalance('');
       setOpeningNotes('');
+      setExistingSharedSession(null);
       setOpeningDenominations({
         bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
         coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
       });
-      
+
+      // Fetch all active sessions to check for shared drawers
+      fetchAllActiveSessions();
+
       // Auto-select current user if not already selected
       if (!selectedEmployee) {
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -199,14 +205,14 @@ function CashDrawer() {
           setSelectedEmployee(currentUser.id);
         }
       }
-      
+
       // Set closing mode (blind count) based on drawer type filter
       if (drawerTypeFilter === 'safe' || drawerTypeFilter === 'master_safe') {
         setIsBlindCount(drawerBlindCountPrefs.safe);
       } else if (drawerTypeFilter === 'physical') {
         setIsBlindCount(drawerBlindCountPrefs.drawers);
       }
-      
+
       // Set opening mode (individual denominations) based on drawer type filter
       if (drawerTypeFilter === 'safe' || drawerTypeFilter === 'master_safe') {
         setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
@@ -868,7 +874,7 @@ function CashDrawer() {
     }
   };
 
-  const handleCloseDrawer = async (forceClose = false, bypassMinMaxWarning = false) => {
+  const handleCloseDrawer = async (forceClose = false, bypassMinMaxWarning = false, bypassPhysicalTenderWarning = false) => {
     // Get current logged-in user
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = currentUser.id;
@@ -931,6 +937,22 @@ function CashDrawer() {
         setCalculatedClosingBalance(calculatedBalance);
         setCloseDrawerDialog(false);
         setMinMaxWarningDialog(true);
+        return;
+      }
+    }
+
+    // Check for physical tender in drawer (for physical drawers only)
+    // Skip if forceClose (manager approved) or explicitly bypassed
+    if (activeSession?.drawer_type === 'physical' && !forceClose && !bypassPhysicalTenderWarning) {
+      // Calculate total physical tender (cash + other physical tenders like checks, gift cards)
+      const otherPhysicalTenderTotal = Object.values(closingTenderBalances)
+        .reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
+      const totalPhysicalTender = calculatedBalance + otherPhysicalTenderTotal;
+
+      if (totalPhysicalTender > 0) {
+        setCalculatedClosingBalance(calculatedBalance);
+        setCloseDrawerDialog(false);
+        setPhysicalTenderWarningDialog(true);
         return;
       }
     }
@@ -1030,6 +1052,38 @@ function CashDrawer() {
     }
   };
 
+  // Handle connecting to an existing shared drawer session (no counting required)
+  const handleConnectToDrawer = async () => {
+    if (!selectedDrawer || !existingSharedSession) return;
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const employeeId = selectedEmployee || currentUser.id;
+
+    try {
+      // Call the open drawer API - it will detect the existing session and create a connection
+      const response = await axios.post(`${API_BASE_URL}/cash-drawer/open`, {
+        drawer_id: selectedDrawer,
+        employee_id: employeeId,
+        opening_balance: 0 // Not used for connections
+      });
+
+      if (response.data.is_connection) {
+        showSnackbar('Successfully connected to shared drawer', 'success');
+      } else {
+        showSnackbar('Connected to drawer', 'success');
+      }
+
+      setOpenDrawerDialog(false);
+      resetOpenForm();
+      await fetchOverview();
+      await fetchDrawers();
+      await checkActiveSession();
+    } catch (err) {
+      console.error('Error connecting to drawer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to connect to drawer', 'error');
+    }
+  };
+
   const handleAddAdjustment = async () => {
     if (!adjustmentAmount || !adjustmentReason) {
       showSnackbar('Please fill in all required fields', 'error');
@@ -1106,6 +1160,7 @@ function CashDrawer() {
     setDrawerTypeFilter(null);
     setSelectedSharingMode(null);
     setSharingModeRequired(false);
+    setExistingSharedSession(null);
     setOpeningBalance('');
     setOpeningNotes('');
     setOpeningDenominations({
@@ -1822,8 +1877,21 @@ function CashDrawer() {
                     setSharingModeRequired(needsSharingMode);
                     // Default to 'shared' when sharing mode is required
                     setSelectedSharingMode(needsSharingMode ? 'shared' : null);
-                    // For physical drawers, fetch previous tender balances
-                    if (drawer.drawer_type === 'physical') {
+
+                    // Check if this drawer is already open by someone else (for shared drawers)
+                    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+                    const drawerIsShared = drawer.is_shared === true || isSafe; // Safe/master_safe are always shared
+                    const existingSession = allActiveSessions.find(s => s.drawer_id === drawerId);
+
+                    if (existingSession && drawerIsShared && existingSession.employee_id !== currentUser.id) {
+                      // Drawer is already open by another employee - user can connect without counting
+                      setExistingSharedSession(existingSession);
+                    } else {
+                      setExistingSharedSession(null);
+                    }
+
+                    // For physical drawers, fetch previous tender balances (only if not connecting to existing session)
+                    if (drawer.drawer_type === 'physical' && !existingSession) {
                       fetchPreviousTenderBalances(drawerId);
                     } else {
                       setPreviousTenderBalances(null);
@@ -1853,49 +1921,66 @@ function CashDrawer() {
               </Select>
             </FormControl>
 
-            {/* Sharing Mode dropdown for physical drawers that haven't been configured */}
-            {selectedDrawer && selectedDrawerType === 'physical' && sharingModeRequired && (
-              <FormControl fullWidth required>
-                <InputLabel>Drawer Mode</InputLabel>
-                <Select
-                  value={selectedSharingMode || ''}
-                  label="Drawer Mode"
-                  onChange={(e) => setSelectedSharingMode(e.target.value)}
-                >
-                  <MenuItem value="single">
-                    Single - Only one employee can use this drawer at a time
-                  </MenuItem>
-                  <MenuItem value="shared">
-                    Shared - Multiple employees can connect to this drawer
-                  </MenuItem>
-                </Select>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
-                  This setting will be saved for future use of this drawer
+            {/* Show connect message when drawer is already open by another employee */}
+            {existingSharedSession ? (
+              <Alert severity="info" sx={{ mt: 1 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  This drawer is already open
                 </Typography>
-              </FormControl>
-            )}
-
-            {isIndividualDenominations ? (
-              <>
-                {renderDenominationEntry(openingDenominations, setOpeningDenominations, calculateDenominationTotal(openingDenominations))}
-                <Alert severity="info" sx={{ mt: 1 }}>
-                  Opening balance will be automatically set to the total of counted denominations: {formatCurrency(calculateDenominationTotal(openingDenominations))}
-                </Alert>
-              </>
+                <Typography variant="body2">
+                  Opened by: {existingSharedSession.employee_first_name || 'Another employee'} {existingSharedSession.employee_last_name || ''}
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  You will connect to the existing session. No counting required.
+                </Typography>
+              </Alert>
             ) : (
-              <TextField
-                label="Opening Balance"
-                type="number"
-                fullWidth
-                value={openingBalance}
-                onChange={(e) => setOpeningBalance(e.target.value)}
-                required
-                inputProps={{ step: '0.01', min: '0' }}
-              />
+              <>
+                {/* Sharing Mode dropdown for physical drawers that haven't been configured */}
+                {selectedDrawer && selectedDrawerType === 'physical' && sharingModeRequired && (
+                  <FormControl fullWidth required>
+                    <InputLabel>Drawer Mode</InputLabel>
+                    <Select
+                      value={selectedSharingMode || ''}
+                      label="Drawer Mode"
+                      onChange={(e) => setSelectedSharingMode(e.target.value)}
+                    >
+                      <MenuItem value="single">
+                        Single - Only one employee can use this drawer at a time
+                      </MenuItem>
+                      <MenuItem value="shared">
+                        Shared - Multiple employees can connect to this drawer
+                      </MenuItem>
+                    </Select>
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                      This setting will be saved for future use of this drawer
+                    </Typography>
+                  </FormControl>
+                )}
+
+                {isIndividualDenominations ? (
+                  <>
+                    {renderDenominationEntry(openingDenominations, setOpeningDenominations, calculateDenominationTotal(openingDenominations))}
+                    <Alert severity="info" sx={{ mt: 1 }}>
+                      Opening balance will be automatically set to the total of counted denominations: {formatCurrency(calculateDenominationTotal(openingDenominations))}
+                    </Alert>
+                  </>
+                ) : (
+                  <TextField
+                    label="Opening Balance"
+                    type="number"
+                    fullWidth
+                    value={openingBalance}
+                    onChange={(e) => setOpeningBalance(e.target.value)}
+                    required
+                    inputProps={{ step: '0.01', min: '0' }}
+                  />
+                )}
+              </>
             )}
 
-            {/* Previous Tender Balances Section - for physical drawers with leftover tenders */}
-            {selectedDrawerType === 'physical' && previousTenderBalances && previousTenderBalances.tenderBalances.length > 0 && (
+            {/* Previous Tender Balances Section - for physical drawers with leftover tenders (not shown when connecting) */}
+            {!existingSharedSession && selectedDrawerType === 'physical' && previousTenderBalances && previousTenderBalances.tenderBalances.length > 0 && (
               <Box sx={{ mt: 2, p: 2, bgcolor: 'warning.light', borderRadius: 1 }}>
                 <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
                   Previous Tender Balances to Count
@@ -1923,21 +2008,30 @@ function CashDrawer() {
               </Box>
             )}
 
-            <TextField
-              label="Notes (Optional)"
-              fullWidth
-              multiline
-              rows={3}
-              value={openingNotes}
-              onChange={(e) => setOpeningNotes(e.target.value)}
-            />
+            {/* Only show notes field when opening a new session, not when connecting */}
+            {!existingSharedSession && (
+              <TextField
+                label="Notes (Optional)"
+                fullWidth
+                multiline
+                rows={3}
+                value={openingNotes}
+                onChange={(e) => setOpeningNotes(e.target.value)}
+              />
+            )}
           </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenDrawerDialog(false)}>Cancel</Button>
-          <Button onClick={handleOpenDrawer} variant="contained" color="primary" disabled={isStoreClosed}>
-            Open Drawer
-          </Button>
+          {existingSharedSession ? (
+            <Button onClick={handleConnectToDrawer} variant="contained" color="primary" disabled={isStoreClosed}>
+              Connect to Drawer
+            </Button>
+          ) : (
+            <Button onClick={handleOpenDrawer} variant="contained" color="primary" disabled={isStoreClosed}>
+              Open Drawer
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
@@ -2346,6 +2440,65 @@ function CashDrawer() {
             disabled={isStoreClosed}
           >
             Proceed Anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Physical Tender Warning Dialog */}
+      <Dialog open={physicalTenderWarningDialog} onClose={() => setPhysicalTenderWarningDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarningIcon color="warning" />
+            <Typography variant="h6">Physical Tender in Drawer</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="warning">
+              There is physical tender remaining in the drawer. This should normally be transferred to a safe before closing.
+            </Alert>
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                <strong>Tender in Drawer:</strong>
+              </Typography>
+              {calculatedClosingBalance > 0 && (
+                <Typography variant="body2">
+                  Cash: {formatCurrency(calculatedClosingBalance)}
+                </Typography>
+              )}
+              {Object.entries(closingTenderBalances)
+                .filter(([_, balance]) => parseFloat(balance) > 0)
+                .map(([method, balance]) => {
+                  const methodInfo = physicalPaymentMethods.find(m => m.method_value === method);
+                  return (
+                    <Typography key={method} variant="body2">
+                      {methodInfo?.method_name || method}: {formatCurrency(parseFloat(balance))}
+                    </Typography>
+                  );
+                })}
+            </Box>
+            <Typography variant="body2" color="text.secondary">
+              Are you sure you want to close the drawer with physical tender still inside?
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setPhysicalTenderWarningDialog(false);
+            setCloseDrawerDialog(true);
+          }}>
+            Go Back
+          </Button>
+          <Button
+            onClick={() => {
+              setPhysicalTenderWarningDialog(false);
+              handleCloseDrawer(false, false, true);
+            }}
+            variant="contained"
+            color="warning"
+            disabled={isStoreClosed}
+          >
+            Close Anyway
           </Button>
         </DialogActions>
       </Dialog>
