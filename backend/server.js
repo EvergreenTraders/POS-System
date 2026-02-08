@@ -217,6 +217,85 @@ pool.connect()
     console.error('Database connection error:', err.message);
   });
 
+// ==================== STORE CLOSED MIDDLEWARE ====================
+// In-memory store status cache
+let storeStatusCache = { isOpen: null, lastChecked: 0 };
+const STORE_STATUS_CACHE_TTL = 5000; // 5 seconds
+
+async function isStoreOpen() {
+  const now = Date.now();
+  if (storeStatusCache.isOpen !== null && (now - storeStatusCache.lastChecked) < STORE_STATUS_CACHE_TTL) {
+    return storeStatusCache.isOpen;
+  }
+  const result = await pool.query(
+    "SELECT session_id FROM store_sessions WHERE status = 'open' LIMIT 1"
+  );
+  storeStatusCache = { isOpen: result.rows.length > 0, lastChecked: now };
+  return storeStatusCache.isOpen;
+}
+
+// Middleware: block financial write operations when store is closed
+const storeClosedMiddleware = async (req, res, next) => {
+  // Always allow GET requests (read-only)
+  if (req.method === 'GET') return next();
+
+  // Paths always allowed regardless of store status
+  const alwaysAllowedPaths = [
+    '/api/auth/',
+    '/api/store-sessions/',
+    '/api/store-status',
+    '/api/employees',
+    '/api/customers',
+    '/api/business-info',
+    '/api/drawer-config',
+    '/api/safe-drawers-config',
+    '/api/master-safe-config',
+    '/api/cases-config',
+    '/api/discrepancy-threshold',
+    '/api/pawn-config',
+    '/api/receipt-config',
+    '/api/tax-config',
+    '/api/quote-expiration/config',
+    '/api/inventory-hold-period/config',
+    '/api/customer-preferences/',
+    '/api/diamond_estimates',
+    '/api/user_preferences',
+    '/api/drawer-type-config',
+    '/api/live_pricing',
+    '/api/live_spot_prices',
+    '/api/spot_prices',
+    '/api/price_estimates',
+    '/api/carat-conversion',
+    '/api/attribute-config',
+    '/api/item-attributes/',
+    '/api/linked-account-authorization',
+    '/api/inventory-status',
+    '/api/migrate',
+    '/api/pawn/check-forfeitures',
+  ];
+
+  const isAllowed = alwaysAllowedPaths.some(path => req.path.startsWith(path));
+  if (isAllowed) return next();
+
+  // For all other write operations, check store status
+  try {
+    const open = await isStoreOpen();
+    if (!open) {
+      return res.status(403).json({
+        error: 'Store is currently closed. This operation is not available.',
+        code: 'STORE_CLOSED'
+      });
+    }
+    next();
+  } catch (error) {
+    console.error('Error checking store status in middleware:', error);
+    // Fail open to prevent lockout
+    next();
+  }
+};
+
+app.use(storeClosedMiddleware);
+
 // Authentication route
 app.post('/api/auth/login', async (req, res) => {
   try {
@@ -416,6 +495,188 @@ app.delete('/api/employees/:id', async (req, res) => {
 });
 
 // ============================================================================
+// Employee Sessions (Clock-In/Clock-Out) API Routes
+// ============================================================================
+
+// Clock in employee
+app.post('/api/employee-sessions/clock-in', async (req, res) => {
+  try {
+    const { employee_id, notes } = req.body;
+
+    if (!employee_id) {
+      return res.status(400).json({ error: 'Employee ID is required' });
+    }
+
+    // Check if employee is already clocked in
+    const existingSession = await pool.query(
+      "SELECT session_id FROM employee_sessions WHERE employee_id = $1 AND status = 'clocked_in'",
+      [employee_id]
+    );
+
+    if (existingSession.rows.length > 0) {
+      return res.status(400).json({ error: 'Employee is already clocked in' });
+    }
+
+    // Create new clock-in session
+    const result = await pool.query(`
+      INSERT INTO employee_sessions (employee_id, clock_in_notes, status)
+      VALUES ($1, $2, 'clocked_in')
+      RETURNING *
+    `, [employee_id, notes || null]);
+
+    // Get employee details for response
+    const employee = await pool.query(
+      'SELECT first_name, last_name FROM employees WHERE employee_id = $1',
+      [employee_id]
+    );
+
+    const session = result.rows[0];
+    session.employee_name = employee.rows[0]
+      ? `${employee.rows[0].first_name} ${employee.rows[0].last_name}`
+      : 'Unknown';
+
+    res.status(201).json(session);
+  } catch (error) {
+    console.error('Error clocking in employee:', error);
+    res.status(500).json({ error: 'Failed to clock in employee' });
+  }
+});
+
+// Clock out employee
+app.post('/api/employee-sessions/clock-out', async (req, res) => {
+  try {
+    const { employee_id, notes } = req.body;
+
+    if (!employee_id) {
+      return res.status(400).json({ error: 'Employee ID is required' });
+    }
+
+    // Find active clock-in session
+    const existingSession = await pool.query(
+      "SELECT session_id FROM employee_sessions WHERE employee_id = $1 AND status = 'clocked_in' ORDER BY clock_in_time DESC LIMIT 1",
+      [employee_id]
+    );
+
+    if (existingSession.rows.length === 0) {
+      return res.status(400).json({ error: 'Employee is not clocked in' });
+    }
+
+    // Update session to clock out
+    const result = await pool.query(`
+      UPDATE employee_sessions
+      SET status = 'clocked_out', clock_out_time = CURRENT_TIMESTAMP, clock_out_notes = $1
+      WHERE session_id = $2
+      RETURNING *
+    `, [notes || null, existingSession.rows[0].session_id]);
+
+    // Get employee details for response
+    const employee = await pool.query(
+      'SELECT first_name, last_name FROM employees WHERE employee_id = $1',
+      [employee_id]
+    );
+
+    const session = result.rows[0];
+    session.employee_name = employee.rows[0]
+      ? `${employee.rows[0].first_name} ${employee.rows[0].last_name}`
+      : 'Unknown';
+
+    res.json(session);
+  } catch (error) {
+    console.error('Error clocking out employee:', error);
+    res.status(500).json({ error: 'Failed to clock out employee' });
+  }
+});
+
+// Get all currently clocked-in employees
+app.get('/api/employee-sessions/clocked-in', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        es.session_id,
+        es.employee_id,
+        es.clock_in_time,
+        es.clock_in_notes,
+        e.first_name,
+        e.last_name,
+        e.role,
+        CONCAT(e.first_name, ' ', e.last_name) AS employee_name
+      FROM employee_sessions es
+      JOIN employees e ON es.employee_id = e.employee_id
+      WHERE es.status = 'clocked_in'
+      ORDER BY es.clock_in_time DESC
+    `);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching clocked-in employees:', error);
+    res.status(500).json({ error: 'Failed to fetch clocked-in employees' });
+  }
+});
+
+// Get employee sessions for a specific employee
+app.get('/api/employee-sessions/employee/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit = 50 } = req.query;
+
+    const result = await pool.query(`
+      SELECT
+        es.*,
+        CONCAT(e.first_name, ' ', e.last_name) AS employee_name
+      FROM employee_sessions es
+      JOIN employees e ON es.employee_id = e.employee_id
+      WHERE es.employee_id = $1
+      ORDER BY es.clock_in_time DESC
+      LIMIT $2
+    `, [id, limit]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching employee sessions:', error);
+    res.status(500).json({ error: 'Failed to fetch employee sessions' });
+  }
+});
+
+// Store closing notification flag (in-memory)
+let storeClosingNotification = {
+  active: false,
+  timestamp: null
+};
+
+// POST /api/employee-sessions/notify-closing - Set store closing notification
+app.post('/api/employee-sessions/notify-closing', async (req, res) => {
+  try {
+    storeClosingNotification = {
+      active: true,
+      timestamp: new Date()
+    };
+
+    // Auto-clear after 30 seconds
+    setTimeout(() => {
+      storeClosingNotification.active = false;
+    }, 30000);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error setting store closing notification:', error);
+    res.status(500).json({ error: 'Failed to set notification' });
+  }
+});
+
+// GET /api/employee-sessions/closing-notification - Check if store closing notification is active
+app.get('/api/employee-sessions/closing-notification', async (req, res) => {
+  try {
+    res.json({
+      active: storeClosingNotification.active,
+      timestamp: storeClosingNotification.timestamp
+    });
+  } catch (error) {
+    console.error('Error checking store closing notification:', error);
+    res.status(500).json({ error: 'Failed to check notification' });
+  }
+});
+
+// ============================================================================
 // Cash Drawer API Routes
 // ============================================================================
 
@@ -433,6 +694,92 @@ app.get('/api/cash-drawer/active', async (req, res) => {
   }
 });
 
+// GET /api/cash-drawer/overview - Get overview of all safes and drawers with their status
+app.get('/api/cash-drawer/overview', async (req, res) => {
+  try {
+    // Get all drawers with their open sessions
+    const drawersResult = await pool.query(`
+      SELECT
+        d.drawer_id,
+        d.drawer_name,
+        d.drawer_type,
+        d.is_shared,
+        CASE
+          WHEN d.is_shared = TRUE OR d.drawer_type IN ('safe', 'master_safe') THEN 'Shared'
+          WHEN d.is_shared = FALSE THEN 'Single'
+          ELSE 'Not Configured'
+        END as type,
+        CASE
+          WHEN EXISTS (SELECT 1 FROM active_drawer_sessions ads WHERE ads.drawer_id = d.drawer_id) THEN 'OPEN'
+          ELSE 'CLOSED'
+        END as status,
+        COALESCE(
+          (SELECT SUM(ads2.current_expected_balance)
+           FROM active_drawer_sessions ads2
+           WHERE ads2.drawer_id = d.drawer_id),
+          0
+        ) as balance,
+        (SELECT ads3.session_id FROM active_drawer_sessions ads3 WHERE ads3.drawer_id = d.drawer_id LIMIT 1) as session_id
+      FROM drawers d
+      WHERE d.is_active = TRUE
+        AND d.drawer_type IN ('physical', 'safe', 'master_safe')
+      ORDER BY
+        CASE d.drawer_type
+          WHEN 'master_safe' THEN 1
+          WHEN 'safe' THEN 2
+          WHEN 'physical' THEN 3
+        END,
+        d.drawer_name
+    `);
+
+    // For each open drawer, get all connected employees (opener + connections)
+    const drawersWithEmployees = await Promise.all(drawersResult.rows.map(async (drawer) => {
+      if (drawer.status !== 'OPEN' || !drawer.session_id) {
+        return { ...drawer, connected_employees: '' };
+      }
+
+      // Get opener
+      const openerResult = await pool.query(`
+        SELECT e.first_name, e.last_name, e.username
+        FROM cash_drawer_sessions s
+        JOIN employees e ON s.employee_id = e.employee_id
+        WHERE s.session_id = $1
+      `, [drawer.session_id]);
+
+      // Get connected employees (for shared drawers)
+      let connectedEmployees = [];
+      const isShared = drawer.is_shared === true || drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe';
+      if (isShared) {
+        const connectionsResult = await pool.query(`
+          SELECT e.first_name, e.last_name, e.username
+          FROM drawer_session_connections c
+          JOIN employees e ON c.employee_id = e.employee_id
+          WHERE c.session_id = $1 AND c.is_active = TRUE
+        `, [drawer.session_id]);
+        connectedEmployees = connectionsResult.rows;
+      }
+
+      // Combine opener and connections
+      const allEmployees = [...openerResult.rows, ...connectedEmployees];
+      const employeeNames = allEmployees.map(e => `${e.first_name} ${e.last_name} (${e.username})`).join(', ');
+
+      return { ...drawer, connected_employees: employeeNames };
+    }));
+
+    // Separate safes and drawers
+    const safes = drawersWithEmployees.filter(d => d.drawer_type === 'safe' || d.drawer_type === 'master_safe');
+    const drawers = drawersWithEmployees.filter(d => d.drawer_type === 'physical');
+
+    res.json({
+      safes,
+      drawers
+    });
+  } catch (error) {
+    console.error('Error fetching drawer overview:', error);
+    res.status(500).json({ error: 'Failed to fetch drawer overview' });
+  }
+});
+
 // GET /api/cash-drawer/employee/:employeeId/active - Get all active drawer sessions for an employee
 app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
   const { employeeId } = req.params;
@@ -443,21 +790,42 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
         s.*,
         d.drawer_type,
         d.drawer_name,
+        d.is_shared,
         calculate_expected_balance(s.session_id) AS current_expected_balance,
         (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS transaction_count,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
-        (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments
+        (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments,
+        CASE
+          WHEN s.employee_id = $1 THEN TRUE
+          ELSE FALSE
+        END AS is_opener,
+        CASE
+          WHEN s.employee_id != $1 THEN
+            (SELECT c.connection_id FROM drawer_session_connections c
+             WHERE c.session_id = s.session_id AND c.employee_id = $1 AND c.is_active = TRUE)
+          ELSE NULL
+        END AS connection_id,
+        -- Count of OTHER active connections (excluding current user)
+        (SELECT COUNT(*) FROM drawer_session_connections c
+         WHERE c.session_id = s.session_id AND c.is_active = TRUE AND c.employee_id != $1) AS other_connections_count
       FROM cash_drawer_sessions s
       JOIN drawers d ON s.drawer_id = d.drawer_id
       WHERE s.status = 'open'
         AND (
-          s.employee_id = $1  -- Employee's own physical drawer sessions
-          OR d.drawer_type IN ('safe', 'master_safe')  -- All shared safe/master_safe sessions
+          s.employee_id = $1  -- Employee's own drawer sessions (opener)
+          OR (d.drawer_type IN ('safe', 'master_safe') AND EXISTS (
+            SELECT 1 FROM drawer_session_connections c
+            WHERE c.session_id = s.session_id AND c.employee_id = $1 AND c.is_active = TRUE
+          ))  -- Safe/master_safe drawers where employee is connected
+          OR (d.drawer_type = 'physical' AND d.is_shared = TRUE AND EXISTS (
+            SELECT 1 FROM drawer_session_connections c
+            WHERE c.session_id = s.session_id AND c.employee_id = $1 AND c.is_active = TRUE
+          ))  -- Shared physical drawers where employee is connected
         )
       ORDER BY s.opened_at DESC
     `, [employeeId]);
 
-    // Return all active sessions (employee's physical drawers + shared safe drawers)
+    // Return all active sessions (employee's own drawers + shared drawers they're connected to)
     res.json(result.rows);
   } catch (error) {
     console.error('Error checking active drawer:', error);
@@ -569,7 +937,7 @@ app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
 
 // POST /api/cash-drawer/open - Open a new cash drawer session for an employee
 app.post('/api/cash-drawer/open', async (req, res) => {
-  const { drawer_id, employee_id, opening_balance, opening_notes } = req.body;
+  const { drawer_id, employee_id, opening_balance, opening_notes, is_shared } = req.body;
 
   // Validation
   if (!drawer_id || !employee_id || opening_balance === undefined) {
@@ -581,62 +949,183 @@ app.post('/api/cash-drawer/open', async (req, res) => {
   }
 
   try {
-    // Check if employee already has an open drawer of the same type
-    // Get the drawer type for the drawer being opened
-    const drawerTypeResult = await pool.query(
-      'SELECT drawer_type FROM drawers WHERE drawer_id = $1',
+    // Get the drawer info including type and sharing mode
+    const drawerInfoResult = await pool.query(
+      'SELECT drawer_id, drawer_name, drawer_type, is_shared FROM drawers WHERE drawer_id = $1',
       [drawer_id]
     );
 
-    if (drawerTypeResult.rows.length === 0) {
+    if (drawerInfoResult.rows.length === 0) {
       return res.status(404).json({ error: 'Drawer not found' });
     }
 
-    const drawerType = drawerTypeResult.rows[0].drawer_type;
+    const drawerInfo = drawerInfoResult.rows[0];
+    const drawerType = drawerInfo.drawer_type;
+    let drawerIsShared = drawerInfo.is_shared;
 
-    // For safe and master_safe: check globally for any existing open session (shared across all employees)
-    // For physical drawers: check only for this employee
-    let existingDrawer;
+    // For physical drawers, check if sharing mode needs to be configured
+    if (drawerType === 'physical' && drawerIsShared === null) {
+      // First time opening this drawer - need to set sharing mode
+      if (is_shared === undefined || is_shared === null) {
+        // Return a response indicating sharing mode selection is required
+        return res.status(400).json({
+          error: 'Sharing mode must be selected for first-time drawer setup',
+          errorType: 'SHARING_MODE_REQUIRED',
+          drawer_id: drawer_id,
+          drawer_name: drawerInfo.drawer_name,
+          requiresSharingMode: true
+        });
+      }
+
+      // Update the drawer with the selected sharing mode
+      await pool.query(
+        'UPDATE drawers SET is_shared = $1, updated_at = CURRENT_TIMESTAMP WHERE drawer_id = $2',
+        [is_shared, drawer_id]
+      );
+      drawerIsShared = is_shared;
+    }
+
+    // Safe and master_safe are always shared
     if (drawerType === 'safe' || drawerType === 'master_safe') {
-      // Safe and master safe are shared - check if ANY employee has it open
+      drawerIsShared = true;
+    }
+
+    // Determine behavior based on is_shared value
+    let existingDrawer;
+    if (drawerIsShared) {
+      // Shared drawer - check if ANY employee has this specific drawer open
+      existingDrawer = await pool.query(
+        `SELECT s.session_id, s.employee_id, s.opening_balance, s.opened_at, e.first_name, e.last_name
+       FROM cash_drawer_sessions s
+       JOIN drawers d ON s.drawer_id = d.drawer_id
+         LEFT JOIN employees e ON s.employee_id = e.employee_id
+         WHERE s.status = $1
+           AND s.drawer_id = $2`,
+        ['open', drawer_id]
+    );
+
+    if (existingDrawer.rows.length > 0) {
+        const existingSession = existingDrawer.rows[0];
+
+        // Check if this employee is already connected to this session
+        const existingConnection = await pool.query(
+          `SELECT connection_id FROM drawer_session_connections
+           WHERE session_id = $1 AND employee_id = $2 AND is_active = TRUE`,
+          [existingSession.session_id, employee_id]
+        );
+
+        // Check if this employee is the one who opened the session
+        if (existingSession.employee_id === employee_id) {
+          // Employee is the opener, just return the session
+          return res.status(200).json({
+            ...existingSession,
+            drawer_id,
+            status: 'open',
+            is_connection: false,
+            is_shared: true,
+            message: 'Already connected to this drawer session'
+          });
+        }
+
+        if (existingConnection.rows.length > 0) {
+          // Already connected, just return the session info
+          return res.status(200).json({
+            ...existingSession,
+            drawer_id,
+            status: 'open',
+            is_connection: true,
+            is_shared: true,
+            connection_id: existingConnection.rows[0].connection_id,
+            message: 'Already connected to this drawer session'
+          });
+        }
+
+        // Connect to the existing shared drawer session (no count required)
+        const connectionResult = await pool.query(
+          `INSERT INTO drawer_session_connections (session_id, employee_id)
+           VALUES ($1, $2)
+           RETURNING *`,
+          [existingSession.session_id, employee_id]
+        );
+
+        // Return the existing session with connection info
+        return res.status(200).json({
+          ...existingSession,
+          drawer_id,
+          status: 'open',
+          is_connection: true,
+          is_shared: true,
+          connection_id: connectionResult.rows[0].connection_id,
+          connected_at: connectionResult.rows[0].connected_at,
+          message: 'Connected to existing drawer session'
+        });
+      }
+    } else {
+      // Single drawer - check if THIS SPECIFIC drawer is already open by anyone
       existingDrawer = await pool.query(
         `SELECT s.session_id, s.employee_id, e.first_name, e.last_name
          FROM cash_drawer_sessions s
-         JOIN drawers d ON s.drawer_id = d.drawer_id
          LEFT JOIN employees e ON s.employee_id = e.employee_id
-         WHERE s.status = $1
-           AND d.drawer_type = $2`,
-        ['open', drawerType]
+         WHERE s.drawer_id = $1
+           AND s.status = $2`,
+        [drawer_id, 'open']
       );
 
       if (existingDrawer.rows.length > 0) {
         const existingSession = existingDrawer.rows[0];
-        const drawerTypeName = drawerType === 'safe' ? 'safe drawer' : 'master safe';
+        // If the same employee has this drawer open, return the session
+        if (existingSession.employee_id === employee_id) {
+          return res.status(200).json({
+            session_id: existingSession.session_id,
+            drawer_id,
+            employee_id,
+            status: 'open',
+            is_shared: false,
+            message: 'You already have this drawer open'
+          });
+        }
+        // Different employee has this drawer open - cannot connect to single drawer
         const openedBy = `${existingSession.first_name} ${existingSession.last_name}`;
-        return res.status(400).json({
-          error: `The ${drawerTypeName} is already open (opened by ${openedBy})`,
+      return res.status(400).json({
+          error: `This drawer is already in use by ${openedBy}`,
           session_id: existingSession.session_id
         });
       }
-    } else {
-      // Physical drawers are per-employee
-      existingDrawer = await pool.query(
-        `SELECT s.session_id
+
+      // For single physical drawers, check if this employee already has ANY single physical drawer open
+      const employeeOpenDrawer = await pool.query(
+        `SELECT s.session_id, d.drawer_name
          FROM cash_drawer_sessions s
          JOIN drawers d ON s.drawer_id = d.drawer_id
          WHERE s.employee_id = $1
            AND s.status = $2
-           AND d.drawer_type = $3`,
-        [employee_id, 'open', drawerType]
+           AND d.drawer_type = $3
+           AND d.is_shared = FALSE`,
+        [employee_id, 'open', 'physical']
       );
 
-      if (existingDrawer.rows.length > 0) {
+      if (employeeOpenDrawer.rows.length > 0) {
         return res.status(400).json({
-          error: `Employee already has an open physical drawer session`,
-          session_id: existingDrawer.rows[0].session_id
+          error: `You already have ${employeeOpenDrawer.rows[0].drawer_name} open. Please close it first.`,
+          session_id: employeeOpenDrawer.rows[0].session_id
         });
       }
     }
+
+    // Get previous closing balance for this drawer (most recent closed session)
+    const previousSessionResult = await pool.query(`
+      SELECT actual_balance, closed_at
+      FROM cash_drawer_sessions
+      WHERE drawer_id = $1
+        AND status = 'closed'
+        AND actual_balance IS NOT NULL
+      ORDER BY closed_at DESC
+      LIMIT 1
+    `, [drawer_id]);
+
+    const previousClosingBalance = previousSessionResult.rows.length > 0
+      ? parseFloat(previousSessionResult.rows[0].actual_balance)
+      : null;
 
     // Create new drawer session
     const result = await pool.query(`
@@ -645,7 +1134,12 @@ app.post('/api/cash-drawer/open', async (req, res) => {
       RETURNING *
     `, [drawer_id, employee_id, opening_balance, opening_notes || null]);
 
-    res.status(201).json(result.rows[0]);
+    res.status(201).json({
+      ...result.rows[0],
+      is_shared: drawerIsShared,
+      is_connection: false,
+      previous_closing_balance: previousClosingBalance
+    });
   } catch (error) {
     console.error('Error opening cash drawer:', error);
 
@@ -687,6 +1181,166 @@ app.post('/api/cash-drawer/open', async (req, res) => {
       error: 'System error: Unable to open cash drawer. Please try again or contact support if the problem persists.',
       errorType: 'SYSTEM_ERROR'
     });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/connections - Get all employees connected to a drawer session
+app.get('/api/cash-drawer/:sessionId/connections', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    // Get the session opener
+    const sessionResult = await pool.query(
+      `SELECT s.session_id, s.employee_id, s.opened_at, e.first_name, e.last_name
+       FROM cash_drawer_sessions s
+       LEFT JOIN employees e ON s.employee_id = e.employee_id
+       WHERE s.session_id = $1`,
+      [sessionId]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const opener = sessionResult.rows[0];
+
+    // Get all active connections
+    const connectionsResult = await pool.query(
+      `SELECT c.connection_id, c.employee_id, c.connected_at, e.first_name, e.last_name
+       FROM drawer_session_connections c
+       LEFT JOIN employees e ON c.employee_id = e.employee_id
+       WHERE c.session_id = $1 AND c.is_active = TRUE
+       ORDER BY c.connected_at`,
+      [sessionId]
+    );
+
+    res.json({
+      session_id: parseInt(sessionId),
+      opener: {
+        employee_id: opener.employee_id,
+        name: `${opener.first_name} ${opener.last_name}`,
+        connected_at: opener.opened_at,
+        is_opener: true
+      },
+      connections: connectionsResult.rows.map(c => ({
+        connection_id: c.connection_id,
+        employee_id: c.employee_id,
+        name: `${c.first_name} ${c.last_name}`,
+        connected_at: c.connected_at,
+        is_opener: false
+      }))
+    });
+  } catch (error) {
+    console.error('Error getting drawer connections:', error);
+    res.status(500).json({ error: 'Failed to get drawer connections' });
+  }
+});
+
+// POST /api/cash-drawer/:sessionId/disconnect - Disconnect an employee from a shared drawer session
+app.post('/api/cash-drawer/:sessionId/disconnect', async (req, res) => {
+  const { sessionId } = req.params;
+  const { employee_id } = req.body;
+
+  if (!employee_id) {
+    return res.status(400).json({ error: 'employee_id is required' });
+  }
+
+  try {
+    // Check if this is the session opener and drawer info
+    const sessionResult = await pool.query(
+      `SELECT s.employee_id, d.drawer_type, d.is_shared
+       FROM cash_drawer_sessions s
+       JOIN drawers d ON s.drawer_id = d.drawer_id
+       WHERE s.session_id = $1 AND s.status = 'open'`,
+      [sessionId]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Active session not found' });
+    }
+
+    const session = sessionResult.rows[0];
+
+    // For physical drawers, only allow disconnect if it's a shared drawer
+    if (session.drawer_type === 'physical' && !session.is_shared) {
+      return res.status(400).json({
+        error: 'Cannot disconnect from a single-use physical drawer. Use close instead.'
+      });
+    }
+
+    // If this is the opener, they cannot disconnect - they must close the drawer
+    if (session.employee_id === employee_id) {
+      return res.status(400).json({
+        error: 'The drawer opener cannot disconnect. You must close the drawer instead.'
+      });
+    }
+
+    // Disconnect the employee
+    const result = await pool.query(
+      `UPDATE drawer_session_connections
+       SET is_active = FALSE, disconnected_at = CURRENT_TIMESTAMP
+       WHERE session_id = $1 AND employee_id = $2 AND is_active = TRUE
+       RETURNING *`,
+      [sessionId, employee_id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No active connection found for this employee' });
+    }
+
+    res.json({
+      message: 'Successfully disconnected from drawer session',
+      connection: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error disconnecting from drawer:', error);
+    res.status(500).json({ error: 'Failed to disconnect from drawer session' });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/connection-count - Get the count of active connections (including opener)
+app.get('/api/cash-drawer/:sessionId/connection-count', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    // Get session info
+    const sessionResult = await pool.query(
+      `SELECT s.session_id, s.employee_id as opener_id, d.drawer_type, d.is_shared
+       FROM cash_drawer_sessions s
+       JOIN drawers d ON s.drawer_id = d.drawer_id
+       WHERE s.session_id = $1 AND s.status = 'open'`,
+      [sessionId]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Active session not found' });
+    }
+
+    const session = sessionResult.rows[0];
+
+    // Count active connections (excluding opener who is tracked separately)
+    const connectionsResult = await pool.query(
+      `SELECT COUNT(*) as connection_count
+       FROM drawer_session_connections
+       WHERE session_id = $1 AND is_active = TRUE`,
+      [sessionId]
+    );
+
+    const connectionCount = parseInt(connectionsResult.rows[0].connection_count) || 0;
+    // Total = opener (1) + connected employees
+    const totalCount = 1 + connectionCount;
+
+    res.json({
+      session_id: parseInt(sessionId),
+      opener_id: session.opener_id,
+      drawer_type: session.drawer_type,
+      is_shared: session.is_shared,
+      connection_count: connectionCount,
+      total_count: totalCount
+    });
+  } catch (error) {
+    console.error('Error getting connection count:', error);
+    res.status(500).json({ error: 'Failed to get connection count' });
   }
 });
 
@@ -1001,7 +1655,8 @@ app.post('/api/cash-drawer/:sessionId/transaction', async (req, res) => {
 // PUT /api/cash-drawer/:sessionId/close - Close a cash drawer session
 app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
   const { sessionId } = req.params;
-  const { actual_balance, closing_notes } = req.body;
+  const { actual_balance, closing_notes, tender_balances, employee_id } = req.body;
+  // tender_balances: [{ paymentMethod: 'check', balance: 150.00 }, ...]
 
   // Validation
   if (actual_balance === undefined) {
@@ -1028,6 +1683,84 @@ app.put('/api/cash-drawer/:sessionId/close', async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Session not found or already closed' });
+    }
+
+    // Save tender balances if provided (for physical tenders like checks, gift cards)
+    if (tender_balances && Array.isArray(tender_balances) && tender_balances.length > 0) {
+      for (const tender of tender_balances) {
+        if (tender.balance > 0) {
+          await pool.query(`
+            INSERT INTO drawer_tender_balances
+              (session_id, payment_method, closing_balance, balance_type, counted_by)
+            VALUES ($1, $2, $3, 'close', $4)
+            ON CONFLICT (session_id, payment_method, balance_type)
+            DO UPDATE SET closing_balance = $3, counted_by = $4, counted_at = CURRENT_TIMESTAMP
+          `, [sessionId, tender.paymentMethod, parseFloat(tender.balance), employee_id || null]);
+        }
+      }
+    }
+
+    // Disconnect all connected employees when drawer is closed
+    await pool.query(`
+      UPDATE drawer_session_connections
+      SET is_active = FALSE, disconnected_at = CURRENT_TIMESTAMP
+      WHERE session_id = $1 AND is_active = TRUE
+    `, [sessionId]);
+
+    // Transfer electronic tenders to master safe (for physical drawers only)
+    // Electronic tenders are payment methods where is_physical = false (credit cards, debit cards, etc.)
+    const drawerTypeResult = await pool.query(`
+      SELECT d.drawer_type FROM cash_drawer_sessions s
+      JOIN drawers d ON s.drawer_id = d.drawer_id
+      WHERE s.session_id = $1
+    `, [sessionId]);
+
+    if (drawerTypeResult.rows[0]?.drawer_type === 'physical') {
+      // Get totals for each electronic payment method from transactions in this session
+      const electronicTendersResult = await pool.query(`
+        SELECT
+          p.payment_method,
+          pm.method_name,
+          SUM(CASE WHEN p.action = 'in' THEN p.amount ELSE -p.amount END) as total_amount
+        FROM payments p
+        JOIN transactions t ON p.transaction_id = t.transaction_id
+        JOIN payment_methods pm ON p.payment_method = pm.method_value
+        WHERE t.session_id = $1
+          AND pm.is_physical = false
+        GROUP BY p.payment_method, pm.method_name
+        HAVING SUM(CASE WHEN p.action = 'in' THEN p.amount ELSE -p.amount END) != 0
+      `, [sessionId]);
+
+      // Find the open master safe session
+      if (electronicTendersResult.rows.length > 0) {
+        const masterSafeSession = await pool.query(`
+          SELECT s.session_id FROM cash_drawer_sessions s
+          JOIN drawers d ON s.drawer_id = d.drawer_id
+          WHERE d.drawer_type = 'master_safe' AND s.status = 'open'
+          LIMIT 1
+        `);
+
+        if (masterSafeSession.rows.length > 0) {
+          const masterSafeSessionId = masterSafeSession.rows[0].session_id;
+
+          // Record each electronic tender total as an adjustment in the master safe
+          for (const tender of electronicTendersResult.rows) {
+            if (parseFloat(tender.total_amount) !== 0) {
+              await pool.query(`
+                INSERT INTO cash_drawer_adjustments
+                  (session_id, amount, adjustment_type, reason, performed_by, source_session_id)
+                VALUES ($1, $2, 'transfer', $3, $4, $5)
+              `, [
+                masterSafeSessionId,
+                parseFloat(tender.total_amount),
+                `Electronic tender transfer (${tender.method_name}) from drawer session #${sessionId}`,
+                employee_id || null,
+                sessionId
+              ]);
+            }
+          }
+        }
+      }
     }
 
     res.json(result.rows[0]);
@@ -1335,6 +2068,63 @@ app.get('/api/drawers', async (req, res) => {
   } catch (error) {
     console.error('Error fetching drawers:', error);
     res.status(500).json({ error: 'Failed to fetch drawers' });
+  }
+});
+
+// PUT /api/drawers/:drawerId/sharing-mode - Update drawer sharing mode
+app.put('/api/drawers/:drawerId/sharing-mode', async (req, res) => {
+  const { drawerId } = req.params;
+  const { is_shared } = req.body;
+
+  if (is_shared === undefined || typeof is_shared !== 'boolean') {
+    return res.status(400).json({ error: 'is_shared must be a boolean value' });
+  }
+
+  try {
+    // Check if drawer exists and is a physical drawer
+    const drawerCheck = await pool.query(
+      'SELECT drawer_id, drawer_type, drawer_name FROM drawers WHERE drawer_id = $1',
+      [drawerId]
+    );
+
+    if (drawerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Drawer not found' });
+    }
+
+    const drawer = drawerCheck.rows[0];
+
+    // Only physical drawers can have their sharing mode changed
+    if (drawer.drawer_type !== 'physical') {
+      return res.status(400).json({
+        error: 'Sharing mode can only be changed for physical drawers. Safe and master safe are always shared.'
+      });
+    }
+
+    // Check if drawer has any active sessions
+    const activeSession = await pool.query(
+      'SELECT session_id FROM cash_drawer_sessions WHERE drawer_id = $1 AND status = $2',
+      [drawerId, 'open']
+    );
+
+    if (activeSession.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Cannot change sharing mode while drawer has an active session. Please close the drawer first.'
+      });
+    }
+
+    // Update the sharing mode
+    const result = await pool.query(
+      'UPDATE drawers SET is_shared = $1, updated_at = CURRENT_TIMESTAMP WHERE drawer_id = $2 RETURNING *',
+      [is_shared, drawerId]
+    );
+
+    res.json({
+      message: `Drawer "${drawer.drawer_name}" sharing mode updated to ${is_shared ? 'Shared' : 'Single'}`,
+      drawer: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error updating drawer sharing mode:', error);
+    res.status(500).json({ error: 'Failed to update drawer sharing mode' });
   }
 });
 
@@ -2110,6 +2900,93 @@ app.put('/api/user_preferences', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error updating user preferences:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Drawer Type Configuration API Endpoints
+// GET all drawer type configurations (grouped by drawer_type from drawers table)
+app.get('/api/drawer-type-config', async (req, res) => {
+  try {
+    // Get distinct drawer types with their min/max values
+    // Note: master_safe uses the same values as safe, so we only return physical and safe
+    const result = await pool.query(`
+      SELECT DISTINCT ON (drawer_type)
+        drawer_type,
+        min_close,
+        max_close
+      FROM drawers
+      WHERE drawer_type IN ('physical', 'safe')
+      ORDER BY drawer_type
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching drawer type config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET specific drawer type configuration
+app.get('/api/drawer-type-config/:drawerType', async (req, res) => {
+  try {
+    let { drawerType } = req.params;
+
+    // master_safe uses the same values as safe
+    if (drawerType === 'master_safe') {
+      drawerType = 'safe';
+    }
+
+    const result = await pool.query(
+      `SELECT drawer_type, min_close, max_close
+       FROM drawers
+       WHERE drawer_type = $1
+       LIMIT 1`,
+      [drawerType]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Drawer type configuration not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching drawer type config:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PUT update drawer type configuration (updates all drawers of that type)
+app.put('/api/drawer-type-config/:drawerType', async (req, res) => {
+  try {
+    const { drawerType } = req.params;
+    const { min_close, max_close } = req.body;
+
+    // Determine which drawer types to update
+    let drawerTypes = [drawerType];
+
+    // If updating safe, also update master_safe to keep them in sync
+    if (drawerType === 'safe') {
+      drawerTypes = ['safe', 'master_safe'];
+    }
+
+    // Update all drawers of these types
+    const result = await pool.query(
+      `UPDATE drawers
+       SET min_close = $1, max_close = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE drawer_type = ANY($3)
+       RETURNING drawer_type, min_close, max_close`,
+      [min_close, max_close, drawerTypes]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No drawers found for this type' });
+    }
+
+    // Return safe type values (or the requested type if it's physical)
+    const returnRow = result.rows.find(row => row.drawer_type === drawerType) || result.rows[0];
+    res.json(returnRow);
+  } catch (error) {
+    console.error('Error updating drawer type config:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -3559,9 +4436,9 @@ app.delete('/api/jewelry/:item_id', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error deleting jewelry item:', error);
     res.status(500).json({ error: 'Failed to delete jewelry item' });
-  } finally {
-    client.release();
-  }
+    } finally {
+        client.release();
+    }
 });
 
 // Inventory Status API Endpoints
@@ -5122,7 +5999,7 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
 
     // Convert empty email to null to avoid unique constraint issues
     const emailValue = email && email.trim() ? email.trim() : null;
-
+    
     // Handle multiple image uploads
     let image = null;
     let id_image_front = null;
@@ -6773,6 +7650,346 @@ app.get('/api/payment-methods', async (req, res) => {
   } catch (error) {
     console.error('Error fetching payment methods:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get physical payment methods (tenders kept in drawer, excluding cash which has separate handling)
+app.get('/api/payment-methods/physical', async (req, res) => {
+  try {
+    const query = `
+      SELECT * FROM payment_methods
+      WHERE is_active = true AND is_physical = true AND method_value != 'cash'
+      ORDER BY id
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching physical payment methods:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get electronic payment methods (credit cards, debit cards, e-transfers, etc.)
+app.get('/api/payment-methods/electronic', async (req, res) => {
+  try {
+    const query = `
+      SELECT * FROM payment_methods
+      WHERE is_active = true AND is_physical = false
+      ORDER BY id
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching electronic payment methods:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get expected electronic tender totals for a drawer session
+// Returns the expected qty and amount for each electronic payment method based on transactions
+// GET /api/cash-drawer/:sessionId/tender-balances - Get tender balances for a session
+app.get('/api/cash-drawer/:sessionId/tender-balances', async (req, res) => {
+  const { sessionId } = req.params;
+  const { type } = req.query; // 'open' or 'close', defaults to 'close'
+
+  try {
+    const balanceType = type || 'close';
+    
+    // Get tender balances from the session
+    const result = await pool.query(`
+      SELECT 
+        tb.payment_method,
+        tb.closing_balance,
+        pm.method_name,
+        pm.is_physical
+      FROM drawer_tender_balances tb
+      JOIN payment_methods pm ON tb.payment_method = pm.method_value
+      WHERE tb.session_id = $1 
+        AND tb.balance_type = $2
+        AND tb.closing_balance > 0
+      ORDER BY pm.id
+    `, [sessionId, balanceType]);
+
+    const tenderBalances = {};
+    result.rows.forEach(row => {
+      tenderBalances[row.payment_method] = {
+        methodName: row.method_name,
+        balance: parseFloat(row.closing_balance),
+        isPhysical: row.is_physical
+      };
+    });
+
+    res.json({
+      tenderBalances,
+      physicalTenders: result.rows.filter(r => r.is_physical).map(r => ({
+        paymentMethod: r.payment_method,
+        methodName: r.method_name,
+        balance: parseFloat(r.closing_balance)
+      })),
+      electronicTenders: result.rows.filter(r => !r.is_physical).map(r => ({
+        paymentMethod: r.payment_method,
+        methodName: r.method_name,
+        balance: parseFloat(r.closing_balance)
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching tender balances:', error);
+    res.status(500).json({ error: 'Failed to fetch tender balances' });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/electronic-tender-expected - Get expected totals for electronic payment methods
+app.get('/api/cash-drawer/:sessionId/electronic-tender-expected', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    // Get totals for each electronic payment method from transactions in this session
+    const result = await pool.query(`
+      SELECT
+        p.payment_method,
+        pm.method_name,
+        COUNT(*) as expected_qty,
+        SUM(CASE WHEN p.action = 'in' THEN p.amount ELSE -p.amount END) as expected_amount
+      FROM payments p
+      JOIN transactions t ON p.transaction_id = t.transaction_id
+      JOIN payment_methods pm ON p.payment_method = pm.method_value
+      WHERE t.session_id = $1
+        AND pm.is_physical = false
+      GROUP BY p.payment_method, pm.method_name, pm.id
+      ORDER BY pm.id
+    `, [sessionId]);
+
+    // Convert to object keyed by payment method
+    const expected = {};
+    result.rows.forEach(row => {
+      expected[row.payment_method] = {
+        method_name: row.method_name,
+        expected_qty: parseInt(row.expected_qty) || 0,
+        expected_amount: parseFloat(row.expected_amount) || 0
+      };
+    });
+
+    res.json(expected);
+  } catch (error) {
+    console.error('Error fetching electronic tender expected:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/cash-drawer/drawer/:drawerId/last-session - Get the last session (open or closed) for a drawer
+app.get('/api/cash-drawer/drawer/:drawerId/last-session', async (req, res) => {
+  const { drawerId } = req.params;
+
+  try {
+    // Get the most recent session (open or closed) for this drawer
+    const result = await pool.query(`
+      SELECT 
+        session_id,
+        status,
+        opened_at,
+        closed_at,
+        actual_balance,
+        expected_balance,
+        opening_balance
+      FROM cash_drawer_sessions
+      WHERE drawer_id = $1
+      ORDER BY 
+        CASE WHEN status = 'open' THEN 0 ELSE 1 END,
+        COALESCE(closed_at, opened_at) DESC
+      LIMIT 1
+    `, [drawerId]);
+
+    if (result.rows.length === 0) {
+      return res.json({ session_id: null });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching last session:', error);
+    res.status(500).json({ error: 'Failed to fetch last session' });
+  }
+});
+
+// Get previous tender balances for a drawer (from last closed session)
+// Used when opening a drawer to determine what tender balances need to be counted
+app.get('/api/cash-drawer/:drawerId/previous-tender-balances', async (req, res) => {
+  const { drawerId } = req.params;
+
+  try {
+    // Find the most recent closed session for this drawer
+    const lastSessionResult = await pool.query(`
+      SELECT s.session_id, s.closed_at, s.employee_id,
+             e.first_name || ' ' || e.last_name as closed_by
+      FROM cash_drawer_sessions s
+      LEFT JOIN employees e ON s.employee_id = e.employee_id
+      WHERE s.drawer_id = $1 AND s.status IN ('closed', 'reconciled')
+      ORDER BY s.closed_at DESC
+      LIMIT 1
+    `, [drawerId]);
+
+    if (lastSessionResult.rows.length === 0) {
+      // No previous session, no tender balances to count
+      return res.json({ hasPreviousTenderBalances: false, tenderBalances: [] });
+    }
+
+    const lastSession = lastSessionResult.rows[0];
+
+    // Get tender balances from the last closed session
+    const tenderBalancesResult = await pool.query(`
+      SELECT tb.payment_method, tb.closing_balance, pm.method_name
+      FROM drawer_tender_balances tb
+      JOIN payment_methods pm ON tb.payment_method = pm.method_value
+      WHERE tb.session_id = $1 AND tb.balance_type = 'close' AND tb.closing_balance > 0
+      ORDER BY pm.id
+    `, [lastSession.session_id]);
+
+    res.json({
+      hasPreviousTenderBalances: tenderBalancesResult.rows.length > 0,
+      previousSessionId: lastSession.session_id,
+      closedAt: lastSession.closed_at,
+      closedBy: lastSession.closed_by,
+      tenderBalances: tenderBalancesResult.rows.map(tb => ({
+        paymentMethod: tb.payment_method,
+        methodName: tb.method_name,
+        expectedBalance: parseFloat(tb.closing_balance)
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching previous tender balances:', error);
+    res.status(500).json({ error: 'Failed to fetch previous tender balances' });
+  }
+});
+
+// Verify opening tender counts against previous close balances
+// Returns discrepancy info based on blind count rules
+app.post('/api/cash-drawer/:sessionId/verify-tender-counts', async (req, res) => {
+  const { sessionId } = req.params;
+  const { tenderCounts, employeeId } = req.body;
+  // tenderCounts: [{ paymentMethod: 'check', count: 150.00 }, ...]
+
+  if (!tenderCounts || !Array.isArray(tenderCounts)) {
+    return res.status(400).json({ error: 'tenderCounts array is required' });
+  }
+
+  try {
+    // Get the drawer_id from the session
+    const sessionResult = await pool.query(
+      'SELECT drawer_id FROM cash_drawer_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const drawerId = sessionResult.rows[0].drawer_id;
+
+    // Get the previous session's closing tender balances
+    const previousBalancesResult = await pool.query(`
+      SELECT tb.payment_method, tb.closing_balance
+      FROM drawer_tender_balances tb
+      JOIN cash_drawer_sessions s ON tb.session_id = s.session_id
+      WHERE s.drawer_id = $1
+        AND s.session_id != $2
+        AND s.status IN ('closed', 'reconciled')
+        AND tb.balance_type = 'close'
+      ORDER BY s.closed_at DESC
+    `, [drawerId, sessionId]);
+
+    // Build a map of expected balances
+    const expectedBalances = {};
+    previousBalancesResult.rows.forEach(row => {
+      expectedBalances[row.payment_method] = parseFloat(row.closing_balance);
+    });
+
+    // Get employee's discrepancy threshold
+    let employeeThreshold = 0;
+    if (employeeId) {
+      const employeeResult = await pool.query(
+        'SELECT discrepancy_threshold FROM employees WHERE employee_id = $1',
+        [employeeId]
+      );
+      if (employeeResult.rows.length > 0 && employeeResult.rows[0].discrepancy_threshold !== null) {
+        employeeThreshold = parseFloat(employeeResult.rows[0].discrepancy_threshold);
+      }
+    }
+
+    // If no employee threshold, get system default
+    if (employeeThreshold === 0) {
+      const thresholdResult = await pool.query(
+        'SELECT threshold_amount FROM discrepancy_threshold LIMIT 1'
+      );
+      if (thresholdResult.rows.length > 0) {
+        employeeThreshold = parseFloat(thresholdResult.rows[0].threshold_amount);
+      }
+    }
+
+    // Calculate discrepancies
+    const discrepancies = [];
+    let hasDiscrepancy = false;
+    let withinThreshold = true;
+
+    for (const tender of tenderCounts) {
+      const expected = expectedBalances[tender.paymentMethod] || 0;
+      const counted = parseFloat(tender.count) || 0;
+      const discrepancy = counted - expected;
+
+      if (Math.abs(discrepancy) > 0.001) {
+        hasDiscrepancy = true;
+        const exceedsThreshold = Math.abs(discrepancy) > employeeThreshold;
+        if (exceedsThreshold) {
+          withinThreshold = false;
+        }
+
+        discrepancies.push({
+          paymentMethod: tender.paymentMethod,
+          counted,
+          // Only reveal expected and discrepancy if within threshold
+          expected: exceedsThreshold ? null : expected,
+          discrepancy: exceedsThreshold ? null : discrepancy,
+          exceedsThreshold
+        });
+      }
+    }
+
+    res.json({
+      hasDiscrepancy,
+      withinThreshold,
+      discrepancies,
+      employeeThreshold
+    });
+  } catch (error) {
+    console.error('Error verifying tender counts:', error);
+    res.status(500).json({ error: 'Failed to verify tender counts' });
+  }
+});
+
+// Save opening tender counts
+app.post('/api/cash-drawer/:sessionId/opening-tender-counts', async (req, res) => {
+  const { sessionId } = req.params;
+  const { tenderCounts, employeeId } = req.body;
+  // tenderCounts: [{ paymentMethod: 'check', count: 150.00 }, ...]
+
+  if (!tenderCounts || !Array.isArray(tenderCounts) || !employeeId) {
+    return res.status(400).json({ error: 'tenderCounts array and employeeId are required' });
+  }
+
+  try {
+    // Save each tender count as an opening balance
+    for (const tender of tenderCounts) {
+      await pool.query(`
+        INSERT INTO drawer_tender_balances
+          (session_id, payment_method, closing_balance, opening_balance, balance_type, counted_by)
+        VALUES ($1, $2, 0, $3, 'open', $4)
+        ON CONFLICT (session_id, payment_method, balance_type)
+        DO UPDATE SET opening_balance = $3, counted_by = $4, counted_at = CURRENT_TIMESTAMP
+      `, [sessionId, tender.paymentMethod, parseFloat(tender.count) || 0, employeeId]);
+    }
+
+    res.json({ message: 'Opening tender counts saved successfully' });
+  } catch (error) {
+    console.error('Error saving opening tender counts:', error);
+    res.status(500).json({ error: 'Failed to save opening tender counts' });
   }
 });
 
@@ -8497,6 +9714,232 @@ setInterval(checkPawnForfeitures, 21600000);
 
 // Run forfeiture check on startup
 checkPawnForfeitures();
+
+// ==================== STORE SESSIONS ====================
+
+// Get current store status
+app.get('/api/store-status', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        s.session_id,
+        s.status,
+        s.opened_at,
+        s.closed_at,
+        s.opened_by,
+        e_open.first_name || ' ' || e_open.last_name AS opened_by_name,
+        s.closed_by,
+        e_close.first_name || ' ' || e_close.last_name AS closed_by_name,
+        s.opening_notes,
+        s.closing_notes
+      FROM store_sessions s
+      LEFT JOIN employees e_open ON s.opened_by = e_open.employee_id
+      LEFT JOIN employees e_close ON s.closed_by = e_close.employee_id
+      WHERE s.status = 'open'
+      ORDER BY s.opened_at DESC
+      LIMIT 1
+    `);
+
+    if (result.rows.length > 0) {
+      res.json({ status: 'open', session: result.rows[0] });
+    } else {
+      // Get last closed session for reference
+      const lastClosed = await pool.query(`
+        SELECT session_id, closed_at, closed_by,
+          e.first_name || ' ' || e.last_name AS closed_by_name
+        FROM store_sessions s
+        LEFT JOIN employees e ON s.closed_by = e.employee_id
+        WHERE s.status = 'closed'
+        ORDER BY s.closed_at DESC
+        LIMIT 1
+      `);
+      res.json({
+        status: 'closed',
+        session: null,
+        lastClosed: lastClosed.rows[0] || null
+      });
+    }
+  } catch (error) {
+    console.error('Error getting store status:', error);
+    res.status(500).json({ error: 'Failed to get store status' });
+  }
+});
+
+// Open store
+app.post('/api/store-sessions/open', async (req, res) => {
+  try {
+    const { employee_id, notes } = req.body;
+
+    if (!employee_id) {
+      return res.status(400).json({ error: 'Employee ID is required' });
+    }
+
+    // Check if store is already open
+    const existing = await pool.query(
+      "SELECT session_id FROM store_sessions WHERE status = 'open'"
+    );
+
+    if (existing.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Store is already open',
+        session_id: existing.rows[0].session_id
+      });
+    }
+
+    // Create new store session
+    const result = await pool.query(`
+      INSERT INTO store_sessions (opened_by, opening_notes, status)
+      VALUES ($1, $2, 'open')
+      RETURNING *
+    `, [employee_id, notes || null]);
+
+    // Get employee name for response
+    const employee = await pool.query(
+      'SELECT first_name, last_name FROM employees WHERE employee_id = $1',
+      [employee_id]
+    );
+
+    const session = result.rows[0];
+    session.opened_by_name = employee.rows[0]
+      ? `${employee.rows[0].first_name} ${employee.rows[0].last_name}`
+      : null;
+
+    // Invalidate store status cache
+    storeStatusCache = { isOpen: null, lastChecked: 0 };
+
+    res.status(201).json({
+      message: 'Store opened successfully',
+      session
+    });
+  } catch (error) {
+    console.error('Error opening store:', error);
+    res.status(500).json({ error: 'Failed to open store' });
+  }
+});
+
+// Check for open drawers/safes before closing store
+app.get('/api/store-sessions/check-open-drawers', async (req, res) => {
+  try {
+    const openDrawers = await pool.query(`
+      SELECT cds.session_id, d.drawer_name, d.drawer_type
+      FROM cash_drawer_sessions cds
+      JOIN drawers d ON cds.drawer_id = d.drawer_id
+      WHERE cds.status = 'open' AND d.drawer_type != 'master_safe'
+    `);
+
+    if (openDrawers.rows.length > 0) {
+      const drawerNames = openDrawers.rows.map(d => d.drawer_name).join(', ');
+      return res.status(400).json({
+        error: `Cannot close store. The following drawers/safes are still open: ${drawerNames}. Please close all drawers and safes before closing the store.`,
+        code: 'OPEN_DRAWERS',
+        openDrawers: openDrawers.rows
+      });
+    }
+
+    res.json({ success: true, message: 'No open drawers found' });
+  } catch (error) {
+    console.error('Error checking open drawers:', error);
+    res.status(500).json({ error: 'Failed to check drawer status' });
+  }
+});
+
+// Close store
+app.post('/api/store-sessions/close', async (req, res) => {
+  try {
+    const { employee_id, notes } = req.body;
+
+    if (!employee_id) {
+      return res.status(400).json({ error: 'Employee ID is required' });
+    }
+
+    // Find open session
+    const existing = await pool.query(
+      "SELECT session_id FROM store_sessions WHERE status = 'open'"
+    );
+
+    if (existing.rows.length === 0) {
+      return res.status(400).json({ error: 'Store is not open' });
+    }
+
+    // Check for open drawers/safes (excluding master safe)
+    const openDrawers = await pool.query(`
+      SELECT cds.session_id, d.drawer_name, d.drawer_type
+      FROM cash_drawer_sessions cds
+      JOIN drawers d ON cds.drawer_id = d.drawer_id
+      WHERE cds.status = 'open' AND d.drawer_type != 'master_safe'
+    `);
+
+    if (openDrawers.rows.length > 0) {
+      const drawerNames = openDrawers.rows.map(d => d.drawer_name).join(', ');
+      return res.status(400).json({
+        error: `Cannot close store. The following drawers/safes are still open: ${drawerNames}. Please close all drawers and safes before closing the store.`,
+        code: 'OPEN_DRAWERS',
+        openDrawers: openDrawers.rows
+      });
+    }
+
+    // Close the session
+    const result = await pool.query(`
+      UPDATE store_sessions
+      SET status = 'closed', closed_by = $1, closing_notes = $2
+      WHERE session_id = $3
+      RETURNING *
+    `, [employee_id, notes || null, existing.rows[0].session_id]);
+
+    // Get employee name for response
+    const employee = await pool.query(
+      'SELECT first_name, last_name FROM employees WHERE employee_id = $1',
+      [employee_id]
+    );
+
+    const session = result.rows[0];
+    session.closed_by_name = employee.rows[0]
+      ? `${employee.rows[0].first_name} ${employee.rows[0].last_name}`
+      : null;
+
+    // Invalidate store status cache
+    storeStatusCache = { isOpen: null, lastChecked: 0 };
+
+    res.json({
+      message: 'Store closed successfully',
+      session
+    });
+  } catch (error) {
+    console.error('Error closing store:', error);
+    res.status(500).json({ error: 'Failed to close store' });
+  }
+});
+
+// Get store session history
+app.get('/api/store-sessions', async (req, res) => {
+  try {
+    const { limit = 30 } = req.query;
+
+    const result = await pool.query(`
+      SELECT
+        s.session_id,
+        s.status,
+        s.opened_at,
+        s.closed_at,
+        s.opened_by,
+        e_open.first_name || ' ' || e_open.last_name AS opened_by_name,
+        s.closed_by,
+        e_close.first_name || ' ' || e_close.last_name AS closed_by_name,
+        s.opening_notes,
+        s.closing_notes
+      FROM store_sessions s
+      LEFT JOIN employees e_open ON s.opened_by = e_open.employee_id
+      LEFT JOIN employees e_close ON s.closed_by = e_close.employee_id
+      ORDER BY s.opened_at DESC
+      LIMIT $1
+    `, [parseInt(limit)]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error getting store sessions:', error);
+    res.status(500).json({ error: 'Failed to get store sessions' });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {

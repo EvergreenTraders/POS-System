@@ -38,6 +38,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import HistoryIcon from '@mui/icons-material/History';
 import { useSnackbar } from 'notistack';
+import { useStoreStatus } from '../context/StoreStatusContext';
 import SearchIcon from '@mui/icons-material/Search';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import config from '../config';
@@ -49,6 +50,7 @@ function Jewelry() {
   const { user: currentUser } = useAuth();
   const { enqueueSnackbar } = useSnackbar();
   const { cartItems, addToCart } = useCart();
+  const { isStoreClosed } = useStoreStatus();
 
   // Update expired HOLD items to ON_PROCESS when component mounts
   useEffect(() => {
@@ -1024,6 +1026,7 @@ function Jewelry() {
                               variant="contained"
                               color="primary"
                               size="small"
+                              disabled={isStoreClosed}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleEditClick(item);
@@ -1047,6 +1050,7 @@ function Jewelry() {
                               variant="contained"
                               color="success"
                               size="small"
+                              disabled={isStoreClosed}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleAddToTicket(item);
@@ -1070,6 +1074,7 @@ function Jewelry() {
                               variant="outlined"
                               color="error"
                               size="small"
+                              disabled={isStoreClosed}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setItemToScrap(item);
@@ -1312,10 +1317,11 @@ function Jewelry() {
           <Button onClick={() => setScrapDialogOpen(false)} color="primary">
             Cancel
           </Button>
-          <Button 
-            onClick={handleMoveToScrap} 
+          <Button
+            onClick={handleMoveToScrap}
             color="error"
             variant="contained"
+            disabled={isStoreClosed}
             autoFocus
           >
             Move to Scrap

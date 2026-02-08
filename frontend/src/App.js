@@ -1,11 +1,12 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { Box } from '@mui/material';
+import { Box, Alert } from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
 import { CartProvider } from './context/CartContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WorkingDateProvider } from './context/WorkingDateContext';
+import { StoreStatusProvider, useStoreStatus } from './context/StoreStatusContext';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import Login from './components/Login';
@@ -117,6 +118,8 @@ const AuthenticatedLayout = ({ children }) => {
     };
   }, []);
 
+  const { isStoreClosed } = useStoreStatus();
+
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
       <Navbar />
@@ -133,6 +136,17 @@ const AuthenticatedLayout = ({ children }) => {
           }),
         }}
       >
+        {isStoreClosed && (
+          <Alert
+            severity="warning"
+            sx={{
+              borderRadius: 0,
+              '& .MuiAlert-message': { width: '100%', textAlign: 'center' }
+            }}
+          >
+            Store is CLOSED &mdash; Read-only mode. Financial transactions are disabled.
+          </Alert>
+        )}
         {children}
       </Box>
     </Box>
@@ -146,6 +160,7 @@ function App() {
       <Router>
         <AuthProvider>
           <WorkingDateProvider>
+            <StoreStatusProvider>
             <CartProvider>
             <Routes>
               <Route path="/login" element={<Login />} />
@@ -480,6 +495,7 @@ function App() {
               <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
             </CartProvider>
+            </StoreStatusProvider>
           </WorkingDateProvider>
         </AuthProvider>
       </Router>

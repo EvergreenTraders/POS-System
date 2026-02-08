@@ -41,12 +41,14 @@ import HistoryIcon from '@mui/icons-material/History';
 import axios from 'axios';
 import config from '../config';
 import { useWorkingDate } from '../context/WorkingDateContext';
+import { useStoreStatus } from '../context/StoreStatusContext';
 
 const API_BASE_URL = config.apiUrl;
 
 const Pawns = () => {
   const navigate = useNavigate();
   const { getCurrentDateObject } = useWorkingDate();
+  const { isStoreClosed } = useStoreStatus();
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [pawns, setPawns] = useState([]);
@@ -839,6 +841,7 @@ const Pawns = () => {
                                 size="small"
                                 startIcon={<AttachMoneyIcon />}
                                 onClick={() => handleRedeemClick(ticket)}
+                                disabled={isStoreClosed}
                                 sx={{
                                   backgroundColor: '#00a862',
                                   '&:hover': {
@@ -853,6 +856,7 @@ const Pawns = () => {
                                 size="small"
                                 startIcon={<ScheduleIcon />}
                                 onClick={() => handleExtendClick(ticket)}
+                                disabled={isStoreClosed}
                                 sx={{
                                   borderColor: '#1976d2',
                                   color: '#1976d2',
@@ -869,6 +873,7 @@ const Pawns = () => {
                                 size="small"
                                 startIcon={<BlockIcon />}
                                 onClick={() => handleForfeitClick(ticket)}
+                                disabled={isStoreClosed}
                                 sx={{
                                   borderColor: '#f57c00',
                                   color: '#f57c00',
@@ -1018,6 +1023,7 @@ const Pawns = () => {
           <Button
             onClick={handleRedeemConfirm}
             variant="contained"
+            disabled={isStoreClosed}
             sx={{
               backgroundColor: '#00a862',
               '&:hover': {

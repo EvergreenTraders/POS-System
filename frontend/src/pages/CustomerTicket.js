@@ -10,6 +10,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
+import { useStoreStatus } from '../context/StoreStatusContext';
 import MetalEstimator from './MetalEstimator';
 import GemEstimator from './GemEstimator';
 import JewelEstimator from './JewelEstimator';
@@ -454,6 +455,7 @@ const CustomerTicket = () => {
 
   const { user } = useAuth(); // Get user at component level
   const { getCurrentDateObject } = useWorkingDate(); // Get working date for calculations
+  const { isStoreClosed } = useStoreStatus();
 
   // Pawn configuration for calculations
   const [interestRate, setInterestRate] = React.useState(2.9);
@@ -5620,7 +5622,7 @@ return (
                     variant="contained"
                     color="success"
                     onClick={handleCheckout}
-                    disabled={!customer || customerValidationErrors.length > 0}
+                    disabled={!customer || customerValidationErrors.length > 0 || isStoreClosed}
                   >
                     Checkout
                   </Button>

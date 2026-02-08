@@ -41,11 +41,13 @@ import PrintIcon from '@mui/icons-material/Print';
 import axios from 'axios';
 import config from '../config';
 import { useAuth } from '../context/AuthContext';
+import { useStoreStatus } from '../context/StoreStatusContext';
 
 const Layaway = () => {
   const API_BASE_URL = config.apiUrl;
   const location = useLocation();
   const { user: currentUser } = useAuth();
+  const { isStoreClosed } = useStoreStatus();
 
   // State management
   const [layaways, setLayaways] = useState([]);
@@ -288,6 +290,7 @@ const Layaway = () => {
             color="primary"
             startIcon={<AddIcon />}
             onClick={handleOpenCreateDialog}
+            disabled={isStoreClosed}
           >
             New Layaway
           </Button>
@@ -383,7 +386,7 @@ const Layaway = () => {
                     <TableCell>
                       <Box sx={{ display: 'flex', gap: 0.5 }}>
                         <Tooltip title="Make Payment">
-                          <IconButton size="small" onClick={() => handleOpenPaymentDialog(layaway)}>
+                          <IconButton size="small" onClick={() => handleOpenPaymentDialog(layaway)} disabled={isStoreClosed}>
                             <PaymentIcon fontSize="small" color="primary" />
                           </IconButton>
                         </Tooltip>
@@ -492,7 +495,7 @@ const Layaway = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseCreateDialog}>Cancel</Button>
-          <Button onClick={handleCreateLayaway} variant="contained" color="primary">
+          <Button onClick={handleCreateLayaway} variant="contained" color="primary" disabled={isStoreClosed}>
             Create
           </Button>
         </DialogActions>
@@ -547,7 +550,7 @@ const Layaway = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleClosePaymentDialog}>Cancel</Button>
-          <Button onClick={handleMakePayment} variant="contained" color="primary">
+          <Button onClick={handleMakePayment} variant="contained" color="primary" disabled={isStoreClosed}>
             Process Payment
           </Button>
         </DialogActions>

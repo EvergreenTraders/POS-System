@@ -53,9 +53,11 @@ import config from '../config';
 import { injectPDFScript } from '../utils/printUtils';
 import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
+import { useStoreStatus } from '../context/StoreStatusContext';
 
 const Scrap = () => {
   const { getCurrentDate } = useWorkingDate();
+  const { isStoreClosed } = useStoreStatus();
   const API_BASE_URL = config.apiUrl;
 
   // Debug logging
@@ -1470,6 +1472,7 @@ const Scrap = () => {
             color="primary"
             startIcon={<AddIcon />}
             onClick={handleNewScrap}
+            disabled={isStoreClosed}
           >
             New Bucket
           </Button>
@@ -1658,6 +1661,7 @@ const Scrap = () => {
                           size="small"
                           startIcon={<EditIcon />}
                           onClick={() => handleEditBucketClick(selectedBucket)}
+                          disabled={isStoreClosed}
                         >
                           Edit
                         </Button>
@@ -1668,6 +1672,7 @@ const Scrap = () => {
                             size="small"
                             startIcon={<DeleteIcon />}
                             onClick={() => handleDeleteBucketClick(selectedBucket)}
+                            disabled={isStoreClosed}
                           >
                             Delete
                           </Button>
@@ -1683,6 +1688,7 @@ const Scrap = () => {
                         size="small"
                         startIcon={<PhotoCameraIcon />}
                         onClick={handleOpenWeightPhotoDialog}
+                        disabled={isStoreClosed}
                       >
                         Add Weight Photo
                       </Button>
@@ -1695,6 +1701,7 @@ const Scrap = () => {
                       size="small"
                       startIcon={<AddIcon />}
                       onClick={handleAddItemClick}
+                      disabled={isStoreClosed}
                     >
                       Add Item
                     </Button>
@@ -2050,11 +2057,11 @@ const Scrap = () => {
                                 <IconButton
                                   size="small"
                                   onClick={() => handleDeleteClick(item)}
-                                  disabled={selectedBucket.status === 'CLOSED'}
+                                  disabled={selectedBucket.status === 'CLOSED' || isStoreClosed}
                                 >
                                   <RemoveCircleOutlineIcon
                                     fontSize="small"
-                                    color={selectedBucket.status === 'CLOSED' ? "disabled" : "error"}
+                                    color={(selectedBucket.status === 'CLOSED' || isStoreClosed) ? "disabled" : "error"}
                                   />
                                 </IconButton>
                               </span>
@@ -2154,7 +2161,7 @@ const Scrap = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button onClick={handleCreateBucket} variant="contained" color="primary">
+          <Button onClick={handleCreateBucket} variant="contained" color="primary" disabled={isStoreClosed}>
             Create
           </Button>
         </DialogActions>
