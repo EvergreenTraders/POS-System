@@ -2424,13 +2424,6 @@ function CashDrawer() {
                       )}
                       <Button
                         variant="outlined"
-                        startIcon={<HistoryIcon />}
-                        onClick={() => fetchSessionDetails(activeSession.session_id)}
-                      >
-                        View Details
-                      </Button>
-                      <Button
-                        variant="outlined"
                         startIcon={<AssignmentIcon />}
                         onClick={openQuickReport}
                       >
@@ -4676,7 +4669,7 @@ function CashDrawer() {
       </Dialog>
 
       {/* Quick Cash Drawer Report Dialog - Activity Journal */}
-      <Dialog open={quickReportDialog} onClose={() => { setQuickReportDialog(false); setQuickReportTxnDetail(null); }} maxWidth="md" fullWidth>
+      <Dialog open={quickReportDialog} onClose={() => { setQuickReportDialog(false); }} maxWidth="md" fullWidth>
         <DialogTitle>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="h6">Quick Drawer Report</Typography>
@@ -4715,7 +4708,6 @@ function CashDrawer() {
                 totalAmount: parseFloat(t.total_amount || 0), // Total transaction amount
                 details: t.transaction_id, // Show transaction_id in details
                 transaction_id: t.transaction_id,
-                item_descriptions: t.item_descriptions, // Store for use in detail view
               })),
               ...adjs.map(a => ({
                 time: a.created_at,
@@ -4852,7 +4844,6 @@ function CashDrawer() {
                         <TableCell>Details</TableCell>
                         <TableCell align="right">Amount</TableCell>
                         {showRunningBalance && <TableCell align="right">Running Balance</TableCell>}
-                        <TableCell align="center" sx={{ width: 50 }}>View</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
