@@ -191,6 +191,8 @@ function SystemConfig() {
   // Opening drawer mode (Individual Denominations vs Drawer Total)
   const [isIndividualDenominationsDrawers, setIsIndividualDenominationsDrawers] = useState(false);
   const [isIndividualDenominationsSafe, setIsIndividualDenominationsSafe] = useState(false);
+  const [isElectronicBlindCountDrawers, setIsElectronicBlindCountDrawers] = useState(false);
+  const [isElectronicBlindCountSafe, setIsElectronicBlindCountSafe] = useState(false);
   const [minClose, setMinClose] = useState(0); // For physical drawers
   const [maxClose, setMaxClose] = useState(0); // For physical drawers
   const [minCloseSafe, setMinCloseSafe] = useState(0); // For safes
@@ -273,12 +275,16 @@ function SystemConfig() {
       setIsBlindCountSafe(safeConfig ? safeConfig.blind_count : true);
       setIsIndividualDenominationsDrawers(physicalConfig ? physicalConfig.individual_denominations : false);
       setIsIndividualDenominationsSafe(safeConfig ? safeConfig.individual_denominations : false);
+      setIsElectronicBlindCountDrawers(physicalConfig ? physicalConfig.electronic_blind_count : false);
+      setIsElectronicBlindCountSafe(safeConfig ? safeConfig.electronic_blind_count : false);
     } catch (error) {
       console.error('Error fetching drawer mode preferences:', error);
       setIsBlindCountDrawers(true); // Default to blind count
       setIsBlindCountSafe(true); // Default to blind count
       setIsIndividualDenominationsDrawers(false); // Default to drawer total
       setIsIndividualDenominationsSafe(false); // Default to drawer total
+      setIsElectronicBlindCountDrawers(false); // Default to open count
+      setIsElectronicBlindCountSafe(false); // Default to open count
     }
   };
 
@@ -1437,6 +1443,54 @@ function SystemConfig() {
     }
   };
 
+  const handleElectronicBlindCountDrawersToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsElectronicBlindCountDrawers(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/drawer-type-config/physical`, {
+        electronic_blind_count: newValue
+      });
+      await fetchBlindCountPreference();
+      setSnackbar({
+        open: true,
+        message: `Physical drawers electronic count set to ${newValue ? 'Blind' : 'Open'}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating electronic blind count for drawers:', error);
+      setIsElectronicBlindCountDrawers(!newValue);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update electronic count settings for drawers',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleElectronicBlindCountSafeToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsElectronicBlindCountSafe(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/drawer-type-config/safe`, {
+        electronic_blind_count: newValue
+      });
+      await fetchBlindCountPreference();
+      setSnackbar({
+        open: true,
+        message: `Safe electronic count set to ${newValue ? 'Blind' : 'Open'}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating electronic blind count for safe:', error);
+      setIsElectronicBlindCountSafe(!newValue);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update electronic count settings for safe',
+        severity: 'error'
+      });
+    }
+  };
+
   const handleMinCloseChange = async (event) => {
     const newValue = parseFloat(event.target.value) || 0;
     setMinClose(newValue);
@@ -2042,6 +2096,56 @@ function SystemConfig() {
                               color="primary"
                             />
                             <Typography variant="body2" color={isBlindCountSafe ? 'primary' : 'text.secondary'} fontWeight={isBlindCountSafe ? 'bold' : 'normal'}>
+                              Blind
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </Box>
+                    </Box>
+                  </Grid>
+
+                  {/* Electronic Count */}
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="h6" gutterBottom>
+                      Electronic Count
+                    </Typography>
+                    <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Select how to count the electronic tenders at open/close
+                      </Typography>
+                      <Box display="flex" gap={3} flexWrap="wrap">
+                        <Box sx={{ flex: '1 1 200px' }}>
+                          <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                            Physical Drawers
+                          </Typography>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <Typography variant="body2" color={!isElectronicBlindCountDrawers ? 'primary' : 'text.secondary'} fontWeight={!isElectronicBlindCountDrawers ? 'bold' : 'normal'}>
+                              Open
+                            </Typography>
+                            <Switch
+                              checked={isElectronicBlindCountDrawers}
+                              onChange={handleElectronicBlindCountDrawersToggle}
+                              color="primary"
+                            />
+                            <Typography variant="body2" color={isElectronicBlindCountDrawers ? 'primary' : 'text.secondary'} fontWeight={isElectronicBlindCountDrawers ? 'bold' : 'normal'}>
+                              Blind
+                            </Typography>
+                          </Box>
+                        </Box>
+                        <Box sx={{ flex: '1 1 200px' }}>
+                          <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                            Safe Drawers
+                          </Typography>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <Typography variant="body2" color={!isElectronicBlindCountSafe ? 'primary' : 'text.secondary'} fontWeight={!isElectronicBlindCountSafe ? 'bold' : 'normal'}>
+                              Open
+                            </Typography>
+                            <Switch
+                              checked={isElectronicBlindCountSafe}
+                              onChange={handleElectronicBlindCountSafeToggle}
+                              color="primary"
+                            />
+                            <Typography variant="body2" color={isElectronicBlindCountSafe ? 'primary' : 'text.secondary'} fontWeight={isElectronicBlindCountSafe ? 'bold' : 'normal'}>
                               Blind
                             </Typography>
                           </Box>

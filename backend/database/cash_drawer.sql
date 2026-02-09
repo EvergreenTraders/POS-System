@@ -820,3 +820,16 @@ BEGIN
 
     DELETE FROM user_preferences WHERE preference_name IN ('individualDenominations_drawers', 'individualDenominations_safe');
 END $$;
+
+-- Add electronic_blind_count column to drawers table (per-drawer-type setting for electronic tenders)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'drawers' AND column_name = 'electronic_blind_count'
+    ) THEN
+        ALTER TABLE drawers ADD COLUMN electronic_blind_count BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+END $$;
+
+COMMENT ON COLUMN drawers.electronic_blind_count IS 'Electronic tender closing mode: TRUE = blind count (no expected amounts shown), FALSE = open count (show expected electronic tender amounts). Applied per drawer type.';

@@ -177,6 +177,7 @@ function CashDrawer() {
   const [isIndividualDenominations, setIsIndividualDenominations] = useState(false); // For opening drawer mode
   const [drawerBlindCountPrefs, setDrawerBlindCountPrefs] = useState({ drawers: true, safe: true }); // Closing mode preferences
   const [drawerIndividualDenominationsPrefs, setDrawerIndividualDenominationsPrefs] = useState({ drawers: false, safe: false }); // Opening mode preferences
+  const [drawerElectronicBlindCountPrefs, setDrawerElectronicBlindCountPrefs] = useState({ drawers: false, safe: false }); // Electronic tender closing mode preferences
   const [allDrawers, setAllDrawers] = useState([]); // Store all drawers including safe
 
   // Form states
@@ -338,9 +339,10 @@ function CashDrawer() {
       const isSafe = activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe';
       setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
       setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
+      setIsElectronicBlindCount(isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers);
       setSelectedDrawerType(activeSession.drawer_type);
     }
-  }, [activeSession, drawerBlindCountPrefs, drawerIndividualDenominationsPrefs]);
+  }, [activeSession, drawerBlindCountPrefs, drawerIndividualDenominationsPrefs, drawerElectronicBlindCountPrefs]);
 
   // Show message if redirected from checkout
   useEffect(() => {
@@ -385,11 +387,13 @@ function CashDrawer() {
       // Set opening mode (individual denominations) based on drawer type filter
       if (drawerTypeFilter === 'safe' || drawerTypeFilter === 'master_safe') {
         setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
+        setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
       } else if (drawerTypeFilter === 'physical') {
         setIsIndividualDenominations(drawerIndividualDenominationsPrefs.drawers);
+        setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.drawers);
       }
     }
-  }, [openDrawerDialog, drawerTypeFilter, drawerBlindCountPrefs]);
+  }, [openDrawerDialog, drawerTypeFilter, drawerBlindCountPrefs, drawerElectronicBlindCountPrefs]);
 
   const fetchEmployees = async () => {
     try {
@@ -774,6 +778,8 @@ function CashDrawer() {
       const blindCountSafe = safeConfig ? safeConfig.blind_count : true;
       const individualDenominationsDrawers = physicalConfig ? physicalConfig.individual_denominations : false;
       const individualDenominationsSafe = safeConfig ? safeConfig.individual_denominations : false;
+      const electronicBlindCountDrawers = physicalConfig ? physicalConfig.electronic_blind_count : false;
+      const electronicBlindCountSafe = safeConfig ? safeConfig.electronic_blind_count : false;
 
       // Store both preference sets
       setDrawerBlindCountPrefs({
@@ -784,15 +790,21 @@ function CashDrawer() {
         drawers: individualDenominationsDrawers,
         safe: individualDenominationsSafe
       });
+      setDrawerElectronicBlindCountPrefs({
+        drawers: electronicBlindCountDrawers,
+        safe: electronicBlindCountSafe
+      });
 
       // Set initial modes based on current selection or default to drawers
       if (selectedDrawerType) {
         const isSafe = selectedDrawerType === 'safe' || selectedDrawerType === 'master_safe';
         setIsBlindCount(isSafe ? blindCountSafe : blindCountDrawers);
         setIsIndividualDenominations(isSafe ? individualDenominationsSafe : individualDenominationsDrawers);
+        setIsElectronicBlindCount(isSafe ? electronicBlindCountSafe : electronicBlindCountDrawers);
       } else {
         setIsBlindCount(blindCountDrawers); // Default to drawers preference
         setIsIndividualDenominations(individualDenominationsDrawers);
+        setIsElectronicBlindCount(electronicBlindCountDrawers);
       }
     } catch (err) {
       console.error('Error fetching drawer mode preferences:', err);
@@ -1052,6 +1064,7 @@ function CashDrawer() {
           setSelectedDrawerType(finalSession.drawer_type);
           const isSafe = finalSession.drawer_type === 'safe' || finalSession.drawer_type === 'master_safe';
           setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
+          setIsElectronicBlindCount(isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers);
         }
       } else {
         setActiveSession(null);
@@ -2705,6 +2718,7 @@ function CashDrawer() {
                               setActiveSession(physicalSession);
                               setIsBlindCount(drawerBlindCountPrefs.drawers);
                               setIsIndividualDenominations(drawerIndividualDenominationsPrefs.drawers);
+                              setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.drawers);
                             }
                           }}
                         >
@@ -2720,6 +2734,7 @@ function CashDrawer() {
                               setSelectedSessionType('safe');
                               setActiveSession(safeSession);
                               setIsBlindCount(drawerBlindCountPrefs.safe);
+                              setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
                             }
                           }}
                         >
@@ -2736,6 +2751,7 @@ function CashDrawer() {
                               setActiveSession(masterSafeSession);
                               setIsBlindCount(drawerBlindCountPrefs.safe);
                               setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
+                              setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
                             }
                           }}
                         >
@@ -3937,7 +3953,7 @@ function CashDrawer() {
                         <TableCell>{drawer.drawer_type === 'master_safe' ? 'Rep' : 'Loc'}</TableCell>
                         <TableCell>{drawer.individual_denominations ? 'Denoms' : 'Balance'}</TableCell>
                         <TableCell>{drawer.blind_count ? 'Blind' : 'Open'}</TableCell>
-                        <TableCell>—</TableCell>
+                        <TableCell>{drawer.electronic_blind_count ? 'Blind' : 'Open'}</TableCell>
                         <TableCell>{formatCurrency(drawer.min_close || 0)}</TableCell>
                         <TableCell>{formatCurrency(drawer.max_close || 0)}</TableCell>
                       </TableRow>
@@ -3990,7 +4006,7 @@ function CashDrawer() {
                         </TableCell>
                         <TableCell>{drawer.individual_denominations ? 'Denoms' : 'Balance'}</TableCell>
                         <TableCell>{drawer.blind_count ? 'Blind' : 'Open'}</TableCell>
-                        <TableCell>—</TableCell>
+                        <TableCell>{drawer.electronic_blind_count ? 'Blind' : 'Open'}</TableCell>
                         <TableCell>{formatCurrency(drawer.min_close || 0)}</TableCell>
                         <TableCell>{formatCurrency(drawer.max_close || 0)}</TableCell>
                       </TableRow>
@@ -4260,6 +4276,7 @@ function CashDrawer() {
                     const isSafe = drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe';
                     setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
                     setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
+                    setIsElectronicBlindCount(isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers);
                     // Check if sharing mode is required for this drawer
                     const needsSharingMode = drawer.drawer_type === 'physical' && drawer.is_shared === null;
                     setSharingModeRequired(needsSharingMode);
@@ -4623,14 +4640,14 @@ function CashDrawer() {
                         <tr>
                           <th style={{ textAlign: 'left' }}>Type</th>
                           <th colSpan={2} style={{ textAlign: 'center' }}>Actual</th>
-                          <th colSpan={2} style={{ textAlign: 'center' }}>Expected</th>
+                          {!isElectronicBlindCount && <th colSpan={2} style={{ textAlign: 'center' }}>Expected</th>}
                         </tr>
                         <tr>
                           <th></th>
                           <th style={{ textAlign: 'center', fontSize: '0.75rem' }}>Qty</th>
                           <th style={{ textAlign: 'right', fontSize: '0.75rem' }}>Amt</th>
-                          <th style={{ textAlign: 'center', fontSize: '0.75rem' }}>Qty</th>
-                          <th style={{ textAlign: 'right', fontSize: '0.75rem' }}>Amt</th>
+                          {!isElectronicBlindCount && <th style={{ textAlign: 'center', fontSize: '0.75rem' }}>Qty</th>}
+                          {!isElectronicBlindCount && <th style={{ textAlign: 'right', fontSize: '0.75rem' }}>Amt</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -4666,8 +4683,8 @@ function CashDrawer() {
                                   sx={{ '& .MuiInputBase-root': { height: '28px' } }}
                                 />
                               </td>
-                              <td style={{ textAlign: 'center' }}>{expected.expected_qty}</td>
-                              <td style={{ textAlign: 'right' }}>{formatCurrency(expected.expected_amount)}</td>
+                              {!isElectronicBlindCount && <td style={{ textAlign: 'center' }}>{expected.expected_qty}</td>}
+                              {!isElectronicBlindCount && <td style={{ textAlign: 'right' }}>{formatCurrency(expected.expected_amount)}</td>}
                             </tr>
                           );
                         })}

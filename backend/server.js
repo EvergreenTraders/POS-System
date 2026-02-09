@@ -4697,6 +4697,7 @@ app.get('/api/drawer-type-config', async (req, res) => {
           max_close,
           blind_count,
           individual_denominations,
+          electronic_blind_count,
           ROW_NUMBER() OVER (
             PARTITION BY drawer_type
             ORDER BY
@@ -4706,7 +4707,7 @@ app.get('/api/drawer-type-config', async (req, res) => {
         FROM drawers
         WHERE drawer_type IN ('physical', 'safe')
       )
-      SELECT drawer_type, min_close, max_close, blind_count, individual_denominations
+      SELECT drawer_type, min_close, max_close, blind_count, individual_denominations, electronic_blind_count
       FROM ranked_drawers
       WHERE rn = 1
       ORDER BY drawer_type
@@ -4730,7 +4731,7 @@ app.get('/api/drawer-type-config/:drawerType', async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT drawer_type, min_close, max_close, blind_count, individual_denominations
+      `SELECT drawer_type, min_close, max_close, blind_count, individual_denominations, electronic_blind_count
        FROM drawers
        WHERE drawer_type = $1
        LIMIT 1`,
@@ -4752,7 +4753,7 @@ app.get('/api/drawer-type-config/:drawerType', async (req, res) => {
 app.put('/api/drawer-type-config/:drawerType', async (req, res) => {
   try {
     const { drawerType } = req.params;
-    const { min_close, max_close, blind_count, individual_denominations } = req.body;
+    const { min_close, max_close, blind_count, individual_denominations, electronic_blind_count } = req.body;
 
     // Determine which drawer types to update
     let drawerTypes = [drawerType];
@@ -4783,6 +4784,10 @@ app.put('/api/drawer-type-config/:drawerType', async (req, res) => {
       setClauses.push(`individual_denominations = $${paramIndex++}`);
       values.push(individual_denominations);
     }
+    if (electronic_blind_count !== undefined) {
+      setClauses.push(`electronic_blind_count = $${paramIndex++}`);
+      values.push(electronic_blind_count);
+    }
 
     values.push(drawerTypes);
 
@@ -4791,7 +4796,7 @@ app.put('/api/drawer-type-config/:drawerType', async (req, res) => {
       `UPDATE drawers
        SET ${setClauses.join(', ')}
        WHERE drawer_type = ANY($${paramIndex})
-       RETURNING drawer_type, min_close, max_close, blind_count, individual_denominations`,
+       RETURNING drawer_type, min_close, max_close, blind_count, individual_denominations, electronic_blind_count`,
       values
     );
 
