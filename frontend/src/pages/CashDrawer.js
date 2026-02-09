@@ -33,6 +33,7 @@ import {
   Tabs,
   FormControlLabel,
   Checkbox,
+  IconButton,
 } from '@mui/material';
 import {
   AttachMoney as MoneyIcon,
@@ -46,6 +47,7 @@ import {
   ArrowForward as ArrowForwardIcon,
   SwapHoriz as SwapHorizIcon,
   Assignment as AssignmentIcon,
+  Visibility as ViewIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -4673,7 +4675,7 @@ function CashDrawer() {
         </DialogActions>
       </Dialog>
 
-      {/* Quick Cash Drawer Report Dialog */}
+      {/* Quick Cash Drawer Report Dialog - Activity Journal */}
       <Dialog open={quickReportDialog} onClose={() => { setQuickReportDialog(false); setQuickReportTxnDetail(null); }} maxWidth="md" fullWidth>
         <DialogTitle>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -4694,184 +4696,242 @@ function CashDrawer() {
                 The current employee does not have a drawer open. Open a drawer to view the quick report.
               </Typography>
             </Box>
-          ) : (
-            <Box sx={{ pt: 1 }}>
-              {/* Header */}
-              <Typography variant="h5" gutterBottom>
-                {activeSession?.drawer_name}
-              </Typography>
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Employee</Typography>
-                  <Typography>{sessionDetails.session.employee_name}</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Status</Typography>
-                  <Box>{getStatusChip(sessionDetails.session.status)}</Box>
-                </Grid>
-              </Grid>
+          ) : (() => {
+            // Build chronological activity entries
+            const session = sessionDetails.session;
+            const txns = sessionDetails.transactions || [];
+            const adjs = sessionDetails.adjustments || [];
+            const showRunningBalance = !isBlindCount || session.status === 'closed';
 
-              {/* Session Info */}
-              <Divider sx={{ my: 2 }} />
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Opened At</Typography>
-                  <Typography>{formatDateTime(sessionDetails.session.opened_at)}</Typography>
-                </Grid>
-                {sessionDetails.session.status === 'closed' && (
-                  <Grid item xs={6}>
-                    <Typography variant="body2" color="text.secondary">Closed At</Typography>
-                    <Typography>{formatDateTime(sessionDetails.session.closed_at)}</Typography>
+            const activities = [
+              { time: session.opened_at, activityType: 'drawer_opened', label: 'Drawer Opened', amount: parseFloat(session.opening_balance), details: `Opened by ${session.employee_name}` },
+              ...txns.map(t => ({
+                time: t.created_at,
+                activityType: t.transaction_type,
+                label: t.transaction_type 
+                  ? t.transaction_type.charAt(0).toUpperCase() + t.transaction_type.slice(1)
+                  : 'Transaction',
+                amount: parseFloat(t.amount || 0), // Cash amount (0 for non-cash transactions)
+                totalAmount: parseFloat(t.total_amount || 0), // Total transaction amount
+                details: t.transaction_id, // Show transaction_id in details
+                transaction_id: t.transaction_id,
+                item_descriptions: t.item_descriptions, // Store for use in detail view
+              })),
+              ...adjs.map(a => ({
+                time: a.created_at,
+                activityType: a.adjustment_type,
+                label: a.adjustment_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+                amount: parseFloat(a.amount),
+                details: a.reason || '',
+                performed_by: a.performed_by_name,
+              })),
+              ...(session.status === 'closed' ? [{
+                time: session.closed_at,
+                activityType: 'drawer_closed',
+                label: 'Drawer Closed',
+                amount: parseFloat(session.actual_balance),
+                details: session.discrepancy != null
+                  ? `Discrepancy: ${formatCurrency(session.discrepancy)}`
+                  : '',
+              }] : []),
+            ].sort((a, b) => new Date(a.time) - new Date(b.time));
+
+            // Calculate running balances
+            let runningBalance = 0;
+            const activitiesWithBalance = activities.map((act) => {
+              if (act.activityType === 'drawer_opened') {
+                runningBalance = act.amount;
+              } else if (act.activityType === 'drawer_closed') {
+                // Don't change running balance for close event
+              } else {
+                runningBalance += act.amount;
+              }
+              return { ...act, runningBalance };
+            });
+
+            // Calculate summary totals
+            const netTransactions = txns.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+            const netAdjustments = adjs.reduce((sum, a) => sum + parseFloat(a.amount), 0);
+            const expectedBalance = parseFloat(session.current_expected_balance || session.expected_balance || 0);
+
+            const getActivityColor = (type) => {
+              switch (type) {
+                case 'drawer_opened': return 'success.main';
+                case 'drawer_closed': return 'warning.main';
+                case 'sale': return 'success.main';
+                case 'refund': return 'error.main';
+                case 'pawn': return 'info.main';
+                case 'buy': return 'info.main';
+                case 'retail': return 'success.main';
+                case 'return': return 'error.main';
+                case 'repair': return 'warning.main';
+                case 'payment': return 'success.main';
+                case 'redeem': return 'info.main';
+                case 'bank_deposit': return 'error.main';
+                case 'bank_withdrawal': return 'success.main';
+                case 'petty_cash': return 'error.main';
+                case 'transfer': return 'info.main';
+                case 'correction': return 'warning.main';
+                default: return 'text.primary';
+              }
+            };
+
+            return (
+              <Box sx={{ pt: 1 }}>
+                {/* Header */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Box>
+                    <Typography variant="h5">{activeSession?.drawer_name}</Typography>
+                    <Typography variant="body2" color="text.secondary">{session.employee_name}</Typography>
+                  </Box>
+                  <Box>{getStatusChip(session.status)}</Box>
+                </Box>
+
+                {/* Summary Bar */}
+                <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: '#f9f9f9' }}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={3}>
+                      <Typography variant="caption" color="text.secondary">Opening Balance</Typography>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{formatCurrency(session.opening_balance)}</Typography>
+                    </Grid>
+                    <Grid item xs={3}>
+                      <Typography variant="caption" color="text.secondary">Net Transactions</Typography>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600, color: netTransactions >= 0 ? 'success.main' : 'error.main' }}>
+                        {formatCurrency(netTransactions)}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={3}>
+                      <Typography variant="caption" color="text.secondary">Net Adjustments</Typography>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600, color: netAdjustments >= 0 ? 'success.main' : 'error.main' }}>
+                        {formatCurrency(netAdjustments)}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={3}>
+                      <Typography variant="caption" color="text.secondary">
+                        {session.status === 'closed' ? 'Expected Balance' : 'Current Expected'}
+                      </Typography>
+                      {showRunningBalance ? (
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                          {formatCurrency(expectedBalance)}
+                        </Typography>
+                      ) : (
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.disabled' }}>Hidden</Typography>
+                      )}
+                    </Grid>
                   </Grid>
-                )}
-              </Grid>
+                </Paper>
 
-              {/* Opening Balance */}
-              <Divider sx={{ my: 2 }} />
-              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Opening Balance</Typography>
-              <Typography variant="h5">{formatCurrency(sessionDetails.session.opening_balance)}</Typography>
-
-              {/* Transactions Summary */}
-              <Divider sx={{ my: 2 }} />
-              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Transactions</Typography>
-              {(() => {
-                const txns = sessionDetails.transactions || [];
-                const salesTxns = txns.filter(t => t.transaction_type === 'sale');
-                const refundTxns = txns.filter(t => t.transaction_type === 'refund');
-                const totalSales = salesTxns.reduce((sum, t) => sum + parseFloat(t.amount), 0);
-                const totalRefunds = refundTxns.reduce((sum, t) => sum + parseFloat(t.amount), 0);
-                const netCash = txns.reduce((sum, t) => sum + parseFloat(t.amount), 0);
-
-                return txns.length === 0 ? (
-                  <Typography color="text.secondary">No transactions yet</Typography>
-                ) : (
-                  <>
-                    <Grid container spacing={2} sx={{ mb: 2 }}>
+                {/* Closing Summary - only for closed sessions */}
+                {session.status === 'closed' && (
+                  <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: '#fff3e0' }}>
+                    <Grid container spacing={2} alignItems="center">
                       <Grid item xs={4}>
-                        <Typography variant="body2" color="text.secondary">Sales</Typography>
-                        <Typography>{salesTxns.length} transactions</Typography>
-                        <Typography color="success.main" sx={{ fontWeight: 600 }}>{formatCurrency(totalSales)}</Typography>
+                        <Typography variant="caption" color="text.secondary">Actual Balance</Typography>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{formatCurrency(session.actual_balance)}</Typography>
                       </Grid>
                       <Grid item xs={4}>
-                        <Typography variant="body2" color="text.secondary">Refunds</Typography>
-                        <Typography>{refundTxns.length} transactions</Typography>
-                        <Typography color="error.main" sx={{ fontWeight: 600 }}>{formatCurrency(Math.abs(totalRefunds))}</Typography>
+                        <Typography variant="caption" color="text.secondary">Discrepancy</Typography>
+                        <Box sx={{ mt: 0.5 }}>{getDiscrepancyChip(session.discrepancy)}</Box>
                       </Grid>
                       <Grid item xs={4}>
-                        <Typography variant="body2" color="text.secondary">Net Cash</Typography>
-                        <Typography variant="h6" sx={{ fontWeight: 600 }}>{formatCurrency(netCash)}</Typography>
+                        <Typography variant="caption" color="text.secondary">Closing Notes</Typography>
+                        <Typography variant="body2">{session.closing_notes || 'None'}</Typography>
                       </Grid>
                     </Grid>
+                  </Paper>
+                )}
 
-                    {/* Transaction entries - clickable for details (read-only) */}
-                    <TableContainer>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Transaction ID</TableCell>
-                            <TableCell>Type</TableCell>
-                            <TableCell>Date</TableCell>
-                            <TableCell align="right">Amount</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {txns.map((txn) => (
-                            <TableRow
-                              key={txn.id || txn.transaction_id}
-                              hover
-                              sx={{ cursor: 'pointer' }}
-                              onClick={() => viewQuickReportTransaction(txn.transaction_id)}
-                            >
-                              <TableCell>{txn.transaction_id}</TableCell>
-                              <TableCell sx={{ textTransform: 'capitalize' }}>{txn.transaction_type}</TableCell>
-                              <TableCell>{formatDateTime(txn.transaction_date || txn.created_at)}</TableCell>
-                              <TableCell align="right" sx={{
-                                color: parseFloat(txn.amount) >= 0 ? 'success.main' : 'error.main',
-                                fontWeight: 600
-                              }}>
-                                {formatCurrency(txn.amount)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </>
-                );
-              })()}
-
-              {/* Adjustments */}
-              {sessionDetails.adjustments && sessionDetails.adjustments.length > 0 && (
-                <>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Adjustments</Typography>
-                  <TableContainer>
-                    <Table size="small">
-                      <TableHead>
+                {/* Activity Journal Table */}
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Activity Journal</Typography>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: '#f5f5f5' }}>
+                        <TableCell>Time</TableCell>
+                        <TableCell>Activity</TableCell>
+                        <TableCell>Details</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                        {showRunningBalance && <TableCell align="right">Running Balance</TableCell>}
+                        <TableCell align="center" sx={{ width: 50 }}>View</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {activitiesWithBalance.length === 0 ? (
                         <TableRow>
-                          <TableCell>Type</TableCell>
-                          <TableCell align="right">Amount</TableCell>
-                          <TableCell>Reason</TableCell>
-                          <TableCell>Performed By</TableCell>
+                          <TableCell colSpan={showRunningBalance ? 6 : 5} align="center" sx={{ py: 3 }}>
+                            No activity recorded
+                          </TableCell>
                         </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {sessionDetails.adjustments.map((adj) => (
-                          <TableRow key={adj.adjustment_id}>
-                            <TableCell sx={{ textTransform: 'capitalize' }}>
-                              {adj.adjustment_type.replace(/_/g, ' ')}
+                      ) : (
+                        activitiesWithBalance.map((act, idx) => (
+                          <TableRow
+                            key={idx}
+                            hover
+                            sx={{
+                              bgcolor: act.activityType === 'drawer_opened' ? 'rgba(76,175,80,0.05)'
+                                : act.activityType === 'drawer_closed' ? 'rgba(255,152,0,0.05)'
+                                : 'inherit'
+                            }}
+                          >
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                              {formatDateTime(act.time)}
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2" sx={{ fontWeight: 600, color: getActivityColor(act.activityType) }}>
+                                {act.label}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                                {act.details}
+                                {act.performed_by ? ` (${act.performed_by})` : ''}
+                              </Typography>
                             </TableCell>
                             <TableCell align="right" sx={{
-                              color: parseFloat(adj.amount) >= 0 ? 'success.main' : 'error.main'
+                              fontWeight: 600,
+                              color: act.activityType === 'drawer_opened' || act.activityType === 'drawer_closed'
+                                ? 'text.primary'
+                                : (parseFloat(act.amount || act.totalAmount || 0) >= 0 ? 'success.main' : 'error.main')
                             }}>
-                              {formatCurrency(adj.amount)}
+                              {act.activityType === 'drawer_closed'
+                                ? formatCurrency(act.amount)
+                                : act.activityType === 'drawer_opened'
+                                  ? formatCurrency(act.amount)
+                                  : (() => {
+                                      // For transactions, show total amount if cash amount is 0 (non-cash transaction)
+                                      const displayAmount = parseFloat(act.amount || 0) === 0 && act.totalAmount 
+                                        ? parseFloat(act.totalAmount || 0)
+                                        : parseFloat(act.amount || 0);
+                                      const sign = displayAmount >= 0 ? '+' : '';
+                                      return sign + formatCurrency(displayAmount);
+                                    })()
+                              }
                             </TableCell>
-                            <TableCell>{adj.reason}</TableCell>
-                            <TableCell>{adj.performed_by_name}</TableCell>
+                            {showRunningBalance && (
+                              <TableCell align="right" sx={{ fontWeight: 600 }}>
+                                {formatCurrency(act.runningBalance)}
+                              </TableCell>
+                            )}
+                            <TableCell align="center">
+                              {act.transaction_id ? (
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  onClick={() => viewQuickReportTransaction(act.transaction_id)}
+                                >
+                                  <ViewIcon fontSize="small" />
+                                </IconButton>
+                              ) : null}
+                            </TableCell>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </>
-              )}
-
-              {/* Expected Balance - respect blind count mode */}
-              {(!isBlindCount || sessionDetails.session.status === 'closed') && (
-                <>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-                    {sessionDetails.session.status === 'closed' ? 'Expected Balance' : 'Current Expected Balance'}
-                  </Typography>
-                  <Typography variant="h4" color="primary.main">
-                    {formatCurrency(sessionDetails.session.current_expected_balance || sessionDetails.session.expected_balance)}
-                  </Typography>
-                </>
-              )}
-
-              {/* Closing Summary - only for closed sessions */}
-              {sessionDetails.session.status === 'closed' && (
-                <>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Closing Summary</Typography>
-                  <Grid container spacing={2}>
-                    <Grid item xs={4}>
-                      <Typography variant="body2" color="text.secondary">Actual Balance</Typography>
-                      <Typography variant="h6">{formatCurrency(sessionDetails.session.actual_balance)}</Typography>
-                    </Grid>
-                    <Grid item xs={4}>
-                      <Typography variant="body2" color="text.secondary">Discrepancy</Typography>
-                      <Box sx={{ mt: 0.5 }}>{getDiscrepancyChip(sessionDetails.session.discrepancy)}</Box>
-                    </Grid>
-                    <Grid item xs={4}>
-                      <Typography variant="body2" color="text.secondary">Closing Notes</Typography>
-                      <Typography>{sessionDetails.session.closing_notes || 'None'}</Typography>
-                    </Grid>
-                  </Grid>
-                </>
-              )}
-            </Box>
-          )}
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            );
+          })()}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => { setQuickReportDialog(false); setQuickReportTxnDetail(null); }}>Close</Button>
@@ -4897,21 +4957,33 @@ function CashDrawer() {
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Item</TableCell>
+                        <TableCell>Description</TableCell>
                         <TableCell align="center">Qty</TableCell>
                         <TableCell align="right">Price</TableCell>
                         <TableCell align="right">Total</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {quickReportTxnDetail.items.map((item, idx) => (
-                        <TableRow key={idx}>
-                          <TableCell>{item.product_name || item.item_name || item.description || 'Item'}</TableCell>
-                          <TableCell align="center">{item.quantity}</TableCell>
-                          <TableCell align="right">{formatCurrency(item.unit_price || item.price)}</TableCell>
-                          <TableCell align="right">{formatCurrency(item.total_price || (item.quantity * (item.unit_price || item.price)))}</TableCell>
-                        </TableRow>
-                      ))}
+                      {quickReportTxnDetail.items.map((item, idx) => {
+                        // Use transaction item price if available, otherwise jewelry item price
+                        const itemPrice = item.transaction_item_price || item.item_price || item.unit_price || item.price || 0;
+                        // Use short_desc, long_desc, or description - prioritize short_desc, then long_desc, then description
+                        const itemDescription = item.short_desc || item.long_desc || item.description || item.product_name || item.item_name || 'Item';
+                        return (
+                          <TableRow key={idx}>
+                            <TableCell>
+                              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                {itemDescription}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="center">{item.quantity || 1}</TableCell>
+                            <TableCell align="right">{formatCurrency(itemPrice)}</TableCell>
+                            <TableCell align="right">
+                              {formatCurrency(item.total_price || itemPrice * (item.quantity || 1))}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </TableContainer>

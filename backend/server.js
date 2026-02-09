@@ -798,7 +798,7 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
         d.drawer_name,
         d.is_shared,
         calculate_expected_balance(s.session_id) AS current_expected_balance,
-        (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS transaction_count,
+        (SELECT COUNT(*) FROM transactions WHERE session_id = s.session_id) AS transaction_count,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments,
         CASE
@@ -909,13 +909,52 @@ app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    // Get transactions for this session
+    // Get all transactions for this session (including non-cash transactions)
+    // Left join with cash_drawer_transactions to get cash amounts if they exist
+    // Determine transaction type and fetch item descriptions from pawn_ticket or sale_ticket based on type
     const transactionsResult = await pool.query(`
-      SELECT dt.*, t.transaction_date
-      FROM cash_drawer_transactions dt
-      JOIN transactions t ON dt.transaction_id = t.transaction_id
-      WHERE dt.session_id = $1
-      ORDER BY dt.created_at DESC
+      SELECT 
+        t.transaction_id,
+        t.transaction_date,
+        t.total_amount,
+        t.created_at,
+        COALESCE(dt.amount, 0) as amount,
+        COALESCE(
+          dt.transaction_type,
+          (
+            SELECT tt.type
+            FROM transaction_items ti
+            JOIN transaction_type tt ON ti.transaction_type_id = tt.id
+            WHERE ti.transaction_id = t.transaction_id
+            LIMIT 1
+          ),
+          'sale'
+        ) as transaction_type,
+        dt.payment_id,
+        dt.notes,
+        (
+          SELECT STRING_AGG(
+            COALESCE(j.short_desc, j.long_desc, 'Item'), 
+            ', '
+            ORDER BY ticket_items.id
+          )
+          FROM (
+            -- Get item_id from pawn_ticket
+            SELECT pt.item_id, pt.id::text as id
+            FROM pawn_ticket pt
+            WHERE pt.transaction_id = t.transaction_id
+            UNION ALL
+            -- Get item_id from sale_ticket
+            SELECT st.item_id, st.id::text as id
+            FROM sale_ticket st
+            WHERE st.transaction_id = t.transaction_id
+          ) AS ticket_items
+          LEFT JOIN jewelry j ON ticket_items.item_id = j.item_id
+        ) as item_descriptions
+      FROM transactions t
+      LEFT JOIN cash_drawer_transactions dt ON t.transaction_id = dt.transaction_id AND dt.session_id = $1
+      WHERE t.session_id = $1
+      ORDER BY t.created_at DESC
     `, [sessionId]);
 
     // Get adjustments for this session
@@ -7791,7 +7830,10 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
         j.jewelry_color,
         j.metal_spot_price,
         j.est_metal_value,
-        j.item_price,
+        COALESCE(ti.item_price, j.item_price) as item_price,
+        ti.item_price as transaction_item_price,
+        j.item_price as jewelry_item_price,
+        ti.description,
         j.images,
         j.status as item_status,
         j.primary_gem_type,
@@ -7827,12 +7869,20 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
 
     const transactionItemsResult = await pool.query(transactionItemsQuery, [transaction_id]);
 
-    // If items found in transaction_items, use those
+    // If items found in transaction_items, transform them to match the expected format
     let result;
     if (transactionItemsResult.rows.length > 0) {
-      result = transactionItemsResult;
+      // Transform transaction_items results to include short_desc and long_desc at top level
+      result = {
+        rows: transactionItemsResult.rows.map(row => ({
+          ...row,
+          short_desc: row.short_desc,
+          long_desc: row.long_desc,
+          description: row.long_desc || row.short_desc || row.description || ''
+        }))
+      };
     } else {
-      // Fallback: Get items from buy_ticket and sale_ticket tables (union of both)
+      // Fallback: Get items from buy_ticket, sale_ticket, and pawn_ticket tables (union of all)
       const ticketQuery = `
         WITH item_list AS (
           -- Get buy ticket items
@@ -8053,6 +8103,9 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
         item_price: row.item_price,
         notes: row.notes || '',
         transaction_type: row.transaction_type,
+        short_desc: row.short_desc,
+        long_desc: row.long_desc,
+        description: row.long_desc || row.short_desc || row.description || '',
         item_details: {
           item_id: row.jewelry_item_id,
           description: row.long_desc || row.short_desc || '',
