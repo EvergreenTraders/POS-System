@@ -16,6 +16,7 @@ import {
   DialogContent,
   DialogActions,
   Button,
+  Tooltip,
 } from '@mui/material';
 import {
   ShoppingCart as CartIcon,
@@ -23,6 +24,7 @@ import {
   LockOutlined as LockIcon,
   Logout as LogoutIcon,
   AccessTime as ClockIcon,
+  WarningAmber as WarningIcon,
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -50,6 +52,7 @@ function Navbar() {
   const [clockLoading, setClockLoading] = useState(false);
   const [clockOutDialogOpen, setClockOutDialogOpen] = useState(false);
   const [storeClosingPromptOpen, setStoreClosingPromptOpen] = useState(false);
+  const [lowBalanceAlerts, setLowBalanceAlerts] = useState([]);
   const { cartItems } = useCart();
   const { user, logout, lockScreen } = useAuth();
   const { workingDate, isWorkingDateEnabled } = useWorkingDate();
@@ -85,6 +88,32 @@ function Navbar() {
     };
 
     checkClockStatus();
+  }, [user]);
+
+  // Poll for low cash balance alerts
+  useEffect(() => {
+    if (!user) return;
+
+    const checkLowBalance = async () => {
+      try {
+        const response = await fetch(`${config.apiUrl}/cash-drawer/low-balance-alerts`);
+        if (response.ok) {
+          const alerts = await response.json();
+          // Filter to alerts relevant to this employee
+          const userId = parseInt(user.id);
+          const myAlerts = alerts.filter(a =>
+            a.connected_employee_ids.includes(userId)
+          );
+          setLowBalanceAlerts(myAlerts);
+        }
+      } catch (error) {
+        // Silently fail - non-critical polling
+      }
+    };
+
+    checkLowBalance();
+    const interval = setInterval(checkLowBalance, 30000);
+    return () => clearInterval(interval);
   }, [user]);
 
   // Poll for store closing notification
@@ -483,6 +512,24 @@ function Navbar() {
                     }
                   }}
                 />
+              )}
+
+              {lowBalanceAlerts.length > 0 && (
+                <Tooltip
+                  title={lowBalanceAlerts.map(a =>
+                    `${a.drawer_name}: $${parseFloat(a.current_balance).toFixed(2)} (min: $${parseFloat(a.min_close).toFixed(2)})`
+                  ).join('\n')}
+                >
+                  <IconButton
+                    color="inherit"
+                    onClick={() => navigate('/cash-drawer')}
+                    sx={{ mr: 1 }}
+                  >
+                    <Badge badgeContent={lowBalanceAlerts.length} color="error">
+                      <WarningIcon sx={{ color: '#ffb74d' }} />
+                    </Badge>
+                  </IconButton>
+                </Tooltip>
               )}
 
               <IconButton

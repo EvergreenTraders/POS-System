@@ -1582,19 +1582,12 @@ function CashDrawer() {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = currentUser.id;
 
-    // Calculate balance based on mode (individual denominations vs total)
-    const calculatedBalance = isIndividualDenominations
-      ? calculateDenominationTotal(closingDenominations)
-      : parseFloat(actualBalance);
+    // Calculate balance from denomination counts (close dialog always uses denomination counting)
+    const calculatedBalance = calculateDenominationTotal(closingDenominations);
 
-    // Validation
-    if (isIndividualDenominations && calculatedBalance === 0) {
+    // Validation - denomination total must be entered
+    if (calculatedBalance === 0) {
       showSnackbar('Please enter denomination counts', 'error');
-      return;
-    }
-
-    if (!isIndividualDenominations && (!actualBalance || isNaN(calculatedBalance))) {
-      showSnackbar('Please enter the actual balance', 'error');
       return;
     }
 
@@ -2696,6 +2689,24 @@ function CashDrawer() {
       {/* Active Session Tab */}
       {tabValue === 0 && (
         <>
+          {/* Low cash balance warnings - only for employee's connected drawers */}
+          {(() => {
+            const myDrawerIds = activeSessions.map(s => s.drawer_id);
+            const allOverviewDrawers = [...(overviewData.safes || []), ...(overviewData.drawers || [])];
+            const lowBalanceDrawers = allOverviewDrawers.filter(d =>
+              d.status === 'OPEN' && d.min_close > 0 && parseFloat(d.balance) < parseFloat(d.min_close)
+              && myDrawerIds.includes(d.drawer_id)
+            );
+            return lowBalanceDrawers.length > 0 ? (
+              <Box sx={{ mb: 2 }}>
+                {lowBalanceDrawers.map(d => (
+                  <Alert key={d.drawer_id} severity="warning" sx={{ mb: 1 }}>
+                    Low cash balance: <strong>{d.drawer_name}</strong> is at {formatCurrency(parseFloat(d.balance))} (minimum: {formatCurrency(parseFloat(d.min_close))})
+                  </Alert>
+                ))}
+              </Box>
+            ) : null;
+          })()}
           {activeSessions.length > 0 ? (
             <Grid container spacing={3}>
               {/* Session Type Selector - Show if multiple types exist */}

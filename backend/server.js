@@ -711,6 +711,7 @@ app.get('/api/cash-drawer/overview', async (req, res) => {
         d.drawer_name,
         d.drawer_type,
         d.is_shared,
+        d.min_close,
         CASE
           WHEN d.is_shared = TRUE OR d.drawer_type IN ('safe', 'master_safe') THEN 'Shared'
           WHEN d.is_shared = FALSE THEN 'Single'
@@ -785,6 +786,49 @@ app.get('/api/cash-drawer/overview', async (req, res) => {
   } catch (error) {
     console.error('Error fetching drawer overview:', error);
     res.status(500).json({ error: 'Failed to fetch drawer overview' });
+  }
+});
+
+// GET /api/cash-drawer/low-balance-alerts - Get drawers/safes where cash balance is below min_close
+app.get('/api/cash-drawer/low-balance-alerts', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        d.drawer_id,
+        d.drawer_name,
+        d.drawer_type,
+        d.min_close,
+        ads.session_id,
+        ads.current_expected_balance as current_balance,
+        ads.employee_id as opener_id
+      FROM active_drawer_sessions ads
+      JOIN drawers d ON ads.drawer_id = d.drawer_id
+      WHERE d.min_close > 0
+        AND ads.current_expected_balance < d.min_close
+        AND d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+      ORDER BY d.drawer_type, d.drawer_name
+    `);
+
+    // For each low-balance session, get connected employee IDs
+    const alerts = await Promise.all(result.rows.map(async (row) => {
+      const connectionsResult = await pool.query(`
+        SELECT employee_id FROM drawer_session_connections
+        WHERE session_id = $1 AND is_active = TRUE
+        UNION
+        SELECT employee_id FROM cash_drawer_sessions
+        WHERE session_id = $1
+      `, [row.session_id]);
+
+      return {
+        ...row,
+        connected_employee_ids: connectionsResult.rows.map(r => r.employee_id)
+      };
+    }));
+
+    res.json(alerts);
+  } catch (error) {
+    console.error('Error fetching low balance alerts:', error);
+    res.status(500).json({ error: 'Failed to fetch low balance alerts' });
   }
 });
 
@@ -3481,7 +3525,7 @@ app.put('/api/drawer-config', async (req, res) => {
         await pool.query(`
           INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id, min_close, max_close)
           VALUES ($1, 'physical', TRUE, $2, $3, $4, $5)
-          ON CONFLICT (drawer_name, store_id) DO UPDATE SET min_close = $4, max_close = $5
+          ON CONFLICT (drawer_name, store_id) DO UPDATE SET is_active = TRUE
         `, [`Drawer ${i}`, i, currentStoreId, minCloseValue, maxCloseValue]);
       }
     } else if (number_of_drawers < currentCount) {
@@ -3916,7 +3960,7 @@ app.put('/api/safe-drawers-config', async (req, res) => {
         await pool.query(`
           INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id, min_close, max_close)
           VALUES ($1, 'safe', TRUE, $2, $3, $4, $5)
-          ON CONFLICT (drawer_name, store_id) DO UPDATE SET min_close = $4, max_close = $5
+          ON CONFLICT (drawer_name, store_id) DO UPDATE SET is_active = TRUE
         `, [`Safe ${i}`, i, currentStoreId, minCloseValue, maxCloseValue]);
       }
     } else if (number_of_safe_drawers < currentCount) {
