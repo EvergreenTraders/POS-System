@@ -91,6 +91,8 @@ function CashDrawer() {
   const [physicalTenderWarningDialog, setPhysicalTenderWarningDialog] = useState(false);
   const [showManagerOverrideView, setShowManagerOverrideView] = useState(false); // For showing expected values
   const [quickReportDialog, setQuickReportDialog] = useState(false);
+  const [quickReportTxnDetail, setQuickReportTxnDetail] = useState(null);
+  const [quickReportTxnLoading, setQuickReportTxnLoading] = useState(false);
 
   // Manager approval form states
   const [managerUsername, setManagerUsername] = useState('');
@@ -777,6 +779,12 @@ function CashDrawer() {
   };
 
   const openQuickReport = async () => {
+    // If no active session, open dialog with empty state (shows "no drawer open" message)
+    if (!activeSession) {
+      setSessionDetails(null);
+      setQuickReportDialog(true);
+      return;
+    }
     try {
       const response = await axios.get(`${API_BASE_URL}/cash-drawer/${activeSession.session_id}/details`);
       setSessionDetails(response.data);
@@ -784,6 +792,26 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching quick report:', err);
       showSnackbar('Failed to load drawer report', 'error');
+    }
+  };
+
+  const viewQuickReportTransaction = async (transactionId) => {
+    setQuickReportTxnLoading(true);
+    try {
+      const [itemsRes, paymentsRes] = await Promise.all([
+        axios.get(`${API_BASE_URL}/transactions/${transactionId}/items`),
+        axios.get(`${API_BASE_URL}/transactions/${transactionId}/payments`)
+      ]);
+      setQuickReportTxnDetail({
+        transaction_id: transactionId,
+        items: itemsRes.data,
+        payments: paymentsRes.data.payments || paymentsRes.data || []
+      });
+    } catch (err) {
+      console.error('Error fetching transaction details:', err);
+      showSnackbar('Failed to load transaction details', 'error');
+    } finally {
+      setQuickReportTxnLoading(false);
     }
   };
 
@@ -2515,6 +2543,13 @@ function CashDrawer() {
                     Open Master Safe
                   </Button>
                 )}
+                <Button
+                  variant="outlined"
+                  startIcon={<AssignmentIcon />}
+                  onClick={openQuickReport}
+                >
+                  Quick Report
+                </Button>
               </Box>
             </Paper>
           )}
@@ -4639,7 +4674,7 @@ function CashDrawer() {
       </Dialog>
 
       {/* Quick Cash Drawer Report Dialog */}
-      <Dialog open={quickReportDialog} onClose={() => setQuickReportDialog(false)} maxWidth="md" fullWidth>
+      <Dialog open={quickReportDialog} onClose={() => { setQuickReportDialog(false); setQuickReportTxnDetail(null); }} maxWidth="md" fullWidth>
         <DialogTitle>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="h6">Quick Drawer Report</Typography>
@@ -4649,7 +4684,17 @@ function CashDrawer() {
           </Box>
         </DialogTitle>
         <DialogContent>
-          {sessionDetails && (
+          {!sessionDetails ? (
+            <Box sx={{ py: 6, textAlign: 'center' }}>
+              <MoneyIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
+              <Typography variant="h6" gutterBottom>
+                No Drawer Open
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                The current employee does not have a drawer open. Open a drawer to view the quick report.
+              </Typography>
+            </Box>
+          ) : (
             <Box sx={{ pt: 1 }}>
               {/* Header */}
               <Typography variant="h5" gutterBottom>
@@ -4700,22 +4745,58 @@ function CashDrawer() {
                 return txns.length === 0 ? (
                   <Typography color="text.secondary">No transactions yet</Typography>
                 ) : (
-                  <Grid container spacing={2}>
-                    <Grid item xs={4}>
-                      <Typography variant="body2" color="text.secondary">Sales</Typography>
-                      <Typography>{salesTxns.length} transactions</Typography>
-                      <Typography color="success.main" sx={{ fontWeight: 600 }}>{formatCurrency(totalSales)}</Typography>
+                  <>
+                    <Grid container spacing={2} sx={{ mb: 2 }}>
+                      <Grid item xs={4}>
+                        <Typography variant="body2" color="text.secondary">Sales</Typography>
+                        <Typography>{salesTxns.length} transactions</Typography>
+                        <Typography color="success.main" sx={{ fontWeight: 600 }}>{formatCurrency(totalSales)}</Typography>
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="body2" color="text.secondary">Refunds</Typography>
+                        <Typography>{refundTxns.length} transactions</Typography>
+                        <Typography color="error.main" sx={{ fontWeight: 600 }}>{formatCurrency(Math.abs(totalRefunds))}</Typography>
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="body2" color="text.secondary">Net Cash</Typography>
+                        <Typography variant="h6" sx={{ fontWeight: 600 }}>{formatCurrency(netCash)}</Typography>
+                      </Grid>
                     </Grid>
-                    <Grid item xs={4}>
-                      <Typography variant="body2" color="text.secondary">Refunds</Typography>
-                      <Typography>{refundTxns.length} transactions</Typography>
-                      <Typography color="error.main" sx={{ fontWeight: 600 }}>{formatCurrency(Math.abs(totalRefunds))}</Typography>
-                    </Grid>
-                    <Grid item xs={4}>
-                      <Typography variant="body2" color="text.secondary">Net Cash</Typography>
-                      <Typography variant="h6" sx={{ fontWeight: 600 }}>{formatCurrency(netCash)}</Typography>
-                    </Grid>
-                  </Grid>
+
+                    {/* Transaction entries - clickable for details (read-only) */}
+                    <TableContainer>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Transaction ID</TableCell>
+                            <TableCell>Type</TableCell>
+                            <TableCell>Date</TableCell>
+                            <TableCell align="right">Amount</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {txns.map((txn) => (
+                            <TableRow
+                              key={txn.id || txn.transaction_id}
+                              hover
+                              sx={{ cursor: 'pointer' }}
+                              onClick={() => viewQuickReportTransaction(txn.transaction_id)}
+                            >
+                              <TableCell>{txn.transaction_id}</TableCell>
+                              <TableCell sx={{ textTransform: 'capitalize' }}>{txn.transaction_type}</TableCell>
+                              <TableCell>{formatDateTime(txn.transaction_date || txn.created_at)}</TableCell>
+                              <TableCell align="right" sx={{
+                                color: parseFloat(txn.amount) >= 0 ? 'success.main' : 'error.main',
+                                fontWeight: 600
+                              }}>
+                                {formatCurrency(txn.amount)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </>
                 );
               })()}
 
@@ -4793,7 +4874,81 @@ function CashDrawer() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setQuickReportDialog(false)}>Close</Button>
+          <Button onClick={() => { setQuickReportDialog(false); setQuickReportTxnDetail(null); }}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Quick Report - Transaction Detail Dialog (read-only) */}
+      <Dialog open={!!quickReportTxnDetail} onClose={() => setQuickReportTxnDetail(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Transaction Details: {quickReportTxnDetail?.transaction_id}
+        </DialogTitle>
+        <DialogContent>
+          {quickReportTxnLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : quickReportTxnDetail && (
+            <Box sx={{ pt: 1 }}>
+              {/* Items */}
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Items</Typography>
+              {quickReportTxnDetail.items && quickReportTxnDetail.items.length > 0 ? (
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Item</TableCell>
+                        <TableCell align="center">Qty</TableCell>
+                        <TableCell align="right">Price</TableCell>
+                        <TableCell align="right">Total</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {quickReportTxnDetail.items.map((item, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell>{item.product_name || item.item_name || item.description || 'Item'}</TableCell>
+                          <TableCell align="center">{item.quantity}</TableCell>
+                          <TableCell align="right">{formatCurrency(item.unit_price || item.price)}</TableCell>
+                          <TableCell align="right">{formatCurrency(item.total_price || (item.quantity * (item.unit_price || item.price)))}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Typography color="text.secondary">No items found</Typography>
+              )}
+
+              {/* Payments */}
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Payments</Typography>
+              {quickReportTxnDetail.payments && quickReportTxnDetail.payments.length > 0 ? (
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Method</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {quickReportTxnDetail.payments.map((payment, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell sx={{ textTransform: 'capitalize' }}>{payment.payment_method || payment.method}</TableCell>
+                          <TableCell align="right">{formatCurrency(payment.amount)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Typography color="text.secondary">No payment details found</Typography>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setQuickReportTxnDetail(null)}>Back</Button>
         </DialogActions>
       </Dialog>
 
