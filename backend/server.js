@@ -856,7 +856,9 @@ app.get('/api/cash-drawer/history', async (req, res) => {
   try {
     let query = `SELECT dsh.* FROM drawer_session_history dsh
       JOIN drawers d ON dsh.drawer_id = d.drawer_id
-      WHERE d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)`;
+      JOIN employees e ON dsh.employee_id = e.employee_id
+      WHERE d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+        AND e.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)`;
     const params = [];
     let paramCount = 1;
 
@@ -1009,7 +1011,9 @@ app.get('/api/cash-drawer/journal', async (req, res) => {
       FROM journal_entries je
       LEFT JOIN payment_methods pm ON je.tender_type = pm.method_value
       JOIN drawers d2 ON je.drawer_id = d2.drawer_id
+      JOIN employees e2 ON je.employee_id = e2.employee_id
       WHERE d2.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+        AND e2.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY je.entry_date DESC, je.entry_time DESC
     `;
     
