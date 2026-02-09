@@ -689,8 +689,10 @@ app.get('/api/employee-sessions/closing-notification', async (req, res) => {
 app.get('/api/cash-drawer/active', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT * FROM active_drawer_sessions
-      ORDER BY opened_at DESC
+      SELECT ads.* FROM active_drawer_sessions ads
+      JOIN drawers d ON ads.drawer_id = d.drawer_id
+      WHERE d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+      ORDER BY ads.opened_at DESC
     `);
     res.json(result.rows);
   } catch (error) {
@@ -852,28 +854,30 @@ app.get('/api/cash-drawer/history', async (req, res) => {
   } = req.query;
 
   try {
-    let query = 'SELECT * FROM drawer_session_history WHERE 1=1';
+    let query = `SELECT dsh.* FROM drawer_session_history dsh
+      JOIN drawers d ON dsh.drawer_id = d.drawer_id
+      WHERE d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)`;
     const params = [];
     let paramCount = 1;
 
     if (employee_id) {
       params.push(employee_id);
-      query += ` AND employee_id = $${paramCount++}`;
+      query += ` AND dsh.employee_id = $${paramCount++}`;
     }
 
     if (start_date) {
       params.push(start_date);
-      query += ` AND opened_at >= $${paramCount++}`;
+      query += ` AND dsh.opened_at >= $${paramCount++}`;
     }
 
     if (end_date) {
       params.push(end_date);
-      query += ` AND opened_at <= $${paramCount++}`;
+      query += ` AND dsh.opened_at <= $${paramCount++}`;
     }
 
     if (status) {
       params.push(status);
-      query += ` AND status = $${paramCount++}`;
+      query += ` AND dsh.status = $${paramCount++}`;
     }
 
     params.push(limit, offset);
@@ -998,12 +1002,14 @@ app.get('/api/cash-drawer/journal', async (req, res) => {
         JOIN drawers d ON s.drawer_id = d.drawer_id
         LEFT JOIN employees e ON a.performed_by = e.employee_id
       )
-      SELECT 
+      SELECT
         je.*,
         pm.method_name as tender_type_name,
         pm.is_physical as tender_is_physical
       FROM journal_entries je
       LEFT JOIN payment_methods pm ON je.tender_type = pm.method_value
+      JOIN drawers d2 ON je.drawer_id = d2.drawer_id
+      WHERE d2.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY je.entry_date DESC, je.entry_time DESC
     `;
     
@@ -1029,10 +1035,13 @@ app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
     const sessionResult = await pool.query(`
       SELECT
         s.*,
+        d.drawer_type,
+        d.drawer_name,
         e.first_name || ' ' || e.last_name AS employee_name,
         r.first_name || ' ' || r.last_name AS reconciled_by_name,
         calculate_expected_balance(s.session_id) AS current_expected_balance
       FROM cash_drawer_sessions s
+      JOIN drawers d ON s.drawer_id = d.drawer_id
       JOIN employees e ON s.employee_id = e.employee_id
       LEFT JOIN employees r ON s.reconciled_by = r.employee_id
       WHERE s.session_id = $1
@@ -1076,6 +1085,11 @@ app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
             SELECT pt.item_id, pt.id::text as id
             FROM pawn_ticket pt
             WHERE pt.transaction_id = t.transaction_id
+            UNION ALL
+            -- Get item_id from buy_ticket
+            SELECT bt.item_id, bt.id::text as id
+            FROM buy_ticket bt
+            WHERE bt.transaction_id = t.transaction_id
             UNION ALL
             -- Get item_id from sale_ticket
             SELECT st.item_id, st.id::text as id
@@ -4673,20 +4687,22 @@ app.get('/api/drawer-type-config', async (req, res) => {
     // Note: master_safe uses the same values as safe, so we only return physical and safe
     const result = await pool.query(`
       WITH ranked_drawers AS (
-        SELECT 
+        SELECT
           drawer_type,
           min_close,
           max_close,
+          blind_count,
+          individual_denominations,
           ROW_NUMBER() OVER (
-            PARTITION BY drawer_type 
-            ORDER BY 
+            PARTITION BY drawer_type
+            ORDER BY
               CASE WHEN min_close > 0 OR max_close > 0 THEN 0 ELSE 1 END,
               drawer_id
           ) as rn
         FROM drawers
         WHERE drawer_type IN ('physical', 'safe')
       )
-      SELECT drawer_type, min_close, max_close
+      SELECT drawer_type, min_close, max_close, blind_count, individual_denominations
       FROM ranked_drawers
       WHERE rn = 1
       ORDER BY drawer_type
@@ -4710,7 +4726,7 @@ app.get('/api/drawer-type-config/:drawerType', async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT drawer_type, min_close, max_close
+      `SELECT drawer_type, min_close, max_close, blind_count, individual_denominations
        FROM drawers
        WHERE drawer_type = $1
        LIMIT 1`,
@@ -4732,7 +4748,7 @@ app.get('/api/drawer-type-config/:drawerType', async (req, res) => {
 app.put('/api/drawer-type-config/:drawerType', async (req, res) => {
   try {
     const { drawerType } = req.params;
-    const { min_close, max_close } = req.body;
+    const { min_close, max_close, blind_count, individual_denominations } = req.body;
 
     // Determine which drawer types to update
     let drawerTypes = [drawerType];
@@ -4742,13 +4758,37 @@ app.put('/api/drawer-type-config/:drawerType', async (req, res) => {
       drawerTypes = ['safe', 'master_safe'];
     }
 
+    // Build dynamic SET clause based on provided fields
+    const setClauses = ['updated_at = CURRENT_TIMESTAMP'];
+    const values = [];
+    let paramIndex = 1;
+
+    if (min_close !== undefined) {
+      setClauses.push(`min_close = $${paramIndex++}`);
+      values.push(min_close);
+    }
+    if (max_close !== undefined) {
+      setClauses.push(`max_close = $${paramIndex++}`);
+      values.push(max_close);
+    }
+    if (blind_count !== undefined) {
+      setClauses.push(`blind_count = $${paramIndex++}`);
+      values.push(blind_count);
+    }
+    if (individual_denominations !== undefined) {
+      setClauses.push(`individual_denominations = $${paramIndex++}`);
+      values.push(individual_denominations);
+    }
+
+    values.push(drawerTypes);
+
     // Update all drawers of these types
     const result = await pool.query(
       `UPDATE drawers
-       SET min_close = $1, max_close = $2, updated_at = CURRENT_TIMESTAMP
-       WHERE drawer_type = ANY($3)
-       RETURNING drawer_type, min_close, max_close`,
-      [min_close, max_close, drawerTypes]
+       SET ${setClauses.join(', ')}
+       WHERE drawer_type = ANY($${paramIndex})
+       RETURNING drawer_type, min_close, max_close, blind_count, individual_denominations`,
+      values
     );
 
     if (result.rows.length === 0) {

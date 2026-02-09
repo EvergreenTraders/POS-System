@@ -736,3 +736,87 @@ END $$;
 UPDATE drawers SET has_location = FALSE WHERE has_location IS NULL;
 
 COMMENT ON COLUMN drawers.has_location IS 'For safes: TRUE = repository/location (creates storage location), FALSE = repository only. For drawers: not applicable.';
+
+-- Add blind_count column to drawers table (per-drawer-type setting, similar to min_close/max_close)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'drawers' AND column_name = 'blind_count'
+    ) THEN
+        ALTER TABLE drawers ADD COLUMN blind_count BOOLEAN NOT NULL DEFAULT TRUE;
+    END IF;
+END $$;
+
+COMMENT ON COLUMN drawers.blind_count IS 'Closing mode: TRUE = blind count (no running balance shown), FALSE = open count (running balance visible). Applied per drawer type.';
+
+-- Migrate blind count preferences from user_preferences to drawers table
+DO $$
+DECLARE
+    v_blind_count_drawers TEXT;
+    v_blind_count_safe TEXT;
+BEGIN
+    -- Read current preferences
+    SELECT preference_value INTO v_blind_count_drawers
+    FROM user_preferences WHERE preference_name = 'blindCount_drawers';
+
+    SELECT preference_value INTO v_blind_count_safe
+    FROM user_preferences WHERE preference_name = 'blindCount_safe';
+
+    -- Update physical drawers
+    IF v_blind_count_drawers IS NOT NULL THEN
+        UPDATE drawers
+        SET blind_count = (v_blind_count_drawers = 'true')
+        WHERE drawer_type = 'physical';
+    END IF;
+
+    -- Update safe and master_safe drawers
+    IF v_blind_count_safe IS NOT NULL THEN
+        UPDATE drawers
+        SET blind_count = (v_blind_count_safe = 'true')
+        WHERE drawer_type IN ('safe', 'master_safe');
+    END IF;
+
+    -- Remove old preferences
+    DELETE FROM user_preferences WHERE preference_name IN ('blindCount_drawers', 'blindCount_safe');
+END $$;
+
+-- Add individual_denominations column to drawers table (opening mode: drawer total vs individual denominations)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'drawers' AND column_name = 'individual_denominations'
+    ) THEN
+        ALTER TABLE drawers ADD COLUMN individual_denominations BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+END $$;
+
+COMMENT ON COLUMN drawers.individual_denominations IS 'Opening mode: TRUE = count by individual denominations, FALSE = enter drawer total. Applied per drawer type.';
+
+-- Migrate individual denominations preferences from user_preferences to drawers table
+DO $$
+DECLARE
+    v_individual_drawers TEXT;
+    v_individual_safe TEXT;
+BEGIN
+    SELECT preference_value INTO v_individual_drawers
+    FROM user_preferences WHERE preference_name = 'individualDenominations_drawers';
+
+    SELECT preference_value INTO v_individual_safe
+    FROM user_preferences WHERE preference_name = 'individualDenominations_safe';
+
+    IF v_individual_drawers IS NOT NULL THEN
+        UPDATE drawers
+        SET individual_denominations = (v_individual_drawers = 'true')
+        WHERE drawer_type = 'physical';
+    END IF;
+
+    IF v_individual_safe IS NOT NULL THEN
+        UPDATE drawers
+        SET individual_denominations = (v_individual_safe = 'true')
+        WHERE drawer_type IN ('safe', 'master_safe');
+    END IF;
+
+    DELETE FROM user_preferences WHERE preference_name IN ('individualDenominations_drawers', 'individualDenominations_safe');
+END $$;

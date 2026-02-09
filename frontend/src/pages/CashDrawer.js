@@ -766,21 +766,15 @@ function CashDrawer() {
 
   const fetchBlindCountPreference = async () => {
     try {
-      // Get all drawer mode preferences
-      const response = await axios.get(`${API_BASE_URL}/user_preferences`);
-      
-      // Closing mode preferences (Blind Count vs Open Count)
-      const blindCountDrawersPreference = response.data.find(pref => pref.preference_name === 'blindCount_drawers');
-      const blindCountSafePreference = response.data.find(pref => pref.preference_name === 'blindCount_safe');
-      const blindCountDrawers = blindCountDrawersPreference ? blindCountDrawersPreference.preference_value === 'true' : true;
-      const blindCountSafe = blindCountSafePreference ? blindCountSafePreference.preference_value === 'true' : true;
-      
-      // Opening mode preferences (Individual Denominations vs Drawer Total)
-      const individualDenominationsDrawersPreference = response.data.find(pref => pref.preference_name === 'individualDenominations_drawers');
-      const individualDenominationsSafePreference = response.data.find(pref => pref.preference_name === 'individualDenominations_safe');
-      const individualDenominationsDrawers = individualDenominationsDrawersPreference ? individualDenominationsDrawersPreference.preference_value === 'true' : false;
-      const individualDenominationsSafe = individualDenominationsSafePreference ? individualDenominationsSafePreference.preference_value === 'true' : false;
-      
+      // Fetch all drawer mode settings from drawer-type-config (stored on drawers table)
+      const drawerConfigRes = await axios.get(`${API_BASE_URL}/drawer-type-config`);
+      const physicalConfig = drawerConfigRes.data.find(c => c.drawer_type === 'physical');
+      const safeConfig = drawerConfigRes.data.find(c => c.drawer_type === 'safe');
+      const blindCountDrawers = physicalConfig ? physicalConfig.blind_count : true;
+      const blindCountSafe = safeConfig ? safeConfig.blind_count : true;
+      const individualDenominationsDrawers = physicalConfig ? physicalConfig.individual_denominations : false;
+      const individualDenominationsSafe = safeConfig ? safeConfig.individual_denominations : false;
+
       // Store both preference sets
       setDrawerBlindCountPrefs({
         drawers: blindCountDrawers,
@@ -1283,7 +1277,7 @@ function CashDrawer() {
     }
   };
 
-  const viewQuickReportTransaction = async (transactionId) => {
+  const viewQuickReportTransaction = async (transactionId, transactionLabel) => {
     setQuickReportTxnLoading(true);
     try {
       const [itemsRes, paymentsRes] = await Promise.all([
@@ -1292,6 +1286,7 @@ function CashDrawer() {
       ]);
       setQuickReportTxnDetail({
         transaction_id: transactionId,
+        transaction_type: transactionLabel || 'Transaction',
         items: itemsRes.data,
         payments: paymentsRes.data.payments || paymentsRes.data || []
       });
@@ -2543,7 +2538,6 @@ function CashDrawer() {
 
       {/* Overview Section */}
       <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" mb={2}>Drawer & Safe Overview</Typography>
 
         {/* Store Status Section */}
         <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
@@ -3941,8 +3935,8 @@ function CashDrawer() {
                         <TableCell>{drawer.drawer_name}</TableCell>
                         <TableCell>{drawer.is_active ? 'Y' : 'N'}</TableCell>
                         <TableCell>{drawer.drawer_type === 'master_safe' ? 'Rep' : 'Loc'}</TableCell>
-                        <TableCell>Denoms</TableCell>
-                        <TableCell>Open</TableCell>
+                        <TableCell>{drawer.individual_denominations ? 'Denoms' : 'Balance'}</TableCell>
+                        <TableCell>{drawer.blind_count ? 'Blind' : 'Open'}</TableCell>
                         <TableCell>—</TableCell>
                         <TableCell>{formatCurrency(drawer.min_close || 0)}</TableCell>
                         <TableCell>{formatCurrency(drawer.max_close || 0)}</TableCell>
@@ -3994,9 +3988,9 @@ function CashDrawer() {
                         <TableCell>
                           {drawer.is_shared === null ? 'Shared' : (drawer.is_shared ? 'Shared' : 'Single')}
                         </TableCell>
-                        <TableCell>Balance</TableCell>
-                        <TableCell>Blind</TableCell>
-                        <TableCell>Open</TableCell>
+                        <TableCell>{drawer.individual_denominations ? 'Denoms' : 'Balance'}</TableCell>
+                        <TableCell>{drawer.blind_count ? 'Blind' : 'Open'}</TableCell>
+                        <TableCell>—</TableCell>
                         <TableCell>{formatCurrency(drawer.min_close || 0)}</TableCell>
                         <TableCell>{formatCurrency(drawer.max_close || 0)}</TableCell>
                       </TableRow>
@@ -6333,7 +6327,9 @@ function CashDrawer() {
             const session = sessionDetails.session;
             const txns = sessionDetails.transactions || [];
             const adjs = sessionDetails.adjustments || [];
-            const showRunningBalance = !isBlindCount || session.status === 'closed';
+            const sessionIsSafe = session.drawer_type === 'safe' || session.drawer_type === 'master_safe';
+            const sessionBlindCount = sessionIsSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers;
+            const showRunningBalance = !sessionBlindCount || session.status === 'closed';
 
             const activities = [
               { time: session.opened_at, activityType: 'drawer_opened', label: 'Drawer Opened', amount: parseFloat(session.opening_balance), details: `Opened by ${session.employee_name}` },
@@ -6345,7 +6341,7 @@ function CashDrawer() {
                   : 'Transaction',
                 amount: parseFloat(t.amount || 0), // Cash amount (0 for non-cash transactions)
                 totalAmount: parseFloat(t.total_amount || 0), // Total transaction amount
-                details: t.transaction_id, // Show transaction_id in details
+                details: t.item_descriptions || t.transaction_id, // Show item descriptions or transaction_id
                 transaction_id: t.transaction_id,
               })),
               ...adjs.map(a => ({
@@ -6547,7 +6543,7 @@ function CashDrawer() {
                                 <IconButton
                                   size="small"
                                   color="primary"
-                                  onClick={() => viewQuickReportTransaction(act.transaction_id)}
+                                  onClick={() => viewQuickReportTransaction(act.transaction_id, act.label)}
                                 >
                                   <ViewIcon fontSize="small" />
                                 </IconButton>
@@ -6571,7 +6567,12 @@ function CashDrawer() {
       {/* Quick Report - Transaction Detail Dialog (read-only) */}
       <Dialog open={!!quickReportTxnDetail} onClose={() => setQuickReportTxnDetail(null)} maxWidth="sm" fullWidth>
         <DialogTitle>
-          Transaction Details: {quickReportTxnDetail?.transaction_id}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            Transaction Details: {quickReportTxnDetail?.transaction_id}
+            {quickReportTxnDetail?.transaction_type && (
+              <Chip label={quickReportTxnDetail.transaction_type} size="small" color="primary" variant="outlined" />
+            )}
+          </Box>
         </DialogTitle>
         <DialogContent>
           {quickReportTxnLoading ? (
@@ -6587,6 +6588,7 @@ function CashDrawer() {
                   <Table size="small">
                     <TableHead>
                       <TableRow>
+                        <TableCell>Type</TableCell>
                         <TableCell>Description</TableCell>
                         <TableCell align="center">Qty</TableCell>
                         <TableCell align="right">Price</TableCell>
@@ -6599,8 +6601,14 @@ function CashDrawer() {
                         const itemPrice = item.transaction_item_price || item.item_price || item.unit_price || item.price || 0;
                         // Use short_desc, long_desc, or description - prioritize short_desc, then long_desc, then description
                         const itemDescription = item.short_desc || item.long_desc || item.description || item.product_name || item.item_name || 'Item';
+                        const itemType = item.transaction_type ? item.transaction_type.charAt(0).toUpperCase() + item.transaction_type.slice(1) : '';
                         return (
                           <TableRow key={idx}>
+                            <TableCell>
+                              <Typography variant="body2" sx={{ fontWeight: 500, textTransform: 'capitalize' }}>
+                                {itemType}
+                              </Typography>
+                            </TableCell>
                             <TableCell>
                               <Typography variant="body2" sx={{ fontWeight: 500 }}>
                                 {itemDescription}
