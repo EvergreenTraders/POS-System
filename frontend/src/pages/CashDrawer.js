@@ -163,6 +163,20 @@ function CashDrawer() {
   });
   const [pettyCashSourceSession, setPettyCashSourceSession] = useState(null);
 
+  // Inter-store transfer states
+  const [stores, setStores] = useState([]);
+  const [currentStore, setCurrentStore] = useState(null);
+  const [interStoreTransferDialog, setInterStoreTransferDialog] = useState(false);
+  const [selectedDestinationStore, setSelectedDestinationStore] = useState('');
+  const [interStoreTransferAmount, setInterStoreTransferAmount] = useState('');
+  const [interStoreTransferNotes, setInterStoreTransferNotes] = useState('');
+  const [interStoreTransferSourceSession, setInterStoreTransferSourceSession] = useState(null);
+  const [pendingInterStoreTransfers, setPendingInterStoreTransfers] = useState([]);
+  const [receiveInterStoreDialog, setReceiveInterStoreDialog] = useState(false);
+  const [selectedPendingTransfer, setSelectedPendingTransfer] = useState(null);
+  const [receiveDestinationSession, setReceiveDestinationSession] = useState('');
+  const [receiveInterStoreNotes, setReceiveInterStoreNotes] = useState('');
+
   // Denomination states for Open Count mode
   const [openingDenominations, setOpeningDenominations] = useState({
     bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
@@ -233,6 +247,8 @@ function CashDrawer() {
     fetchElectronicPaymentMethods();
     fetchBanks();
     fetchPettyCashAccounts();
+    fetchStores();
+    fetchPendingInterStoreTransfers();
   }, []);
 
   // Update count mode when active session changes
@@ -512,6 +528,29 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching petty cash accounts:', err);
       setPettyCashAccounts([]);
+    }
+  };
+
+  const fetchStores = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/stores`);
+      setStores(Array.isArray(response.data) ? response.data : []);
+      // Find and set current store
+      const current = response.data.find(s => s.is_current_store);
+      setCurrentStore(current || null);
+    } catch (err) {
+      console.error('Error fetching stores:', err);
+      setStores([]);
+    }
+  };
+
+  const fetchPendingInterStoreTransfers = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/inter-store-transfers/pending`);
+      setPendingInterStoreTransfers(Array.isArray(response.data) ? response.data : []);
+    } catch (err) {
+      console.error('Error fetching pending inter-store transfers:', err);
+      setPendingInterStoreTransfers([]);
     }
   };
 
@@ -1707,6 +1746,95 @@ function CashDrawer() {
     }
   };
 
+  // Inter-store transfer functions
+  const openInterStoreTransferDialog = (sourceSession) => {
+    setInterStoreTransferSourceSession(sourceSession);
+    setSelectedDestinationStore('');
+    setInterStoreTransferAmount('');
+    setInterStoreTransferNotes('');
+    setInterStoreTransferDialog(true);
+  };
+
+  const handleSendInterStoreTransfer = async () => {
+    if (!selectedDestinationStore || !interStoreTransferSourceSession) {
+      showSnackbar('Please select a destination store', 'error');
+      return;
+    }
+
+    const transferAmount = parseFloat(interStoreTransferAmount) || 0;
+
+    if (transferAmount <= 0) {
+      showSnackbar('Please enter an amount to transfer', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/inter-store-transfers`, {
+        destination_store_id: parseInt(selectedDestinationStore),
+        source_session_id: interStoreTransferSourceSession.session_id,
+        amount: transferAmount,
+        transfer_type: 'cash',
+        send_notes: interStoreTransferNotes,
+        performed_by: currentUser.id
+      });
+
+      showSnackbar(`Inter-store transfer of ${formatCurrency(transferAmount)} sent successfully. Reference: ${response.data.reference_number}`, 'success');
+      setInterStoreTransferDialog(false);
+
+      // Refresh data
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview(),
+        fetchPendingInterStoreTransfers()
+      ]);
+    } catch (err) {
+      console.error('Error sending inter-store transfer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to send inter-store transfer', 'error');
+    }
+  };
+
+  const openReceiveInterStoreDialog = () => {
+    setSelectedPendingTransfer(null);
+    setReceiveDestinationSession('');
+    setReceiveInterStoreNotes('');
+    fetchPendingInterStoreTransfers();
+    setReceiveInterStoreDialog(true);
+  };
+
+  const handleReceiveInterStoreTransfer = async () => {
+    if (!selectedPendingTransfer || !receiveDestinationSession) {
+      showSnackbar('Please select a transfer and destination', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      await axios.post(`${API_BASE_URL}/inter-store-transfers/${selectedPendingTransfer.transfer_id}/receive`, {
+        destination_session_id: parseInt(receiveDestinationSession),
+        receive_notes: receiveInterStoreNotes,
+        performed_by: currentUser.id
+      });
+
+      showSnackbar(`Inter-store transfer of ${formatCurrency(selectedPendingTransfer.amount)} received successfully`, 'success');
+      setReceiveInterStoreDialog(false);
+
+      // Refresh data
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview(),
+        fetchPendingInterStoreTransfers()
+      ]);
+    } catch (err) {
+      console.error('Error receiving inter-store transfer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to receive inter-store transfer', 'error');
+    }
+  };
+
   // Check if drawer uses denominations (physical drawers always do, safes based on preference)
   const drawerUsesDenominations = (drawerType) => {
     if (drawerType === 'physical') return true;
@@ -2212,6 +2340,23 @@ function CashDrawer() {
                         onClick={() => openTransferDialog(activeSession, null)}
                       >
                         Transfer
+                      </Button>
+                      {/* Inter-store transfer buttons */}
+                      <Button
+                        variant="outlined"
+                        startIcon={<StoreIcon />}
+                        disabled={isStoreClosed || stores.filter(s => !s.is_current_store && s.is_active).length === 0}
+                        onClick={() => openInterStoreTransferDialog(activeSession)}
+                      >
+                        Send Inter-store
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        startIcon={<StoreIcon />}
+                        disabled={isStoreClosed || pendingInterStoreTransfers.length === 0}
+                        onClick={openReceiveInterStoreDialog}
+                      >
+                        Receive Inter-store {pendingInterStoreTransfers.length > 0 && `(${pendingInterStoreTransfers.length})`}
                       </Button>
                       {/* Show Bank Deposit and Withdrawal buttons only for Master Safe */}
                       {activeSession.drawer_type === 'master_safe' && (
@@ -4158,6 +4303,229 @@ function CashDrawer() {
             }
           >
             Complete Payout
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Send Inter-Store Transfer Dialog */}
+      <Dialog
+        open={interStoreTransferDialog}
+        onClose={() => setInterStoreTransferDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <StoreIcon />
+            Send Inter-Store Transfer
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {/* Source info */}
+            {interStoreTransferSourceSession && (
+              <Box sx={{ mb: 3, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+                <Typography variant="subtitle2" color="text.secondary">From</Typography>
+                <Typography variant="body1">
+                  {interStoreTransferSourceSession.drawer_name} - {currentStore?.store_name || 'This Store'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Balance: {formatCurrency(interStoreTransferSourceSession.current_expected_balance || 0)}
+                </Typography>
+              </Box>
+            )}
+
+            {/* Destination Store Selection */}
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel>Destination Store</InputLabel>
+              <Select
+                value={selectedDestinationStore}
+                onChange={(e) => setSelectedDestinationStore(e.target.value)}
+                label="Destination Store"
+              >
+                {stores.filter(s => !s.is_current_store && s.is_active).map((store) => (
+                  <MenuItem key={store.store_id} value={store.store_id}>
+                    {store.store_name} {store.store_code && `(${store.store_code})`}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {/* Transfer Amount */}
+            <TextField
+              fullWidth
+              label="Transfer Amount"
+              type="number"
+              value={interStoreTransferAmount}
+              onChange={(e) => setInterStoreTransferAmount(e.target.value)}
+              inputProps={{ min: 0, step: '0.01' }}
+              sx={{ mb: 2 }}
+              required
+            />
+
+            {/* Notes */}
+            <TextField
+              fullWidth
+              label="Notes (Optional)"
+              multiline
+              rows={2}
+              value={interStoreTransferNotes}
+              onChange={(e) => setInterStoreTransferNotes(e.target.value)}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setInterStoreTransferDialog(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSendInterStoreTransfer}
+            variant="contained"
+            color="primary"
+            disabled={
+              !selectedDestinationStore ||
+              !interStoreTransferSourceSession ||
+              isStoreClosed ||
+              !interStoreTransferAmount ||
+              parseFloat(interStoreTransferAmount) <= 0
+            }
+          >
+            Send Transfer
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Receive Inter-Store Transfer Dialog */}
+      <Dialog
+        open={receiveInterStoreDialog}
+        onClose={() => setReceiveInterStoreDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <StoreIcon />
+            Receive Inter-Store Transfer
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {pendingInterStoreTransfers.length === 0 ? (
+              <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                No pending inter-store transfers to receive.
+              </Typography>
+            ) : (
+              <>
+                {/* Pending Transfers List */}
+                <Typography variant="subtitle1" gutterBottom>
+                  Select a Transfer to Receive
+                </Typography>
+                <TableContainer component={Paper} variant="outlined" sx={{ mb: 3, maxHeight: 300 }}>
+                  <Table size="small" stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell padding="checkbox"></TableCell>
+                        <TableCell>Reference</TableCell>
+                        <TableCell>From Store</TableCell>
+                        <TableCell>Amount</TableCell>
+                        <TableCell>Sent By</TableCell>
+                        <TableCell>Sent At</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {pendingInterStoreTransfers.map((transfer) => (
+                        <TableRow
+                          key={transfer.transfer_id}
+                          hover
+                          selected={selectedPendingTransfer?.transfer_id === transfer.transfer_id}
+                          onClick={() => setSelectedPendingTransfer(transfer)}
+                          sx={{ cursor: 'pointer' }}
+                        >
+                          <TableCell padding="checkbox">
+                            <input
+                              type="radio"
+                              checked={selectedPendingTransfer?.transfer_id === transfer.transfer_id}
+                              onChange={() => setSelectedPendingTransfer(transfer)}
+                            />
+                          </TableCell>
+                          <TableCell>{transfer.reference_number}</TableCell>
+                          <TableCell>{transfer.source_store_name}</TableCell>
+                          <TableCell>{formatCurrency(transfer.amount)}</TableCell>
+                          <TableCell>{transfer.sent_by_name}</TableCell>
+                          <TableCell>{new Date(transfer.sent_at).toLocaleString()}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+
+                {/* Selected transfer details */}
+                {selectedPendingTransfer && (
+                  <Box sx={{ mb: 3, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Transfer Details
+                    </Typography>
+                    <Grid container spacing={2}>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" color="text.secondary">Reference</Typography>
+                        <Typography>{selectedPendingTransfer.reference_number}</Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" color="text.secondary">Amount</Typography>
+                        <Typography>{formatCurrency(selectedPendingTransfer.amount)}</Typography>
+                      </Grid>
+                      <Grid item xs={12}>
+                        <Typography variant="caption" color="text.secondary">Notes</Typography>
+                        <Typography>{selectedPendingTransfer.send_notes || 'No notes'}</Typography>
+                      </Grid>
+                    </Grid>
+                  </Box>
+                )}
+
+                {/* Destination Selection */}
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>Deposit Into</InputLabel>
+                  <Select
+                    value={receiveDestinationSession}
+                    onChange={(e) => setReceiveDestinationSession(e.target.value)}
+                    label="Deposit Into"
+                  >
+                    {allActiveSessions.map((session) => (
+                      <MenuItem key={session.session_id} value={session.session_id}>
+                        {session.drawer_name} ({formatCurrency(session.current_expected_balance || 0)})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                {/* Notes */}
+                <TextField
+                  fullWidth
+                  label="Receive Notes (Optional)"
+                  multiline
+                  rows={2}
+                  value={receiveInterStoreNotes}
+                  onChange={(e) => setReceiveInterStoreNotes(e.target.value)}
+                />
+              </>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReceiveInterStoreDialog(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleReceiveInterStoreTransfer}
+            variant="contained"
+            color="primary"
+            disabled={
+              !selectedPendingTransfer ||
+              !receiveDestinationSession ||
+              isStoreClosed
+            }
+          >
+            Receive Transfer
           </Button>
         </DialogActions>
       </Dialog>

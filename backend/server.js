@@ -2269,6 +2269,510 @@ app.get('/api/petty-cash-payouts', async (req, res) => {
   }
 });
 
+// ==================== INTER-STORE TRANSFERS ====================
+
+// GET /api/stores - Get all stores
+app.get('/api/stores', async (req, res) => {
+  const { include_inactive } = req.query;
+
+  try {
+    let query = 'SELECT * FROM stores';
+    if (!include_inactive) {
+      query += ' WHERE is_active = TRUE';
+    }
+    query += ' ORDER BY is_current_store DESC, store_name ASC';
+
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching stores:', error);
+    res.status(500).json({ error: 'Failed to fetch stores' });
+  }
+});
+
+// GET /api/stores/current - Get the current store
+app.get('/api/stores/current', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM stores WHERE is_current_store = TRUE LIMIT 1'
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Current store not configured' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching current store:', error);
+    res.status(500).json({ error: 'Failed to fetch current store' });
+  }
+});
+
+// POST /api/stores - Create a new store
+app.post('/api/stores', async (req, res) => {
+  const { store_name, store_code, address, phone, email, is_current_store } = req.body;
+
+  if (!store_name) {
+    return res.status(400).json({ error: 'store_name is required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // If setting as current store, unset any existing current store
+    if (is_current_store) {
+      await client.query('UPDATE stores SET is_current_store = FALSE WHERE is_current_store = TRUE');
+    }
+
+    const result = await client.query(`
+      INSERT INTO stores (store_name, store_code, address, phone, email, is_current_store)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `, [store_name, store_code || null, address || null, phone || null, email || null, is_current_store || false]);
+
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating store:', error);
+    if (error.code === '23505') { // Unique violation
+      res.status(400).json({ error: 'Store code already exists' });
+    } else {
+      res.status(500).json({ error: 'Failed to create store' });
+    }
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/stores/:storeId - Update a store
+app.put('/api/stores/:storeId', async (req, res) => {
+  const { storeId } = req.params;
+  const { store_name, store_code, address, phone, email, is_active, is_current_store } = req.body;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // If setting as current store, unset any existing current store
+    if (is_current_store) {
+      await client.query('UPDATE stores SET is_current_store = FALSE WHERE is_current_store = TRUE AND store_id != $1', [storeId]);
+    }
+
+    const result = await client.query(`
+      UPDATE stores SET
+        store_name = COALESCE($1, store_name),
+        store_code = COALESCE($2, store_code),
+        address = COALESCE($3, address),
+        phone = COALESCE($4, phone),
+        email = COALESCE($5, email),
+        is_active = COALESCE($6, is_active),
+        is_current_store = COALESCE($7, is_current_store),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE store_id = $8
+      RETURNING *
+    `, [store_name, store_code, address, phone, email, is_active, is_current_store, storeId]);
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Store not found' });
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating store:', error);
+    res.status(500).json({ error: 'Failed to update store' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/inter-store-transfers - Get inter-store transfer history
+app.get('/api/inter-store-transfers', async (req, res) => {
+  const { status, limit = 50, offset = 0 } = req.query;
+
+  try {
+    let query = 'SELECT * FROM inter_store_transfer_history WHERE 1=1';
+    const params = [];
+    let paramCount = 1;
+
+    if (status) {
+      params.push(status);
+      query += ` AND status = $${paramCount++}`;
+    }
+
+    query += ' ORDER BY sent_at DESC';
+
+    params.push(limit, offset);
+    query += ` LIMIT $${paramCount++} OFFSET $${paramCount++}`;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching inter-store transfers:', error);
+    res.status(500).json({ error: 'Failed to fetch inter-store transfers' });
+  }
+});
+
+// GET /api/inter-store-transfers/pending - Get pending transfers to receive at current store
+app.get('/api/inter-store-transfers/pending', async (req, res) => {
+  try {
+    // Get current store
+    const currentStoreResult = await pool.query(
+      'SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1'
+    );
+
+    if (currentStoreResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Current store not configured' });
+    }
+
+    const currentStoreId = currentStoreResult.rows[0].store_id;
+
+    // Get pending transfers destined for current store
+    const result = await pool.query(`
+      SELECT * FROM pending_inter_store_transfers
+      WHERE destination_store_code = (SELECT store_code FROM stores WHERE store_id = $1)
+      ORDER BY sent_at DESC
+    `, [currentStoreId]);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching pending inter-store transfers:', error);
+    res.status(500).json({ error: 'Failed to fetch pending inter-store transfers' });
+  }
+});
+
+// POST /api/inter-store-transfers - Send money to another store
+app.post('/api/inter-store-transfers', async (req, res) => {
+  const {
+    destination_store_id,
+    source_session_id,
+    amount,
+    transfer_type = 'cash',
+    send_notes,
+    performed_by
+  } = req.body;
+
+  // Validation
+  if (!destination_store_id || !source_session_id || !amount || !performed_by) {
+    return res.status(400).json({
+      error: 'destination_store_id, source_session_id, amount, and performed_by are required'
+    });
+  }
+
+  if (parseFloat(amount) <= 0) {
+    return res.status(400).json({ error: 'Transfer amount must be positive' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Get current store
+    const currentStoreResult = await client.query(
+      'SELECT store_id, store_name FROM stores WHERE is_current_store = TRUE LIMIT 1'
+    );
+
+    if (currentStoreResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Current store not configured' });
+    }
+
+    const sourceStoreId = currentStoreResult.rows[0].store_id;
+    const sourceStoreName = currentStoreResult.rows[0].store_name;
+
+    // Verify destination store exists and is not current store
+    const destStoreResult = await client.query(
+      'SELECT store_id, store_name FROM stores WHERE store_id = $1 AND is_active = TRUE',
+      [destination_store_id]
+    );
+
+    if (destStoreResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Destination store not found or inactive' });
+    }
+
+    if (destStoreResult.rows[0].store_id === sourceStoreId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Cannot transfer to the same store' });
+    }
+
+    const destStoreName = destStoreResult.rows[0].store_name;
+
+    // Verify source session exists and is open
+    const sessionCheck = await client.query(`
+      SELECT s.session_id, s.status, d.drawer_type, d.drawer_name
+      FROM cash_drawer_sessions s
+      JOIN drawers d ON s.drawer_id = d.drawer_id
+      WHERE s.session_id = $1
+    `, [source_session_id]);
+
+    if (sessionCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Source session not found' });
+    }
+
+    if (sessionCheck.rows[0].status !== 'open') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Source session is not open' });
+    }
+
+    const sourceDrawerName = sessionCheck.rows[0].drawer_name;
+    const transferAmount = parseFloat(amount);
+
+    // Generate reference number
+    const refResult = await client.query('SELECT generate_transfer_reference() AS ref');
+    const referenceNumber = refResult.rows[0].ref;
+
+    // Create adjustment record (deducting from source)
+    const adjustmentResult = await client.query(`
+      INSERT INTO cash_drawer_adjustments (session_id, amount, adjustment_type, reason, performed_by)
+      VALUES ($1, $2, 'transfer', $3, $4)
+      RETURNING adjustment_id
+    `, [source_session_id, -transferAmount, `Inter-store transfer to ${destStoreName} (Ref: ${referenceNumber})`, performed_by]);
+
+    const adjustmentId = adjustmentResult.rows[0].adjustment_id;
+
+    // Create inter-store transfer record
+    const transferResult = await client.query(`
+      INSERT INTO inter_store_transfers (
+        source_store_id, destination_store_id, amount, transfer_type, status,
+        source_session_id, source_adjustment_id, sent_by, send_notes, reference_number
+      ) VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9)
+      RETURNING *
+    `, [sourceStoreId, destination_store_id, transferAmount, transfer_type,
+        source_session_id, adjustmentId, performed_by, send_notes || null, referenceNumber]);
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      message: 'Inter-store transfer sent successfully',
+      transfer: transferResult.rows[0],
+      reference_number: referenceNumber,
+      source_store: sourceStoreName,
+      destination_store: destStoreName,
+      source_drawer: sourceDrawerName
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating inter-store transfer:', error);
+    res.status(500).json({ error: 'Failed to create inter-store transfer' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/inter-store-transfers/:transferId/receive - Receive a pending transfer
+app.post('/api/inter-store-transfers/:transferId/receive', async (req, res) => {
+  const { transferId } = req.params;
+  const { destination_session_id, receive_notes, performed_by } = req.body;
+
+  // Validation
+  if (!destination_session_id || !performed_by) {
+    return res.status(400).json({
+      error: 'destination_session_id and performed_by are required'
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Get current store
+    const currentStoreResult = await client.query(
+      'SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1'
+    );
+
+    if (currentStoreResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Current store not configured' });
+    }
+
+    const currentStoreId = currentStoreResult.rows[0].store_id;
+
+    // Get transfer and verify it's pending and destined for this store
+    const transferCheck = await client.query(`
+      SELECT t.*, ss.store_name AS source_store_name
+      FROM inter_store_transfers t
+      JOIN stores ss ON t.source_store_id = ss.store_id
+      WHERE t.transfer_id = $1
+    `, [transferId]);
+
+    if (transferCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = transferCheck.rows[0];
+
+    if (transfer.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Transfer is already ${transfer.status}` });
+    }
+
+    if (transfer.destination_store_id !== currentStoreId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'This transfer is not destined for your store' });
+    }
+
+    // Verify destination session exists and is open
+    const sessionCheck = await client.query(`
+      SELECT s.session_id, s.status, d.drawer_type, d.drawer_name
+      FROM cash_drawer_sessions s
+      JOIN drawers d ON s.drawer_id = d.drawer_id
+      WHERE s.session_id = $1
+    `, [destination_session_id]);
+
+    if (sessionCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Destination session not found' });
+    }
+
+    if (sessionCheck.rows[0].status !== 'open') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Destination session is not open' });
+    }
+
+    const destDrawerName = sessionCheck.rows[0].drawer_name;
+
+    // Create adjustment record (adding to destination)
+    const adjustmentResult = await client.query(`
+      INSERT INTO cash_drawer_adjustments (session_id, amount, adjustment_type, reason, performed_by)
+      VALUES ($1, $2, 'transfer', $3, $4)
+      RETURNING adjustment_id
+    `, [destination_session_id, transfer.amount,
+        `Inter-store transfer from ${transfer.source_store_name} (Ref: ${transfer.reference_number})`,
+        performed_by]);
+
+    const adjustmentId = adjustmentResult.rows[0].adjustment_id;
+
+    // Update transfer record
+    const updateResult = await client.query(`
+      UPDATE inter_store_transfers SET
+        status = 'received',
+        destination_session_id = $1,
+        destination_adjustment_id = $2,
+        received_by = $3,
+        received_at = CURRENT_TIMESTAMP,
+        receive_notes = $4
+      WHERE transfer_id = $5
+      RETURNING *
+    `, [destination_session_id, adjustmentId, performed_by, receive_notes || null, transferId]);
+
+    await client.query('COMMIT');
+
+    res.json({
+      message: 'Inter-store transfer received successfully',
+      transfer: updateResult.rows[0],
+      destination_drawer: destDrawerName
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error receiving inter-store transfer:', error);
+    res.status(500).json({ error: 'Failed to receive inter-store transfer' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/inter-store-transfers/:transferId/cancel - Cancel a pending transfer
+app.post('/api/inter-store-transfers/:transferId/cancel', async (req, res) => {
+  const { transferId } = req.params;
+  const { cancel_reason, performed_by } = req.body;
+
+  if (!performed_by) {
+    return res.status(400).json({ error: 'performed_by is required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Get current store
+    const currentStoreResult = await client.query(
+      'SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1'
+    );
+
+    if (currentStoreResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Current store not configured' });
+    }
+
+    const currentStoreId = currentStoreResult.rows[0].store_id;
+
+    // Get transfer and verify it's pending
+    const transferCheck = await client.query(
+      'SELECT * FROM inter_store_transfers WHERE transfer_id = $1',
+      [transferId]
+    );
+
+    if (transferCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    const transfer = transferCheck.rows[0];
+
+    if (transfer.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Transfer is already ${transfer.status}` });
+    }
+
+    // Only allow cancellation from source store
+    if (transfer.source_store_id !== currentStoreId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Only the sending store can cancel a transfer' });
+    }
+
+    // Reverse the adjustment (add money back to source)
+    if (transfer.source_session_id && transfer.source_adjustment_id) {
+      // Check if session is still open
+      const sessionCheck = await client.query(
+        'SELECT status FROM cash_drawer_sessions WHERE session_id = $1',
+        [transfer.source_session_id]
+      );
+
+      if (sessionCheck.rows.length > 0 && sessionCheck.rows[0].status === 'open') {
+        // Create reversal adjustment
+        await client.query(`
+          INSERT INTO cash_drawer_adjustments (session_id, amount, adjustment_type, reason, performed_by)
+          VALUES ($1, $2, 'correction', $3, $4)
+        `, [transfer.source_session_id, transfer.amount,
+            `Cancelled inter-store transfer (Ref: ${transfer.reference_number})`, performed_by]);
+      }
+    }
+
+    // Update transfer record
+    const updateResult = await client.query(`
+      UPDATE inter_store_transfers SET
+        status = 'cancelled',
+        cancelled_by = $1,
+        cancelled_at = CURRENT_TIMESTAMP,
+        cancel_reason = $2
+      WHERE transfer_id = $3
+      RETURNING *
+    `, [performed_by, cancel_reason || null, transferId]);
+
+    await client.query('COMMIT');
+
+    res.json({
+      message: 'Inter-store transfer cancelled successfully',
+      transfer: updateResult.rows[0]
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error cancelling inter-store transfer:', error);
+    res.status(500).json({ error: 'Failed to cancel inter-store transfer' });
+  } finally {
+    client.release();
+  }
+});
+
+// ==================== END INTER-STORE TRANSFERS ====================
+
 // POST /api/cash-drawer/:sessionId/transaction - Link a cash transaction to a drawer session
 app.post('/api/cash-drawer/:sessionId/transaction', async (req, res) => {
   const { sessionId } = req.params;
