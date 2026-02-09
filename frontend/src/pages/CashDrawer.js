@@ -59,6 +59,9 @@ import {
   Search as SearchIcon,
   FilterList as FilterIcon,
   DateRange as DateRangeIcon,
+  Edit as EditIcon,
+  ContentCopy as CopyIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -129,6 +132,27 @@ function CashDrawer() {
   });
   const [filterAnchor, setFilterAnchor] = useState({});
   const [sortAnchor, setSortAnchor] = useState({});
+
+  // Configure Safe/Drawer states
+  const [configDrawers, setConfigDrawers] = useState([]);
+  const [selectedConfigDrawer, setSelectedConfigDrawer] = useState(null);
+  const [addDrawerDialog, setAddDrawerDialog] = useState(false);
+  const [editDrawerDialog, setEditDrawerDialog] = useState(false);
+  const [deleteDrawerDialog, setDeleteDrawerDialog] = useState(false);
+  const [newDrawerForm, setNewDrawerForm] = useState({
+    drawer_type: 'physical',
+    count: 1,
+    drawer_name: '',
+    is_active: true,
+    min_close: 0,
+    max_close: 0
+  });
+  const [editDrawerForm, setEditDrawerForm] = useState({
+    drawer_name: '',
+    is_active: true,
+    min_close: 0,
+    max_close: 0
+  });
 
   // Manager approval form states
   const [managerUsername, setManagerUsername] = useState('');
@@ -377,6 +401,137 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching drawers:', err);
       showSnackbar('Failed to load drawers', 'error');
+    }
+  };
+
+  const fetchConfigDrawers = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/drawers`);
+      setConfigDrawers(response.data || []);
+    } catch (err) {
+      console.error('Error fetching config drawers:', err);
+      showSnackbar('Failed to load drawer configuration', 'error');
+    }
+  };
+
+  const handleAddDrawer = async () => {
+    try {
+      const drawersToCreate = [];
+      for (let i = 0; i < newDrawerForm.count; i++) {
+        const drawerName = newDrawerForm.drawer_name || 
+          (newDrawerForm.drawer_type === 'safe' 
+            ? `Safe${configDrawers.filter(d => d.drawer_type === 'safe').length + i + 1}`
+            : `Drawer ${configDrawers.filter(d => d.drawer_type === 'physical').length + i + 1}`);
+        
+        drawersToCreate.push({
+          drawer_name: drawerName,
+          drawer_type: newDrawerForm.drawer_type,
+          is_active: newDrawerForm.is_active,
+          min_close: newDrawerForm.min_close,
+          max_close: newDrawerForm.max_close
+        });
+      }
+
+      for (const drawer of drawersToCreate) {
+        await axios.post(`${API_BASE_URL}/drawers`, drawer);
+      }
+
+      await fetchConfigDrawers();
+      await fetchDrawers();
+      setAddDrawerDialog(false);
+      setSelectedConfigDrawer(null);
+      showSnackbar(`Successfully added ${newDrawerForm.count} ${newDrawerForm.drawer_type === 'safe' ? 'safe(s)' : 'drawer(s)'}`, 'success');
+    } catch (err) {
+      console.error('Error adding drawer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to add drawer', 'error');
+    }
+  };
+
+  const handleCopyDrawer = () => {
+    if (!selectedConfigDrawer) return;
+    
+    const baseName = selectedConfigDrawer.drawer_name;
+    const copyName = baseName.includes('-') 
+      ? baseName.replace(/-(\d+)$/, (match, num) => `-${parseInt(num) + 1}`)
+      : `${baseName}-2`;
+    
+    setNewDrawerForm({
+      drawer_type: selectedConfigDrawer.drawer_type,
+      count: 1,
+      drawer_name: copyName,
+      is_active: selectedConfigDrawer.is_active,
+      min_close: selectedConfigDrawer.min_close || 0,
+      max_close: selectedConfigDrawer.max_close || 0
+    });
+    setAddDrawerDialog(true);
+  };
+
+  const handleEditDrawer = () => {
+    if (!selectedConfigDrawer) return;
+    
+    setEditDrawerForm({
+      drawer_name: selectedConfigDrawer.drawer_name,
+      is_active: selectedConfigDrawer.is_active,
+      min_close: selectedConfigDrawer.min_close || 0,
+      max_close: selectedConfigDrawer.max_close || 0
+    });
+    setEditDrawerDialog(true);
+  };
+
+  const handleSaveEditDrawer = async () => {
+    if (!selectedConfigDrawer) return;
+    
+    try {
+      // Check if drawer is open
+      const isOpen = activeSessions.some(s => s.drawer_id === selectedConfigDrawer.drawer_id);
+      if (isOpen && !editDrawerForm.is_active) {
+        showSnackbar('Cannot make an open drawer unavailable', 'error');
+        return;
+      }
+
+      await axios.put(`${API_BASE_URL}/drawers/${selectedConfigDrawer.drawer_id}`, {
+        drawer_name: editDrawerForm.drawer_name,
+        is_active: editDrawerForm.is_active,
+        min_close: editDrawerForm.min_close,
+        max_close: editDrawerForm.max_close
+      });
+
+      await fetchConfigDrawers();
+      await fetchDrawers();
+      setEditDrawerDialog(false);
+      setSelectedConfigDrawer(null);
+      showSnackbar('Drawer updated successfully', 'success');
+    } catch (err) {
+      console.error('Error updating drawer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to update drawer', 'error');
+    }
+  };
+
+  const handleDeleteDrawer = async () => {
+    if (!selectedConfigDrawer) return;
+    
+    try {
+      // Check if drawer is open
+      const isOpen = activeSessions.some(s => s.drawer_id === selectedConfigDrawer.drawer_id);
+      if (isOpen) {
+        showSnackbar('Cannot delete an open drawer. Please close it first.', 'error');
+        setDeleteDrawerDialog(false);
+        return;
+      }
+
+      // Check if drawer has balance (would need to check session history or current balance)
+      // For now, we'll just delete and let backend handle it
+      
+      await axios.delete(`${API_BASE_URL}/drawers/${selectedConfigDrawer.drawer_id}`);
+      
+      await fetchConfigDrawers();
+      await fetchDrawers();
+      setDeleteDrawerDialog(false);
+      setSelectedConfigDrawer(null);
+      showSnackbar('Drawer deleted successfully', 'success');
+    } catch (err) {
+      console.error('Error deleting drawer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to delete drawer', 'error');
     }
   };
 
@@ -2401,6 +2556,7 @@ function CashDrawer() {
         <Tab label="Active Session" />
         <Tab label="History" />
         <Tab label="Transaction Journal" />
+        <Tab label="Configure Safe / Drawer" />
       </Tabs>
 
       {/* Active Session Tab */}
@@ -3563,6 +3719,285 @@ function CashDrawer() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setJournalViewDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Configure Safe / Drawer Tab */}
+      {tabValue === 3 && (
+        <Box>
+          <Paper sx={{ p: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h6">Configure Safe / Drawer</Typography>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={() => {
+                    setNewDrawerForm({
+                      drawer_type: 'physical',
+                      count: 1,
+                      drawer_name: '',
+                      is_active: true,
+                      min_close: 0,
+                      max_close: 0
+                    });
+                    setAddDrawerDialog(true);
+                  }}
+                >
+                  Add
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<CopyIcon />}
+                  disabled={!selectedConfigDrawer || selectedConfigDrawer.drawer_name === 'Master'}
+                  onClick={handleCopyDrawer}
+                >
+                  Copy
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<EditIcon />}
+                  disabled={!selectedConfigDrawer}
+                  onClick={handleEditDrawer}
+                >
+                  Edit
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<DeleteIcon />}
+                  disabled={!selectedConfigDrawer || selectedConfigDrawer.drawer_name === 'Master'}
+                  onClick={() => setDeleteDrawerDialog(true)}
+                >
+                  Delete
+                </Button>
+              </Box>
+            </Box>
+
+            {/* SAFE Section */}
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, mt: 2 }}>SAFE</Typography>
+            <TableContainer sx={{ mb: 3 }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: '#1976d2' }}>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', width: 50 }}></TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Name</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Available</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Tracking</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Physical Count</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Electronic Count</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Min Amount</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Max Amount</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {configDrawers
+                    .filter(d => d.drawer_type === 'safe' || d.drawer_type === 'master_safe')
+                    .map((drawer) => (
+                      <TableRow
+                        key={drawer.drawer_id}
+                        hover
+                        selected={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
+                        onClick={() => setSelectedConfigDrawer(drawer)}
+                        sx={{
+                          bgcolor: selectedConfigDrawer?.drawer_id === drawer.drawer_id ? '#e3f2fd' : 'white',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
+                            onChange={() => setSelectedConfigDrawer(drawer)}
+                          />
+                        </TableCell>
+                        <TableCell>{drawer.drawer_name}</TableCell>
+                        <TableCell>{drawer.is_active ? 'Y' : 'N'}</TableCell>
+                        <TableCell>{drawer.drawer_type === 'master_safe' ? 'Rep' : 'Loc'}</TableCell>
+                        <TableCell>Denoms</TableCell>
+                        <TableCell>Open</TableCell>
+                        <TableCell>—</TableCell>
+                        <TableCell>{formatCurrency(drawer.min_close || 0)}</TableCell>
+                        <TableCell>{formatCurrency(drawer.max_close || 0)}</TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            {/* DRAWER Section */}
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>DRAWER</Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: '#1976d2' }}>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', width: 50 }}></TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Name</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Available</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Tracking</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Physical Count</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Electronic Count</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Min Amount</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Max Amount</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {configDrawers
+                    .filter(d => d.drawer_type === 'physical')
+                    .map((drawer) => (
+                      <TableRow
+                        key={drawer.drawer_id}
+                        hover
+                        selected={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
+                        onClick={() => setSelectedConfigDrawer(drawer)}
+                        sx={{
+                          bgcolor: selectedConfigDrawer?.drawer_id === drawer.drawer_id ? '#e3f2fd' : 'white',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
+                            onChange={() => setSelectedConfigDrawer(drawer)}
+                          />
+                        </TableCell>
+                        <TableCell>{drawer.drawer_name}</TableCell>
+                        <TableCell>{drawer.is_active ? 'Y' : 'N'}</TableCell>
+                        <TableCell>{drawer.is_shared ? 'Shared' : 'Single'}</TableCell>
+                        <TableCell>Balance</TableCell>
+                        <TableCell>Blind</TableCell>
+                        <TableCell>Open</TableCell>
+                        <TableCell>{formatCurrency(drawer.min_close || 0)}</TableCell>
+                        <TableCell>{formatCurrency(drawer.max_close || 0)}</TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+        </Box>
+      )}
+
+      {/* Add Drawer Dialog */}
+      <Dialog open={addDrawerDialog} onClose={() => setAddDrawerDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add Safe / Drawer</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <FormControl fullWidth>
+              <InputLabel>Type</InputLabel>
+              <Select
+                value={newDrawerForm.drawer_type}
+                onChange={(e) => setNewDrawerForm({ ...newDrawerForm, drawer_type: e.target.value })}
+                label="Type"
+              >
+                <MenuItem value="physical">Drawer</MenuItem>
+                <MenuItem value="safe">Safe</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              label="How Many"
+              type="number"
+              value={newDrawerForm.count}
+              onChange={(e) => setNewDrawerForm({ ...newDrawerForm, count: parseInt(e.target.value) || 1 })}
+              inputProps={{ min: 1, max: 50 }}
+              fullWidth
+            />
+            <TextField
+              label="Name (optional, will auto-generate if empty)"
+              value={newDrawerForm.drawer_name}
+              onChange={(e) => setNewDrawerForm({ ...newDrawerForm, drawer_name: e.target.value })}
+              fullWidth
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={newDrawerForm.is_active}
+                  onChange={(e) => setNewDrawerForm({ ...newDrawerForm, is_active: e.target.checked })}
+                />
+              }
+              label="Available"
+            />
+            <TextField
+              label="Min Amount"
+              type="number"
+              value={newDrawerForm.min_close}
+              onChange={(e) => setNewDrawerForm({ ...newDrawerForm, min_close: parseFloat(e.target.value) || 0 })}
+              fullWidth
+            />
+            <TextField
+              label="Max Amount"
+              type="number"
+              value={newDrawerForm.max_close}
+              onChange={(e) => setNewDrawerForm({ ...newDrawerForm, max_close: parseFloat(e.target.value) || 0 })}
+              fullWidth
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddDrawerDialog(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleAddDrawer}>Add</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Drawer Dialog */}
+      <Dialog open={editDrawerDialog} onClose={() => setEditDrawerDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit Safe / Drawer</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="Name"
+              value={editDrawerForm.drawer_name}
+              onChange={(e) => setEditDrawerForm({ ...editDrawerForm, drawer_name: e.target.value })}
+              fullWidth
+              disabled={selectedConfigDrawer?.drawer_name === 'Master'}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={editDrawerForm.is_active}
+                  onChange={(e) => setEditDrawerForm({ ...editDrawerForm, is_active: e.target.checked })}
+                  disabled={selectedConfigDrawer?.drawer_name === 'Master' || (selectedConfigDrawer && activeSessions.some(s => s.drawer_id === selectedConfigDrawer.drawer_id))}
+                />
+              }
+              label="Available"
+            />
+            <TextField
+              label="Min Amount"
+              type="number"
+              value={editDrawerForm.min_close}
+              onChange={(e) => setEditDrawerForm({ ...editDrawerForm, min_close: parseFloat(e.target.value) || 0 })}
+              fullWidth
+            />
+            <TextField
+              label="Max Amount"
+              type="number"
+              value={editDrawerForm.max_close}
+              onChange={(e) => setEditDrawerForm({ ...editDrawerForm, max_close: parseFloat(e.target.value) || 0 })}
+              fullWidth
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDrawerDialog(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleSaveEditDrawer}>Save</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Drawer Dialog */}
+      <Dialog open={deleteDrawerDialog} onClose={() => setDeleteDrawerDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Delete Safe / Drawer</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Are you sure you want to delete "{selectedConfigDrawer?.drawer_name}"?
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            This action cannot be undone. Make sure the drawer is not currently open.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDrawerDialog(false)}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={handleDeleteDrawer}>Delete</Button>
         </DialogActions>
       </Dialog>
 

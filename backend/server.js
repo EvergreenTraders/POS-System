@@ -3514,6 +3514,191 @@ app.get('/api/drawers', async (req, res) => {
   }
 });
 
+// POST /api/drawers - Create a new drawer
+app.post('/api/drawers', async (req, res) => {
+  try {
+    const { drawer_name, drawer_type, is_active, min_close, max_close } = req.body;
+
+    if (!drawer_name || !drawer_type) {
+      return res.status(400).json({ error: 'drawer_name and drawer_type are required' });
+    }
+
+    // Get current store id
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
+    if (!currentStoreId) {
+      return res.status(400).json({ error: 'No current store found' });
+    }
+
+    // Check if master_safe already exists (only one allowed)
+    if (drawer_type === 'master_safe') {
+      const existingMaster = await pool.query(
+        'SELECT drawer_id FROM drawers WHERE drawer_type = $1 AND store_id = $2',
+        ['master_safe', currentStoreId]
+      );
+      if (existingMaster.rows.length > 0) {
+        return res.status(400).json({ error: 'Master safe already exists. Only one master safe is allowed.' });
+      }
+    }
+
+    // Get max display_order for this drawer type
+    const maxOrderResult = await pool.query(
+      'SELECT COALESCE(MAX(display_order), 0) as max_order FROM drawers WHERE drawer_type = $1 AND store_id = $2',
+      [drawer_type, currentStoreId]
+    );
+    const nextOrder = (maxOrderResult.rows[0].max_order || 0) + 1;
+
+    const result = await pool.query(
+      `INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, min_close, max_close, store_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [drawer_name, drawer_type, is_active !== false, nextOrder, min_close || 0, max_close || 0, currentStoreId]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating drawer:', error);
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A drawer with this name already exists' });
+    }
+    res.status(500).json({ error: 'Failed to create drawer' });
+  }
+});
+
+// PUT /api/drawers/:drawerId - Update a drawer
+app.put('/api/drawers/:drawerId', async (req, res) => {
+  try {
+    const { drawerId } = req.params;
+    const { drawer_name, is_active, min_close, max_close } = req.body;
+
+    // Get current store id
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
+    // Check if drawer exists and belongs to current store
+    const drawerCheck = await pool.query(
+      'SELECT drawer_id, drawer_name, drawer_type FROM drawers WHERE drawer_id = $1 AND store_id = $2',
+      [drawerId, currentStoreId]
+    );
+
+    if (drawerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Drawer not found' });
+    }
+
+    const drawer = drawerCheck.rows[0];
+
+    // Master safe name cannot be changed
+    if (drawer.drawer_name === 'Master' && drawer_name && drawer_name !== 'Master') {
+      return res.status(400).json({ error: 'Master safe name cannot be changed' });
+    }
+
+    // Check if drawer is open when trying to make it unavailable
+    if (is_active === false) {
+      const activeSession = await pool.query(
+        'SELECT session_id FROM cash_drawer_sessions WHERE drawer_id = $1 AND status = $2',
+        [drawerId, 'open']
+      );
+
+      if (activeSession.rows.length > 0) {
+        return res.status(400).json({
+          error: 'Cannot make an open drawer unavailable. Please close the drawer first.'
+        });
+      }
+    }
+
+    // Build update query dynamically
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (drawer_name !== undefined) {
+      updates.push(`drawer_name = $${paramCount++}`);
+      values.push(drawer_name);
+    }
+    if (is_active !== undefined) {
+      updates.push(`is_active = $${paramCount++}`);
+      values.push(is_active);
+    }
+    if (min_close !== undefined) {
+      updates.push(`min_close = $${paramCount++}`);
+      values.push(min_close);
+    }
+    if (max_close !== undefined) {
+      updates.push(`max_close = $${paramCount++}`);
+      values.push(max_close);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    values.push(drawerId);
+
+    const result = await pool.query(
+      `UPDATE drawers SET ${updates.join(', ')} WHERE drawer_id = $${paramCount} RETURNING *`,
+      values
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating drawer:', error);
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A drawer with this name already exists' });
+    }
+    res.status(500).json({ error: 'Failed to update drawer' });
+  }
+});
+
+// DELETE /api/drawers/:drawerId - Delete a drawer
+app.delete('/api/drawers/:drawerId', async (req, res) => {
+  try {
+    const { drawerId } = req.params;
+
+    // Get current store id
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
+    // Check if drawer exists and belongs to current store
+    const drawerCheck = await pool.query(
+      'SELECT drawer_id, drawer_name, drawer_type FROM drawers WHERE drawer_id = $1 AND store_id = $2',
+      [drawerId, currentStoreId]
+    );
+
+    if (drawerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Drawer not found' });
+    }
+
+    const drawer = drawerCheck.rows[0];
+
+    // Master safe cannot be deleted
+    if (drawer.drawer_name === 'Master' || drawer.drawer_type === 'master_safe') {
+      return res.status(400).json({ error: 'Master safe cannot be deleted' });
+    }
+
+    // Check if drawer is open
+    const activeSession = await pool.query(
+      'SELECT session_id FROM cash_drawer_sessions WHERE drawer_id = $1 AND status = $2',
+      [drawerId, 'open']
+    );
+
+    if (activeSession.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Cannot delete an open drawer. Please close it first.'
+      });
+    }
+
+    // Delete the drawer (cascade will handle related records)
+    await pool.query('DELETE FROM drawers WHERE drawer_id = $1', [drawerId]);
+
+    res.json({ message: `Drawer "${drawer.drawer_name}" deleted successfully` });
+  } catch (error) {
+    console.error('Error deleting drawer:', error);
+    res.status(500).json({ error: 'Failed to delete drawer' });
+  }
+});
+
 // PUT /api/drawers/:drawerId/sharing-mode - Update drawer sharing mode
 app.put('/api/drawers/:drawerId/sharing-mode', async (req, res) => {
   const { drawerId } = req.params;
