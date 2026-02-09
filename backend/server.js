@@ -228,7 +228,7 @@ async function isStoreOpen() {
     return storeStatusCache.isOpen;
   }
   const result = await pool.query(
-    "SELECT session_id FROM store_sessions WHERE status = 'open' LIMIT 1"
+    "SELECT session_id FROM store_sessions WHERE status = 'open' AND store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1) LIMIT 1"
   );
   storeStatusCache = { isOpen: result.rows.length > 0, lastChecked: now };
   return storeStatusCache.isOpen;
@@ -728,6 +728,7 @@ app.get('/api/cash-drawer/overview', async (req, res) => {
       FROM drawers d
       WHERE d.is_active = TRUE
         AND d.drawer_type IN ('physical', 'safe', 'master_safe')
+        AND d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY
         CASE d.drawer_type
           WHEN 'master_safe' THEN 1
@@ -816,6 +817,7 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
       FROM cash_drawer_sessions s
       JOIN drawers d ON s.drawer_id = d.drawer_id
       WHERE s.status = 'open'
+        AND d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
         AND (
           s.employee_id = $1  -- Employee's own drawer sessions (opener)
           OR (d.drawer_type IN ('safe', 'master_safe') AND EXISTS (
@@ -3307,6 +3309,7 @@ app.get('/api/drawers', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT * FROM drawers
+      WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY display_order, drawer_id
     `);
     res.json(result.rows);
@@ -10981,6 +10984,7 @@ app.get('/api/store-status', async (req, res) => {
       LEFT JOIN employees e_open ON s.opened_by = e_open.employee_id
       LEFT JOIN employees e_close ON s.closed_by = e_close.employee_id
       WHERE s.status = 'open'
+        AND s.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY s.opened_at DESC
       LIMIT 1
     `);
@@ -10995,6 +10999,7 @@ app.get('/api/store-status', async (req, res) => {
         FROM store_sessions s
         LEFT JOIN employees e ON s.closed_by = e.employee_id
         WHERE s.status = 'closed'
+          AND s.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
         ORDER BY s.closed_at DESC
         LIMIT 1
       `);
@@ -11019,9 +11024,16 @@ app.post('/api/store-sessions/open', async (req, res) => {
       return res.status(400).json({ error: 'Employee ID is required' });
     }
 
-    // Check if store is already open
+    // Get current store
+    const currentStoreResult = await pool.query(
+      'SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1'
+    );
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
+    // Check if store is already open (for current store only)
     const existing = await pool.query(
-      "SELECT session_id FROM store_sessions WHERE status = 'open'"
+      "SELECT session_id FROM store_sessions WHERE status = 'open' AND (store_id = $1 OR ($1 IS NULL AND store_id IS NULL))",
+      [currentStoreId]
     );
 
     if (existing.rows.length > 0) {
@@ -11033,10 +11045,10 @@ app.post('/api/store-sessions/open', async (req, res) => {
 
     // Create new store session
     const result = await pool.query(`
-      INSERT INTO store_sessions (opened_by, opening_notes, status)
-      VALUES ($1, $2, 'open')
+      INSERT INTO store_sessions (opened_by, opening_notes, status, store_id)
+      VALUES ($1, $2, 'open', $3)
       RETURNING *
-    `, [employee_id, notes || null]);
+    `, [employee_id, notes || null, currentStoreId]);
 
     // Get employee name for response
     const employee = await pool.query(
@@ -11070,6 +11082,7 @@ app.get('/api/store-sessions/check-open-drawers', async (req, res) => {
       FROM cash_drawer_sessions cds
       JOIN drawers d ON cds.drawer_id = d.drawer_id
       WHERE cds.status = 'open' AND d.drawer_type != 'master_safe'
+        AND d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
     `);
 
     if (openDrawers.rows.length > 0) {
@@ -11097,21 +11110,22 @@ app.post('/api/store-sessions/close', async (req, res) => {
       return res.status(400).json({ error: 'Employee ID is required' });
     }
 
-    // Find open session
+    // Find open session for current store
     const existing = await pool.query(
-      "SELECT session_id FROM store_sessions WHERE status = 'open'"
+      "SELECT session_id FROM store_sessions WHERE status = 'open' AND store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)"
     );
 
     if (existing.rows.length === 0) {
       return res.status(400).json({ error: 'Store is not open' });
     }
 
-    // Check for open drawers/safes (excluding master safe)
+    // Check for open drawers/safes (excluding master safe) for current store
     const openDrawers = await pool.query(`
       SELECT cds.session_id, d.drawer_name, d.drawer_type
       FROM cash_drawer_sessions cds
       JOIN drawers d ON cds.drawer_id = d.drawer_id
       WHERE cds.status = 'open' AND d.drawer_type != 'master_safe'
+        AND d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
     `);
 
     if (openDrawers.rows.length > 0) {
@@ -11175,6 +11189,7 @@ app.get('/api/store-sessions', async (req, res) => {
       FROM store_sessions s
       LEFT JOIN employees e_open ON s.opened_by = e_open.employee_id
       LEFT JOIN employees e_close ON s.closed_by = e_close.employee_id
+      WHERE s.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY s.opened_at DESC
       LIMIT $1
     `, [parseInt(limit)]);

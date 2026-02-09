@@ -705,3 +705,8 @@ CREATE INDEX IF NOT EXISTS idx_petty_cash_payouts_date ON petty_cash_payouts(cre
 -- Add comments for documentation
 COMMENT ON TABLE petty_cash_payouts IS 'Tracks petty cash disbursements from drawers and safes';
 COMMENT ON COLUMN petty_cash_payouts.invoice_number IS 'Invoice or receipt number for the expense';
+
+-- Add store_id to drawers table to associate drawers with specific stores
+ALTER TABLE drawers ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+UPDATE drawers SET store_id = 1 WHERE store_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_drawers_store_id ON drawers(store_id);
