@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -33,6 +33,13 @@ import {
   Tabs,
   FormControlLabel,
   Checkbox,
+  IconButton,
+  InputAdornment,
+  Popover,
+  MenuList,
+  ListItemText,
+  TextField as MuiTextField,
+  Tooltip,
 } from '@mui/material';
 import {
   AttachMoney as MoneyIcon,
@@ -45,6 +52,16 @@ import {
   Store as StoreIcon,
   ArrowForward as ArrowForwardIcon,
   SwapHoriz as SwapHorizIcon,
+  Assignment as AssignmentIcon,
+  Visibility as ViewIcon,
+  ArrowUpward as ArrowUpIcon,
+  ArrowDownward as ArrowDownIcon,
+  Search as SearchIcon,
+  FilterList as FilterIcon,
+  DateRange as DateRangeIcon,
+  Edit as EditIcon,
+  ContentCopy as CopyIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -87,8 +104,64 @@ function CashDrawer() {
   const [openingDiscrepancyDialog, setOpeningDiscrepancyDialog] = useState(false);
   const [managerApprovalDialog, setManagerApprovalDialog] = useState(false);
   const [minMaxWarningDialog, setMinMaxWarningDialog] = useState(false);
+  const [transferMinMaxWarningDialog, setTransferMinMaxWarningDialog] = useState(false);
+  const [transferMinMaxWarningData, setTransferMinMaxWarningData] = useState(null); // { resultingBalance, minClose, maxClose, drawerName, transferAmount }
   const [physicalTenderWarningDialog, setPhysicalTenderWarningDialog] = useState(false);
   const [showManagerOverrideView, setShowManagerOverrideView] = useState(false); // For showing expected values
+  const [quickReportDialog, setQuickReportDialog] = useState(false);
+  const [quickReportTxnDetail, setQuickReportTxnDetail] = useState(null);
+  const [quickReportTxnLoading, setQuickReportTxnLoading] = useState(false);
+
+  // Transaction Journal states
+  const [journalEntries, setJournalEntries] = useState([]);
+  const [journalLoading, setJournalLoading] = useState(false);
+  const [selectedJournalRow, setSelectedJournalRow] = useState(0);
+  const [journalViewDialog, setJournalViewDialog] = useState(false);
+  const [selectedJournalEntry, setSelectedJournalEntry] = useState(null);
+  const [journalTransactionDetails, setJournalTransactionDetails] = useState(null);
+  const [journalTransactionLoading, setJournalTransactionLoading] = useState(false);
+  const [journalSearch, setJournalSearch] = useState('');
+  const [journalSort, setJournalSort] = useState({ column: 'entry_date', direction: 'desc' });
+  const [journalFilters, setJournalFilters] = useState({
+    date: { start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] },
+    time: { start: '00:00', end: '23:59' },
+    drawer: [],
+    employee: [],
+    transactionType: [],
+    moneyIn: { min: '', max: '' },
+    moneyOut: { min: '', max: '' },
+    tenderType: []
+  });
+  const [filterAnchor, setFilterAnchor] = useState({});
+  const [sortAnchor, setSortAnchor] = useState({});
+
+  // Configure Safe/Drawer states
+  const [configDrawers, setConfigDrawers] = useState([]);
+  const [selectedConfigDrawer, setSelectedConfigDrawer] = useState(null);
+  const [addDrawerDialog, setAddDrawerDialog] = useState(false);
+  const [editDrawerDialog, setEditDrawerDialog] = useState(false);
+  const [deleteDrawerDialog, setDeleteDrawerDialog] = useState(false);
+  const [newDrawerForm, setNewDrawerForm] = useState({
+    drawer_type: 'physical',
+    count: 1,
+    drawer_name: '',
+    is_active: true,
+    min_close: 0,
+    max_close: 0,
+    has_location: false, // For safes: repository/location
+    is_shared: true // For drawers: single/shared
+  });
+  const [editDrawerForm, setEditDrawerForm] = useState({
+    drawer_name: '',
+    is_active: true,
+    min_close: 0,
+    max_close: 0,
+    has_location: false,
+    is_shared: true
+  });
+  const [locationTransferDialog, setLocationTransferDialog] = useState(false);
+  const [transferLocationTo, setTransferLocationTo] = useState('');
+  const [availableLocations, setAvailableLocations] = useState([]);
 
   // Manager approval form states
   const [managerUsername, setManagerUsername] = useState('');
@@ -106,6 +179,7 @@ function CashDrawer() {
   const [isIndividualDenominations, setIsIndividualDenominations] = useState(false); // For opening drawer mode
   const [drawerBlindCountPrefs, setDrawerBlindCountPrefs] = useState({ drawers: true, safe: true }); // Closing mode preferences
   const [drawerIndividualDenominationsPrefs, setDrawerIndividualDenominationsPrefs] = useState({ drawers: false, safe: false }); // Opening mode preferences
+  const [drawerElectronicBlindCountPrefs, setDrawerElectronicBlindCountPrefs] = useState({ drawers: false, safe: false }); // Electronic tender closing mode preferences
   const [allDrawers, setAllDrawers] = useState([]); // Store all drawers including safe
 
   // Form states
@@ -236,6 +310,7 @@ function CashDrawer() {
   useEffect(() => {
     fetchEmployees();
     fetchDrawers();
+    fetchConfigDrawers();
     fetchDiscrepancyThreshold();
     fetchMinMaxClose();
     fetchBlindCountPreference();
@@ -251,15 +326,25 @@ function CashDrawer() {
     fetchPendingInterStoreTransfers();
   }, []);
 
+  useEffect(() => {
+    if (tabValue === 2) {
+      fetchJournalEntries();
+    }
+    if (tabValue === 3) {
+      fetchConfigDrawers();
+    }
+  }, [tabValue]);
+
   // Update count mode when active session changes
   useEffect(() => {
     if (activeSession && activeSession.drawer_type && drawerBlindCountPrefs.drawers !== undefined) {
       const isSafe = activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe';
       setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
       setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
+      setIsElectronicBlindCount(isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers);
       setSelectedDrawerType(activeSession.drawer_type);
     }
-  }, [activeSession, drawerBlindCountPrefs, drawerIndividualDenominationsPrefs]);
+  }, [activeSession, drawerBlindCountPrefs, drawerIndividualDenominationsPrefs, drawerElectronicBlindCountPrefs]);
 
   // Show message if redirected from checkout
   useEffect(() => {
@@ -304,11 +389,13 @@ function CashDrawer() {
       // Set opening mode (individual denominations) based on drawer type filter
       if (drawerTypeFilter === 'safe' || drawerTypeFilter === 'master_safe') {
         setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
+        setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
       } else if (drawerTypeFilter === 'physical') {
         setIsIndividualDenominations(drawerIndividualDenominationsPrefs.drawers);
+        setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.drawers);
       }
     }
-  }, [openDrawerDialog, drawerTypeFilter, drawerBlindCountPrefs]);
+  }, [openDrawerDialog, drawerTypeFilter, drawerBlindCountPrefs, drawerElectronicBlindCountPrefs]);
 
   const fetchEmployees = async () => {
     try {
@@ -331,6 +418,246 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching drawers:', err);
       showSnackbar('Failed to load drawers', 'error');
+    }
+  };
+
+  const fetchConfigDrawers = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/drawers`);
+      setConfigDrawers(response.data || []);
+    } catch (err) {
+      console.error('Error fetching config drawers:', err);
+      showSnackbar('Failed to load drawer configuration', 'error');
+    }
+  };
+
+  const handleAddDrawer = async () => {
+    try {
+      const drawersToCreate = [];
+      const baseName = newDrawerForm.drawer_name || 
+        (newDrawerForm.drawer_type === 'safe' 
+          ? `Safe`
+          : `Drawer`);
+      
+      for (let i = 0; i < newDrawerForm.count; i++) {
+        // Auto-add dash and number when creating multiple
+        let drawerName;
+        if (newDrawerForm.count > 1) {
+          drawerName = `${baseName}-${i + 1}`;
+        } else {
+          drawerName = baseName;
+        }
+        
+        drawersToCreate.push({
+          drawer_name: drawerName,
+          drawer_type: newDrawerForm.drawer_type,
+          is_active: newDrawerForm.is_active,
+          min_close: newDrawerForm.min_close,
+          max_close: newDrawerForm.max_close,
+          has_location: newDrawerForm.has_location, // For safes
+          is_shared: newDrawerForm.is_shared // For drawers
+        });
+      }
+
+      for (const drawer of drawersToCreate) {
+        await axios.post(`${API_BASE_URL}/drawers`, drawer);
+      }
+
+      await fetchConfigDrawers();
+      await fetchDrawers();
+      setAddDrawerDialog(false);
+      setSelectedConfigDrawer(null);
+      // Reset form
+      setNewDrawerForm({
+        drawer_type: 'physical',
+        count: 1,
+        drawer_name: '',
+        is_active: true,
+        min_close: 0,
+        max_close: 0,
+        has_location: false,
+        is_shared: true
+      });
+      showSnackbar(`Successfully added ${newDrawerForm.count} ${newDrawerForm.drawer_type === 'safe' ? 'safe(s)' : 'drawer(s)'}`, 'success');
+    } catch (err) {
+      console.error('Error adding drawer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to add drawer', 'error');
+    }
+  };
+
+  const handleCopyDrawer = () => {
+    if (!selectedConfigDrawer) return;
+    
+    const baseName = selectedConfigDrawer.drawer_name;
+    const copyName = baseName.includes('-') 
+      ? baseName.replace(/-(\d+)$/, (match, num) => `-${parseInt(num) + 1}`)
+      : `${baseName}-2`;
+    
+    setNewDrawerForm({
+      drawer_type: selectedConfigDrawer.drawer_type,
+      count: 1,
+      drawer_name: copyName,
+      is_active: selectedConfigDrawer.is_active,
+      min_close: selectedConfigDrawer.min_close || 0,
+      max_close: selectedConfigDrawer.max_close || 0
+    });
+    setAddDrawerDialog(true);
+  };
+
+  const handleEditDrawer = () => {
+    if (!selectedConfigDrawer) return;
+    
+    // Ensure min_close and max_close are properly parsed as numbers
+    const minClose = selectedConfigDrawer.min_close != null ? parseFloat(selectedConfigDrawer.min_close) || 0 : 0;
+    const maxClose = selectedConfigDrawer.max_close != null ? parseFloat(selectedConfigDrawer.max_close) || 0 : 0;
+    
+    setEditDrawerForm({
+      drawer_name: selectedConfigDrawer.drawer_name,
+      is_active: selectedConfigDrawer.is_active,
+      min_close: minClose,
+      max_close: maxClose,
+      has_location: selectedConfigDrawer.has_location || false,
+      is_shared: selectedConfigDrawer.is_shared !== false // Default to true if null/undefined
+    });
+    setEditDrawerDialog(true);
+  };
+
+  const handleSaveEditDrawer = async () => {
+    if (!selectedConfigDrawer) return;
+    
+    try {
+      // Check if drawer is open
+      const isOpen = activeSessions.some(s => s.drawer_id === selectedConfigDrawer.drawer_id);
+      if (isOpen && !editDrawerForm.is_active) {
+        showSnackbar('Cannot make an open drawer unavailable', 'error');
+        return;
+      }
+
+      // Check if turning location OFF for a safe with items
+      const isSafe = selectedConfigDrawer.drawer_type === 'safe' || selectedConfigDrawer.drawer_type === 'master_safe';
+      const wasLocationOn = selectedConfigDrawer.has_location;
+      const isLocationOff = !editDrawerForm.has_location;
+
+      if (isSafe && wasLocationOn && isLocationOff) {
+        // Check if items exist in location - need to handle transfer
+        // First, try to update without transfer_location_to to see if transfer is needed
+        try {
+          await axios.put(`${API_BASE_URL}/drawers/${selectedConfigDrawer.drawer_id}`, {
+            drawer_name: editDrawerForm.drawer_name,
+            is_active: editDrawerForm.is_active,
+            min_close: editDrawerForm.min_close,
+            max_close: editDrawerForm.max_close,
+            has_location: editDrawerForm.has_location,
+            is_shared: editDrawerForm.is_shared
+          });
+          // If successful, no items exist, proceed normally
+        } catch (err) {
+          if (err.response?.data?.requires_transfer) {
+            // Items exist - fetch available locations and show transfer dialog
+            try {
+              const locationsResponse = await axios.get(`${API_BASE_URL}/storage-locations`);
+              const filteredLocations = locationsResponse.data.filter(loc => loc.location !== (editDrawerForm.drawer_name || selectedConfigDrawer.drawer_name));
+              setAvailableLocations(filteredLocations);
+              setLocationTransferDialog(true);
+              return; // Don't close dialog yet, wait for user to select transfer location or cancel
+            } catch (locationErr) {
+              console.error('Error fetching locations:', locationErr);
+              showSnackbar('Failed to fetch available locations', 'error');
+              return;
+            }
+          } else {
+            // Some other error
+            throw err;
+          }
+        }
+      } else {
+        // Normal update (no location transfer needed)
+        await axios.put(`${API_BASE_URL}/drawers/${selectedConfigDrawer.drawer_id}`, {
+          drawer_name: editDrawerForm.drawer_name,
+          is_active: editDrawerForm.is_active,
+          min_close: editDrawerForm.min_close,
+          max_close: editDrawerForm.max_close,
+          has_location: editDrawerForm.has_location,
+          is_shared: editDrawerForm.is_shared
+        });
+      }
+
+      await fetchConfigDrawers();
+      await fetchDrawers();
+      setEditDrawerDialog(false);
+      setSelectedConfigDrawer(null);
+      showSnackbar('Drawer updated successfully', 'success');
+    } catch (err) {
+      console.error('Error updating drawer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to update drawer', 'error');
+    }
+  };
+
+  const handleLocationTransfer = async () => {
+    if (!transferLocationTo) {
+      showSnackbar('Please select a location to transfer items to', 'error');
+      return;
+    }
+
+    try {
+      await axios.put(`${API_BASE_URL}/drawers/${selectedConfigDrawer.drawer_id}`, {
+        drawer_name: editDrawerForm.drawer_name,
+        is_active: editDrawerForm.is_active,
+        min_close: editDrawerForm.min_close,
+        max_close: editDrawerForm.max_close,
+        has_location: editDrawerForm.has_location,
+        is_shared: editDrawerForm.is_shared,
+        transfer_location_to: transferLocationTo
+      });
+
+      await fetchConfigDrawers();
+      await fetchDrawers();
+      setLocationTransferDialog(false);
+      setEditDrawerDialog(false);
+      setSelectedConfigDrawer(null);
+      setTransferLocationTo('');
+      showSnackbar('Items transferred and drawer updated successfully', 'success');
+    } catch (err) {
+      console.error('Error transferring location:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to transfer items', 'error');
+    }
+  };
+
+  const handleCancelLocationTransfer = () => {
+    // Cancel - keep location ON
+    setEditDrawerForm({
+      ...editDrawerForm,
+      has_location: true // Revert to keeping location ON
+    });
+    setLocationTransferDialog(false);
+    setTransferLocationTo('');
+  };
+
+  const handleDeleteDrawer = async () => {
+    if (!selectedConfigDrawer) return;
+    
+    try {
+      // Check if drawer is open
+      const isOpen = activeSessions.some(s => s.drawer_id === selectedConfigDrawer.drawer_id);
+      if (isOpen) {
+        showSnackbar('Cannot delete an open drawer. Please close it first.', 'error');
+        setDeleteDrawerDialog(false);
+        return;
+      }
+
+      // Check if drawer has balance (would need to check session history or current balance)
+      // For now, we'll just delete and let backend handle it
+      
+      await axios.delete(`${API_BASE_URL}/drawers/${selectedConfigDrawer.drawer_id}`);
+      
+      await fetchConfigDrawers();
+      await fetchDrawers();
+      setDeleteDrawerDialog(false);
+      setSelectedConfigDrawer(null);
+      showSnackbar('Drawer deleted successfully', 'success');
+    } catch (err) {
+      console.error('Error deleting drawer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to delete drawer', 'error');
     }
   };
 
@@ -445,21 +772,17 @@ function CashDrawer() {
 
   const fetchBlindCountPreference = async () => {
     try {
-      // Get all drawer mode preferences
-      const response = await axios.get(`${API_BASE_URL}/user_preferences`);
-      
-      // Closing mode preferences (Blind Count vs Open Count)
-      const blindCountDrawersPreference = response.data.find(pref => pref.preference_name === 'blindCount_drawers');
-      const blindCountSafePreference = response.data.find(pref => pref.preference_name === 'blindCount_safe');
-      const blindCountDrawers = blindCountDrawersPreference ? blindCountDrawersPreference.preference_value === 'true' : true;
-      const blindCountSafe = blindCountSafePreference ? blindCountSafePreference.preference_value === 'true' : true;
-      
-      // Opening mode preferences (Individual Denominations vs Drawer Total)
-      const individualDenominationsDrawersPreference = response.data.find(pref => pref.preference_name === 'individualDenominations_drawers');
-      const individualDenominationsSafePreference = response.data.find(pref => pref.preference_name === 'individualDenominations_safe');
-      const individualDenominationsDrawers = individualDenominationsDrawersPreference ? individualDenominationsDrawersPreference.preference_value === 'true' : false;
-      const individualDenominationsSafe = individualDenominationsSafePreference ? individualDenominationsSafePreference.preference_value === 'true' : false;
-      
+      // Fetch all drawer mode settings from drawer-type-config (stored on drawers table)
+      const drawerConfigRes = await axios.get(`${API_BASE_URL}/drawer-type-config`);
+      const physicalConfig = drawerConfigRes.data.find(c => c.drawer_type === 'physical');
+      const safeConfig = drawerConfigRes.data.find(c => c.drawer_type === 'safe');
+      const blindCountDrawers = physicalConfig ? physicalConfig.blind_count : true;
+      const blindCountSafe = safeConfig ? safeConfig.blind_count : true;
+      const individualDenominationsDrawers = physicalConfig ? physicalConfig.individual_denominations : false;
+      const individualDenominationsSafe = safeConfig ? safeConfig.individual_denominations : false;
+      const electronicBlindCountDrawers = physicalConfig ? physicalConfig.electronic_blind_count : false;
+      const electronicBlindCountSafe = safeConfig ? safeConfig.electronic_blind_count : false;
+
       // Store both preference sets
       setDrawerBlindCountPrefs({
         drawers: blindCountDrawers,
@@ -469,15 +792,21 @@ function CashDrawer() {
         drawers: individualDenominationsDrawers,
         safe: individualDenominationsSafe
       });
+      setDrawerElectronicBlindCountPrefs({
+        drawers: electronicBlindCountDrawers,
+        safe: electronicBlindCountSafe
+      });
 
       // Set initial modes based on current selection or default to drawers
       if (selectedDrawerType) {
         const isSafe = selectedDrawerType === 'safe' || selectedDrawerType === 'master_safe';
         setIsBlindCount(isSafe ? blindCountSafe : blindCountDrawers);
         setIsIndividualDenominations(isSafe ? individualDenominationsSafe : individualDenominationsDrawers);
+        setIsElectronicBlindCount(isSafe ? electronicBlindCountSafe : electronicBlindCountDrawers);
       } else {
         setIsBlindCount(blindCountDrawers); // Default to drawers preference
         setIsIndividualDenominations(individualDenominationsDrawers);
+        setIsElectronicBlindCount(electronicBlindCountDrawers);
       }
     } catch (err) {
       console.error('Error fetching drawer mode preferences:', err);
@@ -737,6 +1066,7 @@ function CashDrawer() {
           setSelectedDrawerType(finalSession.drawer_type);
           const isSafe = finalSession.drawer_type === 'safe' || finalSession.drawer_type === 'master_safe';
           setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
+          setIsElectronicBlindCount(isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers);
         }
       } else {
         setActiveSession(null);
@@ -763,6 +1093,177 @@ function CashDrawer() {
     }
   };
 
+  const fetchJournalEntries = async () => {
+    try {
+      setJournalLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/cash-drawer/journal`);
+      setJournalEntries(response.data || []);
+      // Reset selection to first row
+      if (response.data && response.data.length > 0) {
+        setSelectedJournalRow(0);
+      }
+    } catch (err) {
+      console.error('Error fetching journal entries:', err);
+      const errorMessage = err.response?.data?.details || err.response?.data?.error || err.message || 'Failed to load transaction journal';
+      showSnackbar(errorMessage, 'error');
+    } finally {
+      setJournalLoading(false);
+    }
+  };
+
+  // Filter and sort journal entries
+  const filteredJournalEntries = useMemo(() => {
+    let filtered = [...journalEntries];
+
+    // Apply search filter
+    if (journalSearch) {
+      const searchLower = journalSearch.toLowerCase();
+      filtered = filtered.filter(entry => {
+        return (
+          entry.drawer_name?.toLowerCase().includes(searchLower) ||
+          entry.employee_name?.toLowerCase().includes(searchLower) ||
+          entry.transaction_type?.toLowerCase().includes(searchLower) ||
+          entry.tender_type?.toLowerCase().includes(searchLower) ||
+          entry.tender_type_name?.toLowerCase().includes(searchLower) ||
+          entry.entry_id?.toString().includes(searchLower) ||
+          entry.transaction_id?.toString().includes(searchLower) ||
+          formatCurrency(entry.money_in).toLowerCase().includes(searchLower) ||
+          formatCurrency(entry.money_out).toLowerCase().includes(searchLower)
+        );
+      });
+    }
+
+    // Apply date filter
+    if (journalFilters.date.start && journalFilters.date.end) {
+      filtered = filtered.filter(entry => {
+        const entryDate = new Date(entry.entry_date).toISOString().split('T')[0];
+        return entryDate >= journalFilters.date.start && entryDate <= journalFilters.date.end;
+      });
+    }
+
+    // Apply time filter
+    if (journalFilters.time.start && journalFilters.time.end) {
+      filtered = filtered.filter(entry => {
+        const entryTime = entry.entry_time || new Date(entry.entry_date).toTimeString().split(' ')[0];
+        return entryTime >= journalFilters.time.start && entryTime <= journalFilters.time.end;
+      });
+    }
+
+    // Apply drawer filter
+    if (journalFilters.drawer.length > 0) {
+      filtered = filtered.filter(entry => journalFilters.drawer.includes(entry.drawer_id));
+    }
+
+    // Apply employee filter
+    if (journalFilters.employee.length > 0) {
+      filtered = filtered.filter(entry => journalFilters.employee.includes(entry.employee_id));
+    }
+
+    // Apply transaction type filter
+    if (journalFilters.transactionType.length > 0) {
+      filtered = filtered.filter(entry => journalFilters.transactionType.includes(entry.transaction_type));
+    }
+
+    // Apply money IN filter
+    if (journalFilters.moneyIn.min !== '' || journalFilters.moneyIn.max !== '') {
+      filtered = filtered.filter(entry => {
+        const amount = parseFloat(entry.money_in || 0);
+        const min = journalFilters.moneyIn.min !== '' ? parseFloat(journalFilters.moneyIn.min) : 0;
+        const max = journalFilters.moneyIn.max !== '' ? parseFloat(journalFilters.moneyIn.max) : Infinity;
+        return amount >= min && amount <= max;
+      });
+    }
+
+    // Apply money OUT filter
+    if (journalFilters.moneyOut.min !== '' || journalFilters.moneyOut.max !== '') {
+      filtered = filtered.filter(entry => {
+        const amount = parseFloat(entry.money_out || 0);
+        const min = journalFilters.moneyOut.min !== '' ? parseFloat(journalFilters.moneyOut.min) : 0;
+        const max = journalFilters.moneyOut.max !== '' ? parseFloat(journalFilters.moneyOut.max) : Infinity;
+        return amount >= min && amount <= max;
+      });
+    }
+
+    // Apply tender type filter
+    if (journalFilters.tenderType.length > 0) {
+      filtered = filtered.filter(entry => journalFilters.tenderType.includes(entry.tender_type));
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      const { column, direction } = journalSort;
+      let aVal = a[column];
+      let bVal = b[column];
+
+      if (column === 'entry_date' || column === 'entry_time') {
+        aVal = new Date(a.entry_date + ' ' + (a.entry_time || ''));
+        bVal = new Date(b.entry_date + ' ' + (b.entry_time || ''));
+      }
+
+      if (typeof aVal === 'string') {
+        aVal = aVal.toLowerCase();
+        bVal = (bVal || '').toLowerCase();
+      }
+
+      if (aVal < bVal) return direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return filtered;
+  }, [journalEntries, journalSearch, journalFilters, journalSort]);
+
+  // Keyboard navigation for journal table
+  useEffect(() => {
+    if (tabValue !== 2) return;
+
+    const handleKeyDown = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedJournalRow(prev => Math.max(0, prev - 1));
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedJournalRow(prev => Math.min(filteredJournalEntries.length - 1, prev + 1));
+      } else if (e.key === 'Enter' && selectedJournalRow >= 0 && selectedJournalRow < filteredJournalEntries.length) {
+        e.preventDefault();
+        const entry = filteredJournalEntries[selectedJournalRow];
+        setSelectedJournalEntry(entry);
+        setJournalViewDialog(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [tabValue, selectedJournalRow, filteredJournalEntries]);
+
+  // Load transaction details when view dialog opens
+  useEffect(() => {
+    if (journalViewDialog && selectedJournalEntry?.transaction_id && selectedJournalEntry?.transaction_type === 'Payments') {
+      setJournalTransactionLoading(true);
+      Promise.all([
+        axios.get(`${API_BASE_URL}/transactions/${selectedJournalEntry.transaction_id}/items`),
+        axios.get(`${API_BASE_URL}/transactions/${selectedJournalEntry.transaction_id}/payments`)
+      ])
+        .then(([itemsRes, paymentsRes]) => {
+          setJournalTransactionDetails({
+            items: itemsRes.data || [],
+            payments: paymentsRes.data || []
+          });
+        })
+        .catch(err => {
+          console.error('Error loading transaction details:', err);
+          showSnackbar('Failed to load transaction details', 'error');
+        })
+        .finally(() => {
+          setJournalTransactionLoading(false);
+        });
+    } else {
+      setJournalTransactionDetails(null);
+    }
+  }, [journalViewDialog, selectedJournalEntry]);
+
   const fetchSessionDetails = async (sessionId) => {
     try {
       const response = await axios.get(`${API_BASE_URL}/cash-drawer/${sessionId}/details`);
@@ -771,6 +1272,44 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching session details:', err);
       showSnackbar('Failed to load session details', 'error');
+    }
+  };
+
+  const openQuickReport = async () => {
+    // If no active session, open dialog with empty state (shows "no drawer open" message)
+    if (!activeSession) {
+      setSessionDetails(null);
+      setQuickReportDialog(true);
+      return;
+    }
+    try {
+      const response = await axios.get(`${API_BASE_URL}/cash-drawer/${activeSession.session_id}/details`);
+      setSessionDetails(response.data);
+      setQuickReportDialog(true);
+    } catch (err) {
+      console.error('Error fetching quick report:', err);
+      showSnackbar('Failed to load drawer report', 'error');
+    }
+  };
+
+  const viewQuickReportTransaction = async (transactionId, transactionLabel) => {
+    setQuickReportTxnLoading(true);
+    try {
+      const [itemsRes, paymentsRes] = await Promise.all([
+        axios.get(`${API_BASE_URL}/transactions/${transactionId}/items`),
+        axios.get(`${API_BASE_URL}/transactions/${transactionId}/payments`)
+      ]);
+      setQuickReportTxnDetail({
+        transaction_id: transactionId,
+        transaction_type: transactionLabel || 'Transaction',
+        items: itemsRes.data,
+        payments: paymentsRes.data.payments || paymentsRes.data || []
+      });
+    } catch (err) {
+      console.error('Error fetching transaction details:', err);
+      showSnackbar('Failed to load transaction details', 'error');
+    } finally {
+      setQuickReportTxnLoading(false);
     }
   };
 
@@ -1045,19 +1584,12 @@ function CashDrawer() {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = currentUser.id;
 
-    // Calculate balance based on mode (individual denominations vs total)
-    const calculatedBalance = isIndividualDenominations
-      ? calculateDenominationTotal(closingDenominations)
-      : parseFloat(actualBalance);
+    // Calculate balance from denomination counts (close dialog always uses denomination counting)
+    const calculatedBalance = calculateDenominationTotal(closingDenominations);
 
-    // Validation
-    if (isIndividualDenominations && calculatedBalance === 0) {
+    // Validation - denomination total must be entered
+    if (calculatedBalance === 0) {
       showSnackbar('Please enter denomination counts', 'error');
-      return;
-    }
-
-    if (!isIndividualDenominations && (!actualBalance || isNaN(calculatedBalance))) {
-      showSnackbar('Please enter the actual balance', 'error');
       return;
     }
 
@@ -1692,7 +2224,7 @@ function CashDrawer() {
     }
   };
 
-  const handleTransfer = async () => {
+  const handleTransfer = async (bypassMinMaxWarning = false) => {
     if (!transferSource || !transferDestination) {
       showSnackbar('Please select both source and destination', 'error');
       return;
@@ -1710,6 +2242,45 @@ function CashDrawer() {
     if (totalTransfer <= 0) {
       showSnackbar('Please enter amounts to transfer', 'error');
       return;
+    }
+
+    // Check min/max range for destination drawer (cash only)
+    if (!bypassMinMaxWarning && cashTotal > 0) {
+      // Get destination drawer info to check min/max
+      const destinationDrawer = allDrawers.find(d => d.drawer_id === transferDestination.drawer_id);
+      if (destinationDrawer) {
+        const minCloseValue = parseFloat(destinationDrawer.min_close || 0);
+        const maxCloseValue = parseFloat(destinationDrawer.max_close || 0);
+        
+        // Get current expected balance for destination
+        const currentBalance = parseFloat(transferDestination.current_expected_balance || 0);
+        // Calculate resulting balance after transfer (cash only affects balance)
+        const resultingBalance = currentBalance + cashTotal;
+        
+        // Check if resulting balance is outside range
+        let isOutsideRange = false;
+        if (minCloseValue > 0 && maxCloseValue > 0) {
+          isOutsideRange = resultingBalance < minCloseValue || resultingBalance > maxCloseValue;
+        } else if (minCloseValue > 0) {
+          isOutsideRange = resultingBalance < minCloseValue;
+        } else if (maxCloseValue > 0) {
+          isOutsideRange = resultingBalance > maxCloseValue;
+        }
+        
+        if (isOutsideRange) {
+          // Show warning dialog
+          setTransferMinMaxWarningData({
+            resultingBalance,
+            minClose: minCloseValue,
+            maxClose: maxCloseValue,
+            drawerName: transferDestination.drawer_name,
+            transferAmount: cashTotal,
+            currentBalance
+          });
+          setTransferMinMaxWarningDialog(true);
+          return; // Don't proceed with transfer yet
+        }
+      }
     }
 
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -2014,7 +2585,6 @@ function CashDrawer() {
 
       {/* Overview Section */}
       <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" mb={2}>Drawer & Safe Overview</Typography>
 
         {/* Store Status Section */}
         <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
@@ -2072,85 +2642,132 @@ function CashDrawer() {
 
         <Divider sx={{ mb: 3 }} />
 
-        {/* SAFE Section */}
-        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>SAFE</Typography>
-        <TableContainer sx={{ mb: 3 }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ bgcolor: '#1976d2' }}>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>SAFE</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {overviewData.safes.map((safe) => (
-                <TableRow
-                  key={safe.drawer_id}
-                  sx={{
-                    bgcolor: safe.status === 'OPEN' ? '#e3f2fd' : 'white',
-                    '&:hover': { bgcolor: safe.status === 'OPEN' ? '#bbdefb' : '#f5f5f5' }
-                  }}
-                >
-                  <TableCell>{safe.drawer_name}</TableCell>
-                  <TableCell>{safe.status}</TableCell>
-                  <TableCell>
-                    {safe.status === 'OPEN' && safe.balance !== null
-                      ? `$${parseFloat(safe.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : '—'}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        {/* SAFE and DRAWER Sections - Side by Side */}
+        <Grid container spacing={3} sx={{ mb: 3 }}>
+          {/* SAFE Section */}
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>SAFE</Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: '#1976d2' }}>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>SAFE</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {overviewData.safes.map((safe) => (
+                    <TableRow
+                      key={safe.drawer_id}
+                      sx={{
+                        bgcolor: safe.status === 'OPEN' ? '#e3f2fd' : 'white',
+                        '&:hover': { bgcolor: safe.status === 'OPEN' ? '#bbdefb' : '#f5f5f5' }
+                      }}
+                    >
+                      <TableCell>{safe.drawer_name}</TableCell>
+                      <TableCell>{safe.status}</TableCell>
+                      <TableCell>
+                        {safe.status === 'OPEN' && safe.balance !== null
+                          ? `$${parseFloat(safe.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : '—'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Grid>
 
-        {/* DRAWER Section */}
-        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>DRAWER</Typography>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ bgcolor: '#1976d2' }}>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>DRAWER</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Connected Employees</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {overviewData.drawers.map((drawer) => (
-                <TableRow
-                  key={drawer.drawer_id}
-                  sx={{
-                    bgcolor: drawer.status === 'OPEN' ? '#e3f2fd' : 'white',
-                    '&:hover': { bgcolor: drawer.status === 'OPEN' ? '#bbdefb' : '#f5f5f5' }
-                  }}
-                >
-                  <TableCell>{drawer.drawer_name}</TableCell>
-                  <TableCell>{drawer.status}</TableCell>
-                  <TableCell>{drawer.type}</TableCell>
-                  <TableCell>
-                    {drawer.status === 'OPEN' && drawer.balance !== null
-                      ? `$${parseFloat(drawer.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : '—'}
-                  </TableCell>
-                  <TableCell>{drawer.connected_employees || '—'}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+          {/* DRAWER Section */}
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>DRAWER</Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: '#1976d2' }}>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>DRAWER</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Connected Employees</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {overviewData.drawers.map((drawer) => (
+                    <TableRow
+                      key={drawer.drawer_id}
+                      sx={{
+                        bgcolor: drawer.status === 'OPEN' ? '#e3f2fd' : 'white',
+                        '&:hover': { bgcolor: drawer.status === 'OPEN' ? '#bbdefb' : '#f5f5f5' }
+                      }}
+                    >
+                      <TableCell>{drawer.drawer_name}</TableCell>
+                      <TableCell>{drawer.status}</TableCell>
+                      <TableCell>{drawer.type}</TableCell>
+                      <TableCell>
+                        {drawer.status === 'OPEN' && drawer.balance !== null
+                          ? `$${parseFloat(drawer.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : '—'}
+                      </TableCell>
+                      <TableCell>{drawer.connected_employees || '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Grid>
+        </Grid>
       </Paper>
 
       <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ mb: 3 }}>
         <Tab label="Active Session" />
         <Tab label="History" />
+        <Tab label="Transaction Journal" />
+        <Tab label="Configure Safe / Drawer" />
       </Tabs>
 
       {/* Active Session Tab */}
       {tabValue === 0 && (
         <>
+          {/* Cash balance warnings (min/max) - only for employee's connected drawers */}
+          {(() => {
+            const myDrawerIds = activeSessions.map(s => s.drawer_id);
+            const allOverviewDrawers = [...(overviewData.safes || []), ...(overviewData.drawers || [])];
+            const balanceWarnings = allOverviewDrawers.filter(d => {
+              if (d.status !== 'OPEN' || !myDrawerIds.includes(d.drawer_id)) return false;
+              const balance = parseFloat(d.balance);
+              const minClose = parseFloat(d.min_close || 0);
+              const maxClose = parseFloat(d.max_close || 0);
+              return (minClose > 0 && balance < minClose) || (maxClose > 0 && balance > maxClose);
+            });
+            return balanceWarnings.length > 0 ? (
+              <Box sx={{ mb: 2 }}>
+                {balanceWarnings.map(d => {
+                  const balance = parseFloat(d.balance);
+                  const minClose = parseFloat(d.min_close || 0);
+                  const maxClose = parseFloat(d.max_close || 0);
+                  const isBelowMin = minClose > 0 && balance < minClose;
+                  const isAboveMax = maxClose > 0 && balance > maxClose;
+                  
+                  if (isBelowMin) {
+                    return (
+                      <Alert key={d.drawer_id} severity="warning" sx={{ mb: 1 }}>
+                        Low cash balance: <strong>{d.drawer_name}</strong> is at {formatCurrency(balance)} (minimum: {formatCurrency(minClose)})
+                      </Alert>
+                    );
+                  } else if (isAboveMax) {
+                    return (
+                      <Alert key={d.drawer_id} severity="warning" sx={{ mb: 1 }}>
+                        High cash balance: <strong>{d.drawer_name}</strong> is at {formatCurrency(balance)} (maximum: {formatCurrency(maxClose)})
+                      </Alert>
+                    );
+                  }
+                  return null;
+                })}
+              </Box>
+            ) : null;
+          })()}
           {activeSessions.length > 0 ? (
             <Grid container spacing={3}>
               {/* Session Type Selector - Show if multiple types exist */}
@@ -2173,6 +2790,7 @@ function CashDrawer() {
                               setActiveSession(physicalSession);
                               setIsBlindCount(drawerBlindCountPrefs.drawers);
                               setIsIndividualDenominations(drawerIndividualDenominationsPrefs.drawers);
+                              setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.drawers);
                             }
                           }}
                         >
@@ -2188,6 +2806,7 @@ function CashDrawer() {
                               setSelectedSessionType('safe');
                               setActiveSession(safeSession);
                               setIsBlindCount(drawerBlindCountPrefs.safe);
+                              setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
                             }
                           }}
                         >
@@ -2204,6 +2823,7 @@ function CashDrawer() {
                               setActiveSession(masterSafeSession);
                               setIsBlindCount(drawerBlindCountPrefs.safe);
                               setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
+                              setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
                             }
                           }}
                         >
@@ -2381,10 +3001,10 @@ function CashDrawer() {
                       )}
                       <Button
                         variant="outlined"
-                        startIcon={<HistoryIcon />}
-                        onClick={() => fetchSessionDetails(activeSession.session_id)}
+                        startIcon={<AssignmentIcon />}
+                        onClick={openQuickReport}
                       >
-                        View Details
+                        Quick Report
                       </Button>
                       <Button
                         variant="outlined"
@@ -2495,6 +3115,13 @@ function CashDrawer() {
                     Open Master Safe
                   </Button>
                 )}
+                <Button
+                  variant="outlined"
+                  startIcon={<AssignmentIcon />}
+                  onClick={openQuickReport}
+                >
+                  Quick Report
+                </Button>
               </Box>
             </Paper>
           )}
@@ -2546,6 +3173,1150 @@ function CashDrawer() {
         </TableContainer>
       )}
 
+      {/* Transaction Journal Tab */}
+      {tabValue === 2 && (
+        <Box>
+          {/* Search Bar */}
+          <Paper sx={{ p: 2, mb: 2 }}>
+            <TextField
+              fullWidth
+              placeholder="Search by keyword or value..."
+              value={journalSearch}
+              onChange={(e) => setJournalSearch(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon />
+                  </InputAdornment>
+                ),
+              }}
+            />
+          </Paper>
+
+          {/* Journal Table */}
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  {/* Date Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, date: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Date</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'entry_date', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'entry_date', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Time Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, time: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Time</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'entry_time', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'entry_time', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Safe/Drawer Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, drawer: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Safe/Drawer</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'drawer_name', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'drawer_name', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Employee Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, employee: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Employee</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'employee_name', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'employee_name', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Transaction Type Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, transactionType: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Transaction Type</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'transaction_type', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'transaction_type', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Money IN Column */}
+                  <TableCell align="right">
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, moneyIn: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Money IN</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'money_in', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'money_in', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Money OUT Column */}
+                  <TableCell align="right">
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, moneyOut: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Money OUT</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'money_out', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'money_out', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Tender Type Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, tenderType: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Tender Type</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'tender_type', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'tender_type', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* View Column */}
+                  <TableCell align="center">View</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {journalLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                      <CircularProgress />
+                    </TableCell>
+                  </TableRow>
+                ) : filteredJournalEntries.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                      No journal entries found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredJournalEntries.map((entry, index) => (
+                    <TableRow
+                      key={entry.entry_id}
+                      hover
+                      selected={index === selectedJournalRow}
+                      onClick={() => {
+                        setSelectedJournalRow(index);
+                        setSelectedJournalEntry(entry);
+                      }}
+                      onDoubleClick={() => {
+                        setSelectedJournalEntry(entry);
+                        setJournalViewDialog(true);
+                      }}
+                      sx={{
+                        cursor: 'pointer',
+                        backgroundColor: index === selectedJournalRow ? 'action.selected' : 'inherit',
+                        '&:hover': {
+                          backgroundColor: index === selectedJournalRow ? 'action.selected' : 'action.hover',
+                        },
+                      }}
+                    >
+                      <TableCell>{new Date(entry.entry_date).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        {entry.entry_time 
+                          ? entry.entry_time.split('.')[0].substring(0, 8) 
+                          : new Date(entry.entry_date).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                        }
+                      </TableCell>
+                      <TableCell>{entry.drawer_name || 'N/A'}</TableCell>
+                      <TableCell>{entry.employee_name || 'N/A'}</TableCell>
+                      <TableCell>{entry.transaction_type || 'N/A'}</TableCell>
+                      <TableCell align="right">{entry.money_in > 0 ? formatCurrency(entry.money_in) : '—'}</TableCell>
+                      <TableCell align="right">{entry.money_out > 0 ? formatCurrency(entry.money_out) : '—'}</TableCell>
+                      <TableCell>{entry.tender_type_name || entry.tender_type || 'N/A'}</TableCell>
+                      <TableCell align="center">
+                        {index === selectedJournalRow && (
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedJournalEntry(entry);
+                              setJournalViewDialog(true);
+                            }}
+                          >
+                            <ViewIcon />
+                          </IconButton>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      )}
+
+      {/* Filter Dialogs */}
+      {/* Date Filter */}
+      <Popover
+        open={Boolean(filterAnchor.date)}
+        anchorEl={filterAnchor.date}
+        onClose={() => setFilterAnchor({ ...filterAnchor, date: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 300 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Date Range</Typography>
+          <TextField
+            label="Start Date"
+            type="date"
+            value={journalFilters.date.start}
+            onChange={(e) => setJournalFilters({ ...journalFilters, date: { ...journalFilters.date, start: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputLabelProps={{ shrink: true }}
+          />
+          <TextField
+            label="End Date"
+            type="date"
+            value={journalFilters.date.end}
+            onChange={(e) => setJournalFilters({ ...journalFilters, date: { ...journalFilters.date, end: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputLabelProps={{ shrink: true }}
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => {
+              const today = new Date().toISOString().split('T')[0];
+              setJournalFilters({ ...journalFilters, date: { start: today, end: today } });
+            }}
+            fullWidth
+          >
+            Reset to Today
+          </Button>
+        </Box>
+      </Popover>
+
+      {/* Time Filter */}
+      <Popover
+        open={Boolean(filterAnchor.time)}
+        anchorEl={filterAnchor.time}
+        onClose={() => setFilterAnchor({ ...filterAnchor, time: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 300 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Time Range</Typography>
+          <TextField
+            label="Start Time"
+            type="time"
+            value={journalFilters.time.start}
+            onChange={(e) => setJournalFilters({ ...journalFilters, time: { ...journalFilters.time, start: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputLabelProps={{ shrink: true }}
+          />
+          <TextField
+            label="End Time"
+            type="time"
+            value={journalFilters.time.end}
+            onChange={(e) => setJournalFilters({ ...journalFilters, time: { ...journalFilters.time, end: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputLabelProps={{ shrink: true }}
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setJournalFilters({ ...journalFilters, time: { start: '00:00', end: '23:59' } })}
+            fullWidth
+          >
+            Reset to Full Day
+          </Button>
+        </Box>
+      </Popover>
+
+      {/* Drawer Filter */}
+      <Popover
+        open={Boolean(filterAnchor.drawer)}
+        anchorEl={filterAnchor.drawer}
+        onClose={() => setFilterAnchor({ ...filterAnchor, drawer: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250, maxHeight: 400, overflow: 'auto' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Safe/Drawer</Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={journalFilters.drawer.length === 0}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setJournalFilters({ ...journalFilters, drawer: [] });
+                  }
+                }}
+              />
+            }
+            label="All"
+          />
+          {drawers.map((drawer) => (
+            <FormControlLabel
+              key={drawer.drawer_id}
+              control={
+                <Checkbox
+                  checked={journalFilters.drawer.includes(drawer.drawer_id)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setJournalFilters({ ...journalFilters, drawer: [...journalFilters.drawer, drawer.drawer_id] });
+                    } else {
+                      setJournalFilters({ ...journalFilters, drawer: journalFilters.drawer.filter(id => id !== drawer.drawer_id) });
+                    }
+                  }}
+                />
+              }
+              label={drawer.drawer_name}
+            />
+          ))}
+        </Box>
+      </Popover>
+
+      {/* Employee Filter */}
+      <Popover
+        open={Boolean(filterAnchor.employee)}
+        anchorEl={filterAnchor.employee}
+        onClose={() => setFilterAnchor({ ...filterAnchor, employee: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250, maxHeight: 400, overflow: 'auto' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Employee</Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={journalFilters.employee.length === 0}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setJournalFilters({ ...journalFilters, employee: [] });
+                  }
+                }}
+              />
+            }
+            label="All"
+          />
+          {employees.map((emp) => (
+            <FormControlLabel
+              key={emp.employee_id}
+              control={
+                <Checkbox
+                  checked={journalFilters.employee.includes(emp.employee_id)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setJournalFilters({ ...journalFilters, employee: [...journalFilters.employee, emp.employee_id] });
+                    } else {
+                      setJournalFilters({ ...journalFilters, employee: journalFilters.employee.filter(id => id !== emp.employee_id) });
+                    }
+                  }}
+                />
+              }
+              label={`${emp.first_name} ${emp.last_name}`}
+            />
+          ))}
+        </Box>
+      </Popover>
+
+      {/* Transaction Type Filter */}
+      <Popover
+        open={Boolean(filterAnchor.transactionType)}
+        anchorEl={filterAnchor.transactionType}
+        onClose={() => setFilterAnchor({ ...filterAnchor, transactionType: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250, maxHeight: 400, overflow: 'auto' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Transaction Type</Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={journalFilters.transactionType.length === 0}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setJournalFilters({ ...journalFilters, transactionType: [] });
+                  }
+                }}
+              />
+            }
+            label="All"
+          />
+          {['Open', 'Close', 'Transfer', 'Over/Short', 'Payments', 'Petty Cash Payout'].map((type) => (
+            <FormControlLabel
+              key={type}
+              control={
+                <Checkbox
+                  checked={journalFilters.transactionType.includes(type)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setJournalFilters({ ...journalFilters, transactionType: [...journalFilters.transactionType, type] });
+                    } else {
+                      setJournalFilters({ ...journalFilters, transactionType: journalFilters.transactionType.filter(t => t !== type) });
+                    }
+                  }}
+                />
+              }
+              label={type}
+            />
+          ))}
+        </Box>
+      </Popover>
+
+      {/* Money IN Filter */}
+      <Popover
+        open={Boolean(filterAnchor.moneyIn)}
+        anchorEl={filterAnchor.moneyIn}
+        onClose={() => setFilterAnchor({ ...filterAnchor, moneyIn: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Money IN Range</Typography>
+          <TextField
+            label="Min Amount"
+            type="number"
+            value={journalFilters.moneyIn.min}
+            onChange={(e) => setJournalFilters({ ...journalFilters, moneyIn: { ...journalFilters.moneyIn, min: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
+          />
+          <TextField
+            label="Max Amount"
+            type="number"
+            value={journalFilters.moneyIn.max}
+            onChange={(e) => setJournalFilters({ ...journalFilters, moneyIn: { ...journalFilters.moneyIn, max: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setJournalFilters({ ...journalFilters, moneyIn: { min: '', max: '' } })}
+            fullWidth
+          >
+            Clear Filter
+          </Button>
+        </Box>
+      </Popover>
+
+      {/* Money OUT Filter */}
+      <Popover
+        open={Boolean(filterAnchor.moneyOut)}
+        anchorEl={filterAnchor.moneyOut}
+        onClose={() => setFilterAnchor({ ...filterAnchor, moneyOut: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Money OUT Range</Typography>
+          <TextField
+            label="Min Amount"
+            type="number"
+            value={journalFilters.moneyOut.min}
+            onChange={(e) => setJournalFilters({ ...journalFilters, moneyOut: { ...journalFilters.moneyOut, min: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
+          />
+          <TextField
+            label="Max Amount"
+            type="number"
+            value={journalFilters.moneyOut.max}
+            onChange={(e) => setJournalFilters({ ...journalFilters, moneyOut: { ...journalFilters.moneyOut, max: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setJournalFilters({ ...journalFilters, moneyOut: { min: '', max: '' } })}
+            fullWidth
+          >
+            Clear Filter
+          </Button>
+        </Box>
+      </Popover>
+
+      {/* Tender Type Filter */}
+      <Popover
+        open={Boolean(filterAnchor.tenderType)}
+        anchorEl={filterAnchor.tenderType}
+        onClose={() => setFilterAnchor({ ...filterAnchor, tenderType: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250, maxHeight: 400, overflow: 'auto' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Tender Type</Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={journalFilters.tenderType.length === 0}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setJournalFilters({ ...journalFilters, tenderType: [] });
+                  }
+                }}
+              />
+            }
+            label="All"
+          />
+          {Array.from(new Set(journalEntries.map(e => e.tender_type).filter(Boolean))).map((tender) => {
+            const tenderName = journalEntries.find(e => e.tender_type === tender)?.tender_type_name || tender;
+            return (
+              <FormControlLabel
+                key={tender}
+                control={
+                  <Checkbox
+                    checked={journalFilters.tenderType.includes(tender)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setJournalFilters({ ...journalFilters, tenderType: [...journalFilters.tenderType, tender] });
+                      } else {
+                        setJournalFilters({ ...journalFilters, tenderType: journalFilters.tenderType.filter(t => t !== tender) });
+                      }
+                    }}
+                  />
+                }
+                label={tenderName}
+              />
+            );
+          })}
+        </Box>
+      </Popover>
+
+      {/* Journal View Dialog */}
+      <Dialog
+        open={journalViewDialog}
+        onClose={() => {
+          setJournalViewDialog(false);
+          setJournalTransactionDetails(null);
+        }}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          Transaction Details - {selectedJournalEntry?.transaction_type || 'Entry'}
+        </DialogTitle>
+        <DialogContent>
+          {selectedJournalEntry && (
+            <Box sx={{ mt: 2 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Date</Typography>
+                  <Typography variant="body1">{new Date(selectedJournalEntry.entry_date).toLocaleDateString()}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Time</Typography>
+                  <Typography variant="body1">
+                    {selectedJournalEntry.entry_time 
+                      ? selectedJournalEntry.entry_time.split('.')[0].substring(0, 8)
+                      : new Date(selectedJournalEntry.entry_date).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                    }
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Safe/Drawer</Typography>
+                  <Typography variant="body1">{selectedJournalEntry.drawer_name || 'N/A'}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Employee</Typography>
+                  <Typography variant="body1">{selectedJournalEntry.employee_name || 'N/A'}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Transaction Type</Typography>
+                  <Typography variant="body1">{selectedJournalEntry.transaction_type || 'N/A'}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Tender Type</Typography>
+                  <Typography variant="body1">{selectedJournalEntry.tender_type_name || selectedJournalEntry.tender_type || 'N/A'}</Typography>
+                </Grid>
+                {selectedJournalEntry.money_in > 0 && (
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">Money IN</Typography>
+                    <Typography variant="body1" sx={{ color: 'success.main', fontWeight: 600 }}>
+                      {formatCurrency(selectedJournalEntry.money_in)}
+                    </Typography>
+                  </Grid>
+                )}
+                {selectedJournalEntry.money_out > 0 && (
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">Money OUT</Typography>
+                    <Typography variant="body1" sx={{ color: 'error.main', fontWeight: 600 }}>
+                      {formatCurrency(selectedJournalEntry.money_out)}
+                    </Typography>
+                  </Grid>
+                )}
+                {selectedJournalEntry.transaction_id && (
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="text.secondary">Transaction ID</Typography>
+                    <Typography variant="body1">{selectedJournalEntry.transaction_id}</Typography>
+                  </Grid>
+                )}
+                {selectedJournalEntry.notes && (
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="text.secondary">Notes</Typography>
+                    <Typography variant="body1">{selectedJournalEntry.notes}</Typography>
+                  </Grid>
+                )}
+              </Grid>
+
+              {/* For store transactions, show items and payments */}
+              {selectedJournalEntry.transaction_id && selectedJournalEntry.transaction_type === 'Payments' && (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 600 }}>Transaction Items</Typography>
+                  <Box sx={{ maxHeight: 300, overflow: 'auto' }}>
+                    <CircularProgress size={24} />
+                    <Typography variant="body2" color="text.secondary">Loading transaction details...</Typography>
+                  </Box>
+                </>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setJournalViewDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Configure Safe / Drawer Tab */}
+      {tabValue === 3 && (
+        <Box>
+          <Paper sx={{ p: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h6">Configure Safe / Drawer</Typography>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={() => {
+                    setNewDrawerForm({
+                      drawer_type: 'physical',
+                      count: 1,
+                      drawer_name: '',
+                      is_active: true,
+                      min_close: 0,
+                      max_close: 0
+                    });
+                    setAddDrawerDialog(true);
+                  }}
+                >
+                  Add
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<CopyIcon />}
+                  disabled={!selectedConfigDrawer || selectedConfigDrawer.drawer_name === 'Master'}
+                  onClick={handleCopyDrawer}
+                >
+                  Copy
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<EditIcon />}
+                  disabled={!selectedConfigDrawer}
+                  onClick={handleEditDrawer}
+                >
+                  Edit
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<DeleteIcon />}
+                  disabled={!selectedConfigDrawer || selectedConfigDrawer.drawer_name === 'Master'}
+                  onClick={() => setDeleteDrawerDialog(true)}
+                >
+                  Delete
+                </Button>
+              </Box>
+            </Box>
+
+            {/* SAFE Section */}
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, mt: 2 }}>SAFE</Typography>
+            <TableContainer sx={{ mb: 3 }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: '#1976d2' }}>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', width: 50 }}></TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Name</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Available</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Tracking</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Physical Count</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Electronic Count</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Min Amount</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Max Amount</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {configDrawers
+                    .filter(d => d.drawer_type === 'safe' || d.drawer_type === 'master_safe')
+                    .map((drawer) => (
+                      <TableRow
+                        key={drawer.drawer_id}
+                        hover
+                        selected={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
+                        onClick={() => setSelectedConfigDrawer(drawer)}
+                        sx={{
+                          bgcolor: selectedConfigDrawer?.drawer_id === drawer.drawer_id ? '#e3f2fd' : 'white',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
+                            onChange={() => setSelectedConfigDrawer(drawer)}
+                          />
+                        </TableCell>
+                        <TableCell>{drawer.drawer_name}</TableCell>
+                        <TableCell>{drawer.is_active ? 'Y' : 'N'}</TableCell>
+                        <TableCell>{drawer.drawer_type === 'master_safe' ? 'Rep' : 'Loc'}</TableCell>
+                        <TableCell>{drawer.individual_denominations ? 'Denoms' : 'Balance'}</TableCell>
+                        <TableCell>{drawer.blind_count ? 'Blind' : 'Open'}</TableCell>
+                        <TableCell>{drawer.electronic_blind_count ? 'Blind' : 'Open'}</TableCell>
+                        <TableCell>{formatCurrency(drawer.min_close || 0)}</TableCell>
+                        <TableCell>{formatCurrency(drawer.max_close || 0)}</TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            {/* DRAWER Section */}
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>DRAWER</Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: '#1976d2' }}>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', width: 50 }}></TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Name</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Available</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Tracking</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Physical Count</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Electronic Count</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Min Amount</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Max Amount</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {configDrawers
+                    .filter(d => d.drawer_type === 'physical')
+                    .map((drawer) => (
+                      <TableRow
+                        key={drawer.drawer_id}
+                        hover
+                        selected={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
+                        onClick={() => setSelectedConfigDrawer(drawer)}
+                        sx={{
+                          bgcolor: selectedConfigDrawer?.drawer_id === drawer.drawer_id ? '#e3f2fd' : 'white',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
+                            onChange={() => setSelectedConfigDrawer(drawer)}
+                          />
+                        </TableCell>
+                        <TableCell>{drawer.drawer_name}</TableCell>
+                        <TableCell>{drawer.is_active ? 'Y' : 'N'}</TableCell>
+                        <TableCell>
+                          {drawer.is_shared === null ? 'Shared' : (drawer.is_shared ? 'Shared' : 'Single')}
+                        </TableCell>
+                        <TableCell>{drawer.individual_denominations ? 'Denoms' : 'Balance'}</TableCell>
+                        <TableCell>{drawer.blind_count ? 'Blind' : 'Open'}</TableCell>
+                        <TableCell>{drawer.electronic_blind_count ? 'Blind' : 'Open'}</TableCell>
+                        <TableCell>{formatCurrency(drawer.min_close || 0)}</TableCell>
+                        <TableCell>{formatCurrency(drawer.max_close || 0)}</TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+        </Box>
+      )}
+
+      {/* Add Drawer Dialog */}
+      <Dialog open={addDrawerDialog} onClose={() => setAddDrawerDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add Safe / Drawer</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <FormControl fullWidth>
+              <InputLabel>Category</InputLabel>
+              <Select
+                value={newDrawerForm.drawer_type}
+                onChange={(e) => {
+                  const newType = e.target.value;
+                  setNewDrawerForm({ 
+                    ...newDrawerForm, 
+                    drawer_type: newType,
+                    // Reset type-specific fields when changing category
+                    has_location: newType === 'safe' ? false : false,
+                    is_shared: newType === 'physical' ? true : true
+                  });
+                }}
+                label="Category"
+              >
+                <MenuItem value="physical">Drawer</MenuItem>
+                <MenuItem value="safe">Safe</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              label="How Many"
+              type="number"
+              value={newDrawerForm.count}
+              onChange={(e) => setNewDrawerForm({ ...newDrawerForm, count: parseInt(e.target.value) || 1 })}
+              inputProps={{ min: 1, max: 50 }}
+              fullWidth
+            />
+            <TextField
+              label="Name (optional, will auto-generate if empty)"
+              value={newDrawerForm.drawer_name}
+              onChange={(e) => setNewDrawerForm({ ...newDrawerForm, drawer_name: e.target.value })}
+              fullWidth
+              helperText={newDrawerForm.count > 1 ? "Will auto-add dash and number (e.g., Safe-1, Safe-2)" : ""}
+            />
+            {/* Type field - different options for safes vs drawers */}
+            {newDrawerForm.drawer_type === 'safe' ? (
+              <FormControl fullWidth>
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={newDrawerForm.has_location ? 'repository-location' : 'repository'}
+                  onChange={(e) => setNewDrawerForm({ ...newDrawerForm, has_location: e.target.value === 'repository-location' })}
+                  label="Type"
+                >
+                  <MenuItem value="repository">Repository</MenuItem>
+                  <MenuItem value="repository-location">Repository/Location</MenuItem>
+                </Select>
+              </FormControl>
+            ) : (
+              <FormControl fullWidth>
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={newDrawerForm.is_shared ? 'shared' : 'single'}
+                  onChange={(e) => setNewDrawerForm({ ...newDrawerForm, is_shared: e.target.value === 'shared' })}
+                  label="Type"
+                >
+                  <MenuItem value="single">Single</MenuItem>
+                  <MenuItem value="shared">Shared</MenuItem>
+                </Select>
+              </FormControl>
+            )}
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={newDrawerForm.is_active}
+                  onChange={(e) => setNewDrawerForm({ ...newDrawerForm, is_active: e.target.checked })}
+                />
+              }
+              label="Available"
+            />
+            <TextField
+              label="Min Amount"
+              type="number"
+              value={newDrawerForm.min_close}
+              onChange={(e) => setNewDrawerForm({ ...newDrawerForm, min_close: parseFloat(e.target.value) || 0 })}
+              fullWidth
+            />
+            <TextField
+              label="Max Amount"
+              type="number"
+              value={newDrawerForm.max_close}
+              onChange={(e) => setNewDrawerForm({ ...newDrawerForm, max_close: parseFloat(e.target.value) || 0 })}
+              fullWidth
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddDrawerDialog(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleAddDrawer}>Add</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Drawer Dialog */}
+      <Dialog open={editDrawerDialog} onClose={() => setEditDrawerDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit Safe / Drawer</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="Name"
+              value={editDrawerForm.drawer_name}
+              onChange={(e) => setEditDrawerForm({ ...editDrawerForm, drawer_name: e.target.value })}
+              fullWidth
+              disabled={selectedConfigDrawer?.drawer_name === 'Master'}
+            />
+            {/* Type field - different options for safes vs drawers */}
+            {(selectedConfigDrawer?.drawer_type === 'safe' || selectedConfigDrawer?.drawer_type === 'master_safe') ? (
+              <FormControl fullWidth>
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={editDrawerForm.has_location ? 'repository-location' : 'repository'}
+                  onChange={(e) => setEditDrawerForm({ ...editDrawerForm, has_location: e.target.value === 'repository-location' })}
+                  label="Type"
+                >
+                  <MenuItem value="repository">Repository</MenuItem>
+                  <MenuItem value="repository-location">Repository/Location</MenuItem>
+                </Select>
+              </FormControl>
+            ) : selectedConfigDrawer?.drawer_type === 'physical' ? (
+              <FormControl fullWidth>
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={editDrawerForm.is_shared ? 'shared' : 'single'}
+                  onChange={(e) => setEditDrawerForm({ ...editDrawerForm, is_shared: e.target.value === 'shared' })}
+                  label="Type"
+                >
+                  <MenuItem value="single">Single</MenuItem>
+                  <MenuItem value="shared">Shared</MenuItem>
+                </Select>
+              </FormControl>
+            ) : null}
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={editDrawerForm.is_active}
+                  onChange={(e) => setEditDrawerForm({ ...editDrawerForm, is_active: e.target.checked })}
+                  disabled={selectedConfigDrawer?.drawer_name === 'Master' || (selectedConfigDrawer && activeSessions.some(s => s.drawer_id === selectedConfigDrawer.drawer_id))}
+                />
+              }
+              label="Available"
+            />
+            <TextField
+              label="Min Amount"
+              type="number"
+              value={editDrawerForm.min_close || 0}
+              onChange={(e) => {
+                const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                setEditDrawerForm({ ...editDrawerForm, min_close: isNaN(val) ? 0 : val });
+              }}
+              inputProps={{ step: '0.01' }}
+              fullWidth
+            />
+            <TextField
+              label="Max Amount"
+              type="number"
+              value={editDrawerForm.max_close || 0}
+              onChange={(e) => {
+                const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                setEditDrawerForm({ ...editDrawerForm, max_close: isNaN(val) ? 0 : val });
+              }}
+              inputProps={{ step: '0.01' }}
+              fullWidth
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDrawerDialog(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleSaveEditDrawer}>Save</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Location Transfer Dialog */}
+      <Dialog open={locationTransferDialog} onClose={handleCancelLocationTransfer} maxWidth="sm" fullWidth>
+        <DialogTitle>Transfer Items from Safe Location</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Items exist in the safe location "{selectedConfigDrawer?.drawer_name}". Please select a location to transfer them to.
+            </Alert>
+            <FormControl fullWidth required>
+              <InputLabel>Transfer Items To</InputLabel>
+              <Select
+                value={transferLocationTo}
+                onChange={(e) => setTransferLocationTo(e.target.value)}
+                label="Transfer Items To"
+              >
+                {availableLocations.map((location) => (
+                  <MenuItem key={location.location_id} value={location.location}>
+                    {location.location}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Typography variant="body2" color="text.secondary">
+              If you cancel, the location will remain enabled for this safe.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelLocationTransfer}>Cancel</Button>
+          <Button variant="contained" onClick={handleLocationTransfer} disabled={!transferLocationTo}>
+            Transfer and Update
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Drawer Dialog */}
+      <Dialog open={deleteDrawerDialog} onClose={() => setDeleteDrawerDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Delete Safe / Drawer</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Are you sure you want to delete "{selectedConfigDrawer?.drawer_name}"?
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            This action cannot be undone. Make sure the drawer is not currently open.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDrawerDialog(false)}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={handleDeleteDrawer}>Delete</Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Open Drawer Dialog */}
       <Dialog open={openDrawerDialog} onClose={() => {
         setOpenDrawerDialog(false);
@@ -2577,6 +4348,7 @@ function CashDrawer() {
                     const isSafe = drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe';
                     setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
                     setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
+                    setIsElectronicBlindCount(isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers);
                     // Check if sharing mode is required for this drawer
                     const needsSharingMode = drawer.drawer_type === 'physical' && drawer.is_shared === null;
                     setSharingModeRequired(needsSharingMode);
@@ -2940,14 +4712,14 @@ function CashDrawer() {
                         <tr>
                           <th style={{ textAlign: 'left' }}>Type</th>
                           <th colSpan={2} style={{ textAlign: 'center' }}>Actual</th>
-                          <th colSpan={2} style={{ textAlign: 'center' }}>Expected</th>
+                          {!isElectronicBlindCount && <th colSpan={2} style={{ textAlign: 'center' }}>Expected</th>}
                         </tr>
                         <tr>
                           <th></th>
                           <th style={{ textAlign: 'center', fontSize: '0.75rem' }}>Qty</th>
                           <th style={{ textAlign: 'right', fontSize: '0.75rem' }}>Amt</th>
-                          <th style={{ textAlign: 'center', fontSize: '0.75rem' }}>Qty</th>
-                          <th style={{ textAlign: 'right', fontSize: '0.75rem' }}>Amt</th>
+                          {!isElectronicBlindCount && <th style={{ textAlign: 'center', fontSize: '0.75rem' }}>Qty</th>}
+                          {!isElectronicBlindCount && <th style={{ textAlign: 'right', fontSize: '0.75rem' }}>Amt</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -2983,8 +4755,8 @@ function CashDrawer() {
                                   sx={{ '& .MuiInputBase-root': { height: '28px' } }}
                                 />
                               </td>
-                              <td style={{ textAlign: 'center' }}>{expected.expected_qty}</td>
-                              <td style={{ textAlign: 'right' }}>{formatCurrency(expected.expected_amount)}</td>
+                              {!isElectronicBlindCount && <td style={{ textAlign: 'center' }}>{expected.expected_qty}</td>}
+                              {!isElectronicBlindCount && <td style={{ textAlign: 'right' }}>{formatCurrency(expected.expected_amount)}</td>}
                             </tr>
                           );
                         })}
@@ -3947,12 +5719,79 @@ function CashDrawer() {
             Cancel
           </Button>
           <Button
-            onClick={handleTransfer}
+            onClick={() => handleTransfer(false)}
             variant="contained"
             color="primary"
             disabled={!transferSource || !transferDestination || isStoreClosed}
           >
             Complete Transfer
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Transfer Min/Max Warning Dialog */}
+      <Dialog open={transferMinMaxWarningDialog} onClose={() => setTransferMinMaxWarningDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarningIcon color="warning" />
+            <Typography variant="h6">Transfer Will Put Drawer Outside Recommended Range</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="warning">
+              This transfer will put the destination drawer outside its recommended min/max range.
+            </Alert>
+            {transferMinMaxWarningData && (
+              <Box>
+                <Typography variant="body1" gutterBottom>
+                  <strong>Destination Drawer:</strong> {transferMinMaxWarningData.drawerName}
+                </Typography>
+                <Typography variant="body1" gutterBottom>
+                  <strong>Current Balance:</strong> {formatCurrency(transferMinMaxWarningData.currentBalance)}
+                </Typography>
+                <Typography variant="body1" gutterBottom>
+                  <strong>Transfer Amount (Cash):</strong> {formatCurrency(transferMinMaxWarningData.transferAmount)}
+                </Typography>
+                <Typography variant="body1" gutterBottom>
+                  <strong>Resulting Balance:</strong> {formatCurrency(transferMinMaxWarningData.resultingBalance)}
+                </Typography>
+                {transferMinMaxWarningData.minClose > 0 && transferMinMaxWarningData.maxClose > 0 && (
+                  <Typography variant="body1" gutterBottom>
+                    <strong>Recommended Range:</strong> {formatCurrency(transferMinMaxWarningData.minClose)} - {formatCurrency(transferMinMaxWarningData.maxClose)}
+                  </Typography>
+                )}
+                {transferMinMaxWarningData.minClose > 0 && transferMinMaxWarningData.maxClose === 0 && (
+                  <Typography variant="body1" gutterBottom>
+                    <strong>Minimum Recommended:</strong> {formatCurrency(transferMinMaxWarningData.minClose)}
+                  </Typography>
+                )}
+                {transferMinMaxWarningData.maxClose > 0 && transferMinMaxWarningData.minClose === 0 && (
+                  <Typography variant="body1" gutterBottom>
+                    <strong>Maximum Recommended:</strong> {formatCurrency(transferMinMaxWarningData.maxClose)}
+                  </Typography>
+                )}
+              </Box>
+            )}
+            <Typography variant="body2" color="text.secondary">
+              This is a warning only. You can proceed with the transfer if the amount is correct, or cancel to adjust the transfer amount.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTransferMinMaxWarningDialog(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setTransferMinMaxWarningDialog(false);
+              handleTransfer(true); // Bypass warning and proceed with transfer
+            }}
+            variant="contained"
+            color="warning"
+            disabled={isStoreClosed}
+          >
+            Proceed with Transfer
           </Button>
         </DialogActions>
       </Dialog>
@@ -4615,6 +6454,367 @@ function CashDrawer() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDetailsDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Quick Cash Drawer Report Dialog - Activity Journal */}
+      <Dialog open={quickReportDialog} onClose={() => { setQuickReportDialog(false); }} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">Quick Drawer Report</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {new Date().toLocaleDateString()}
+            </Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {!sessionDetails ? (
+            <Box sx={{ py: 6, textAlign: 'center' }}>
+              <MoneyIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
+              <Typography variant="h6" gutterBottom>
+                No Drawer Open
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                The current employee does not have a drawer open. Open a drawer to view the quick report.
+              </Typography>
+            </Box>
+          ) : (() => {
+            // Build chronological activity entries
+            const session = sessionDetails.session;
+            const txns = sessionDetails.transactions || [];
+            const adjs = sessionDetails.adjustments || [];
+            const sessionIsSafe = session.drawer_type === 'safe' || session.drawer_type === 'master_safe';
+            const sessionBlindCount = sessionIsSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers;
+            const showRunningBalance = !sessionBlindCount || session.status === 'closed';
+
+            const activities = [
+              { time: session.opened_at, activityType: 'drawer_opened', label: 'Drawer Opened', amount: parseFloat(session.opening_balance), details: `Opened by ${session.employee_name}` },
+              ...txns.map(t => ({
+                time: t.created_at,
+                activityType: t.transaction_type,
+                label: t.transaction_type 
+                  ? t.transaction_type.charAt(0).toUpperCase() + t.transaction_type.slice(1)
+                  : 'Transaction',
+                amount: parseFloat(t.amount || 0), // Cash amount (0 for non-cash transactions)
+                totalAmount: parseFloat(t.total_amount || 0), // Total transaction amount
+                details: t.item_descriptions || t.transaction_id, // Show item descriptions or transaction_id
+                transaction_id: t.transaction_id,
+              })),
+              ...adjs.map(a => ({
+                time: a.created_at,
+                activityType: a.adjustment_type,
+                label: a.adjustment_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+                amount: parseFloat(a.amount),
+                details: a.reason || '',
+                performed_by: a.performed_by_name,
+              })),
+              ...(session.status === 'closed' ? [{
+                time: session.closed_at,
+                activityType: 'drawer_closed',
+                label: 'Drawer Closed',
+                amount: parseFloat(session.actual_balance),
+                details: session.discrepancy != null
+                  ? `Discrepancy: ${formatCurrency(session.discrepancy)}`
+                  : '',
+              }] : []),
+            ].sort((a, b) => new Date(a.time) - new Date(b.time));
+
+            // Calculate running balances
+            let runningBalance = 0;
+            const activitiesWithBalance = activities.map((act) => {
+              if (act.activityType === 'drawer_opened') {
+                runningBalance = act.amount;
+              } else if (act.activityType === 'drawer_closed') {
+                // Don't change running balance for close event
+              } else {
+                runningBalance += act.amount;
+              }
+              return { ...act, runningBalance };
+            });
+
+            // Calculate summary totals
+            const netTransactions = txns.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+            const netAdjustments = adjs.reduce((sum, a) => sum + parseFloat(a.amount), 0);
+            const expectedBalance = parseFloat(session.current_expected_balance || session.expected_balance || 0);
+
+            const getActivityColor = (type) => {
+              switch (type) {
+                case 'drawer_opened': return 'success.main';
+                case 'drawer_closed': return 'warning.main';
+                case 'sale': return 'success.main';
+                case 'refund': return 'error.main';
+                case 'pawn': return 'info.main';
+                case 'buy': return 'info.main';
+                case 'retail': return 'success.main';
+                case 'return': return 'error.main';
+                case 'repair': return 'warning.main';
+                case 'payment': return 'success.main';
+                case 'redeem': return 'info.main';
+                case 'bank_deposit': return 'error.main';
+                case 'bank_withdrawal': return 'success.main';
+                case 'petty_cash': return 'error.main';
+                case 'transfer': return 'info.main';
+                case 'correction': return 'warning.main';
+                default: return 'text.primary';
+              }
+            };
+
+            return (
+              <Box sx={{ pt: 1 }}>
+                {/* Header */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Box>
+                    <Typography variant="h5">{activeSession?.drawer_name}</Typography>
+                    <Typography variant="body2" color="text.secondary">{session.employee_name}</Typography>
+                  </Box>
+                  <Box>{getStatusChip(session.status)}</Box>
+                </Box>
+
+                {/* Summary Bar */}
+                <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: '#f9f9f9' }}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={3}>
+                      <Typography variant="caption" color="text.secondary">Opening Balance</Typography>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{formatCurrency(session.opening_balance)}</Typography>
+                    </Grid>
+                    <Grid item xs={3}>
+                      <Typography variant="caption" color="text.secondary">Net Transactions</Typography>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600, color: netTransactions >= 0 ? 'success.main' : 'error.main' }}>
+                        {formatCurrency(netTransactions)}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={3}>
+                      <Typography variant="caption" color="text.secondary">Net Adjustments</Typography>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600, color: netAdjustments >= 0 ? 'success.main' : 'error.main' }}>
+                        {formatCurrency(netAdjustments)}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={3}>
+                      <Typography variant="caption" color="text.secondary">
+                        {session.status === 'closed' ? 'Expected Balance' : 'Current Expected'}
+                      </Typography>
+                      {showRunningBalance ? (
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                          {formatCurrency(expectedBalance)}
+                        </Typography>
+                      ) : (
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.disabled' }}>Hidden</Typography>
+                      )}
+                    </Grid>
+                  </Grid>
+                </Paper>
+
+                {/* Closing Summary - only for closed sessions */}
+                {session.status === 'closed' && (
+                  <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: '#fff3e0' }}>
+                    <Grid container spacing={2} alignItems="center">
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="text.secondary">Actual Balance</Typography>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{formatCurrency(session.actual_balance)}</Typography>
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="text.secondary">Discrepancy</Typography>
+                        <Box sx={{ mt: 0.5 }}>{getDiscrepancyChip(session.discrepancy)}</Box>
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Typography variant="caption" color="text.secondary">Closing Notes</Typography>
+                        <Typography variant="body2">{session.closing_notes || 'None'}</Typography>
+                      </Grid>
+                    </Grid>
+                  </Paper>
+                )}
+
+                {/* Activity Journal Table */}
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Activity Journal</Typography>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: '#f5f5f5' }}>
+                        <TableCell>Time</TableCell>
+                        <TableCell>Activity</TableCell>
+                        <TableCell>Details</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                        {showRunningBalance && <TableCell align="right">Running Balance</TableCell>}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {activitiesWithBalance.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={showRunningBalance ? 6 : 5} align="center" sx={{ py: 3 }}>
+                            No activity recorded
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        activitiesWithBalance.map((act, idx) => (
+                          <TableRow
+                            key={idx}
+                            hover
+                            sx={{
+                              bgcolor: act.activityType === 'drawer_opened' ? 'rgba(76,175,80,0.05)'
+                                : act.activityType === 'drawer_closed' ? 'rgba(255,152,0,0.05)'
+                                : 'inherit'
+                            }}
+                          >
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                              {formatDateTime(act.time)}
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2" sx={{ fontWeight: 600, color: getActivityColor(act.activityType) }}>
+                                {act.label}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                                {act.details}
+                                {act.performed_by ? ` (${act.performed_by})` : ''}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right" sx={{
+                              fontWeight: 600,
+                              color: act.activityType === 'drawer_opened' || act.activityType === 'drawer_closed'
+                                ? 'text.primary'
+                                : (parseFloat(act.amount || act.totalAmount || 0) >= 0 ? 'success.main' : 'error.main')
+                            }}>
+                              {act.activityType === 'drawer_closed'
+                                ? formatCurrency(act.amount)
+                                : act.activityType === 'drawer_opened'
+                                  ? formatCurrency(act.amount)
+                                  : (() => {
+                                      // For transactions, show total amount if cash amount is 0 (non-cash transaction)
+                                      const displayAmount = parseFloat(act.amount || 0) === 0 && act.totalAmount 
+                                        ? parseFloat(act.totalAmount || 0)
+                                        : parseFloat(act.amount || 0);
+                                      const sign = displayAmount >= 0 ? '+' : '';
+                                      return sign + formatCurrency(displayAmount);
+                                    })()
+                              }
+                            </TableCell>
+                            {showRunningBalance && (
+                              <TableCell align="right" sx={{ fontWeight: 600 }}>
+                                {formatCurrency(act.runningBalance)}
+                              </TableCell>
+                            )}
+                            <TableCell align="center">
+                              {act.transaction_id ? (
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  onClick={() => viewQuickReportTransaction(act.transaction_id, act.label)}
+                                >
+                                  <ViewIcon fontSize="small" />
+                                </IconButton>
+                              ) : null}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            );
+          })()}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setQuickReportDialog(false); setQuickReportTxnDetail(null); }}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Quick Report - Transaction Detail Dialog (read-only) */}
+      <Dialog open={!!quickReportTxnDetail} onClose={() => setQuickReportTxnDetail(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            Transaction Details: {quickReportTxnDetail?.transaction_id}
+            {quickReportTxnDetail?.transaction_type && (
+              <Chip label={quickReportTxnDetail.transaction_type} size="small" color="primary" variant="outlined" />
+            )}
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {quickReportTxnLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : quickReportTxnDetail && (
+            <Box sx={{ pt: 1 }}>
+              {/* Items */}
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Items</Typography>
+              {quickReportTxnDetail.items && quickReportTxnDetail.items.length > 0 ? (
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Type</TableCell>
+                        <TableCell>Description</TableCell>
+                        <TableCell align="center">Qty</TableCell>
+                        <TableCell align="right">Price</TableCell>
+                        <TableCell align="right">Total</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {quickReportTxnDetail.items.map((item, idx) => {
+                        // Use transaction item price if available, otherwise jewelry item price
+                        const itemPrice = item.transaction_item_price || item.item_price || item.unit_price || item.price || 0;
+                        // Use short_desc, long_desc, or description - prioritize short_desc, then long_desc, then description
+                        const itemDescription = item.short_desc || item.long_desc || item.description || item.product_name || item.item_name || 'Item';
+                        const itemType = item.transaction_type ? item.transaction_type.charAt(0).toUpperCase() + item.transaction_type.slice(1) : '';
+                        return (
+                          <TableRow key={idx}>
+                            <TableCell>
+                              <Typography variant="body2" sx={{ fontWeight: 500, textTransform: 'capitalize' }}>
+                                {itemType}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                {itemDescription}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="center">{item.quantity || 1}</TableCell>
+                            <TableCell align="right">{formatCurrency(itemPrice)}</TableCell>
+                            <TableCell align="right">
+                              {formatCurrency(item.total_price || itemPrice * (item.quantity || 1))}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Typography color="text.secondary">No items found</Typography>
+              )}
+
+              {/* Payments */}
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Payments</Typography>
+              {quickReportTxnDetail.payments && quickReportTxnDetail.payments.length > 0 ? (
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Method</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {quickReportTxnDetail.payments.map((payment, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell sx={{ textTransform: 'capitalize' }}>{payment.payment_method || payment.method}</TableCell>
+                          <TableCell align="right">{formatCurrency(payment.amount)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Typography color="text.secondary">No payment details found</Typography>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setQuickReportTxnDetail(null)}>Back</Button>
         </DialogActions>
       </Dialog>
 

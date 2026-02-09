@@ -191,6 +191,8 @@ function SystemConfig() {
   // Opening drawer mode (Individual Denominations vs Drawer Total)
   const [isIndividualDenominationsDrawers, setIsIndividualDenominationsDrawers] = useState(false);
   const [isIndividualDenominationsSafe, setIsIndividualDenominationsSafe] = useState(false);
+  const [isElectronicBlindCountDrawers, setIsElectronicBlindCountDrawers] = useState(false);
+  const [isElectronicBlindCountSafe, setIsElectronicBlindCountSafe] = useState(false);
   const [minClose, setMinClose] = useState(0); // For physical drawers
   const [maxClose, setMaxClose] = useState(0); // For physical drawers
   const [minCloseSafe, setMinCloseSafe] = useState(0); // For safes
@@ -265,24 +267,24 @@ function SystemConfig() {
 
   const fetchBlindCountPreference = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/user_preferences`);
-      // Closing drawer mode preferences
-      const blindCountDrawersPreference = response.data.find(pref => pref.preference_name === 'blindCount_drawers');
-      const blindCountSafePreference = response.data.find(pref => pref.preference_name === 'blindCount_safe');
-      setIsBlindCountDrawers(blindCountDrawersPreference ? blindCountDrawersPreference.preference_value === 'true' : true);
-      setIsBlindCountSafe(blindCountSafePreference ? blindCountSafePreference.preference_value === 'true' : true);
-      
-      // Opening drawer mode preferences
-      const individualDenominationsDrawersPreference = response.data.find(pref => pref.preference_name === 'individualDenominations_drawers');
-      const individualDenominationsSafePreference = response.data.find(pref => pref.preference_name === 'individualDenominations_safe');
-      setIsIndividualDenominationsDrawers(individualDenominationsDrawersPreference ? individualDenominationsDrawersPreference.preference_value === 'true' : false);
-      setIsIndividualDenominationsSafe(individualDenominationsSafePreference ? individualDenominationsSafePreference.preference_value === 'true' : false);
+      // Fetch all drawer mode settings from drawer-type-config (stored on drawers table)
+      const drawerConfigRes = await axios.get(`${API_BASE_URL}/drawer-type-config`);
+      const physicalConfig = drawerConfigRes.data.find(c => c.drawer_type === 'physical');
+      const safeConfig = drawerConfigRes.data.find(c => c.drawer_type === 'safe');
+      setIsBlindCountDrawers(physicalConfig ? physicalConfig.blind_count : true);
+      setIsBlindCountSafe(safeConfig ? safeConfig.blind_count : true);
+      setIsIndividualDenominationsDrawers(physicalConfig ? physicalConfig.individual_denominations : false);
+      setIsIndividualDenominationsSafe(safeConfig ? safeConfig.individual_denominations : false);
+      setIsElectronicBlindCountDrawers(physicalConfig ? physicalConfig.electronic_blind_count : false);
+      setIsElectronicBlindCountSafe(safeConfig ? safeConfig.electronic_blind_count : false);
     } catch (error) {
       console.error('Error fetching drawer mode preferences:', error);
       setIsBlindCountDrawers(true); // Default to blind count
       setIsBlindCountSafe(true); // Default to blind count
       setIsIndividualDenominationsDrawers(false); // Default to drawer total
       setIsIndividualDenominationsSafe(false); // Default to drawer total
+      setIsElectronicBlindCountDrawers(false); // Default to open count
+      setIsElectronicBlindCountSafe(false); // Default to open count
     }
   };
 
@@ -1337,23 +1339,29 @@ function SystemConfig() {
 
   const handleBlindCountDrawersToggle = async (event) => {
     const newValue = event.target.checked;
+    // Update state immediately for responsive UI
     setIsBlindCountDrawers(newValue);
     try {
-      await axios.put(`${API_BASE_URL}/user_preferences`, {
-        preference_name: 'blindCount_drawers',
-        preference_value: newValue.toString()
+      // Save to drawers table via drawer-type-config endpoint
+      await axios.put(`${API_BASE_URL}/drawer-type-config/physical`, {
+        blind_count: newValue
       });
+
+      // Refresh preferences to ensure UI is in sync
+      await fetchBlindCountPreference();
+
       setSnackbar({
         open: true,
-        message: `Physical drawers opening mode set to ${newValue ? 'Drawer Total' : 'Individual Denominations'}`,
+        message: `Physical drawers physical count set to ${newValue ? 'Blind' : 'Open'}`,
         severity: 'success'
       });
     } catch (error) {
       console.error('Error updating blind count preference for drawers:', error);
-      setIsBlindCountDrawers(!newValue); // Revert on error
+      // Revert state on error
+      setIsBlindCountDrawers(!newValue);
       setSnackbar({
         open: true,
-        message: 'Failed to update count mode settings for drawers',
+        message: 'Failed to update closing mode settings for drawers',
         severity: 'error'
       });
     }
@@ -1361,20 +1369,26 @@ function SystemConfig() {
 
   const handleBlindCountSafeToggle = async (event) => {
     const newValue = event.target.checked;
+    // Update state immediately for responsive UI
     setIsBlindCountSafe(newValue);
     try {
-      await axios.put(`${API_BASE_URL}/user_preferences`, {
-        preference_name: 'blindCount_safe',
-        preference_value: newValue.toString()
+      // Save to drawers table via drawer-type-config endpoint
+      await axios.put(`${API_BASE_URL}/drawer-type-config/safe`, {
+        blind_count: newValue
       });
+
+      // Refresh preferences to ensure UI is in sync
+      await fetchBlindCountPreference();
+
       setSnackbar({
         open: true,
-        message: `Safe closing mode set to ${newValue ? 'Blind Count' : 'Open Count'}`,
+        message: `Safe physical count set to ${newValue ? 'Blind' : 'Open'}`,
         severity: 'success'
       });
     } catch (error) {
       console.error('Error updating blind count preference for safe:', error);
-      setIsBlindCountSafe(!newValue); // Revert on error
+      // Revert state on error
+      setIsBlindCountSafe(!newValue);
       setSnackbar({
         open: true,
         message: 'Failed to update closing mode settings for safe',
@@ -1387,13 +1401,12 @@ function SystemConfig() {
     const newValue = event.target.checked;
     setIsIndividualDenominationsDrawers(newValue);
     try {
-      await axios.put(`${API_BASE_URL}/user_preferences`, {
-        preference_name: 'individualDenominations_drawers',
-        preference_value: newValue.toString()
+      await axios.put(`${API_BASE_URL}/drawer-type-config/physical`, {
+        individual_denominations: newValue
       });
       setSnackbar({
         open: true,
-        message: `Physical drawers opening mode set to ${newValue ? 'Individual Denominations' : 'Drawer Total'}`,
+        message: `Physical drawers tracking set to ${newValue ? 'Individual Denominations' : 'Total Cash Balance'}`,
         severity: 'success'
       });
     } catch (error) {
@@ -1411,13 +1424,12 @@ function SystemConfig() {
     const newValue = event.target.checked;
     setIsIndividualDenominationsSafe(newValue);
     try {
-      await axios.put(`${API_BASE_URL}/user_preferences`, {
-        preference_name: 'individualDenominations_safe',
-        preference_value: newValue.toString()
+      await axios.put(`${API_BASE_URL}/drawer-type-config/safe`, {
+        individual_denominations: newValue
       });
       setSnackbar({
         open: true,
-        message: `Safe drawers opening mode set to ${newValue ? 'Individual Denominations' : 'Drawer Total'}`,
+        message: `Safe tracking set to ${newValue ? 'Individual Denominations' : 'Total Cash Balance'}`,
         severity: 'success'
       });
     } catch (error) {
@@ -1426,6 +1438,54 @@ function SystemConfig() {
       setSnackbar({
         open: true,
         message: 'Failed to update opening mode settings for safe',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleElectronicBlindCountDrawersToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsElectronicBlindCountDrawers(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/drawer-type-config/physical`, {
+        electronic_blind_count: newValue
+      });
+      await fetchBlindCountPreference();
+      setSnackbar({
+        open: true,
+        message: `Physical drawers electronic count set to ${newValue ? 'Blind' : 'Open'}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating electronic blind count for drawers:', error);
+      setIsElectronicBlindCountDrawers(!newValue);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update electronic count settings for drawers',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleElectronicBlindCountSafeToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsElectronicBlindCountSafe(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/drawer-type-config/safe`, {
+        electronic_blind_count: newValue
+      });
+      await fetchBlindCountPreference();
+      setSnackbar({
+        open: true,
+        message: `Safe electronic count set to ${newValue ? 'Blind' : 'Open'}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating electronic blind count for safe:', error);
+      setIsElectronicBlindCountSafe(!newValue);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update electronic count settings for safe',
         severity: 'error'
       });
     }
@@ -1944,14 +2004,14 @@ function SystemConfig() {
               </Grid>
               <Grid item xs={12}>
                 <Grid container spacing={3}>
-                  {/* Opening Drawer Mode */}
+                  {/* Tracking */}
                   <Grid item xs={12} md={6}>
                     <Typography variant="h6" gutterBottom>
-                      Opening Drawer Mode
+                      Tracking
                     </Typography>
                     <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Choose how to enter opening balance
+                        Select between keeping track of individual denominations or just the total cash balance
                       </Typography>
                       <Box display="flex" gap={3} flexWrap="wrap">
                         <Box sx={{ flex: '1 1 200px' }}>
@@ -1960,7 +2020,7 @@ function SystemConfig() {
                           </Typography>
                           <Box display="flex" alignItems="center" gap={1}>
                             <Typography variant="body2" color={!isIndividualDenominationsDrawers ? 'primary' : 'text.secondary'} fontWeight={!isIndividualDenominationsDrawers ? 'bold' : 'normal'}>
-                              Drawer Total
+                              Total Cash Balance
                             </Typography>
                             <Switch
                               checked={isIndividualDenominationsDrawers}
@@ -1978,7 +2038,7 @@ function SystemConfig() {
                           </Typography>
                           <Box display="flex" alignItems="center" gap={1}>
                             <Typography variant="body2" color={!isIndividualDenominationsSafe ? 'primary' : 'text.secondary'} fontWeight={!isIndividualDenominationsSafe ? 'bold' : 'normal'}>
-                              Drawer Total
+                              Total Cash Balance
                             </Typography>
                             <Switch
                               checked={isIndividualDenominationsSafe}
@@ -1993,15 +2053,15 @@ function SystemConfig() {
                       </Box>
                     </Box>
                   </Grid>
-                  
-                  {/* Closing Drawer Mode */}
+
+                  {/* Physical Count */}
                   <Grid item xs={12} md={6}>
                     <Typography variant="h6" gutterBottom>
-                      Closing Drawer Mode
+                      Physical Count
                     </Typography>
                     <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Choose how to verify closing balance
+                        Select how to count the physical tenders at open/close
                       </Typography>
                       <Box display="flex" gap={3} flexWrap="wrap">
                         <Box sx={{ flex: '1 1 200px' }}>
@@ -2010,7 +2070,7 @@ function SystemConfig() {
                           </Typography>
                           <Box display="flex" alignItems="center" gap={1}>
                             <Typography variant="body2" color={!isBlindCountDrawers ? 'primary' : 'text.secondary'} fontWeight={!isBlindCountDrawers ? 'bold' : 'normal'}>
-                              Open Count
+                              Open
                             </Typography>
                             <Switch
                               checked={isBlindCountDrawers}
@@ -2018,7 +2078,7 @@ function SystemConfig() {
                               color="primary"
                             />
                             <Typography variant="body2" color={isBlindCountDrawers ? 'primary' : 'text.secondary'} fontWeight={isBlindCountDrawers ? 'bold' : 'normal'}>
-                              Blind Count
+                              Blind
                             </Typography>
                           </Box>
                         </Box>
@@ -2028,7 +2088,7 @@ function SystemConfig() {
                           </Typography>
                           <Box display="flex" alignItems="center" gap={1}>
                             <Typography variant="body2" color={!isBlindCountSafe ? 'primary' : 'text.secondary'} fontWeight={!isBlindCountSafe ? 'bold' : 'normal'}>
-                              Open Count
+                              Open
                             </Typography>
                             <Switch
                               checked={isBlindCountSafe}
@@ -2036,7 +2096,57 @@ function SystemConfig() {
                               color="primary"
                             />
                             <Typography variant="body2" color={isBlindCountSafe ? 'primary' : 'text.secondary'} fontWeight={isBlindCountSafe ? 'bold' : 'normal'}>
-                              Blind Count
+                              Blind
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </Box>
+                    </Box>
+                  </Grid>
+
+                  {/* Electronic Count */}
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="h6" gutterBottom>
+                      Electronic Count
+                    </Typography>
+                    <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Select how to count the electronic tenders at open/close
+                      </Typography>
+                      <Box display="flex" gap={3} flexWrap="wrap">
+                        <Box sx={{ flex: '1 1 200px' }}>
+                          <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                            Physical Drawers
+                          </Typography>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <Typography variant="body2" color={!isElectronicBlindCountDrawers ? 'primary' : 'text.secondary'} fontWeight={!isElectronicBlindCountDrawers ? 'bold' : 'normal'}>
+                              Open
+                            </Typography>
+                            <Switch
+                              checked={isElectronicBlindCountDrawers}
+                              onChange={handleElectronicBlindCountDrawersToggle}
+                              color="primary"
+                            />
+                            <Typography variant="body2" color={isElectronicBlindCountDrawers ? 'primary' : 'text.secondary'} fontWeight={isElectronicBlindCountDrawers ? 'bold' : 'normal'}>
+                              Blind
+                            </Typography>
+                          </Box>
+                        </Box>
+                        <Box sx={{ flex: '1 1 200px' }}>
+                          <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                            Safe Drawers
+                          </Typography>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <Typography variant="body2" color={!isElectronicBlindCountSafe ? 'primary' : 'text.secondary'} fontWeight={!isElectronicBlindCountSafe ? 'bold' : 'normal'}>
+                              Open
+                            </Typography>
+                            <Switch
+                              checked={isElectronicBlindCountSafe}
+                              onChange={handleElectronicBlindCountSafeToggle}
+                              color="primary"
+                            />
+                            <Typography variant="body2" color={isElectronicBlindCountSafe ? 'primary' : 'text.secondary'} fontWeight={isElectronicBlindCountSafe ? 'bold' : 'normal'}>
+                              Blind
                             </Typography>
                           </Box>
                         </Box>
@@ -2045,126 +2155,7 @@ function SystemConfig() {
                   </Grid>
                 </Grid>
               </Grid>
-              <Grid item xs={12}>
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                  <TextField
-                    label="Number of Cash Drawers"
-                    type="number"
-                    value={numberOfDrawers.count}
-                    onChange={(e) => setNumberOfDrawers(prev => ({ ...prev, count: e.target.value }))}
-                    onBlur={(e) => handleNumberOfDrawersChange(e)}
-                    size="small"
-                    sx={{ flex: '1 1 150px', minWidth: '150px' }}
-                    InputProps={{
-                      endAdornment: <InputAdornment position="end">drawers</InputAdornment>,
-                    }}
-                    inputProps={{ min: 0, max: 50 }}
-                  />
-                  <TextField
-                    label="Number of Safe Drawers"
-                    type="number"
-                    value={numberOfSafeDrawers.count}
-                    onChange={(e) => setNumberOfSafeDrawers(prev => ({ ...prev, count: e.target.value }))}
-                    onBlur={(e) => handleNumberOfSafeDrawersChange(e)}
-                    size="small"
-                    sx={{ flex: '1 1 150px', minWidth: '150px' }}
-                    InputProps={{
-                      endAdornment: <InputAdornment position="end">safes</InputAdornment>,
-                    }}
-                    inputProps={{ min: 0, max: 50 }}
-                  />
-                  <TextField
-                    label="Min Close (Physical Drawers)"
-                    type="number"
-                    value={minClose}
-                    onChange={(e) => setMinClose(parseFloat(e.target.value) || 0)}
-                    onBlur={handleMinCloseChange}
-                    size="small"
-                    sx={{ flex: '1 1 180px', minWidth: '180px' }}
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                    }}
-                    inputProps={{ min: 0, step: 0.01 }}
-                  />
-                  <TextField
-                    label="Max Close (Physical Drawers)"
-                    type="number"
-                    value={maxClose}
-                    onChange={(e) => setMaxClose(parseFloat(e.target.value) || 0)}
-                    onBlur={handleMaxCloseChange}
-                    size="small"
-                    sx={{ flex: '1 1 180px', minWidth: '180px' }}
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                    }}
-                    inputProps={{ min: 0, step: 0.01 }}
-                  />
-                  <TextField
-                    label="Min Close (Safes)"
-                    type="number"
-                    value={minCloseSafe}
-                    onChange={(e) => setMinCloseSafe(parseFloat(e.target.value) || 0)}
-                    onBlur={handleMinCloseSafeChange}
-                    size="small"
-                    sx={{ flex: '1 1 150px', minWidth: '150px' }}
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                    }}
-                    inputProps={{ min: 0, step: 0.01 }}
-                  />
-                  <TextField
-                    label="Max Close (Safes)"
-                    type="number"
-                    value={maxCloseSafe}
-                    onChange={(e) => setMaxCloseSafe(parseFloat(e.target.value) || 0)}
-                    onBlur={handleMaxCloseSafeChange}
-                    size="small"
-                    sx={{ flex: '1 1 150px', minWidth: '150px' }}
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                    }}
-                    inputProps={{ min: 0, step: 0.01 }}
-                  />
-                </Box>
-              </Grid>
             </Grid>
-            {drawers.length > 0 && (
-              <Box sx={{ mt: 3 }}>
-                <Typography variant="subtitle1" gutterBottom fontWeight="bold">
-                  Configured Drawers:
-                </Typography>
-                <TableContainer component={Paper} sx={{ mt: 1 }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Drawer Name</TableCell>
-                        <TableCell>Type</TableCell>
-                        <TableCell align="center">Status</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {drawers.map((drawer) => (
-                        <TableRow key={drawer.drawer_id}>
-                          <TableCell>{drawer.drawer_name}</TableCell>
-                          <TableCell>
-                            {drawer.drawer_type === 'safe' ? 'Safe/Vault' : 
-                             drawer.drawer_type === 'master_safe' ? 'Master Safe' : 
-                             'Physical Drawer'}
-                          </TableCell>
-                          <TableCell align="center">
-                            {drawer.is_active ? (
-                              <Typography color="success.main" variant="body2">Active</Typography>
-                            ) : (
-                              <Typography color="error.main" variant="body2">Inactive</Typography>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Box>
-            )}
           </ConfigSection>
 
           {/* Storage Cases Configuration */}

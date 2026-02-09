@@ -55,15 +55,15 @@ COMMENT ON COLUMN drawers.drawer_type IS 'Type of drawer: safe (vault/safe - mul
 COMMENT ON COLUMN drawers.is_active IS 'Whether this drawer is currently active and usable';
 COMMENT ON COLUMN drawers.display_order IS 'Order in which drawers should be displayed in the UI';
 
--- Insert default safe drawer
-INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
-VALUES ('Safe', 'safe', TRUE, 0)
-ON CONFLICT (drawer_name) DO NOTHING;
+-- Insert default safe drawer for store 1
+INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id)
+VALUES ('Safe', 'safe', TRUE, 0, 1)
+ON CONFLICT (drawer_name, store_id) DO NOTHING;
 
--- Insert default master safe drawer
-INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
-VALUES ('Master Safe', 'master_safe', TRUE, 0)
-ON CONFLICT (drawer_name) DO NOTHING;
+-- Insert default master safe drawer for store 1
+INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id)
+VALUES ('Master Safe', 'master_safe', TRUE, 0, 1)
+ON CONFLICT (drawer_name, store_id) DO NOTHING;
 
 -- Create cash_drawer_sessions table
 CREATE TABLE IF NOT EXISTS cash_drawer_sessions (
@@ -710,3 +710,126 @@ COMMENT ON COLUMN petty_cash_payouts.invoice_number IS 'Invoice or receipt numbe
 ALTER TABLE drawers ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
 UPDATE drawers SET store_id = 1 WHERE store_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_drawers_store_id ON drawers(store_id);
+
+-- Replace single drawer_name unique constraint with per-store unique (drawer_name + store_id)
+ALTER TABLE drawers DROP CONSTRAINT IF EXISTS drawers_drawer_name_key;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'drawers_drawer_name_store_unique'
+  ) THEN
+    ALTER TABLE drawers ADD CONSTRAINT drawers_drawer_name_store_unique UNIQUE (drawer_name, store_id);
+  END IF;
+END $$;
+
+-- Add has_location column to drawers table for safes (repository vs repository/location)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'drawers' AND column_name = 'has_location'
+    ) THEN
+        ALTER TABLE drawers ADD COLUMN has_location BOOLEAN DEFAULT FALSE;
+    END IF;
+END $$;
+
+-- Set default has_location to FALSE for all existing drawers
+UPDATE drawers SET has_location = FALSE WHERE has_location IS NULL;
+
+COMMENT ON COLUMN drawers.has_location IS 'For safes: TRUE = repository/location (creates storage location), FALSE = repository only. For drawers: not applicable.';
+
+-- Add blind_count column to drawers table (per-drawer-type setting, similar to min_close/max_close)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'drawers' AND column_name = 'blind_count'
+    ) THEN
+        ALTER TABLE drawers ADD COLUMN blind_count BOOLEAN NOT NULL DEFAULT TRUE;
+    END IF;
+END $$;
+
+COMMENT ON COLUMN drawers.blind_count IS 'Closing mode: TRUE = blind count (no running balance shown), FALSE = open count (running balance visible). Applied per drawer type.';
+
+-- Migrate blind count preferences from user_preferences to drawers table
+DO $$
+DECLARE
+    v_blind_count_drawers TEXT;
+    v_blind_count_safe TEXT;
+BEGIN
+    -- Read current preferences
+    SELECT preference_value INTO v_blind_count_drawers
+    FROM user_preferences WHERE preference_name = 'blindCount_drawers';
+
+    SELECT preference_value INTO v_blind_count_safe
+    FROM user_preferences WHERE preference_name = 'blindCount_safe';
+
+    -- Update physical drawers
+    IF v_blind_count_drawers IS NOT NULL THEN
+        UPDATE drawers
+        SET blind_count = (v_blind_count_drawers = 'true')
+        WHERE drawer_type = 'physical';
+    END IF;
+
+    -- Update safe and master_safe drawers
+    IF v_blind_count_safe IS NOT NULL THEN
+        UPDATE drawers
+        SET blind_count = (v_blind_count_safe = 'true')
+        WHERE drawer_type IN ('safe', 'master_safe');
+    END IF;
+
+    -- Remove old preferences
+    DELETE FROM user_preferences WHERE preference_name IN ('blindCount_drawers', 'blindCount_safe');
+END $$;
+
+-- Add individual_denominations column to drawers table (opening mode: drawer total vs individual denominations)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'drawers' AND column_name = 'individual_denominations'
+    ) THEN
+        ALTER TABLE drawers ADD COLUMN individual_denominations BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+END $$;
+
+COMMENT ON COLUMN drawers.individual_denominations IS 'Opening mode: TRUE = count by individual denominations, FALSE = enter drawer total. Applied per drawer type.';
+
+-- Migrate individual denominations preferences from user_preferences to drawers table
+DO $$
+DECLARE
+    v_individual_drawers TEXT;
+    v_individual_safe TEXT;
+BEGIN
+    SELECT preference_value INTO v_individual_drawers
+    FROM user_preferences WHERE preference_name = 'individualDenominations_drawers';
+
+    SELECT preference_value INTO v_individual_safe
+    FROM user_preferences WHERE preference_name = 'individualDenominations_safe';
+
+    IF v_individual_drawers IS NOT NULL THEN
+        UPDATE drawers
+        SET individual_denominations = (v_individual_drawers = 'true')
+        WHERE drawer_type = 'physical';
+    END IF;
+
+    IF v_individual_safe IS NOT NULL THEN
+        UPDATE drawers
+        SET individual_denominations = (v_individual_safe = 'true')
+        WHERE drawer_type IN ('safe', 'master_safe');
+    END IF;
+
+    DELETE FROM user_preferences WHERE preference_name IN ('individualDenominations_drawers', 'individualDenominations_safe');
+END $$;
+
+-- Add electronic_blind_count column to drawers table (per-drawer-type setting for electronic tenders)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'drawers' AND column_name = 'electronic_blind_count'
+    ) THEN
+        ALTER TABLE drawers ADD COLUMN electronic_blind_count BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+END $$;
+
+COMMENT ON COLUMN drawers.electronic_blind_count IS 'Electronic tender closing mode: TRUE = blind count (no expected amounts shown), FALSE = open count (show expected electronic tender amounts). Applied per drawer type.';

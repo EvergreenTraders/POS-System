@@ -689,8 +689,10 @@ app.get('/api/employee-sessions/closing-notification', async (req, res) => {
 app.get('/api/cash-drawer/active', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT * FROM active_drawer_sessions
-      ORDER BY opened_at DESC
+      SELECT ads.* FROM active_drawer_sessions ads
+      JOIN drawers d ON ads.drawer_id = d.drawer_id
+      WHERE d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+      ORDER BY ads.opened_at DESC
     `);
     res.json(result.rows);
   } catch (error) {
@@ -709,6 +711,7 @@ app.get('/api/cash-drawer/overview', async (req, res) => {
         d.drawer_name,
         d.drawer_type,
         d.is_shared,
+        d.min_close,
         CASE
           WHEN d.is_shared = TRUE OR d.drawer_type IN ('safe', 'master_safe') THEN 'Shared'
           WHEN d.is_shared = FALSE THEN 'Single'
@@ -786,6 +789,57 @@ app.get('/api/cash-drawer/overview', async (req, res) => {
   }
 });
 
+// GET /api/cash-drawer/low-balance-alerts - Get drawers/safes where cash balance is below min_close or above max_close
+app.get('/api/cash-drawer/low-balance-alerts', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        d.drawer_id,
+        d.drawer_name,
+        d.drawer_type,
+        d.min_close,
+        d.max_close,
+        ads.session_id,
+        ads.current_expected_balance as current_balance,
+        ads.employee_id as opener_id,
+        CASE
+          WHEN d.min_close > 0 AND ads.current_expected_balance < d.min_close THEN 'below_minimum'
+          WHEN d.max_close > 0 AND ads.current_expected_balance > d.max_close THEN 'above_maximum'
+          ELSE NULL
+        END as alert_type
+      FROM active_drawer_sessions ads
+      JOIN drawers d ON ads.drawer_id = d.drawer_id
+      WHERE (
+        (d.min_close > 0 AND ads.current_expected_balance < d.min_close)
+        OR (d.max_close > 0 AND ads.current_expected_balance > d.max_close)
+      )
+        AND d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+      ORDER BY d.drawer_type, d.drawer_name
+    `);
+
+    // For each alert session, get connected employee IDs
+    const alerts = await Promise.all(result.rows.map(async (row) => {
+      const connectionsResult = await pool.query(`
+        SELECT employee_id FROM drawer_session_connections
+        WHERE session_id = $1 AND is_active = TRUE
+        UNION
+        SELECT employee_id FROM cash_drawer_sessions
+        WHERE session_id = $1
+      `, [row.session_id]);
+
+      return {
+        ...row,
+        connected_employee_ids: connectionsResult.rows.map(r => r.employee_id)
+      };
+    }));
+
+    res.json(alerts);
+  } catch (error) {
+    console.error('Error fetching balance alerts:', error);
+    res.status(500).json({ error: 'Failed to fetch balance alerts' });
+  }
+});
+
 // GET /api/cash-drawer/employee/:employeeId/active - Get all active drawer sessions for an employee
 app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
   const { employeeId } = req.params;
@@ -798,7 +852,7 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
         d.drawer_name,
         d.is_shared,
         calculate_expected_balance(s.session_id) AS current_expected_balance,
-        (SELECT COUNT(*) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS transaction_count,
+        (SELECT COUNT(*) FROM transactions WHERE session_id = s.session_id) AS transaction_count,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_adjustments WHERE session_id = s.session_id) AS total_adjustments,
         CASE
@@ -852,28 +906,32 @@ app.get('/api/cash-drawer/history', async (req, res) => {
   } = req.query;
 
   try {
-    let query = 'SELECT * FROM drawer_session_history WHERE 1=1';
+    let query = `SELECT dsh.* FROM drawer_session_history dsh
+      JOIN drawers d ON dsh.drawer_id = d.drawer_id
+      JOIN employees e ON dsh.employee_id = e.employee_id
+      WHERE d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+        AND e.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)`;
     const params = [];
     let paramCount = 1;
 
     if (employee_id) {
       params.push(employee_id);
-      query += ` AND employee_id = $${paramCount++}`;
+      query += ` AND dsh.employee_id = $${paramCount++}`;
     }
 
     if (start_date) {
       params.push(start_date);
-      query += ` AND opened_at >= $${paramCount++}`;
+      query += ` AND dsh.opened_at >= $${paramCount++}`;
     }
 
     if (end_date) {
       params.push(end_date);
-      query += ` AND opened_at <= $${paramCount++}`;
+      query += ` AND dsh.opened_at <= $${paramCount++}`;
     }
 
     if (status) {
       params.push(status);
-      query += ` AND status = $${paramCount++}`;
+      query += ` AND dsh.status = $${paramCount++}`;
     }
 
     params.push(limit, offset);
@@ -887,6 +945,143 @@ app.get('/api/cash-drawer/history', async (req, res) => {
   }
 });
 
+// GET /api/cash-drawer/journal - Get comprehensive transaction journal with tender type breakdown
+app.get('/api/cash-drawer/journal', async (req, res) => {
+  try {
+    // Get all journal entries: opens, closes, transactions, adjustments, transfers
+    // Each transaction can have multiple entries (one per tender type)
+    const query = `
+      WITH journal_entries AS (
+        -- Drawer Opens
+        SELECT 
+          'open_' || s.session_id::text as entry_id,
+          s.opened_at as entry_date,
+          s.opened_at::time as entry_time,
+          d.drawer_id::integer,
+          d.drawer_name::text,
+          d.drawer_type::text,
+          s.employee_id::integer,
+          (e.first_name || ' ' || e.last_name)::text as employee_name,
+          'Open'::text as transaction_type,
+          COALESCE(s.opening_balance, 0)::decimal as money_in,
+          0::decimal as money_out,
+          'cash'::text as tender_type,
+          NULL::text as transaction_id,
+          NULL::integer as adjustment_id,
+          s.opening_notes::text as notes
+        FROM cash_drawer_sessions s
+        JOIN drawers d ON s.drawer_id = d.drawer_id
+        JOIN employees e ON s.employee_id = e.employee_id
+        
+        UNION ALL
+        
+        -- Drawer Closes
+        SELECT 
+          'close_' || s.session_id::text as entry_id,
+          s.closed_at as entry_date,
+          s.closed_at::time as entry_time,
+          d.drawer_id::integer,
+          d.drawer_name::text,
+          d.drawer_type::text,
+          s.employee_id::integer,
+          (e.first_name || ' ' || e.last_name)::text as employee_name,
+          CASE 
+            WHEN s.discrepancy IS NOT NULL AND ABS(s.discrepancy) > 0.01 THEN 'Over/Short'
+            ELSE 'Close'
+          END::text as transaction_type,
+          CASE WHEN COALESCE(s.discrepancy, 0) > 0 THEN s.discrepancy ELSE 0 END::decimal as money_in,
+          CASE WHEN COALESCE(s.discrepancy, 0) < 0 THEN ABS(s.discrepancy) ELSE 0 END::decimal as money_out,
+          'cash'::text as tender_type,
+          NULL::text as transaction_id,
+          NULL::integer as adjustment_id,
+          s.closing_notes::text as notes
+        FROM cash_drawer_sessions s
+        JOIN drawers d ON s.drawer_id = d.drawer_id
+        JOIN employees e ON s.employee_id = e.employee_id
+        WHERE s.status IN ('closed', 'reconciled') AND s.closed_at IS NOT NULL
+        
+        UNION ALL
+        
+        -- Store Transactions (one entry per payment method/tender type)
+        SELECT 
+          ('txn_' || t.transaction_id || '_' || p.id::text)::text as entry_id,
+          t.created_at as entry_date,
+          t.created_at::time as entry_time,
+          s.drawer_id::integer,
+          d.drawer_name::text,
+          d.drawer_type::text,
+          t.employee_id::integer,
+          (e.first_name || ' ' || e.last_name)::text as employee_name,
+          'Payments'::text as transaction_type,
+          CASE WHEN p.action = 'in' THEN COALESCE(p.amount, 0) ELSE 0 END::decimal as money_in,
+          CASE WHEN p.action = 'out' THEN COALESCE(p.amount, 0) ELSE 0 END::decimal as money_out,
+          COALESCE(p.payment_method, 'cash')::text as tender_type,
+          t.transaction_id::text,
+          NULL::integer as adjustment_id,
+          NULL::text as notes
+        FROM transactions t
+        JOIN cash_drawer_sessions s ON t.session_id = s.session_id
+        JOIN drawers d ON s.drawer_id = d.drawer_id
+        JOIN employees e ON t.employee_id = e.employee_id
+        JOIN payments p ON t.transaction_id = p.transaction_id
+        WHERE t.session_id IS NOT NULL
+        
+        UNION ALL
+        
+        -- Adjustments (Transfers, Petty Cash, Bank Deposits/Withdrawals, etc.)
+        SELECT 
+          ('adj_' || a.adjustment_id::text)::text as entry_id,
+          a.created_at as entry_date,
+          a.created_at::time as entry_time,
+          s.drawer_id::integer,
+          d.drawer_name::text,
+          d.drawer_type::text,
+          a.performed_by::integer as employee_id,
+          COALESCE(e.first_name || ' ' || e.last_name, 'Unknown')::text as employee_name,
+          CASE 
+            WHEN a.adjustment_type = 'transfer' THEN 'Transfer'
+            WHEN a.adjustment_type = 'petty_cash' THEN 'Petty Cash Payout'
+            WHEN a.adjustment_type = 'bank_deposit' THEN 'Transfer'
+            WHEN a.adjustment_type = 'bank_withdrawal' THEN 'Transfer'
+            ELSE 'Transfer'
+          END::text as transaction_type,
+          CASE WHEN COALESCE(a.amount, 0) > 0 THEN a.amount ELSE 0 END::decimal as money_in,
+          CASE WHEN COALESCE(a.amount, 0) < 0 THEN ABS(a.amount) ELSE 0 END::decimal as money_out,
+          'cash'::text as tender_type,
+          NULL::text as transaction_id,
+          a.adjustment_id::integer,
+          a.reason::text as notes
+        FROM cash_drawer_adjustments a
+        JOIN cash_drawer_sessions s ON a.session_id = s.session_id
+        JOIN drawers d ON s.drawer_id = d.drawer_id
+        LEFT JOIN employees e ON a.performed_by = e.employee_id
+      )
+      SELECT
+        je.*,
+        pm.method_name as tender_type_name,
+        pm.is_physical as tender_is_physical
+      FROM journal_entries je
+      LEFT JOIN payment_methods pm ON je.tender_type = pm.method_value
+      JOIN drawers d2 ON je.drawer_id = d2.drawer_id
+      JOIN employees e2 ON je.employee_id = e2.employee_id
+      WHERE d2.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+        AND e2.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+      ORDER BY je.entry_date DESC, je.entry_time DESC
+    `;
+    
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching transaction journal:', error);
+    console.error('Error details:', error.message);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to fetch transaction journal',
+      details: error.message 
+    });
+  }
+});
+
 // GET /api/cash-drawer/:sessionId/details - Get detailed information about a drawer session
 app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
   const { sessionId } = req.params;
@@ -896,10 +1091,13 @@ app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
     const sessionResult = await pool.query(`
       SELECT
         s.*,
+        d.drawer_type,
+        d.drawer_name,
         e.first_name || ' ' || e.last_name AS employee_name,
         r.first_name || ' ' || r.last_name AS reconciled_by_name,
         calculate_expected_balance(s.session_id) AS current_expected_balance
       FROM cash_drawer_sessions s
+      JOIN drawers d ON s.drawer_id = d.drawer_id
       JOIN employees e ON s.employee_id = e.employee_id
       LEFT JOIN employees r ON s.reconciled_by = r.employee_id
       WHERE s.session_id = $1
@@ -909,13 +1107,57 @@ app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    // Get transactions for this session
+    // Get all transactions for this session (including non-cash transactions)
+    // Left join with cash_drawer_transactions to get cash amounts if they exist
+    // Determine transaction type and fetch item descriptions from pawn_ticket or sale_ticket based on type
     const transactionsResult = await pool.query(`
-      SELECT dt.*, t.transaction_date
-      FROM cash_drawer_transactions dt
-      JOIN transactions t ON dt.transaction_id = t.transaction_id
-      WHERE dt.session_id = $1
-      ORDER BY dt.created_at DESC
+      SELECT 
+        t.transaction_id,
+        t.transaction_date,
+        t.total_amount,
+        t.created_at,
+        COALESCE(dt.amount, 0) as amount,
+        COALESCE(
+          dt.transaction_type,
+          (
+            SELECT tt.type
+            FROM transaction_items ti
+            JOIN transaction_type tt ON ti.transaction_type_id = tt.id
+            WHERE ti.transaction_id = t.transaction_id
+            LIMIT 1
+          ),
+          'sale'
+        ) as transaction_type,
+        dt.payment_id,
+        dt.notes,
+        (
+          SELECT STRING_AGG(
+            COALESCE(j.short_desc, j.long_desc, 'Item'), 
+            ', '
+            ORDER BY ticket_items.id
+          )
+          FROM (
+            -- Get item_id from pawn_ticket
+            SELECT pt.item_id, pt.id::text as id
+            FROM pawn_ticket pt
+            WHERE pt.transaction_id = t.transaction_id
+            UNION ALL
+            -- Get item_id from buy_ticket
+            SELECT bt.item_id, bt.id::text as id
+            FROM buy_ticket bt
+            WHERE bt.transaction_id = t.transaction_id
+            UNION ALL
+            -- Get item_id from sale_ticket
+            SELECT st.item_id, st.id::text as id
+            FROM sale_ticket st
+            WHERE st.transaction_id = t.transaction_id
+          ) AS ticket_items
+          LEFT JOIN jewelry j ON ticket_items.item_id = j.item_id
+        ) as item_descriptions
+      FROM transactions t
+      LEFT JOIN cash_drawer_transactions dt ON t.transaction_id = dt.transaction_id AND dt.session_id = $1
+      WHERE t.session_id = $1
+      ORDER BY t.created_at DESC
     `, [sessionId]);
 
     // Get adjustments for this session
@@ -956,17 +1198,26 @@ app.post('/api/cash-drawer/open', async (req, res) => {
   }
 
   try {
-    // Get the drawer info including type and sharing mode
+    // Get current store
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
+    // Get the drawer info including type and sharing mode - must belong to current store
     const drawerInfoResult = await pool.query(
-      'SELECT drawer_id, drawer_name, drawer_type, is_shared FROM drawers WHERE drawer_id = $1',
-      [drawer_id]
+      'SELECT drawer_id, drawer_name, drawer_type, is_shared, is_active FROM drawers WHERE drawer_id = $1 AND store_id = $2',
+      [drawer_id, currentStoreId]
     );
 
     if (drawerInfoResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Drawer not found' });
+      return res.status(404).json({ error: 'Drawer not found for this store' });
     }
 
     const drawerInfo = drawerInfoResult.rows[0];
+
+    // Check if drawer is available (is_active)
+    if (!drawerInfo.is_active) {
+      return res.status(400).json({ error: 'This drawer/safe is not available and cannot be opened' });
+    }
     const drawerType = drawerInfo.drawer_type;
     let drawerIsShared = drawerInfo.is_shared;
 
@@ -3194,19 +3445,34 @@ app.get('/api/cash-drawer/:sessionId/denominations/:type', async (req, res) => {
 });
 
 // Drawer Configuration Routes
-// GET /api/drawer-config - Get drawer configuration
+// GET /api/drawer-config - Get drawer configuration (per-store)
 app.get('/api/drawer-config', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM drawer_config LIMIT 1');
-    if (result.rows.length === 0) {
-      // Insert default if doesn't exist
+    // Get current store
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
+    // Count physical drawers for current store
+    const drawerCount = await pool.query(
+      "SELECT COUNT(*) as count FROM drawers WHERE drawer_type = 'physical' AND store_id = $1",
+      [currentStoreId]
+    );
+
+    // Ensure drawer_config row exists (for global settings like blind_count etc.)
+    const configResult = await pool.query('SELECT * FROM drawer_config LIMIT 1');
+    let config;
+    if (configResult.rows.length === 0) {
       const insertResult = await pool.query(
         'INSERT INTO drawer_config (number_of_drawers) VALUES (0) RETURNING *'
       );
-      res.json(insertResult.rows[0]);
+      config = insertResult.rows[0];
     } else {
-      res.json(result.rows[0]);
+      config = configResult.rows[0];
     }
+
+    // Override number_of_drawers with actual per-store count
+    config.number_of_drawers = parseInt(drawerCount.rows[0].count);
+    res.json(config);
   } catch (error) {
     console.error('Error fetching drawer config:', error);
     res.status(500).json({ error: 'Failed to fetch drawer configuration' });
@@ -3215,7 +3481,7 @@ app.get('/api/drawer-config', async (req, res) => {
 
 // PUT /api/drawer-config - Update drawer configuration
 app.put('/api/drawer-config', async (req, res) => {
-  const { number_of_drawers } = req.body;
+  const { number_of_drawers, min_close, max_close } = req.body;
 
   if (number_of_drawers === undefined || number_of_drawers < 0 || number_of_drawers > 50) {
     return res.status(400).json({ error: 'number_of_drawers must be between 0 and 50' });
@@ -3245,23 +3511,30 @@ app.put('/api/drawer-config', async (req, res) => {
     // Note: Safe drawers are now managed separately via /api/safe-drawers-config
     // Master safe is managed separately via /api/master-safe-config
 
-    // Get current physical drawers
+    // Get current store id
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
+    // Get current physical drawers for current store
     const currentDrawers = await pool.query(`
       SELECT drawer_id, drawer_name FROM drawers
-      WHERE drawer_type = 'physical'
+      WHERE drawer_type = 'physical' AND store_id = $1
       ORDER BY display_order
-    `);
+    `, [currentStoreId]);
 
     const currentCount = currentDrawers.rows.length;
 
     if (number_of_drawers > currentCount) {
-      // Add new drawers
+      // Add new drawers for current store with min/max values
+      const minCloseValue = min_close !== undefined ? parseFloat(min_close) : 0;
+      const maxCloseValue = max_close !== undefined ? parseFloat(max_close) : 0;
+      
       for (let i = currentCount + 1; i <= number_of_drawers; i++) {
         await pool.query(`
-          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
-          VALUES ($1, 'physical', TRUE, $2)
-          ON CONFLICT (drawer_name) DO NOTHING
-        `, [`Drawer ${i}`, i]);
+          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id, min_close, max_close)
+          VALUES ($1, 'physical', TRUE, $2, $3, $4, $5)
+          ON CONFLICT (drawer_name, store_id) DO UPDATE SET is_active = TRUE
+        `, [`Drawer ${i}`, i, currentStoreId, minCloseValue, maxCloseValue]);
       }
     } else if (number_of_drawers < currentCount) {
       // Remove excess drawers - delete drawers beyond the new count
@@ -3275,23 +3548,23 @@ app.put('/api/drawer-config', async (req, res) => {
             DELETE FROM cash_drawer_adjustments
             WHERE session_id IN (
               SELECT session_id FROM cash_drawer_sessions
-              WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
+              WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1 AND store_id = $2)
             )
-          `, [drawerName]);
+          `, [drawerName, currentStoreId]);
 
           await pool.query(`
             DELETE FROM cash_drawer_sessions
-            WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
-          `, [drawerName]);
+            WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1 AND store_id = $2)
+          `, [drawerName, currentStoreId]);
 
           // Then delete the drawer itself
-          await pool.query('DELETE FROM drawers WHERE drawer_name = $1', [drawerName]);
+          await pool.query('DELETE FROM drawers WHERE drawer_name = $1 AND store_id = $2', [drawerName, currentStoreId]);
         } catch (deleteError) {
           console.error(`Error deleting ${drawerName}:`, deleteError);
           // If deletion fails due to constraints, mark as inactive
           await pool.query(
-            'UPDATE drawers SET is_active = FALSE WHERE drawer_name = $1',
-            [drawerName]
+            'UPDATE drawers SET is_active = FALSE WHERE drawer_name = $1 AND store_id = $2',
+            [drawerName, currentStoreId]
           );
         }
       }
@@ -3319,6 +3592,291 @@ app.get('/api/drawers', async (req, res) => {
   }
 });
 
+// POST /api/drawers - Create a new drawer
+app.post('/api/drawers', async (req, res) => {
+  try {
+    const { drawer_name, drawer_type, is_active, min_close, max_close, has_location, is_shared } = req.body;
+
+    if (!drawer_name || !drawer_type) {
+      return res.status(400).json({ error: 'drawer_name and drawer_type are required' });
+    }
+
+    // Get current store id
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
+    if (!currentStoreId) {
+      return res.status(400).json({ error: 'No current store found' });
+    }
+
+    // Check if master_safe already exists (only one allowed)
+    if (drawer_type === 'master_safe') {
+      const existingMaster = await pool.query(
+        'SELECT drawer_id FROM drawers WHERE drawer_type = $1 AND store_id = $2',
+        ['master_safe', currentStoreId]
+      );
+      if (existingMaster.rows.length > 0) {
+        return res.status(400).json({ error: 'Master safe already exists. Only one master safe is allowed.' });
+      }
+    }
+
+    // Get max display_order for this drawer type
+    const maxOrderResult = await pool.query(
+      'SELECT COALESCE(MAX(display_order), 0) as max_order FROM drawers WHERE drawer_type = $1 AND store_id = $2',
+      [drawer_type, currentStoreId]
+    );
+    const nextOrder = (maxOrderResult.rows[0].max_order || 0) + 1;
+
+    // Determine has_location and is_shared values
+    // For safes: has_location can be true/false, is_shared is always true (safes are always shared)
+    // For physical drawers: has_location is not applicable (always false), is_shared can be true/false
+    const finalHasLocation = (drawer_type === 'safe' || drawer_type === 'master_safe') ? (has_location === true) : false;
+    const finalIsShared = (drawer_type === 'safe' || drawer_type === 'master_safe') ? true : (is_shared !== false);
+
+    const result = await pool.query(
+      `INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, min_close, max_close, store_id, has_location, is_shared)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [drawer_name, drawer_type, is_active !== false, nextOrder, min_close || 0, max_close || 0, currentStoreId, finalHasLocation, finalIsShared]
+    );
+
+    // If this is a safe with location enabled, create a storage location with the same name
+    if (finalHasLocation && (drawer_type === 'safe' || drawer_type === 'master_safe')) {
+      try {
+        await pool.query(
+          `INSERT INTO storage_location (location, is_occupied)
+           VALUES ($1, FALSE)
+           ON CONFLICT (location) DO NOTHING`,
+          [drawer_name]
+        );
+      } catch (locationError) {
+        console.error('Error creating storage location for safe:', locationError);
+        // Don't fail the drawer creation if location creation fails
+      }
+    }
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating drawer:', error);
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A drawer with this name already exists' });
+    }
+    res.status(500).json({ error: 'Failed to create drawer' });
+  }
+});
+
+// PUT /api/drawers/:drawerId - Update a drawer
+app.put('/api/drawers/:drawerId', async (req, res) => {
+  try {
+    const { drawerId } = req.params;
+    const { drawer_name, is_active, min_close, max_close, has_location, is_shared, transfer_location_to } = req.body;
+
+    // Get current store id
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
+    // Check if drawer exists and belongs to current store
+    const drawerCheck = await pool.query(
+      'SELECT drawer_id, drawer_name, drawer_type, has_location FROM drawers WHERE drawer_id = $1 AND store_id = $2',
+      [drawerId, currentStoreId]
+    );
+
+    if (drawerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Drawer not found' });
+    }
+
+    const drawer = drawerCheck.rows[0];
+    const oldHasLocation = drawer.has_location;
+    const oldDrawerName = drawer.drawer_name;
+
+    // Master safe name cannot be changed
+    if (drawer.drawer_name === 'Master' && drawer_name && drawer_name !== 'Master') {
+      return res.status(400).json({ error: 'Master safe name cannot be changed' });
+    }
+
+    // Check if drawer is open when trying to make it unavailable
+    if (is_active === false) {
+      const activeSession = await pool.query(
+        'SELECT session_id FROM cash_drawer_sessions WHERE drawer_id = $1 AND status = $2',
+        [drawerId, 'open']
+      );
+
+      if (activeSession.rows.length > 0) {
+        return res.status(400).json({
+          error: 'Cannot make an open drawer unavailable. Please close the drawer first.'
+        });
+      }
+    }
+
+    // Handle location changes for safes
+    if ((drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe') && has_location !== undefined) {
+      const newHasLocation = has_location === true;
+      const safeLocationName = drawer_name || oldDrawerName;
+
+      // If turning location OFF, check if there are items in the location
+      if (oldHasLocation && !newHasLocation) {
+        const itemsInLocation = await pool.query(
+          'SELECT COUNT(*) as count FROM jewelry WHERE location = $1',
+          [safeLocationName]
+        );
+
+        if (parseInt(itemsInLocation.rows[0].count) > 0) {
+          // Items exist in location - require transfer location
+          if (!transfer_location_to) {
+            return res.status(400).json({
+              error: 'Items exist in this safe location. Please specify a location to transfer them to.',
+              requires_transfer: true,
+              item_count: parseInt(itemsInLocation.rows[0].count)
+            });
+          }
+
+          // Transfer items to the new location
+          await pool.query(
+            'UPDATE jewelry SET location = $1 WHERE location = $2',
+            [transfer_location_to, safeLocationName]
+          );
+        }
+
+        // Delete the storage location
+        await pool.query(
+          'DELETE FROM storage_location WHERE location = $1',
+          [safeLocationName]
+        );
+      } else if (!oldHasLocation && newHasLocation) {
+        // Turning location ON - create storage location
+        try {
+          await pool.query(
+            `INSERT INTO storage_location (location, is_occupied)
+             VALUES ($1, FALSE)
+             ON CONFLICT (location) DO NOTHING`,
+            [safeLocationName]
+          );
+        } catch (locationError) {
+          console.error('Error creating storage location for safe:', locationError);
+        }
+      } else if (newHasLocation && drawer_name && drawer_name !== oldDrawerName) {
+        // Location is ON and name changed - update location name
+        const itemsInLocation = await pool.query(
+          'SELECT COUNT(*) as count FROM jewelry WHERE location = $1',
+          [oldDrawerName]
+        );
+
+        // Update items location
+        await pool.query(
+          'UPDATE jewelry SET location = $1 WHERE location = $2',
+          [drawer_name, oldDrawerName]
+        );
+
+        // Update storage location name
+        await pool.query(
+          'UPDATE storage_location SET location = $1 WHERE location = $2',
+          [drawer_name, oldDrawerName]
+        );
+      }
+    }
+
+    // Build update query dynamically
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (drawer_name !== undefined) {
+      updates.push(`drawer_name = $${paramCount++}`);
+      values.push(drawer_name);
+    }
+    if (is_active !== undefined) {
+      updates.push(`is_active = $${paramCount++}`);
+      values.push(is_active);
+    }
+    if (min_close !== undefined) {
+      updates.push(`min_close = $${paramCount++}`);
+      values.push(min_close);
+    }
+    if (max_close !== undefined) {
+      updates.push(`max_close = $${paramCount++}`);
+      values.push(max_close);
+    }
+    // Only update has_location for safes
+    if (has_location !== undefined && (drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe')) {
+      updates.push(`has_location = $${paramCount++}`);
+      values.push(has_location === true);
+    }
+    // Only update is_shared for physical drawers
+    if (is_shared !== undefined && drawer.drawer_type === 'physical') {
+      updates.push(`is_shared = $${paramCount++}`);
+      values.push(is_shared === true);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    values.push(drawerId);
+
+    const result = await pool.query(
+      `UPDATE drawers SET ${updates.join(', ')} WHERE drawer_id = $${paramCount} RETURNING *`,
+      values
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating drawer:', error);
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A drawer with this name already exists' });
+    }
+    res.status(500).json({ error: 'Failed to update drawer' });
+  }
+});
+
+// DELETE /api/drawers/:drawerId - Delete a drawer
+app.delete('/api/drawers/:drawerId', async (req, res) => {
+  try {
+    const { drawerId } = req.params;
+
+    // Get current store id
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
+    // Check if drawer exists and belongs to current store
+    const drawerCheck = await pool.query(
+      'SELECT drawer_id, drawer_name, drawer_type FROM drawers WHERE drawer_id = $1 AND store_id = $2',
+      [drawerId, currentStoreId]
+    );
+
+    if (drawerCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Drawer not found' });
+    }
+
+    const drawer = drawerCheck.rows[0];
+
+    // Master safe cannot be deleted
+    if (drawer.drawer_name === 'Master' || drawer.drawer_type === 'master_safe') {
+      return res.status(400).json({ error: 'Master safe cannot be deleted' });
+    }
+
+    // Check if drawer is open
+    const activeSession = await pool.query(
+      'SELECT session_id FROM cash_drawer_sessions WHERE drawer_id = $1 AND status = $2',
+      [drawerId, 'open']
+    );
+
+    if (activeSession.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Cannot delete an open drawer. Please close it first.'
+      });
+    }
+
+    // Delete the drawer (cascade will handle related records)
+    await pool.query('DELETE FROM drawers WHERE drawer_id = $1', [drawerId]);
+
+    res.json({ message: `Drawer "${drawer.drawer_name}" deleted successfully` });
+  } catch (error) {
+    console.error('Error deleting drawer:', error);
+    res.status(500).json({ error: 'Failed to delete drawer' });
+  }
+});
+
 // PUT /api/drawers/:drawerId/sharing-mode - Update drawer sharing mode
 app.put('/api/drawers/:drawerId/sharing-mode', async (req, res) => {
   const { drawerId } = req.params;
@@ -3329,10 +3887,13 @@ app.put('/api/drawers/:drawerId/sharing-mode', async (req, res) => {
   }
 
   try {
-    // Check if drawer exists and is a physical drawer
+    // Check if drawer exists, is a physical drawer, and belongs to current store
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
     const drawerCheck = await pool.query(
-      'SELECT drawer_id, drawer_type, drawer_name FROM drawers WHERE drawer_id = $1',
-      [drawerId]
+      'SELECT drawer_id, drawer_type, drawer_name FROM drawers WHERE drawer_id = $1 AND store_id = $2',
+      [drawerId, currentStoreId]
     );
 
     if (drawerCheck.rows.length === 0) {
@@ -3378,30 +3939,37 @@ app.put('/api/drawers/:drawerId/sharing-mode', async (req, res) => {
 
 // PUT /api/safe-drawers-config - Update safe drawers configuration
 app.put('/api/safe-drawers-config', async (req, res) => {
-  const { number_of_safe_drawers } = req.body;
+  const { number_of_safe_drawers, min_close, max_close } = req.body;
 
   if (number_of_safe_drawers === undefined || number_of_safe_drawers < 0 || number_of_safe_drawers > 50) {
     return res.status(400).json({ error: 'number_of_safe_drawers must be between 0 and 50' });
   }
 
   try {
-    // Get current safe drawers (excluding master_safe)
+    // Get current store id
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
+    // Get current safe drawers for current store (excluding master_safe)
     const currentSafeDrawers = await pool.query(`
       SELECT drawer_id, drawer_name FROM drawers
-      WHERE drawer_type = 'safe'
+      WHERE drawer_type = 'safe' AND store_id = $1
       ORDER BY display_order
-    `);
+    `, [currentStoreId]);
 
     const currentCount = currentSafeDrawers.rows.length;
 
     if (number_of_safe_drawers > currentCount) {
-      // Add new safe drawers
+      // Add new safe drawers for current store with min/max values
+      const minCloseValue = min_close !== undefined ? parseFloat(min_close) : 0;
+      const maxCloseValue = max_close !== undefined ? parseFloat(max_close) : 0;
+      
       for (let i = currentCount + 1; i <= number_of_safe_drawers; i++) {
         await pool.query(`
-          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
-          VALUES ($1, 'safe', TRUE, $2)
-          ON CONFLICT (drawer_name) DO NOTHING
-        `, [`Safe ${i}`, i]);
+          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id, min_close, max_close)
+          VALUES ($1, 'safe', TRUE, $2, $3, $4, $5)
+          ON CONFLICT (drawer_name, store_id) DO UPDATE SET is_active = TRUE
+        `, [`Safe ${i}`, i, currentStoreId, minCloseValue, maxCloseValue]);
       }
     } else if (number_of_safe_drawers < currentCount) {
       // Remove excess safe drawers - delete drawers beyond the new count
@@ -3414,23 +3982,23 @@ app.put('/api/safe-drawers-config', async (req, res) => {
             DELETE FROM cash_drawer_adjustments
             WHERE session_id IN (
               SELECT session_id FROM cash_drawer_sessions
-              WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
+              WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1 AND store_id = $2)
             )
-          `, [drawerName]);
+          `, [drawerName, currentStoreId]);
 
           await pool.query(`
             DELETE FROM cash_drawer_sessions
-            WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1)
-          `, [drawerName]);
+            WHERE drawer_id = (SELECT drawer_id FROM drawers WHERE drawer_name = $1 AND store_id = $2)
+          `, [drawerName, currentStoreId]);
 
           // Then delete the drawer itself
-          await pool.query('DELETE FROM drawers WHERE drawer_name = $1 AND drawer_type = $2', [drawerName, 'safe']);
+          await pool.query('DELETE FROM drawers WHERE drawer_name = $1 AND drawer_type = $2 AND store_id = $3', [drawerName, 'safe', currentStoreId]);
         } catch (deleteError) {
           console.error(`Error deleting ${drawerName}:`, deleteError);
           // If deletion fails due to constraints, mark as inactive
           await pool.query(
-            'UPDATE drawers SET is_active = FALSE WHERE drawer_name = $1 AND drawer_type = $2',
-            [drawerName, 'safe']
+            'UPDATE drawers SET is_active = FALSE WHERE drawer_name = $1 AND drawer_type = $2 AND store_id = $3',
+            [drawerName, 'safe', currentStoreId]
           );
         }
       }
@@ -3448,18 +4016,32 @@ app.put('/api/master-safe-config', async (req, res) => {
   const { enabled } = req.body;
 
   try {
+    // Get current store id
+    const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
+
     if (enabled) {
-      // Ensure Master Safe exists (only one allowed)
-      await pool.query(`
-        INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
-        VALUES ('Master Safe', 'master_safe', TRUE, -1)
-        ON CONFLICT (drawer_name) DO UPDATE SET is_active = TRUE
-      `);
+      // Ensure Master Safe exists for current store (only one per store)
+      const existing = await pool.query(
+        'SELECT drawer_id FROM drawers WHERE drawer_type = $1 AND store_id = $2',
+        ['master_safe', currentStoreId]
+      );
+      if (existing.rows.length === 0) {
+        await pool.query(`
+          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id)
+          VALUES ('Master Safe', 'master_safe', TRUE, -1, $1)
+        `, [currentStoreId]);
+      } else {
+        await pool.query(
+          'UPDATE drawers SET is_active = TRUE WHERE drawer_type = $1 AND store_id = $2',
+          ['master_safe', currentStoreId]
+        );
+      }
     } else {
-      // Deactivate or delete master safe
+      // Deactivate or delete master safe for current store
       const masterSafeResult = await pool.query(`
-        SELECT drawer_id FROM drawers WHERE drawer_type = 'master_safe' LIMIT 1
-      `);
+        SELECT drawer_id FROM drawers WHERE drawer_type = 'master_safe' AND store_id = $1 LIMIT 1
+      `, [currentStoreId]);
 
       if (masterSafeResult.rows.length > 0) {
         const drawerId = masterSafeResult.rows[0].drawer_id;
@@ -3473,8 +4055,8 @@ app.put('/api/master-safe-config', async (req, res) => {
         if (parseInt(sessionsResult.rows[0].count) > 0) {
           // If there are active sessions, just mark as inactive
           await pool.query(`
-            UPDATE drawers SET is_active = FALSE WHERE drawer_type = 'master_safe'
-          `);
+            UPDATE drawers SET is_active = FALSE WHERE drawer_type = 'master_safe' AND store_id = $1
+          `, [currentStoreId]);
         } else {
           // If no active sessions, can delete
           try {
@@ -3490,13 +4072,13 @@ app.put('/api/master-safe-config', async (req, res) => {
               DELETE FROM cash_drawer_sessions WHERE drawer_id = $1
             `, [drawerId]);
 
-            await pool.query('DELETE FROM drawers WHERE drawer_type = $1', ['master_safe']);
+            await pool.query('DELETE FROM drawers WHERE drawer_type = $1 AND store_id = $2', ['master_safe', currentStoreId]);
           } catch (deleteError) {
             console.error('Error deleting master safe:', deleteError);
             // If deletion fails, mark as inactive
             await pool.query(`
-              UPDATE drawers SET is_active = FALSE WHERE drawer_type = 'master_safe'
-            `);
+              UPDATE drawers SET is_active = FALSE WHERE drawer_type = 'master_safe' AND store_id = $1
+            `, [currentStoreId]);
           }
         }
       }
@@ -4156,17 +4738,33 @@ app.put('/api/user_preferences', async (req, res) => {
 // GET all drawer type configurations (grouped by drawer_type from drawers table)
 app.get('/api/drawer-type-config', async (req, res) => {
   try {
-    // Get distinct drawer types with their min/max values
+    // Get drawer type config - prioritize drawers with non-zero values
+    // If all drawers have zero values, return the first drawer's values
     // Note: master_safe uses the same values as safe, so we only return physical and safe
     const result = await pool.query(`
-      SELECT DISTINCT ON (drawer_type)
-        drawer_type,
-        min_close,
-        max_close
-      FROM drawers
-      WHERE drawer_type IN ('physical', 'safe')
+      WITH ranked_drawers AS (
+        SELECT
+          drawer_type,
+          min_close,
+          max_close,
+          blind_count,
+          individual_denominations,
+          electronic_blind_count,
+          ROW_NUMBER() OVER (
+            PARTITION BY drawer_type
+            ORDER BY
+              CASE WHEN min_close > 0 OR max_close > 0 THEN 0 ELSE 1 END,
+              drawer_id
+          ) as rn
+        FROM drawers
+        WHERE drawer_type IN ('physical', 'safe')
+      )
+      SELECT drawer_type, min_close, max_close, blind_count, individual_denominations, electronic_blind_count
+      FROM ranked_drawers
+      WHERE rn = 1
       ORDER BY drawer_type
     `);
+    
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching drawer type config:', error);
@@ -4185,7 +4783,7 @@ app.get('/api/drawer-type-config/:drawerType', async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT drawer_type, min_close, max_close
+      `SELECT drawer_type, min_close, max_close, blind_count, individual_denominations, electronic_blind_count
        FROM drawers
        WHERE drawer_type = $1
        LIMIT 1`,
@@ -4207,7 +4805,7 @@ app.get('/api/drawer-type-config/:drawerType', async (req, res) => {
 app.put('/api/drawer-type-config/:drawerType', async (req, res) => {
   try {
     const { drawerType } = req.params;
-    const { min_close, max_close } = req.body;
+    const { min_close, max_close, blind_count, individual_denominations, electronic_blind_count } = req.body;
 
     // Determine which drawer types to update
     let drawerTypes = [drawerType];
@@ -4217,13 +4815,41 @@ app.put('/api/drawer-type-config/:drawerType', async (req, res) => {
       drawerTypes = ['safe', 'master_safe'];
     }
 
+    // Build dynamic SET clause based on provided fields
+    const setClauses = ['updated_at = CURRENT_TIMESTAMP'];
+    const values = [];
+    let paramIndex = 1;
+
+    if (min_close !== undefined) {
+      setClauses.push(`min_close = $${paramIndex++}`);
+      values.push(min_close);
+    }
+    if (max_close !== undefined) {
+      setClauses.push(`max_close = $${paramIndex++}`);
+      values.push(max_close);
+    }
+    if (blind_count !== undefined) {
+      setClauses.push(`blind_count = $${paramIndex++}`);
+      values.push(blind_count);
+    }
+    if (individual_denominations !== undefined) {
+      setClauses.push(`individual_denominations = $${paramIndex++}`);
+      values.push(individual_denominations);
+    }
+    if (electronic_blind_count !== undefined) {
+      setClauses.push(`electronic_blind_count = $${paramIndex++}`);
+      values.push(electronic_blind_count);
+    }
+
+    values.push(drawerTypes);
+
     // Update all drawers of these types
     const result = await pool.query(
       `UPDATE drawers
-       SET min_close = $1, max_close = $2, updated_at = CURRENT_TIMESTAMP
-       WHERE drawer_type = ANY($3)
-       RETURNING drawer_type, min_close, max_close`,
-      [min_close, max_close, drawerTypes]
+       SET ${setClauses.join(', ')}
+       WHERE drawer_type = ANY($${paramIndex})
+       RETURNING drawer_type, min_close, max_close, blind_count, individual_denominations, electronic_blind_count`,
+      values
     );
 
     if (result.rows.length === 0) {
@@ -7747,7 +8373,10 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
         j.jewelry_color,
         j.metal_spot_price,
         j.est_metal_value,
-        j.item_price,
+        COALESCE(ti.item_price, j.item_price) as item_price,
+        ti.item_price as transaction_item_price,
+        j.item_price as jewelry_item_price,
+        ti.description,
         j.images,
         j.status as item_status,
         j.primary_gem_type,
@@ -7783,12 +8412,20 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
 
     const transactionItemsResult = await pool.query(transactionItemsQuery, [transaction_id]);
 
-    // If items found in transaction_items, use those
+    // If items found in transaction_items, transform them to match the expected format
     let result;
     if (transactionItemsResult.rows.length > 0) {
-      result = transactionItemsResult;
+      // Transform transaction_items results to include short_desc and long_desc at top level
+      result = {
+        rows: transactionItemsResult.rows.map(row => ({
+          ...row,
+          short_desc: row.short_desc,
+          long_desc: row.long_desc,
+          description: row.long_desc || row.short_desc || row.description || ''
+        }))
+      };
     } else {
-      // Fallback: Get items from buy_ticket and sale_ticket tables (union of both)
+      // Fallback: Get items from buy_ticket, sale_ticket, and pawn_ticket tables (union of all)
       const ticketQuery = `
         WITH item_list AS (
           -- Get buy ticket items
@@ -8009,6 +8646,9 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
         item_price: row.item_price,
         notes: row.notes || '',
         transaction_type: row.transaction_type,
+        short_desc: row.short_desc,
+        long_desc: row.long_desc,
+        description: row.long_desc || row.short_desc || row.description || '',
         item_details: {
           item_id: row.jewelry_item_id,
           description: row.long_desc || row.short_desc || '',

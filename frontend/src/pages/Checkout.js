@@ -1387,7 +1387,7 @@ function Checkout() {
                 `${config.apiUrl}/payments`,
                 {
                   transaction_id: realTransactionId,
-                  amount: parseFloat(payment.amount.toFixed(2)), // Round to 2 decimal places
+                  amount: parseFloat(Number(payment.amount).toFixed(2)),
                   payment_method: payment.payment_method
                 },
                 {
@@ -1406,7 +1406,6 @@ function Checkout() {
                   `${config.apiUrl}/pawn-history/transaction/${realTransactionId}`,
                   { headers: { Authorization: `Bearer ${token}` } }
                 );
-                console.log('✓ Cleaned up pawn history');
               }
 
               // 2. Delete pawn tickets (if any were created)
@@ -1415,7 +1414,6 @@ function Checkout() {
                   `${config.apiUrl}/pawn-ticket/transaction/${realTransactionId}`,
                   { headers: { Authorization: `Bearer ${token}` } }
                 );
-                console.log('✓ Cleaned up pawn tickets');
               }
 
               // 3. Delete transaction
@@ -1424,7 +1422,6 @@ function Checkout() {
                   `${config.apiUrl}/transactions/${realTransactionId}`,
                   { headers: { Authorization: `Bearer ${token}` } }
                 );
-                console.log('✓ Cleaned up transaction');
               }
 
               // 4. Delete jewelry items (if any were created)
@@ -1442,7 +1439,6 @@ function Checkout() {
                       console.error(`Error deleting jewelry item ${itemId}:`, deleteError);
                     }
                   }
-                  console.log('✓ Cleaned up jewelry items');
                 }
               }
             } catch (cleanupError) {
@@ -2403,7 +2399,7 @@ function Checkout() {
                 <Button
                   variant="contained"
                   startIcon={<PaymentIcon />}
-                  onClick={handleSubmit}
+                  onClick={() => handleSubmit()}
                   color="primary"
                   disabled={isStoreClosed}
                 >
