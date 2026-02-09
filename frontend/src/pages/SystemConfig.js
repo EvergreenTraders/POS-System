@@ -269,8 +269,13 @@ function SystemConfig() {
       // Closing drawer mode preferences
       const blindCountDrawersPreference = response.data.find(pref => pref.preference_name === 'blindCount_drawers');
       const blindCountSafePreference = response.data.find(pref => pref.preference_name === 'blindCount_safe');
-      setIsBlindCountDrawers(blindCountDrawersPreference ? blindCountDrawersPreference.preference_value === 'true' : true);
-      setIsBlindCountSafe(blindCountSafePreference ? blindCountSafePreference.preference_value === 'true' : true);
+      
+      // Ensure we're reading the correct preferences
+      const drawersValue = blindCountDrawersPreference ? blindCountDrawersPreference.preference_value === 'true' : true;
+      const safeValue = blindCountSafePreference ? blindCountSafePreference.preference_value === 'true' : true;
+      
+      setIsBlindCountDrawers(drawersValue);
+      setIsBlindCountSafe(safeValue);
       
       // Opening drawer mode preferences
       const individualDenominationsDrawersPreference = response.data.find(pref => pref.preference_name === 'individualDenominations_drawers');
@@ -1337,23 +1342,30 @@ function SystemConfig() {
 
   const handleBlindCountDrawersToggle = async (event) => {
     const newValue = event.target.checked;
+    // Update state immediately for responsive UI
     setIsBlindCountDrawers(newValue);
     try {
-      await axios.put(`${API_BASE_URL}/user_preferences`, {
+      // Save to database with correct preference name for PHYSICAL drawers
+      const response = await axios.put(`${API_BASE_URL}/user_preferences`, {
         preference_name: 'blindCount_drawers',
         preference_value: newValue.toString()
       });
+      
+      // Refresh preferences to ensure UI is in sync
+      await fetchBlindCountPreference();
+      
       setSnackbar({
         open: true,
-        message: `Physical drawers opening mode set to ${newValue ? 'Drawer Total' : 'Individual Denominations'}`,
+        message: `Physical drawers closing mode set to ${newValue ? 'Blind Count' : 'Open Count'}`,
         severity: 'success'
       });
     } catch (error) {
       console.error('Error updating blind count preference for drawers:', error);
-      setIsBlindCountDrawers(!newValue); // Revert on error
+      // Revert state on error
+      setIsBlindCountDrawers(!newValue);
       setSnackbar({
         open: true,
-        message: 'Failed to update count mode settings for drawers',
+        message: 'Failed to update closing mode settings for drawers',
         severity: 'error'
       });
     }
@@ -1361,12 +1373,18 @@ function SystemConfig() {
 
   const handleBlindCountSafeToggle = async (event) => {
     const newValue = event.target.checked;
+    // Update state immediately for responsive UI
     setIsBlindCountSafe(newValue);
     try {
-      await axios.put(`${API_BASE_URL}/user_preferences`, {
+      // Save to database with correct preference name for SAFE drawers
+      const response = await axios.put(`${API_BASE_URL}/user_preferences`, {
         preference_name: 'blindCount_safe',
         preference_value: newValue.toString()
       });
+      
+      // Refresh preferences to ensure UI is in sync
+      await fetchBlindCountPreference();
+      
       setSnackbar({
         open: true,
         message: `Safe closing mode set to ${newValue ? 'Blind Count' : 'Open Count'}`,
@@ -1374,7 +1392,8 @@ function SystemConfig() {
       });
     } catch (error) {
       console.error('Error updating blind count preference for safe:', error);
-      setIsBlindCountSafe(!newValue); // Revert on error
+      // Revert state on error
+      setIsBlindCountSafe(!newValue);
       setSnackbar({
         open: true,
         message: 'Failed to update closing mode settings for safe',

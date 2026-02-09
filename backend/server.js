@@ -1134,7 +1134,7 @@ app.post('/api/cash-drawer/open', async (req, res) => {
 
     // Get the drawer info including type and sharing mode - must belong to current store
     const drawerInfoResult = await pool.query(
-      'SELECT drawer_id, drawer_name, drawer_type, is_shared FROM drawers WHERE drawer_id = $1 AND store_id = $2',
+      'SELECT drawer_id, drawer_name, drawer_type, is_shared, is_active FROM drawers WHERE drawer_id = $1 AND store_id = $2',
       [drawer_id, currentStoreId]
     );
 
@@ -1143,6 +1143,11 @@ app.post('/api/cash-drawer/open', async (req, res) => {
     }
 
     const drawerInfo = drawerInfoResult.rows[0];
+
+    // Check if drawer is available (is_active)
+    if (!drawerInfo.is_active) {
+      return res.status(400).json({ error: 'This drawer/safe is not available and cannot be opened' });
+    }
     const drawerType = drawerInfo.drawer_type;
     let drawerIsShared = drawerInfo.is_shared;
 
@@ -3520,7 +3525,7 @@ app.get('/api/drawers', async (req, res) => {
 // POST /api/drawers - Create a new drawer
 app.post('/api/drawers', async (req, res) => {
   try {
-    const { drawer_name, drawer_type, is_active, min_close, max_close } = req.body;
+    const { drawer_name, drawer_type, is_active, min_close, max_close, has_location, is_shared } = req.body;
 
     if (!drawer_name || !drawer_type) {
       return res.status(400).json({ error: 'drawer_name and drawer_type are required' });
@@ -3552,12 +3557,33 @@ app.post('/api/drawers', async (req, res) => {
     );
     const nextOrder = (maxOrderResult.rows[0].max_order || 0) + 1;
 
+    // Determine has_location and is_shared values
+    // For safes: has_location can be true/false, is_shared is always true (safes are always shared)
+    // For physical drawers: has_location is not applicable (always false), is_shared can be true/false
+    const finalHasLocation = (drawer_type === 'safe' || drawer_type === 'master_safe') ? (has_location === true) : false;
+    const finalIsShared = (drawer_type === 'safe' || drawer_type === 'master_safe') ? true : (is_shared !== false);
+
     const result = await pool.query(
-      `INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, min_close, max_close, store_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, min_close, max_close, store_id, has_location, is_shared)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [drawer_name, drawer_type, is_active !== false, nextOrder, min_close || 0, max_close || 0, currentStoreId]
+      [drawer_name, drawer_type, is_active !== false, nextOrder, min_close || 0, max_close || 0, currentStoreId, finalHasLocation, finalIsShared]
     );
+
+    // If this is a safe with location enabled, create a storage location with the same name
+    if (finalHasLocation && (drawer_type === 'safe' || drawer_type === 'master_safe')) {
+      try {
+        await pool.query(
+          `INSERT INTO storage_location (location, is_occupied)
+           VALUES ($1, FALSE)
+           ON CONFLICT (location) DO NOTHING`,
+          [drawer_name]
+        );
+      } catch (locationError) {
+        console.error('Error creating storage location for safe:', locationError);
+        // Don't fail the drawer creation if location creation fails
+      }
+    }
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -3573,7 +3599,7 @@ app.post('/api/drawers', async (req, res) => {
 app.put('/api/drawers/:drawerId', async (req, res) => {
   try {
     const { drawerId } = req.params;
-    const { drawer_name, is_active, min_close, max_close } = req.body;
+    const { drawer_name, is_active, min_close, max_close, has_location, is_shared, transfer_location_to } = req.body;
 
     // Get current store id
     const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
@@ -3581,7 +3607,7 @@ app.put('/api/drawers/:drawerId', async (req, res) => {
 
     // Check if drawer exists and belongs to current store
     const drawerCheck = await pool.query(
-      'SELECT drawer_id, drawer_name, drawer_type FROM drawers WHERE drawer_id = $1 AND store_id = $2',
+      'SELECT drawer_id, drawer_name, drawer_type, has_location FROM drawers WHERE drawer_id = $1 AND store_id = $2',
       [drawerId, currentStoreId]
     );
 
@@ -3590,6 +3616,8 @@ app.put('/api/drawers/:drawerId', async (req, res) => {
     }
 
     const drawer = drawerCheck.rows[0];
+    const oldHasLocation = drawer.has_location;
+    const oldDrawerName = drawer.drawer_name;
 
     // Master safe name cannot be changed
     if (drawer.drawer_name === 'Master' && drawer_name && drawer_name !== 'Master') {
@@ -3607,6 +3635,73 @@ app.put('/api/drawers/:drawerId', async (req, res) => {
         return res.status(400).json({
           error: 'Cannot make an open drawer unavailable. Please close the drawer first.'
         });
+      }
+    }
+
+    // Handle location changes for safes
+    if ((drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe') && has_location !== undefined) {
+      const newHasLocation = has_location === true;
+      const safeLocationName = drawer_name || oldDrawerName;
+
+      // If turning location OFF, check if there are items in the location
+      if (oldHasLocation && !newHasLocation) {
+        const itemsInLocation = await pool.query(
+          'SELECT COUNT(*) as count FROM jewelry WHERE location = $1',
+          [safeLocationName]
+        );
+
+        if (parseInt(itemsInLocation.rows[0].count) > 0) {
+          // Items exist in location - require transfer location
+          if (!transfer_location_to) {
+            return res.status(400).json({
+              error: 'Items exist in this safe location. Please specify a location to transfer them to.',
+              requires_transfer: true,
+              item_count: parseInt(itemsInLocation.rows[0].count)
+            });
+          }
+
+          // Transfer items to the new location
+          await pool.query(
+            'UPDATE jewelry SET location = $1 WHERE location = $2',
+            [transfer_location_to, safeLocationName]
+          );
+        }
+
+        // Delete the storage location
+        await pool.query(
+          'DELETE FROM storage_location WHERE location = $1',
+          [safeLocationName]
+        );
+      } else if (!oldHasLocation && newHasLocation) {
+        // Turning location ON - create storage location
+        try {
+          await pool.query(
+            `INSERT INTO storage_location (location, is_occupied)
+             VALUES ($1, FALSE)
+             ON CONFLICT (location) DO NOTHING`,
+            [safeLocationName]
+          );
+        } catch (locationError) {
+          console.error('Error creating storage location for safe:', locationError);
+        }
+      } else if (newHasLocation && drawer_name && drawer_name !== oldDrawerName) {
+        // Location is ON and name changed - update location name
+        const itemsInLocation = await pool.query(
+          'SELECT COUNT(*) as count FROM jewelry WHERE location = $1',
+          [oldDrawerName]
+        );
+
+        // Update items location
+        await pool.query(
+          'UPDATE jewelry SET location = $1 WHERE location = $2',
+          [drawer_name, oldDrawerName]
+        );
+
+        // Update storage location name
+        await pool.query(
+          'UPDATE storage_location SET location = $1 WHERE location = $2',
+          [drawer_name, oldDrawerName]
+        );
       }
     }
 
@@ -3630,6 +3725,16 @@ app.put('/api/drawers/:drawerId', async (req, res) => {
     if (max_close !== undefined) {
       updates.push(`max_close = $${paramCount++}`);
       values.push(max_close);
+    }
+    // Only update has_location for safes
+    if (has_location !== undefined && (drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe')) {
+      updates.push(`has_location = $${paramCount++}`);
+      values.push(has_location === true);
+    }
+    // Only update is_shared for physical drawers
+    if (is_shared !== undefined && drawer.drawer_type === 'physical') {
+      updates.push(`is_shared = $${paramCount++}`);
+      values.push(is_shared === true);
     }
 
     if (updates.length === 0) {
@@ -4563,17 +4668,30 @@ app.put('/api/user_preferences', async (req, res) => {
 // GET all drawer type configurations (grouped by drawer_type from drawers table)
 app.get('/api/drawer-type-config', async (req, res) => {
   try {
-    // Get distinct drawer types with their min/max values
+    // Get drawer type config - prioritize drawers with non-zero values
+    // If all drawers have zero values, return the first drawer's values
     // Note: master_safe uses the same values as safe, so we only return physical and safe
     const result = await pool.query(`
-      SELECT DISTINCT ON (drawer_type)
-        drawer_type,
-        min_close,
-        max_close
-      FROM drawers
-      WHERE drawer_type IN ('physical', 'safe')
+      WITH ranked_drawers AS (
+        SELECT 
+          drawer_type,
+          min_close,
+          max_close,
+          ROW_NUMBER() OVER (
+            PARTITION BY drawer_type 
+            ORDER BY 
+              CASE WHEN min_close > 0 OR max_close > 0 THEN 0 ELSE 1 END,
+              drawer_id
+          ) as rn
+        FROM drawers
+        WHERE drawer_type IN ('physical', 'safe')
+      )
+      SELECT drawer_type, min_close, max_close
+      FROM ranked_drawers
+      WHERE rn = 1
       ORDER BY drawer_type
     `);
+    
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching drawer type config:', error);

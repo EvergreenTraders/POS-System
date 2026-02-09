@@ -720,3 +720,19 @@ DO $$ BEGIN
     ALTER TABLE drawers ADD CONSTRAINT drawers_drawer_name_store_unique UNIQUE (drawer_name, store_id);
   END IF;
 END $$;
+
+-- Add has_location column to drawers table for safes (repository vs repository/location)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'drawers' AND column_name = 'has_location'
+    ) THEN
+        ALTER TABLE drawers ADD COLUMN has_location BOOLEAN DEFAULT FALSE;
+    END IF;
+END $$;
+
+-- Set default has_location to FALSE for all existing drawers
+UPDATE drawers SET has_location = FALSE WHERE has_location IS NULL;
+
+COMMENT ON COLUMN drawers.has_location IS 'For safes: TRUE = repository/location (creates storage location), FALSE = repository only. For drawers: not applicable.';

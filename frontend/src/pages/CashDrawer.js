@@ -145,14 +145,21 @@ function CashDrawer() {
     drawer_name: '',
     is_active: true,
     min_close: 0,
-    max_close: 0
+    max_close: 0,
+    has_location: false, // For safes: repository/location
+    is_shared: true // For drawers: single/shared
   });
   const [editDrawerForm, setEditDrawerForm] = useState({
     drawer_name: '',
     is_active: true,
     min_close: 0,
-    max_close: 0
+    max_close: 0,
+    has_location: false,
+    is_shared: true
   });
+  const [locationTransferDialog, setLocationTransferDialog] = useState(false);
+  const [transferLocationTo, setTransferLocationTo] = useState('');
+  const [availableLocations, setAvailableLocations] = useState([]);
 
   // Manager approval form states
   const [managerUsername, setManagerUsername] = useState('');
@@ -421,18 +428,28 @@ function CashDrawer() {
   const handleAddDrawer = async () => {
     try {
       const drawersToCreate = [];
+      const baseName = newDrawerForm.drawer_name || 
+        (newDrawerForm.drawer_type === 'safe' 
+          ? `Safe`
+          : `Drawer`);
+      
       for (let i = 0; i < newDrawerForm.count; i++) {
-        const drawerName = newDrawerForm.drawer_name || 
-          (newDrawerForm.drawer_type === 'safe' 
-            ? `Safe${configDrawers.filter(d => d.drawer_type === 'safe').length + i + 1}`
-            : `Drawer ${configDrawers.filter(d => d.drawer_type === 'physical').length + i + 1}`);
+        // Auto-add dash and number when creating multiple
+        let drawerName;
+        if (newDrawerForm.count > 1) {
+          drawerName = `${baseName}-${i + 1}`;
+        } else {
+          drawerName = baseName;
+        }
         
         drawersToCreate.push({
           drawer_name: drawerName,
           drawer_type: newDrawerForm.drawer_type,
           is_active: newDrawerForm.is_active,
           min_close: newDrawerForm.min_close,
-          max_close: newDrawerForm.max_close
+          max_close: newDrawerForm.max_close,
+          has_location: newDrawerForm.has_location, // For safes
+          is_shared: newDrawerForm.is_shared // For drawers
         });
       }
 
@@ -444,6 +461,17 @@ function CashDrawer() {
       await fetchDrawers();
       setAddDrawerDialog(false);
       setSelectedConfigDrawer(null);
+      // Reset form
+      setNewDrawerForm({
+        drawer_type: 'physical',
+        count: 1,
+        drawer_name: '',
+        is_active: true,
+        min_close: 0,
+        max_close: 0,
+        has_location: false,
+        is_shared: true
+      });
       showSnackbar(`Successfully added ${newDrawerForm.count} ${newDrawerForm.drawer_type === 'safe' ? 'safe(s)' : 'drawer(s)'}`, 'success');
     } catch (err) {
       console.error('Error adding drawer:', err);
@@ -473,11 +501,17 @@ function CashDrawer() {
   const handleEditDrawer = () => {
     if (!selectedConfigDrawer) return;
     
+    // Ensure min_close and max_close are properly parsed as numbers
+    const minClose = selectedConfigDrawer.min_close != null ? parseFloat(selectedConfigDrawer.min_close) || 0 : 0;
+    const maxClose = selectedConfigDrawer.max_close != null ? parseFloat(selectedConfigDrawer.max_close) || 0 : 0;
+    
     setEditDrawerForm({
       drawer_name: selectedConfigDrawer.drawer_name,
       is_active: selectedConfigDrawer.is_active,
-      min_close: selectedConfigDrawer.min_close || 0,
-      max_close: selectedConfigDrawer.max_close || 0
+      min_close: minClose,
+      max_close: maxClose,
+      has_location: selectedConfigDrawer.has_location || false,
+      is_shared: selectedConfigDrawer.is_shared !== false // Default to true if null/undefined
     });
     setEditDrawerDialog(true);
   };
@@ -493,12 +527,54 @@ function CashDrawer() {
         return;
       }
 
-      await axios.put(`${API_BASE_URL}/drawers/${selectedConfigDrawer.drawer_id}`, {
-        drawer_name: editDrawerForm.drawer_name,
-        is_active: editDrawerForm.is_active,
-        min_close: editDrawerForm.min_close,
-        max_close: editDrawerForm.max_close
-      });
+      // Check if turning location OFF for a safe with items
+      const isSafe = selectedConfigDrawer.drawer_type === 'safe' || selectedConfigDrawer.drawer_type === 'master_safe';
+      const wasLocationOn = selectedConfigDrawer.has_location;
+      const isLocationOff = !editDrawerForm.has_location;
+
+      if (isSafe && wasLocationOn && isLocationOff) {
+        // Check if items exist in location - need to handle transfer
+        // First, try to update without transfer_location_to to see if transfer is needed
+        try {
+          await axios.put(`${API_BASE_URL}/drawers/${selectedConfigDrawer.drawer_id}`, {
+            drawer_name: editDrawerForm.drawer_name,
+            is_active: editDrawerForm.is_active,
+            min_close: editDrawerForm.min_close,
+            max_close: editDrawerForm.max_close,
+            has_location: editDrawerForm.has_location,
+            is_shared: editDrawerForm.is_shared
+          });
+          // If successful, no items exist, proceed normally
+        } catch (err) {
+          if (err.response?.data?.requires_transfer) {
+            // Items exist - fetch available locations and show transfer dialog
+            try {
+              const locationsResponse = await axios.get(`${API_BASE_URL}/storage-locations`);
+              const filteredLocations = locationsResponse.data.filter(loc => loc.location !== (editDrawerForm.drawer_name || selectedConfigDrawer.drawer_name));
+              setAvailableLocations(filteredLocations);
+              setLocationTransferDialog(true);
+              return; // Don't close dialog yet, wait for user to select transfer location or cancel
+            } catch (locationErr) {
+              console.error('Error fetching locations:', locationErr);
+              showSnackbar('Failed to fetch available locations', 'error');
+              return;
+            }
+          } else {
+            // Some other error
+            throw err;
+          }
+        }
+      } else {
+        // Normal update (no location transfer needed)
+        await axios.put(`${API_BASE_URL}/drawers/${selectedConfigDrawer.drawer_id}`, {
+          drawer_name: editDrawerForm.drawer_name,
+          is_active: editDrawerForm.is_active,
+          min_close: editDrawerForm.min_close,
+          max_close: editDrawerForm.max_close,
+          has_location: editDrawerForm.has_location,
+          is_shared: editDrawerForm.is_shared
+        });
+      }
 
       await fetchConfigDrawers();
       await fetchDrawers();
@@ -509,6 +585,46 @@ function CashDrawer() {
       console.error('Error updating drawer:', err);
       showSnackbar(err.response?.data?.error || 'Failed to update drawer', 'error');
     }
+  };
+
+  const handleLocationTransfer = async () => {
+    if (!transferLocationTo) {
+      showSnackbar('Please select a location to transfer items to', 'error');
+      return;
+    }
+
+    try {
+      await axios.put(`${API_BASE_URL}/drawers/${selectedConfigDrawer.drawer_id}`, {
+        drawer_name: editDrawerForm.drawer_name,
+        is_active: editDrawerForm.is_active,
+        min_close: editDrawerForm.min_close,
+        max_close: editDrawerForm.max_close,
+        has_location: editDrawerForm.has_location,
+        is_shared: editDrawerForm.is_shared,
+        transfer_location_to: transferLocationTo
+      });
+
+      await fetchConfigDrawers();
+      await fetchDrawers();
+      setLocationTransferDialog(false);
+      setEditDrawerDialog(false);
+      setSelectedConfigDrawer(null);
+      setTransferLocationTo('');
+      showSnackbar('Items transferred and drawer updated successfully', 'success');
+    } catch (err) {
+      console.error('Error transferring location:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to transfer items', 'error');
+    }
+  };
+
+  const handleCancelLocationTransfer = () => {
+    // Cancel - keep location ON
+    setEditDrawerForm({
+      ...editDrawerForm,
+      has_location: true // Revert to keeping location ON
+    });
+    setLocationTransferDialog(false);
+    setTransferLocationTo('');
   };
 
   const handleDeleteDrawer = async () => {
@@ -3898,11 +4014,20 @@ function CashDrawer() {
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <FormControl fullWidth>
-              <InputLabel>Type</InputLabel>
+              <InputLabel>Category</InputLabel>
               <Select
                 value={newDrawerForm.drawer_type}
-                onChange={(e) => setNewDrawerForm({ ...newDrawerForm, drawer_type: e.target.value })}
-                label="Type"
+                onChange={(e) => {
+                  const newType = e.target.value;
+                  setNewDrawerForm({ 
+                    ...newDrawerForm, 
+                    drawer_type: newType,
+                    // Reset type-specific fields when changing category
+                    has_location: newType === 'safe' ? false : false,
+                    is_shared: newType === 'physical' ? true : true
+                  });
+                }}
+                label="Category"
               >
                 <MenuItem value="physical">Drawer</MenuItem>
                 <MenuItem value="safe">Safe</MenuItem>
@@ -3921,7 +4046,34 @@ function CashDrawer() {
               value={newDrawerForm.drawer_name}
               onChange={(e) => setNewDrawerForm({ ...newDrawerForm, drawer_name: e.target.value })}
               fullWidth
+              helperText={newDrawerForm.count > 1 ? "Will auto-add dash and number (e.g., Safe-1, Safe-2)" : ""}
             />
+            {/* Type field - different options for safes vs drawers */}
+            {newDrawerForm.drawer_type === 'safe' ? (
+              <FormControl fullWidth>
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={newDrawerForm.has_location ? 'repository-location' : 'repository'}
+                  onChange={(e) => setNewDrawerForm({ ...newDrawerForm, has_location: e.target.value === 'repository-location' })}
+                  label="Type"
+                >
+                  <MenuItem value="repository">Repository</MenuItem>
+                  <MenuItem value="repository-location">Repository/Location</MenuItem>
+                </Select>
+              </FormControl>
+            ) : (
+              <FormControl fullWidth>
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={newDrawerForm.is_shared ? 'shared' : 'single'}
+                  onChange={(e) => setNewDrawerForm({ ...newDrawerForm, is_shared: e.target.value === 'shared' })}
+                  label="Type"
+                >
+                  <MenuItem value="single">Single</MenuItem>
+                  <MenuItem value="shared">Shared</MenuItem>
+                </Select>
+              </FormControl>
+            )}
             <FormControlLabel
               control={
                 <Checkbox
@@ -3965,6 +4117,32 @@ function CashDrawer() {
               fullWidth
               disabled={selectedConfigDrawer?.drawer_name === 'Master'}
             />
+            {/* Type field - different options for safes vs drawers */}
+            {(selectedConfigDrawer?.drawer_type === 'safe' || selectedConfigDrawer?.drawer_type === 'master_safe') ? (
+              <FormControl fullWidth>
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={editDrawerForm.has_location ? 'repository-location' : 'repository'}
+                  onChange={(e) => setEditDrawerForm({ ...editDrawerForm, has_location: e.target.value === 'repository-location' })}
+                  label="Type"
+                >
+                  <MenuItem value="repository">Repository</MenuItem>
+                  <MenuItem value="repository-location">Repository/Location</MenuItem>
+                </Select>
+              </FormControl>
+            ) : selectedConfigDrawer?.drawer_type === 'physical' ? (
+              <FormControl fullWidth>
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={editDrawerForm.is_shared ? 'shared' : 'single'}
+                  onChange={(e) => setEditDrawerForm({ ...editDrawerForm, is_shared: e.target.value === 'shared' })}
+                  label="Type"
+                >
+                  <MenuItem value="single">Single</MenuItem>
+                  <MenuItem value="shared">Shared</MenuItem>
+                </Select>
+              </FormControl>
+            ) : null}
             <FormControlLabel
               control={
                 <Checkbox
@@ -3978,15 +4156,23 @@ function CashDrawer() {
             <TextField
               label="Min Amount"
               type="number"
-              value={editDrawerForm.min_close}
-              onChange={(e) => setEditDrawerForm({ ...editDrawerForm, min_close: parseFloat(e.target.value) || 0 })}
+              value={editDrawerForm.min_close || 0}
+              onChange={(e) => {
+                const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                setEditDrawerForm({ ...editDrawerForm, min_close: isNaN(val) ? 0 : val });
+              }}
+              inputProps={{ step: '0.01' }}
               fullWidth
             />
             <TextField
               label="Max Amount"
               type="number"
-              value={editDrawerForm.max_close}
-              onChange={(e) => setEditDrawerForm({ ...editDrawerForm, max_close: parseFloat(e.target.value) || 0 })}
+              value={editDrawerForm.max_close || 0}
+              onChange={(e) => {
+                const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                setEditDrawerForm({ ...editDrawerForm, max_close: isNaN(val) ? 0 : val });
+              }}
+              inputProps={{ step: '0.01' }}
               fullWidth
             />
           </Box>
@@ -3994,6 +4180,41 @@ function CashDrawer() {
         <DialogActions>
           <Button onClick={() => setEditDrawerDialog(false)}>Cancel</Button>
           <Button variant="contained" onClick={handleSaveEditDrawer}>Save</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Location Transfer Dialog */}
+      <Dialog open={locationTransferDialog} onClose={handleCancelLocationTransfer} maxWidth="sm" fullWidth>
+        <DialogTitle>Transfer Items from Safe Location</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Items exist in the safe location "{selectedConfigDrawer?.drawer_name}". Please select a location to transfer them to.
+            </Alert>
+            <FormControl fullWidth required>
+              <InputLabel>Transfer Items To</InputLabel>
+              <Select
+                value={transferLocationTo}
+                onChange={(e) => setTransferLocationTo(e.target.value)}
+                label="Transfer Items To"
+              >
+                {availableLocations.map((location) => (
+                  <MenuItem key={location.location_id} value={location.location}>
+                    {location.location}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Typography variant="body2" color="text.secondary">
+              If you cancel, the location will remain enabled for this safe.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelLocationTransfer}>Cancel</Button>
+          <Button variant="contained" onClick={handleLocationTransfer} disabled={!transferLocationTo}>
+            Transfer and Update
+          </Button>
         </DialogActions>
       </Dialog>
 
