@@ -150,6 +150,19 @@ function CashDrawer() {
   const [bankWithdrawalReference, setBankWithdrawalReference] = useState('');
   const [bankWithdrawalNotes, setBankWithdrawalNotes] = useState('');
 
+  // Petty cash payout dialog states
+  const [pettyCashDialog, setPettyCashDialog] = useState(false);
+  const [pettyCashAccounts, setPettyCashAccounts] = useState([]);
+  const [selectedPettyCashAccount, setSelectedPettyCashAccount] = useState('');
+  const [pettyCashAmount, setPettyCashAmount] = useState('');
+  const [pettyCashInvoice, setPettyCashInvoice] = useState('');
+  const [pettyCashDescription, setPettyCashDescription] = useState('');
+  const [pettyCashDenominations, setPettyCashDenominations] = useState({
+    bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+    coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+  });
+  const [pettyCashSourceSession, setPettyCashSourceSession] = useState(null);
+
   // Denomination states for Open Count mode
   const [openingDenominations, setOpeningDenominations] = useState({
     bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
@@ -219,6 +232,7 @@ function CashDrawer() {
     fetchPhysicalPaymentMethods();
     fetchElectronicPaymentMethods();
     fetchBanks();
+    fetchPettyCashAccounts();
   }, []);
 
   // Update count mode when active session changes
@@ -488,6 +502,16 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching banks:', err);
       setBanks([]);
+    }
+  };
+
+  const fetchPettyCashAccounts = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/petty-cash-accounts`);
+      setPettyCashAccounts(Array.isArray(response.data) ? response.data : []);
+    } catch (err) {
+      console.error('Error fetching petty cash accounts:', err);
+      setPettyCashAccounts([]);
     }
   };
 
@@ -1540,6 +1564,95 @@ function CashDrawer() {
     }
   };
 
+  const resetPettyCashForm = () => {
+    setSelectedPettyCashAccount('');
+    setPettyCashAmount('');
+    setPettyCashInvoice('');
+    setPettyCashDescription('');
+    setPettyCashDenominations({
+      bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+      coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+    });
+    setPettyCashSourceSession(null);
+  };
+
+  const openPettyCashDialog = () => {
+    fetchPettyCashAccounts();
+    fetchAllActiveSessions();
+    resetPettyCashForm();
+
+    // Determine source session: prefer physical drawer, then safe
+    if (activeSession) {
+      setPettyCashSourceSession(activeSession);
+    }
+    setPettyCashDialog(true);
+  };
+
+  const handlePettyCashPayout = async () => {
+    if (!selectedPettyCashAccount) {
+      showSnackbar('Please select an expense account', 'error');
+      return;
+    }
+
+    if (!pettyCashDescription.trim()) {
+      showSnackbar('Please enter a description', 'error');
+      return;
+    }
+
+    if (!pettyCashSourceSession) {
+      showSnackbar('Please select a source drawer/safe', 'error');
+      return;
+    }
+
+    // Check if denominations are required
+    const sourceDrawerType = pettyCashSourceSession.drawer_type;
+    const usesDenominations = sourceDrawerType === 'physical' ||
+      ((sourceDrawerType === 'safe' || sourceDrawerType === 'master_safe') && drawerIndividualDenominationsPrefs.safe);
+
+    let payoutTotal;
+    if (usesDenominations) {
+      payoutTotal = calculateDenominationTotal(pettyCashDenominations);
+    } else {
+      payoutTotal = parseFloat(pettyCashAmount) || 0;
+    }
+
+    if (payoutTotal <= 0) {
+      showSnackbar('Please enter a valid payout amount', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      await axios.post(
+        `${API_BASE_URL}/cash-drawer/${pettyCashSourceSession.session_id}/petty-cash-payout`,
+        {
+          account_id: selectedPettyCashAccount,
+          amount: payoutTotal,
+          invoice_number: pettyCashInvoice || null,
+          description: pettyCashDescription,
+          performed_by: currentUser.id,
+          denominations: usesDenominations ? pettyCashDenominations : null
+        }
+      );
+
+      const accountName = pettyCashAccounts.find(a => a.account_id === selectedPettyCashAccount)?.account_name || 'Account';
+      showSnackbar(`Petty cash payout of ${formatCurrency(payoutTotal)} to ${accountName} completed`, 'success');
+      setPettyCashDialog(false);
+      resetPettyCashForm();
+
+      // Refresh sessions and overview
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview()
+      ]);
+    } catch (err) {
+      console.error('Error processing petty cash payout:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to process petty cash payout', 'error');
+    }
+  };
+
   const handleTransfer = async () => {
     if (!transferSource || !transferDestination) {
       showSnackbar('Please select both source and destination', 'error');
@@ -2127,6 +2240,14 @@ function CashDrawer() {
                         onClick={() => fetchSessionDetails(activeSession.session_id)}
                       >
                         View Details
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        startIcon={<MoneyIcon />}
+                        disabled={isStoreClosed}
+                        onClick={openPettyCashDialog}
+                      >
+                        Petty Cash
                       </Button>
                       {/* Show Open Cash Drawer button if no physical session exists */}
                       {!activeSessions.some(s => s.drawer_type === 'physical') && allDrawers.some(d => d.drawer_type === 'physical' && d.is_active) && (
@@ -3855,6 +3976,188 @@ function CashDrawer() {
             disabled={!selectedWithdrawalBank || !bankWithdrawalAmount || parseFloat(bankWithdrawalAmount) <= 0 || isStoreClosed}
           >
             Complete Withdrawal
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Petty Cash Payout Dialog */}
+      <Dialog
+        open={pettyCashDialog}
+        onClose={() => {
+          setPettyCashDialog(false);
+          resetPettyCashForm();
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <MoneyIcon />
+            Petty Cash Payout
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {/* Source Session Selection */}
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel>Source Drawer/Safe</InputLabel>
+              <Select
+                value={pettyCashSourceSession?.session_id || ''}
+                onChange={(e) => {
+                  const session = allActiveSessions.find(s => s.session_id === e.target.value);
+                  setPettyCashSourceSession(session || null);
+                  // Reset denominations when source changes
+                  setPettyCashDenominations({
+                    bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+                    coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+                  });
+                }}
+                label="Source Drawer/Safe"
+              >
+                {allActiveSessions.map((session) => (
+                  <MenuItem key={session.session_id} value={session.session_id}>
+                    {session.drawer_name} ({formatCurrency(session.current_expected_balance || 0)})
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {/* Expense Account Selection */}
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel>Expense Account</InputLabel>
+              <Select
+                value={selectedPettyCashAccount}
+                onChange={(e) => setSelectedPettyCashAccount(e.target.value)}
+                label="Expense Account"
+              >
+                {pettyCashAccounts.map((account) => (
+                  <MenuItem key={account.account_id} value={account.account_id}>
+                    {account.account_name} {account.account_code && `(${account.account_code})`}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {/* Amount Entry - denominations or simple input based on drawer type */}
+            {pettyCashSourceSession && (
+              (pettyCashSourceSession.drawer_type === 'physical' ||
+               ((pettyCashSourceSession.drawer_type === 'safe' || pettyCashSourceSession.drawer_type === 'master_safe') && drawerIndividualDenominationsPrefs.safe)) ? (
+                <>
+                  <Typography variant="subtitle1" gutterBottom>
+                    Enter Payout Amount by Denomination
+                  </Typography>
+                  <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Denomination</TableCell>
+                          <TableCell align="center">Count</TableCell>
+                          <TableCell align="right">Subtotal</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {[
+                          { label: '$100', field: 'bill_100', value: 100 },
+                          { label: '$50', field: 'bill_50', value: 50 },
+                          { label: '$20', field: 'bill_20', value: 20 },
+                          { label: '$10', field: 'bill_10', value: 10 },
+                          { label: '$5', field: 'bill_5', value: 5 },
+                          { label: '$2', field: 'coin_2', value: 2 },
+                          { label: '$1', field: 'coin_1', value: 1 },
+                          { label: '25¢', field: 'coin_0_25', value: 0.25 },
+                          { label: '10¢', field: 'coin_0_10', value: 0.10 },
+                          { label: '5¢', field: 'coin_0_05', value: 0.05 },
+                        ].map((item) => (
+                          <TableRow key={item.field}>
+                            <TableCell>{item.label}</TableCell>
+                            <TableCell align="center">
+                              <TextField
+                                type="number"
+                                size="small"
+                                inputProps={{ min: 0, style: { textAlign: 'center' } }}
+                                sx={{ width: 80 }}
+                                value={pettyCashDenominations[item.field] || 0}
+                                onChange={(e) => {
+                                  const val = Math.max(0, parseInt(e.target.value) || 0);
+                                  setPettyCashDenominations(prev => ({ ...prev, [item.field]: val }));
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell align="right">
+                              {formatCurrency((pettyCashDenominations[item.field] || 0) * item.value)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow>
+                          <TableCell colSpan={2}><strong>Total Payout</strong></TableCell>
+                          <TableCell align="right">
+                            <strong>{formatCurrency(calculateDenominationTotal(pettyCashDenominations))}</strong>
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </>
+              ) : (
+                <TextField
+                  fullWidth
+                  label="Payout Amount"
+                  type="number"
+                  value={pettyCashAmount}
+                  onChange={(e) => setPettyCashAmount(e.target.value)}
+                  inputProps={{ min: 0, step: '0.01' }}
+                  sx={{ mb: 2 }}
+                  required
+                />
+              )
+            )}
+
+            {/* Invoice/Receipt Number */}
+            <TextField
+              fullWidth
+              label="Invoice / Receipt Number (Optional)"
+              value={pettyCashInvoice}
+              onChange={(e) => setPettyCashInvoice(e.target.value)}
+              sx={{ mb: 2 }}
+            />
+
+            {/* Description */}
+            <TextField
+              fullWidth
+              label="Description"
+              multiline
+              rows={2}
+              value={pettyCashDescription}
+              onChange={(e) => setPettyCashDescription(e.target.value)}
+              required
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setPettyCashDialog(false);
+            resetPettyCashForm();
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handlePettyCashPayout}
+            variant="contained"
+            color="primary"
+            disabled={
+              !selectedPettyCashAccount ||
+              !pettyCashDescription.trim() ||
+              !pettyCashSourceSession ||
+              isStoreClosed ||
+              (pettyCashSourceSession && (
+                (pettyCashSourceSession.drawer_type === 'physical' ||
+                 ((pettyCashSourceSession.drawer_type === 'safe' || pettyCashSourceSession.drawer_type === 'master_safe') && drawerIndividualDenominationsPrefs.safe))
+                  ? calculateDenominationTotal(pettyCashDenominations) <= 0
+                  : (!pettyCashAmount || parseFloat(pettyCashAmount) <= 0)
+              ))
+            }
+          >
+            Complete Payout
           </Button>
         </DialogActions>
       </Dialog>

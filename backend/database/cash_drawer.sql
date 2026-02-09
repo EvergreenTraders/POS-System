@@ -646,3 +646,62 @@ CREATE INDEX IF NOT EXISTS idx_bank_deposits_date ON bank_deposits(created_at);
 -- Add comments for documentation
 COMMENT ON TABLE bank_deposits IS 'Tracks cash deposits and withdrawals between master safe and bank accounts. Positive amount = deposit to bank, Negative amount = withdrawal from bank';
 COMMENT ON COLUMN bank_deposits.deposit_reference IS 'Bank reference or confirmation number for the transaction';
+
+-- Create petty_cash_accounts table to store pre-configured expense accounts
+CREATE TABLE IF NOT EXISTS petty_cash_accounts (
+    account_id SERIAL PRIMARY KEY,
+    account_name VARCHAR(100) NOT NULL,
+    account_code VARCHAR(50),
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+-- Create index for petty_cash_accounts
+CREATE INDEX IF NOT EXISTS idx_petty_cash_accounts_active ON petty_cash_accounts(is_active);
+
+-- Add comments for documentation
+COMMENT ON TABLE petty_cash_accounts IS 'Stores pre-configured expense accounts for petty cash payouts';
+COMMENT ON COLUMN petty_cash_accounts.account_code IS 'Optional accounting code for integration with accounting systems';
+
+-- Insert some default petty cash accounts
+INSERT INTO petty_cash_accounts (account_name, account_code)
+SELECT * FROM (VALUES
+    ('Office Supplies', 'EXP-001'),
+    ('Postage & Shipping', 'EXP-002'),
+    ('Repairs & Maintenance', 'EXP-003'),
+    ('Travel & Transportation', 'EXP-004'),
+    ('Meals & Entertainment', 'EXP-005'),
+    ('Miscellaneous', 'EXP-999')
+) AS defaults(account_name, account_code)
+WHERE NOT EXISTS (SELECT 1 FROM petty_cash_accounts LIMIT 1);
+
+-- Create petty_cash_payouts table to track petty cash disbursements
+CREATE TABLE IF NOT EXISTS petty_cash_payouts (
+    payout_id SERIAL PRIMARY KEY,
+    session_id INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    adjustment_id INTEGER, -- Reference to the adjustment record
+    invoice_number VARCHAR(100),
+    description TEXT NOT NULL,
+    performed_by INTEGER NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id) REFERENCES petty_cash_accounts(account_id),
+    FOREIGN KEY (adjustment_id) REFERENCES cash_drawer_adjustments(adjustment_id) ON DELETE SET NULL,
+    FOREIGN KEY (performed_by) REFERENCES employees(employee_id),
+
+    CONSTRAINT chk_positive_payout CHECK (amount > 0)
+);
+
+-- Create indexes for petty_cash_payouts
+CREATE INDEX IF NOT EXISTS idx_petty_cash_payouts_session ON petty_cash_payouts(session_id);
+CREATE INDEX IF NOT EXISTS idx_petty_cash_payouts_account ON petty_cash_payouts(account_id);
+CREATE INDEX IF NOT EXISTS idx_petty_cash_payouts_date ON petty_cash_payouts(created_at);
+
+-- Add comments for documentation
+COMMENT ON TABLE petty_cash_payouts IS 'Tracks petty cash disbursements from drawers and safes';
+COMMENT ON COLUMN petty_cash_payouts.invoice_number IS 'Invoice or receipt number for the expense';

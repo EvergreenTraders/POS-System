@@ -2034,6 +2034,241 @@ app.post('/api/cash-drawer/:sessionId/bank-withdrawal', async (req, res) => {
   }
 });
 
+// ============ PETTY CASH ENDPOINTS ============
+
+// GET /api/petty-cash-accounts - Get all active petty cash accounts
+app.get('/api/petty-cash-accounts', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM petty_cash_accounts
+      WHERE is_active = TRUE
+      ORDER BY account_name ASC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching petty cash accounts:', error);
+    res.status(500).json({ error: 'Failed to fetch petty cash accounts' });
+  }
+});
+
+// POST /api/petty-cash-accounts - Create a new petty cash account
+app.post('/api/petty-cash-accounts', async (req, res) => {
+  const { account_name, account_code, description } = req.body;
+
+  if (!account_name) {
+    return res.status(400).json({ error: 'account_name is required' });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO petty_cash_accounts (account_name, account_code, description)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `, [account_name, account_code || null, description || null]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating petty cash account:', error);
+    res.status(500).json({ error: 'Failed to create petty cash account' });
+  }
+});
+
+// PUT /api/petty-cash-accounts/:accountId - Update a petty cash account
+app.put('/api/petty-cash-accounts/:accountId', async (req, res) => {
+  const { accountId } = req.params;
+  const { account_name, account_code, description, is_active } = req.body;
+
+  try {
+    const result = await pool.query(`
+      UPDATE petty_cash_accounts SET
+        account_name = COALESCE($1, account_name),
+        account_code = COALESCE($2, account_code),
+        description = COALESCE($3, description),
+        is_active = COALESCE($4, is_active),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE account_id = $5
+      RETURNING *
+    `, [account_name, account_code, description, is_active, accountId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Petty cash account not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating petty cash account:', error);
+    res.status(500).json({ error: 'Failed to update petty cash account' });
+  }
+});
+
+// POST /api/cash-drawer/:sessionId/petty-cash-payout - Make a petty cash payout
+app.post('/api/cash-drawer/:sessionId/petty-cash-payout', async (req, res) => {
+  const { sessionId } = req.params;
+  const { account_id, amount, invoice_number, description, performed_by, denominations } = req.body;
+
+  // Validation
+  if (!account_id || !amount || !description || !performed_by) {
+    return res.status(400).json({
+      error: 'account_id, amount, description, and performed_by are required'
+    });
+  }
+
+  if (parseFloat(amount) <= 0) {
+    return res.status(400).json({
+      error: 'Payout amount must be positive'
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Verify session exists and is open
+    const sessionCheck = await client.query(`
+      SELECT s.session_id, s.status, d.drawer_type, d.drawer_name
+      FROM cash_drawer_sessions s
+      JOIN drawers d ON s.drawer_id = d.drawer_id
+      WHERE s.session_id = $1
+    `, [sessionId]);
+
+    if (sessionCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (sessionCheck.rows[0].status !== 'open') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Session is not open' });
+    }
+
+    // Verify account exists and is active
+    const accountCheck = await client.query(
+      'SELECT account_id, account_name FROM petty_cash_accounts WHERE account_id = $1 AND is_active = TRUE',
+      [account_id]
+    );
+
+    if (accountCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Petty cash account not found or inactive' });
+    }
+
+    const accountName = accountCheck.rows[0].account_name;
+    const drawerName = sessionCheck.rows[0].drawer_name;
+    const payoutAmount = parseFloat(amount);
+
+    // Create negative adjustment (cash going out)
+    const adjustmentResult = await client.query(`
+      INSERT INTO cash_drawer_adjustments
+        (session_id, amount, adjustment_type, reason, performed_by)
+      VALUES ($1, $2, 'petty_cash', $3, $4)
+      RETURNING *
+    `, [sessionId, -payoutAmount, `Petty cash payout - ${accountName}: ${description}${invoice_number ? ' (Ref: ' + invoice_number + ')' : ''}`, performed_by]);
+
+    const adjustmentId = adjustmentResult.rows[0].adjustment_id;
+
+    // Store denominations if provided
+    if (denominations) {
+      const denomValues = {
+        bill_100: denominations.bill_100 || 0,
+        bill_50: denominations.bill_50 || 0,
+        bill_20: denominations.bill_20 || 0,
+        bill_10: denominations.bill_10 || 0,
+        bill_5: denominations.bill_5 || 0,
+        coin_2: denominations.coin_2 || 0,
+        coin_1: denominations.coin_1 || 0,
+        coin_0_25: denominations.coin_0_25 || 0,
+        coin_0_10: denominations.coin_0_10 || 0,
+        coin_0_05: denominations.coin_0_05 || 0
+      };
+
+      await client.query(`
+        INSERT INTO adjustment_denominations
+          (adjustment_id, bill_100, bill_50, bill_20, bill_10, bill_5, coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [
+        adjustmentId,
+        denomValues.bill_100, denomValues.bill_50, denomValues.bill_20, denomValues.bill_10, denomValues.bill_5,
+        denomValues.coin_2, denomValues.coin_1, denomValues.coin_0_25, denomValues.coin_0_10, denomValues.coin_0_05
+      ]);
+    }
+
+    // Create petty cash payout record
+    const payoutResult = await client.query(`
+      INSERT INTO petty_cash_payouts
+        (session_id, account_id, amount, adjustment_id, invoice_number, description, performed_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `, [sessionId, account_id, payoutAmount, adjustmentId, invoice_number || null, description, performed_by]);
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      message: 'Petty cash payout completed successfully',
+      payout: payoutResult.rows[0],
+      adjustment: adjustmentResult.rows[0],
+      account_name: accountName,
+      drawer_name: drawerName
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error processing petty cash payout:', error);
+    res.status(500).json({ error: 'Failed to process petty cash payout' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/petty-cash-payouts - Get petty cash payout history
+app.get('/api/petty-cash-payouts', async (req, res) => {
+  const { start_date, end_date, account_id, limit = 50, offset = 0 } = req.query;
+
+  try {
+    let query = `
+      SELECT
+        p.*,
+        a.account_name,
+        a.account_code,
+        e.first_name || ' ' || e.last_name AS performed_by_name,
+        d.drawer_name,
+        d.drawer_type
+      FROM petty_cash_payouts p
+      JOIN petty_cash_accounts a ON p.account_id = a.account_id
+      JOIN employees e ON p.performed_by = e.employee_id
+      JOIN cash_drawer_sessions s ON p.session_id = s.session_id
+      JOIN drawers d ON s.drawer_id = d.drawer_id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramCount = 1;
+
+    if (start_date) {
+      params.push(start_date);
+      query += ` AND p.created_at >= $${paramCount++}`;
+    }
+
+    if (end_date) {
+      params.push(end_date);
+      query += ` AND p.created_at <= $${paramCount++}`;
+    }
+
+    if (account_id) {
+      params.push(account_id);
+      query += ` AND p.account_id = $${paramCount++}`;
+    }
+
+    query += ` ORDER BY p.created_at DESC`;
+
+    params.push(limit, offset);
+    query += ` LIMIT $${paramCount++} OFFSET $${paramCount++}`;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching petty cash payouts:', error);
+    res.status(500).json({ error: 'Failed to fetch petty cash payouts' });
+  }
+});
+
 // POST /api/cash-drawer/:sessionId/transaction - Link a cash transaction to a drawer session
 app.post('/api/cash-drawer/:sessionId/transaction', async (req, res) => {
   const { sessionId } = req.params;
