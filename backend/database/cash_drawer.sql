@@ -580,3 +580,56 @@ CREATE INDEX IF NOT EXISTS idx_drawer_connections_active ON drawer_session_conne
 -- Add comments for documentation
 COMMENT ON TABLE drawer_session_connections IS 'Tracks employees connected to shared drawer sessions (safe/master_safe). When an employee opens a shared drawer that is already open, they connect to the existing session.';
 COMMENT ON COLUMN drawer_session_connections.is_active IS 'Whether this connection is currently active. Set to FALSE when employee disconnects.';
+
+-- Create banks table to store bank account configurations for deposits
+CREATE TABLE IF NOT EXISTS banks (
+    bank_id SERIAL PRIMARY KEY,
+    bank_name VARCHAR(100) NOT NULL,
+    account_number VARCHAR(50),
+    routing_number VARCHAR(50),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+-- Create index for banks
+CREATE INDEX IF NOT EXISTS idx_banks_active ON banks(is_active);
+
+-- Add comments for documentation
+COMMENT ON TABLE banks IS 'Stores bank account configurations for cash deposits from master safe';
+COMMENT ON COLUMN banks.is_default IS 'Default bank to use when making deposits';
+
+-- Insert a default bank if none exists
+INSERT INTO banks (bank_name, is_default)
+SELECT 'Primary Bank', TRUE
+WHERE NOT EXISTS (SELECT 1 FROM banks LIMIT 1);
+
+-- Create bank_deposits table to track deposits from master safe to bank
+CREATE TABLE IF NOT EXISTS bank_deposits (
+    deposit_id SERIAL PRIMARY KEY,
+    session_id INTEGER NOT NULL,
+    bank_id INTEGER NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    adjustment_id INTEGER, -- Reference to the adjustment record
+    deposit_reference VARCHAR(100), -- Bank reference/confirmation number
+    notes TEXT,
+    performed_by INTEGER NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE CASCADE,
+    FOREIGN KEY (bank_id) REFERENCES banks(bank_id),
+    FOREIGN KEY (adjustment_id) REFERENCES cash_drawer_adjustments(adjustment_id) ON DELETE SET NULL,
+    FOREIGN KEY (performed_by) REFERENCES employees(employee_id),
+
+    CONSTRAINT chk_positive_deposit CHECK (amount > 0)
+);
+
+-- Create indexes for bank_deposits
+CREATE INDEX IF NOT EXISTS idx_bank_deposits_session ON bank_deposits(session_id);
+CREATE INDEX IF NOT EXISTS idx_bank_deposits_bank ON bank_deposits(bank_id);
+CREATE INDEX IF NOT EXISTS idx_bank_deposits_date ON bank_deposits(created_at);
+
+-- Add comments for documentation
+COMMENT ON TABLE bank_deposits IS 'Tracks cash deposits from master safe to bank accounts';
+COMMENT ON COLUMN bank_deposits.deposit_reference IS 'Bank reference or confirmation number for the deposit';

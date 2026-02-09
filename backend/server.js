@@ -1678,6 +1678,267 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
   }
 });
 
+// ============ BANK ENDPOINTS ============
+
+// GET /api/banks - Get all active banks
+app.get('/api/banks', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM banks
+      WHERE is_active = TRUE
+      ORDER BY is_default DESC, bank_name ASC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching banks:', error);
+    res.status(500).json({ error: 'Failed to fetch banks' });
+  }
+});
+
+// POST /api/banks - Create a new bank
+app.post('/api/banks', async (req, res) => {
+  const { bank_name, account_number, routing_number, is_default } = req.body;
+
+  if (!bank_name) {
+    return res.status(400).json({ error: 'bank_name is required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // If this bank is set as default, unset other defaults
+    if (is_default) {
+      await client.query('UPDATE banks SET is_default = FALSE WHERE is_default = TRUE');
+    }
+
+    const result = await client.query(`
+      INSERT INTO banks (bank_name, account_number, routing_number, is_default)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [bank_name, account_number || null, routing_number || null, is_default || false]);
+
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating bank:', error);
+    res.status(500).json({ error: 'Failed to create bank' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/banks/:bankId - Update a bank
+app.put('/api/banks/:bankId', async (req, res) => {
+  const { bankId } = req.params;
+  const { bank_name, account_number, routing_number, is_default, is_active } = req.body;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // If this bank is set as default, unset other defaults
+    if (is_default) {
+      await client.query('UPDATE banks SET is_default = FALSE WHERE is_default = TRUE AND bank_id != $1', [bankId]);
+    }
+
+    const result = await client.query(`
+      UPDATE banks SET
+        bank_name = COALESCE($1, bank_name),
+        account_number = COALESCE($2, account_number),
+        routing_number = COALESCE($3, routing_number),
+        is_default = COALESCE($4, is_default),
+        is_active = COALESCE($5, is_active),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE bank_id = $6
+      RETURNING *
+    `, [bank_name, account_number, routing_number, is_default, is_active, bankId]);
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Bank not found' });
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating bank:', error);
+    res.status(500).json({ error: 'Failed to update bank' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/cash-drawer/:sessionId/bank-deposit - Make a bank deposit from master safe
+app.post('/api/cash-drawer/:sessionId/bank-deposit', async (req, res) => {
+  const { sessionId } = req.params;
+  const { bank_id, amount, deposit_reference, notes, performed_by, denominations } = req.body;
+
+  // Validation
+  if (!bank_id || !amount || !performed_by) {
+    return res.status(400).json({
+      error: 'bank_id, amount, and performed_by are required'
+    });
+  }
+
+  if (parseFloat(amount) <= 0) {
+    return res.status(400).json({
+      error: 'Deposit amount must be positive'
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Verify session exists, is open, and is a master_safe
+    const sessionCheck = await client.query(`
+      SELECT s.session_id, s.status, d.drawer_type, d.drawer_name
+      FROM cash_drawer_sessions s
+      JOIN drawers d ON s.drawer_id = d.drawer_id
+      WHERE s.session_id = $1
+    `, [sessionId]);
+
+    if (sessionCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (sessionCheck.rows[0].status !== 'open') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Session is not open' });
+    }
+
+    if (sessionCheck.rows[0].drawer_type !== 'master_safe') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Bank deposits can only be made from the Master Safe' });
+    }
+
+    // Verify bank exists and is active
+    const bankCheck = await client.query(
+      'SELECT bank_id, bank_name FROM banks WHERE bank_id = $1 AND is_active = TRUE',
+      [bank_id]
+    );
+
+    if (bankCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Bank not found or inactive' });
+    }
+
+    const bankName = bankCheck.rows[0].bank_name;
+    const depositAmount = parseFloat(amount);
+
+    // Create negative adjustment on master safe (cash going out to bank)
+    const adjustmentResult = await client.query(`
+      INSERT INTO cash_drawer_adjustments
+        (session_id, amount, adjustment_type, reason, performed_by)
+      VALUES ($1, $2, 'bank_deposit', $3, $4)
+      RETURNING *
+    `, [sessionId, -depositAmount, `Bank deposit to ${bankName}${notes ? ': ' + notes : ''}`, performed_by]);
+
+    const adjustmentId = adjustmentResult.rows[0].adjustment_id;
+
+    // Store denominations if provided
+    if (denominations) {
+      const denomValues = {
+        bill_100: denominations.bill_100 || 0,
+        bill_50: denominations.bill_50 || 0,
+        bill_20: denominations.bill_20 || 0,
+        bill_10: denominations.bill_10 || 0,
+        bill_5: denominations.bill_5 || 0,
+        coin_2: denominations.coin_2 || 0,
+        coin_1: denominations.coin_1 || 0,
+        coin_0_25: denominations.coin_0_25 || 0,
+        coin_0_10: denominations.coin_0_10 || 0,
+        coin_0_05: denominations.coin_0_05 || 0
+      };
+
+      await client.query(`
+        INSERT INTO adjustment_denominations
+          (adjustment_id, bill_100, bill_50, bill_20, bill_10, bill_5, coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [
+        adjustmentId,
+        denomValues.bill_100, denomValues.bill_50, denomValues.bill_20, denomValues.bill_10, denomValues.bill_5,
+        denomValues.coin_2, denomValues.coin_1, denomValues.coin_0_25, denomValues.coin_0_10, denomValues.coin_0_05
+      ]);
+    }
+
+    // Create bank deposit record
+    const depositResult = await client.query(`
+      INSERT INTO bank_deposits
+        (session_id, bank_id, amount, adjustment_id, deposit_reference, notes, performed_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `, [sessionId, bank_id, depositAmount, adjustmentId, deposit_reference || null, notes || null, performed_by]);
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      message: 'Bank deposit completed successfully',
+      deposit: depositResult.rows[0],
+      adjustment: adjustmentResult.rows[0],
+      bank_name: bankName
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error processing bank deposit:', error);
+    res.status(500).json({ error: 'Failed to process bank deposit' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/bank-deposits - Get bank deposit history
+app.get('/api/bank-deposits', async (req, res) => {
+  const { start_date, end_date, bank_id, limit = 50, offset = 0 } = req.query;
+
+  try {
+    let query = `
+      SELECT
+        bd.*,
+        b.bank_name,
+        e.first_name || ' ' || e.last_name AS performed_by_name,
+        s.opened_at AS session_opened_at
+      FROM bank_deposits bd
+      JOIN banks b ON bd.bank_id = b.bank_id
+      JOIN employees e ON bd.performed_by = e.employee_id
+      JOIN cash_drawer_sessions s ON bd.session_id = s.session_id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramCount = 1;
+
+    if (start_date) {
+      params.push(start_date);
+      query += ` AND bd.created_at >= $${paramCount++}`;
+    }
+
+    if (end_date) {
+      params.push(end_date);
+      query += ` AND bd.created_at <= $${paramCount++}`;
+    }
+
+    if (bank_id) {
+      params.push(bank_id);
+      query += ` AND bd.bank_id = $${paramCount++}`;
+    }
+
+    query += ` ORDER BY bd.created_at DESC`;
+
+    params.push(limit, offset);
+    query += ` LIMIT $${paramCount++} OFFSET $${paramCount++}`;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching bank deposits:', error);
+    res.status(500).json({ error: 'Failed to fetch bank deposits' });
+  }
+});
+
 // POST /api/cash-drawer/:sessionId/transaction - Link a cash transaction to a drawer session
 app.post('/api/cash-drawer/:sessionId/transaction', async (req, res) => {
   const { sessionId } = req.params;

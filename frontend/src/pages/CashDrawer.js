@@ -41,6 +41,7 @@ import {
   Add as AddIcon,
   History as HistoryIcon,
   AccountBalance as BankIcon,
+  AccountBalance as AccountBalanceIcon,
   Store as StoreIcon,
   ArrowForward as ArrowForwardIcon,
   SwapHoriz as SwapHorizIcon,
@@ -134,6 +135,14 @@ function CashDrawer() {
   const [transferTenderAmounts, setTransferTenderAmounts] = useState({}); // { check: 500, debit: 1234.56, etc. }
   const [transferNotes, setTransferNotes] = useState('');
 
+  // Bank deposit dialog states
+  const [bankDepositDialog, setBankDepositDialog] = useState(false);
+  const [banks, setBanks] = useState([]);
+  const [selectedBank, setSelectedBank] = useState('');
+  const [bankDepositAmount, setBankDepositAmount] = useState('');
+  const [bankDepositReference, setBankDepositReference] = useState('');
+  const [bankDepositNotes, setBankDepositNotes] = useState('');
+
   // Denomination states for Open Count mode
   const [openingDenominations, setOpeningDenominations] = useState({
     bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
@@ -202,6 +211,7 @@ function CashDrawer() {
     fetchHistory();
     fetchPhysicalPaymentMethods();
     fetchElectronicPaymentMethods();
+    fetchBanks();
   }, []);
 
   // Update count mode when active session changes
@@ -456,6 +466,21 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching drawer overview:', err);
       setOverviewData({ safes: [], drawers: [] });
+    }
+  };
+
+  const fetchBanks = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/banks`);
+      setBanks(Array.isArray(response.data) ? response.data : []);
+      // Set default bank if available
+      const defaultBank = response.data.find(b => b.is_default);
+      if (defaultBank) {
+        setSelectedBank(defaultBank.bank_id);
+      }
+    } catch (err) {
+      console.error('Error fetching banks:', err);
+      setBanks([]);
     }
   };
 
@@ -1374,6 +1399,73 @@ function CashDrawer() {
     setTransferDialog(true);
   };
 
+  const resetBankDepositForm = () => {
+    setBankDepositAmount('');
+    setBankDepositReference('');
+    setBankDepositNotes('');
+    // Keep selected bank as default
+    const defaultBank = banks.find(b => b.is_default);
+    if (defaultBank) {
+      setSelectedBank(defaultBank.bank_id);
+    }
+  };
+
+  const openBankDepositDialog = () => {
+    fetchBanks();
+    resetBankDepositForm();
+    setBankDepositDialog(true);
+  };
+
+  const handleBankDeposit = async () => {
+    if (!selectedBank) {
+      showSnackbar('Please select a bank', 'error');
+      return;
+    }
+
+    const depositTotal = parseFloat(bankDepositAmount) || 0;
+
+    if (depositTotal <= 0) {
+      showSnackbar('Please enter a valid deposit amount', 'error');
+      return;
+    }
+
+    // Verify we're on master safe
+    if (activeSession?.drawer_type !== 'master_safe') {
+      showSnackbar('Bank deposits can only be made from the Master Safe', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      await axios.post(
+        `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/bank-deposit`,
+        {
+          bank_id: selectedBank,
+          amount: depositTotal,
+          deposit_reference: bankDepositReference || null,
+          notes: bankDepositNotes || null,
+          performed_by: currentUser.id
+        }
+      );
+
+      const bankName = banks.find(b => b.bank_id === selectedBank)?.bank_name || 'Bank';
+      showSnackbar(`Bank deposit of ${formatCurrency(depositTotal)} to ${bankName} completed`, 'success');
+      setBankDepositDialog(false);
+      resetBankDepositForm();
+
+      // Refresh sessions and overview
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview()
+      ]);
+    } catch (err) {
+      console.error('Error processing bank deposit:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to process bank deposit', 'error');
+    }
+  };
+
   const handleTransfer = async () => {
     if (!transferSource || !transferDestination) {
       showSnackbar('Please select both source and destination', 'error');
@@ -1934,6 +2026,17 @@ function CashDrawer() {
                       >
                         Transfer
                       </Button>
+                      {/* Show Bank Deposit button only for Master Safe */}
+                      {activeSession.drawer_type === 'master_safe' && (
+                        <Button
+                          variant="outlined"
+                          startIcon={<AccountBalanceIcon />}
+                          disabled={isStoreClosed}
+                          onClick={openBankDepositDialog}
+                        >
+                          Bank Deposit
+                        </Button>
+                      )}
                       <Button
                         variant="outlined"
                         startIcon={<HistoryIcon />}
@@ -3500,6 +3603,90 @@ function CashDrawer() {
             disabled={!transferSource || !transferDestination || isStoreClosed}
           >
             Complete Transfer
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bank Deposit Dialog */}
+      <Dialog
+        open={bankDepositDialog}
+        onClose={() => {
+          setBankDepositDialog(false);
+          resetBankDepositForm();
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AccountBalanceIcon />
+            Bank Deposit from Master Safe
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {/* Bank Selection */}
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel>Select Bank</InputLabel>
+              <Select
+                value={selectedBank}
+                onChange={(e) => setSelectedBank(e.target.value)}
+                label="Select Bank"
+              >
+                {banks.map((bank) => (
+                  <MenuItem key={bank.bank_id} value={bank.bank_id}>
+                    {bank.bank_name} {bank.is_default && '(Default)'}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {/* Deposit Amount */}
+            <TextField
+              fullWidth
+              label="Deposit Amount"
+              type="number"
+              value={bankDepositAmount}
+              onChange={(e) => setBankDepositAmount(e.target.value)}
+              inputProps={{ min: 0, step: '0.01' }}
+              sx={{ mb: 2 }}
+              required
+            />
+
+            {/* Reference Number */}
+            <TextField
+              fullWidth
+              label="Bank Reference / Confirmation Number (Optional)"
+              value={bankDepositReference}
+              onChange={(e) => setBankDepositReference(e.target.value)}
+              sx={{ mb: 2 }}
+            />
+
+            {/* Notes */}
+            <TextField
+              fullWidth
+              label="Notes (Optional)"
+              multiline
+              rows={2}
+              value={bankDepositNotes}
+              onChange={(e) => setBankDepositNotes(e.target.value)}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setBankDepositDialog(false);
+            resetBankDepositForm();
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleBankDeposit}
+            variant="contained"
+            color="primary"
+            disabled={!selectedBank || !bankDepositAmount || parseFloat(bankDepositAmount) <= 0 || isStoreClosed}
+          >
+            Complete Deposit
           </Button>
         </DialogActions>
       </Dialog>
