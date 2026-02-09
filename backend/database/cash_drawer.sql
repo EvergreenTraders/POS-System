@@ -176,6 +176,60 @@ END $$;
 -- Add comment documenting transfer rules
 COMMENT ON TABLE cash_drawer_adjustments IS 'Records manual cash additions/removals during shifts. Transfer rules: Physical drawers receive from physical/safe. Safe drawers receive from physical/master_safe. Master safe receives from safe/bank.';
 
+-- Create adjustment_denominations table to store denomination counts for adjustments/transfers
+CREATE TABLE IF NOT EXISTS adjustment_denominations (
+    id SERIAL PRIMARY KEY,
+    adjustment_id INTEGER NOT NULL,
+
+    -- Bill denominations (CAD)
+    bill_100 INTEGER DEFAULT 0,
+    bill_50 INTEGER DEFAULT 0,
+    bill_20 INTEGER DEFAULT 0,
+    bill_10 INTEGER DEFAULT 0,
+    bill_5 INTEGER DEFAULT 0,
+
+    -- Coin denominations (CAD)
+    coin_2 INTEGER DEFAULT 0,
+    coin_1 INTEGER DEFAULT 0,
+    coin_0_25 INTEGER DEFAULT 0,
+    coin_0_10 INTEGER DEFAULT 0,
+    coin_0_05 INTEGER DEFAULT 0,
+
+    -- Calculated total
+    total_amount DECIMAL(10,2) GENERATED ALWAYS AS (
+        (bill_100 * 100) +
+        (bill_50 * 50) +
+        (bill_20 * 20) +
+        (bill_10 * 10) +
+        (bill_5 * 5) +
+        (coin_2 * 2) +
+        (coin_1 * 1) +
+        (coin_0_25 * 0.25) +
+        (coin_0_10 * 0.10) +
+        (coin_0_05 * 0.05)
+    ) STORED,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (adjustment_id) REFERENCES cash_drawer_adjustments(adjustment_id) ON DELETE CASCADE,
+
+    CONSTRAINT chk_adj_non_negative_bills CHECK (
+        bill_100 >= 0 AND bill_50 >= 0 AND bill_20 >= 0 AND
+        bill_10 >= 0 AND bill_5 >= 0
+    ),
+    CONSTRAINT chk_adj_non_negative_coins CHECK (
+        coin_2 >= 0 AND coin_1 >= 0 AND coin_0_25 >= 0 AND
+        coin_0_10 >= 0 AND coin_0_05 >= 0
+    )
+);
+
+-- Create index for adjustment_denominations
+CREATE INDEX IF NOT EXISTS idx_adjustment_denominations_adjustment ON adjustment_denominations(adjustment_id);
+
+-- Add comments for documentation
+COMMENT ON TABLE adjustment_denominations IS 'Stores denomination counts for cash drawer adjustments (transfers, deposits, etc.)';
+COMMENT ON COLUMN adjustment_denominations.total_amount IS 'Automatically calculated total from all denominations';
+
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_drawer_sessions_employee ON cash_drawer_sessions(employee_id);
 CREATE INDEX IF NOT EXISTS idx_drawer_sessions_status ON cash_drawer_sessions(status);

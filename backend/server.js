@@ -1347,7 +1347,7 @@ app.get('/api/cash-drawer/:sessionId/connection-count', async (req, res) => {
 // POST /api/cash-drawer/:sessionId/adjustment - Add a cash adjustment to a drawer session
 app.post('/api/cash-drawer/:sessionId/adjustment', async (req, res) => {
   const { sessionId } = req.params;
-  const { amount, adjustment_type, reason, performed_by, approved_by } = req.body;
+  const { amount, adjustment_type, reason, performed_by, approved_by, denominations } = req.body;
 
   // Validation
   if (!amount || !adjustment_type || !reason || !performed_by) {
@@ -1363,31 +1363,65 @@ app.post('/api/cash-drawer/:sessionId/adjustment', async (req, res) => {
     });
   }
 
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+
     // Verify session exists and is open
-    const sessionCheck = await pool.query(
+    const sessionCheck = await client.query(
       'SELECT status FROM cash_drawer_sessions WHERE session_id = $1',
       [sessionId]
     );
 
     if (sessionCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Session not found' });
     }
 
     if (sessionCheck.rows[0].status !== 'open') {
+      await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Can only add adjustments to open sessions' });
     }
 
     // Insert adjustment
-    const result = await pool.query(`
+    const result = await client.query(`
       INSERT INTO cash_drawer_adjustments
         (session_id, amount, adjustment_type, reason, performed_by, approved_by)
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *
     `, [sessionId, amount, adjustment_type, reason, performed_by, approved_by || null]);
 
+    // Store denominations if provided
+    if (denominations) {
+      const denomValues = {
+        bill_100: denominations.bill_100 || 0,
+        bill_50: denominations.bill_50 || 0,
+        bill_20: denominations.bill_20 || 0,
+        bill_10: denominations.bill_10 || 0,
+        bill_5: denominations.bill_5 || 0,
+        coin_2: denominations.coin_2 || 0,
+        coin_1: denominations.coin_1 || 0,
+        coin_0_25: denominations.coin_0_25 || 0,
+        coin_0_10: denominations.coin_0_10 || 0,
+        coin_0_05: denominations.coin_0_05 || 0
+      };
+
+      await client.query(`
+        INSERT INTO adjustment_denominations
+          (adjustment_id, bill_100, bill_50, bill_20, bill_10, bill_5, coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [
+        result.rows[0].adjustment_id,
+        denomValues.bill_100, denomValues.bill_50, denomValues.bill_20, denomValues.bill_10, denomValues.bill_5,
+        denomValues.coin_2, denomValues.coin_1, denomValues.coin_0_25, denomValues.coin_0_10, denomValues.coin_0_05
+      ]);
+    }
+
+    await client.query('COMMIT');
+
     res.status(201).json(result.rows[0]);
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error adding cash drawer adjustment:', error);
 
     // Provide specific error messages based on error type
@@ -1420,18 +1454,22 @@ app.post('/api/cash-drawer/:sessionId/adjustment', async (req, res) => {
       error: 'System error: Unable to add adjustment. Please try again or contact support if the problem persists.',
       errorType: 'SYSTEM_ERROR'
     });
+  } finally {
+    client.release();
   }
 });
 
 // POST /api/cash-drawer/:sessionId/transfer - Transfer cash from another drawer to this drawer
 app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
   const { sessionId } = req.params; // Target session (receiving cash)
-  const { amount, source_session_id, reason, performed_by } = req.body;
+  const { amount, source_session_id, reason, performed_by, denominations, tender_breakdown } = req.body;
+  // denominations: { bill_100: 1, bill_50: 0, bill_20: 10, ... } (optional)
+  // tender_breakdown: [{ method: 'check', amount: 500 }, { method: 'debit', amount: 1234.56 }] (optional)
 
   // Validation
-  if (!amount || !source_session_id || !reason || !performed_by) {
+  if (!amount || !source_session_id || !performed_by) {
     return res.status(400).json({
-      error: 'amount, source_session_id, reason, and performed_by are required'
+      error: 'amount, source_session_id, and performed_by are required'
     });
   }
 
@@ -1513,13 +1551,41 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
     }
     const transferAmount = parseFloat(amount);
 
+    // Build detailed reason including tender breakdown
+    let detailedReason = reason || 'Transfer';
+    if (tender_breakdown && tender_breakdown.length > 0) {
+      const tenderDetails = tender_breakdown
+        .filter(t => t.amount > 0)
+        .map(t => `${t.method}: $${parseFloat(t.amount).toFixed(2)}`)
+        .join(', ');
+      if (tenderDetails) {
+        detailedReason += ` | Tenders: ${tenderDetails}`;
+      }
+    }
+    if (denominations) {
+      const denomDetails = [];
+      if (denominations.bill_100 > 0) denomDetails.push(`$100x${denominations.bill_100}`);
+      if (denominations.bill_50 > 0) denomDetails.push(`$50x${denominations.bill_50}`);
+      if (denominations.bill_20 > 0) denomDetails.push(`$20x${denominations.bill_20}`);
+      if (denominations.bill_10 > 0) denomDetails.push(`$10x${denominations.bill_10}`);
+      if (denominations.bill_5 > 0) denomDetails.push(`$5x${denominations.bill_5}`);
+      if (denominations.coin_2 > 0) denomDetails.push(`$2x${denominations.coin_2}`);
+      if (denominations.coin_1 > 0) denomDetails.push(`$1x${denominations.coin_1}`);
+      if (denominations.coin_0_25 > 0) denomDetails.push(`25¢x${denominations.coin_0_25}`);
+      if (denominations.coin_0_10 > 0) denomDetails.push(`10¢x${denominations.coin_0_10}`);
+      if (denominations.coin_0_05 > 0) denomDetails.push(`5¢x${denominations.coin_0_05}`);
+      if (denomDetails.length > 0) {
+        detailedReason += ` | Cash: ${denomDetails.join(', ')}`;
+      }
+    }
+
     // Create negative adjustment on source drawer (cash going out)
     const sourceAdjustment = await client.query(`
       INSERT INTO cash_drawer_adjustments
         (session_id, amount, adjustment_type, reason, performed_by, source_session_id)
       VALUES ($1, $2, 'transfer', $3, $4, NULL)
       RETURNING *
-    `, [source_session_id, -transferAmount, `Transfer to ${targetDrawerName}: ${reason}`, performed_by]);
+    `, [source_session_id, -transferAmount, `Transfer to ${targetDrawerName}: ${detailedReason}`, performed_by]);
 
     // Create positive adjustment on target drawer (cash coming in)
     const targetAdjustment = await client.query(`
@@ -1527,14 +1593,54 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
         (session_id, amount, adjustment_type, reason, performed_by, source_session_id)
       VALUES ($1, $2, 'transfer', $3, $4, $5)
       RETURNING *
-    `, [sessionId, transferAmount, `Transfer from ${sourceDrawerName}: ${reason}`, performed_by, source_session_id]);
+    `, [sessionId, transferAmount, `Transfer from ${sourceDrawerName}: ${detailedReason}`, performed_by, source_session_id]);
+
+    // Store denominations if provided
+    if (denominations) {
+      const denomValues = {
+        bill_100: denominations.bill_100 || 0,
+        bill_50: denominations.bill_50 || 0,
+        bill_20: denominations.bill_20 || 0,
+        bill_10: denominations.bill_10 || 0,
+        bill_5: denominations.bill_5 || 0,
+        coin_2: denominations.coin_2 || 0,
+        coin_1: denominations.coin_1 || 0,
+        coin_0_25: denominations.coin_0_25 || 0,
+        coin_0_10: denominations.coin_0_10 || 0,
+        coin_0_05: denominations.coin_0_05 || 0
+      };
+
+      // Insert denominations for source adjustment (outgoing)
+      await client.query(`
+        INSERT INTO adjustment_denominations
+          (adjustment_id, bill_100, bill_50, bill_20, bill_10, bill_5, coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [
+        sourceAdjustment.rows[0].adjustment_id,
+        denomValues.bill_100, denomValues.bill_50, denomValues.bill_20, denomValues.bill_10, denomValues.bill_5,
+        denomValues.coin_2, denomValues.coin_1, denomValues.coin_0_25, denomValues.coin_0_10, denomValues.coin_0_05
+      ]);
+
+      // Insert denominations for target adjustment (incoming)
+      await client.query(`
+        INSERT INTO adjustment_denominations
+          (adjustment_id, bill_100, bill_50, bill_20, bill_10, bill_5, coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [
+        targetAdjustment.rows[0].adjustment_id,
+        denomValues.bill_100, denomValues.bill_50, denomValues.bill_20, denomValues.bill_10, denomValues.bill_5,
+        denomValues.coin_2, denomValues.coin_1, denomValues.coin_0_25, denomValues.coin_0_10, denomValues.coin_0_05
+      ]);
+    }
 
     await client.query('COMMIT');
 
     res.status(201).json({
       message: 'Transfer completed successfully',
       source_adjustment: sourceAdjustment.rows[0],
-      target_adjustment: targetAdjustment.rows[0]
+      target_adjustment: targetAdjustment.rows[0],
+      tender_breakdown: tender_breakdown || [],
+      denominations: denominations || null
     });
   } catch (error) {
     await client.query('ROLLBACK');

@@ -42,6 +42,8 @@ import {
   History as HistoryIcon,
   AccountBalance as BankIcon,
   Store as StoreIcon,
+  ArrowForward as ArrowForwardIcon,
+  SwapHoriz as SwapHorizIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -120,6 +122,17 @@ function CashDrawer() {
   const [adjustmentType, setAdjustmentType] = useState('bank_deposit');
   const [adjustmentReason, setAdjustmentReason] = useState('');
   const [transferSourceSession, setTransferSourceSession] = useState('');
+
+  // Enhanced transfer dialog states
+  const [transferDialog, setTransferDialog] = useState(false);
+  const [transferSource, setTransferSource] = useState(null); // Source session object
+  const [transferDestination, setTransferDestination] = useState(null); // Destination session object
+  const [transferDenominations, setTransferDenominations] = useState({
+    bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+    coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+  });
+  const [transferTenderAmounts, setTransferTenderAmounts] = useState({}); // { check: 500, debit: 1234.56, etc. }
+  const [transferNotes, setTransferNotes] = useState('');
 
   // Denomination states for Open Count mode
   const [openingDenominations, setOpeningDenominations] = useState({
@@ -1294,7 +1307,8 @@ function CashDrawer() {
       // Refresh both current user's sessions and all active sessions
       await Promise.all([
         checkActiveSession(),
-        fetchAllActiveSessions()
+        fetchAllActiveSessions(),
+        fetchOverview()
       ]);
     } catch (err) {
       console.error('Error adding adjustment:', err);
@@ -1337,6 +1351,90 @@ function CashDrawer() {
     setAdjustmentType('bank_deposit');
     setAdjustmentReason('');
     setTransferSourceSession('');
+  };
+
+  const resetTransferForm = () => {
+    setTransferSource(null);
+    setTransferDestination(null);
+    setTransferDenominations({
+      bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+      coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+    });
+    setTransferTenderAmounts({});
+    setTransferNotes('');
+  };
+
+  const openTransferDialog = (sourceSession = null, destinationSession = null) => {
+    fetchAllActiveSessions();
+    setTransferSource(sourceSession);
+    setTransferDestination(destinationSession);
+    resetTransferForm();
+    if (sourceSession) setTransferSource(sourceSession);
+    if (destinationSession) setTransferDestination(destinationSession);
+    setTransferDialog(true);
+  };
+
+  const handleTransfer = async () => {
+    if (!transferSource || !transferDestination) {
+      showSnackbar('Please select both source and destination', 'error');
+      return;
+    }
+
+    // Calculate total cash from denominations
+    const cashTotal = calculateDenominationTotal(transferDenominations);
+
+    // Calculate total from other tenders
+    const otherTendersTotal = Object.values(transferTenderAmounts)
+      .reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
+
+    const totalTransfer = cashTotal + otherTendersTotal;
+
+    if (totalTransfer <= 0) {
+      showSnackbar('Please enter amounts to transfer', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      // Call the transfer API
+      await axios.post(
+        `${API_BASE_URL}/cash-drawer/${transferDestination.session_id}/transfer`,
+        {
+          source_session_id: transferSource.session_id,
+          amount: totalTransfer,
+          reason: transferNotes || `Transfer from ${transferSource.drawer_name} to ${transferDestination.drawer_name}`,
+          performed_by: currentUser.id,
+          denominations: cashTotal > 0 ? transferDenominations : null,
+          tender_breakdown: Object.entries(transferTenderAmounts)
+            .filter(([_, amount]) => parseFloat(amount) > 0)
+            .map(([method, amount]) => ({ method, amount: parseFloat(amount) }))
+        }
+      );
+
+      showSnackbar(`Transfer of ${formatCurrency(totalTransfer)} completed successfully`, 'success');
+      setTransferDialog(false);
+      resetTransferForm();
+
+      // Refresh sessions and overview
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview()
+      ]);
+    } catch (err) {
+      console.error('Error processing transfer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to process transfer', 'error');
+    }
+  };
+
+  // Check if drawer uses denominations (physical drawers always do, safes based on preference)
+  const drawerUsesDenominations = (drawerType) => {
+    if (drawerType === 'physical') return true;
+    if (drawerType === 'safe' || drawerType === 'master_safe') {
+      return drawerIndividualDenominationsPrefs.safe;
+    }
+    return false;
   };
 
   const resetManagerApprovalForm = () => {
@@ -1830,11 +1928,11 @@ function CashDrawer() {
                       </Button>
                       <Button
                         variant="outlined"
-                        startIcon={<AddIcon />}
+                        startIcon={<SwapHorizIcon />}
                         disabled={isStoreClosed}
-                        onClick={() => setAdjustmentDialog(true)}
+                        onClick={() => openTransferDialog(activeSession, null)}
                       >
-                        Add Adjustment
+                        Transfer
                       </Button>
                       <Button
                         variant="outlined"
@@ -3144,6 +3242,264 @@ function CashDrawer() {
           <Button onClick={() => setAdjustmentDialog(false)}>Cancel</Button>
           <Button onClick={handleAddAdjustment} variant="contained" color="primary" disabled={isStoreClosed}>
             Add Adjustment
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Enhanced Transfer Dialog */}
+      <Dialog
+        open={transferDialog}
+        onClose={() => {
+          setTransferDialog(false);
+          resetTransferForm();
+        }}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <SwapHorizIcon />
+            Transfer Between Drawers/Safes
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {/* Source and Destination Selection */}
+            <Grid container spacing={2} alignItems="center" sx={{ mb: 3 }}>
+              {/* Source Selection */}
+              <Grid item xs={5}>
+                <FormControl fullWidth>
+                  <InputLabel>Source (From)</InputLabel>
+                  <Select
+                    value={transferSource?.session_id || ''}
+                    onChange={(e) => {
+                      const session = allActiveSessions.find(s => s.session_id === e.target.value);
+                      setTransferSource(session || null);
+                    }}
+                    label="Source (From)"
+                  >
+                    {allActiveSessions
+                      .filter(session => {
+                        // Can't be same as destination
+                        if (transferDestination && session.session_id === transferDestination.session_id) return false;
+                        return true;
+                      })
+                      .map((session) => (
+                        <MenuItem key={session.session_id} value={session.session_id}>
+                          {session.drawer_name}
+                          {session.drawer_type === 'physical' && ` - ${session.employee_name}`}
+                          {` (${formatCurrency(session.current_expected_balance || 0)})`}
+                        </MenuItem>
+                      ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              {/* Arrow */}
+              <Grid item xs={2} sx={{ textAlign: 'center' }}>
+                <Box sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  color: 'primary.main'
+                }}>
+                  <ArrowForwardIcon sx={{ fontSize: 48 }} />
+                  <Typography variant="caption" color="text.secondary">Transfer</Typography>
+                </Box>
+              </Grid>
+
+              {/* Destination Selection */}
+              <Grid item xs={5}>
+                <FormControl fullWidth>
+                  <InputLabel>Destination (To)</InputLabel>
+                  <Select
+                    value={transferDestination?.session_id || ''}
+                    onChange={(e) => {
+                      const session = allActiveSessions.find(s => s.session_id === e.target.value);
+                      setTransferDestination(session || null);
+                    }}
+                    label="Destination (To)"
+                  >
+                    {allActiveSessions
+                      .filter(session => {
+                        // Can't be same as source
+                        if (transferSource && session.session_id === transferSource.session_id) return false;
+                        // Apply transfer rules
+                        if (transferSource) {
+                          const allowedTargets = {
+                            'physical': ['physical', 'safe'],
+                            'safe': ['physical', 'master_safe'],
+                            'master_safe': ['safe']
+                          };
+                          return allowedTargets[transferSource.drawer_type]?.includes(session.drawer_type) || false;
+                        }
+                        return true;
+                      })
+                      .map((session) => (
+                        <MenuItem key={session.session_id} value={session.session_id}>
+                          {session.drawer_name}
+                          {session.drawer_type === 'physical' && ` - ${session.employee_name}`}
+                          {` (${formatCurrency(session.current_expected_balance || 0)})`}
+                        </MenuItem>
+                      ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            </Grid>
+
+            {/* Transfer hierarchy note */}
+            {transferSource && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <Typography variant="body2">
+                  {transferSource.drawer_type === 'physical' && 'Physical drawers can transfer to: Physical Drawers, Safe'}
+                  {transferSource.drawer_type === 'safe' && 'Safe can transfer to: Physical Drawers, Master Safe'}
+                  {transferSource.drawer_type === 'master_safe' && 'Master Safe can transfer to: Safe'}
+                </Typography>
+              </Alert>
+            )}
+
+            {/* Tender Entry Section - shown once both source and destination are selected */}
+            {transferSource && transferDestination && (
+              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2 }}>
+                {/* Cash Section with Denominations */}
+                <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1 }}>
+                  Cash {(drawerUsesDenominations(transferSource.drawer_type) || drawerUsesDenominations(transferDestination.drawer_type)) && '(Denominations Required)'}
+                </Typography>
+
+                {(drawerUsesDenominations(transferSource.drawer_type) || drawerUsesDenominations(transferDestination.drawer_type)) ? (
+                  <Box component="table" sx={{ width: '100%', mb: 3, borderCollapse: 'collapse', '& td, & th': { p: 0.5, fontSize: '0.9rem' } }}>
+                    <tbody>
+                      {[
+                        { label: '$100', field: 'bill_100', value: 100 },
+                        { label: '$50', field: 'bill_50', value: 50 },
+                        { label: '$20', field: 'bill_20', value: 20 },
+                        { label: '$10', field: 'bill_10', value: 10 },
+                        { label: '$5', field: 'bill_5', value: 5 },
+                        { label: '$2', field: 'coin_2', value: 2 },
+                        { label: '$1', field: 'coin_1', value: 1 },
+                        { label: '$0.25', field: 'coin_0_25', value: 0.25 },
+                        { label: '$0.10', field: 'coin_0_10', value: 0.10 },
+                        { label: '$0.05', field: 'coin_0_05', value: 0.05 },
+                      ].map(item => (
+                        <tr key={item.field}>
+                          <td style={{ width: '80px' }}>{item.label}</td>
+                          <td style={{ width: '100px' }}>
+                            <TextField
+                              type="number"
+                              size="small"
+                              value={transferDenominations[item.field] || 0}
+                              onChange={(e) => setTransferDenominations(prev => ({
+                                ...prev,
+                                [item.field]: parseInt(e.target.value) || 0
+                              }))}
+                              inputProps={{ min: 0, style: { textAlign: 'center', width: '60px', padding: '6px' } }}
+                              sx={{ '& .MuiInputBase-root': { height: '32px' } }}
+                            />
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {formatCurrency((transferDenominations[item.field] || 0) * item.value)}
+                          </td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: '2px solid #ccc', fontWeight: 'bold' }}>
+                        <td colSpan={2}>Cash Total:</td>
+                        <td style={{ textAlign: 'right' }}>{formatCurrency(calculateDenominationTotal(transferDenominations))}</td>
+                      </tr>
+                    </tbody>
+                  </Box>
+                ) : (
+                  <TextField
+                    label="Cash Amount"
+                    type="number"
+                    size="small"
+                    fullWidth
+                    value={transferTenderAmounts.cash || ''}
+                    onChange={(e) => setTransferTenderAmounts(prev => ({
+                      ...prev,
+                      cash: e.target.value
+                    }))}
+                    inputProps={{ min: 0, step: '0.01' }}
+                    sx={{ mb: 2 }}
+                  />
+                )}
+
+                {/* Other Tenders Section */}
+                <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1 }}>Other Tenders</Typography>
+                <Grid container spacing={2}>
+                  {/* Physical tenders */}
+                  {physicalPaymentMethods.map(method => (
+                    <Grid item xs={6} key={method.method_value}>
+                      <TextField
+                        label={method.method_name}
+                        type="number"
+                        size="small"
+                        fullWidth
+                        value={transferTenderAmounts[method.method_value] || ''}
+                        onChange={(e) => setTransferTenderAmounts(prev => ({
+                          ...prev,
+                          [method.method_value]: e.target.value
+                        }))}
+                        inputProps={{ min: 0, step: '0.01' }}
+                      />
+                    </Grid>
+                  ))}
+                  {/* Electronic tenders */}
+                  {electronicPaymentMethods.map(method => (
+                    <Grid item xs={6} key={method.method_value}>
+                      <TextField
+                        label={method.method_name}
+                        type="number"
+                        size="small"
+                        fullWidth
+                        value={transferTenderAmounts[method.method_value] || ''}
+                        onChange={(e) => setTransferTenderAmounts(prev => ({
+                          ...prev,
+                          [method.method_value]: e.target.value
+                        }))}
+                        inputProps={{ min: 0, step: '0.01' }}
+                      />
+                    </Grid>
+                  ))}
+                </Grid>
+
+                {/* Total */}
+                <Box sx={{ mt: 3, p: 2, bgcolor: 'success.light', borderRadius: 1 }}>
+                  <Typography variant="h6" sx={{ textAlign: 'center' }}>
+                    Total Transfer: {formatCurrency(
+                      calculateDenominationTotal(transferDenominations) +
+                      Object.values(transferTenderAmounts).reduce((sum, val) => sum + (parseFloat(val) || 0), 0)
+                    )}
+                  </Typography>
+                </Box>
+
+                {/* Notes */}
+                <TextField
+                  label="Transfer Notes (Optional)"
+                  fullWidth
+                  multiline
+                  rows={2}
+                  value={transferNotes}
+                  onChange={(e) => setTransferNotes(e.target.value)}
+                  sx={{ mt: 2 }}
+                />
+              </Box>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setTransferDialog(false);
+            resetTransferForm();
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleTransfer}
+            variant="contained"
+            color="primary"
+            disabled={!transferSource || !transferDestination || isStoreClosed}
+          >
+            Complete Transfer
           </Button>
         </DialogActions>
       </Dialog>
