@@ -887,6 +887,139 @@ app.get('/api/cash-drawer/history', async (req, res) => {
   }
 });
 
+// GET /api/cash-drawer/journal - Get comprehensive transaction journal with tender type breakdown
+app.get('/api/cash-drawer/journal', async (req, res) => {
+  try {
+    // Get all journal entries: opens, closes, transactions, adjustments, transfers
+    // Each transaction can have multiple entries (one per tender type)
+    const query = `
+      WITH journal_entries AS (
+        -- Drawer Opens
+        SELECT 
+          'open_' || s.session_id::text as entry_id,
+          s.opened_at as entry_date,
+          s.opened_at::time as entry_time,
+          d.drawer_id::integer,
+          d.drawer_name::text,
+          d.drawer_type::text,
+          s.employee_id::integer,
+          (e.first_name || ' ' || e.last_name)::text as employee_name,
+          'Open'::text as transaction_type,
+          COALESCE(s.opening_balance, 0)::decimal as money_in,
+          0::decimal as money_out,
+          'cash'::text as tender_type,
+          NULL::text as transaction_id,
+          NULL::integer as adjustment_id,
+          s.opening_notes::text as notes
+        FROM cash_drawer_sessions s
+        JOIN drawers d ON s.drawer_id = d.drawer_id
+        JOIN employees e ON s.employee_id = e.employee_id
+        
+        UNION ALL
+        
+        -- Drawer Closes
+        SELECT 
+          'close_' || s.session_id::text as entry_id,
+          s.closed_at as entry_date,
+          s.closed_at::time as entry_time,
+          d.drawer_id::integer,
+          d.drawer_name::text,
+          d.drawer_type::text,
+          s.employee_id::integer,
+          (e.first_name || ' ' || e.last_name)::text as employee_name,
+          CASE 
+            WHEN s.discrepancy IS NOT NULL AND ABS(s.discrepancy) > 0.01 THEN 'Over/Short'
+            ELSE 'Close'
+          END::text as transaction_type,
+          CASE WHEN COALESCE(s.discrepancy, 0) > 0 THEN s.discrepancy ELSE 0 END::decimal as money_in,
+          CASE WHEN COALESCE(s.discrepancy, 0) < 0 THEN ABS(s.discrepancy) ELSE 0 END::decimal as money_out,
+          'cash'::text as tender_type,
+          NULL::text as transaction_id,
+          NULL::integer as adjustment_id,
+          s.closing_notes::text as notes
+        FROM cash_drawer_sessions s
+        JOIN drawers d ON s.drawer_id = d.drawer_id
+        JOIN employees e ON s.employee_id = e.employee_id
+        WHERE s.status IN ('closed', 'reconciled') AND s.closed_at IS NOT NULL
+        
+        UNION ALL
+        
+        -- Store Transactions (one entry per payment method/tender type)
+        SELECT 
+          ('txn_' || t.transaction_id || '_' || p.id::text)::text as entry_id,
+          t.created_at as entry_date,
+          t.created_at::time as entry_time,
+          s.drawer_id::integer,
+          d.drawer_name::text,
+          d.drawer_type::text,
+          t.employee_id::integer,
+          (e.first_name || ' ' || e.last_name)::text as employee_name,
+          'Payments'::text as transaction_type,
+          CASE WHEN p.action = 'in' THEN COALESCE(p.amount, 0) ELSE 0 END::decimal as money_in,
+          CASE WHEN p.action = 'out' THEN COALESCE(p.amount, 0) ELSE 0 END::decimal as money_out,
+          COALESCE(p.payment_method, 'cash')::text as tender_type,
+          t.transaction_id::text,
+          NULL::integer as adjustment_id,
+          NULL::text as notes
+        FROM transactions t
+        JOIN cash_drawer_sessions s ON t.session_id = s.session_id
+        JOIN drawers d ON s.drawer_id = d.drawer_id
+        JOIN employees e ON t.employee_id = e.employee_id
+        JOIN payments p ON t.transaction_id = p.transaction_id
+        WHERE t.session_id IS NOT NULL
+        
+        UNION ALL
+        
+        -- Adjustments (Transfers, Petty Cash, Bank Deposits/Withdrawals, etc.)
+        SELECT 
+          ('adj_' || a.adjustment_id::text)::text as entry_id,
+          a.created_at as entry_date,
+          a.created_at::time as entry_time,
+          s.drawer_id::integer,
+          d.drawer_name::text,
+          d.drawer_type::text,
+          a.performed_by::integer as employee_id,
+          COALESCE(e.first_name || ' ' || e.last_name, 'Unknown')::text as employee_name,
+          CASE 
+            WHEN a.adjustment_type = 'transfer' THEN 'Transfer'
+            WHEN a.adjustment_type = 'petty_cash' THEN 'Petty Cash Payout'
+            WHEN a.adjustment_type = 'bank_deposit' THEN 'Transfer'
+            WHEN a.adjustment_type = 'bank_withdrawal' THEN 'Transfer'
+            ELSE 'Transfer'
+          END::text as transaction_type,
+          CASE WHEN COALESCE(a.amount, 0) > 0 THEN a.amount ELSE 0 END::decimal as money_in,
+          CASE WHEN COALESCE(a.amount, 0) < 0 THEN ABS(a.amount) ELSE 0 END::decimal as money_out,
+          'cash'::text as tender_type,
+          NULL::text as transaction_id,
+          a.adjustment_id::integer,
+          a.reason::text as notes
+        FROM cash_drawer_adjustments a
+        JOIN cash_drawer_sessions s ON a.session_id = s.session_id
+        JOIN drawers d ON s.drawer_id = d.drawer_id
+        LEFT JOIN employees e ON a.performed_by = e.employee_id
+      )
+      SELECT 
+        je.*,
+        pm.method_name as tender_type_name,
+        pm.is_physical as tender_is_physical
+      FROM journal_entries je
+      LEFT JOIN payment_methods pm ON je.tender_type = pm.method_value
+      ORDER BY je.entry_date DESC, je.entry_time DESC
+    `;
+    
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching transaction journal:', error);
+    console.error('Error details:', error.message);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to fetch transaction journal',
+      details: error.message 
+    });
+  }
+});
+
 // GET /api/cash-drawer/:sessionId/details - Get detailed information about a drawer session
 app.get('/api/cash-drawer/:sessionId/details', async (req, res) => {
   const { sessionId } = req.params;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -34,6 +34,12 @@ import {
   FormControlLabel,
   Checkbox,
   IconButton,
+  InputAdornment,
+  Popover,
+  MenuList,
+  ListItemText,
+  TextField as MuiTextField,
+  Tooltip,
 } from '@mui/material';
 import {
   AttachMoney as MoneyIcon,
@@ -48,6 +54,11 @@ import {
   SwapHoriz as SwapHorizIcon,
   Assignment as AssignmentIcon,
   Visibility as ViewIcon,
+  ArrowUpward as ArrowUpIcon,
+  ArrowDownward as ArrowDownIcon,
+  Search as SearchIcon,
+  FilterList as FilterIcon,
+  DateRange as DateRangeIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -95,6 +106,29 @@ function CashDrawer() {
   const [quickReportDialog, setQuickReportDialog] = useState(false);
   const [quickReportTxnDetail, setQuickReportTxnDetail] = useState(null);
   const [quickReportTxnLoading, setQuickReportTxnLoading] = useState(false);
+
+  // Transaction Journal states
+  const [journalEntries, setJournalEntries] = useState([]);
+  const [journalLoading, setJournalLoading] = useState(false);
+  const [selectedJournalRow, setSelectedJournalRow] = useState(0);
+  const [journalViewDialog, setJournalViewDialog] = useState(false);
+  const [selectedJournalEntry, setSelectedJournalEntry] = useState(null);
+  const [journalTransactionDetails, setJournalTransactionDetails] = useState(null);
+  const [journalTransactionLoading, setJournalTransactionLoading] = useState(false);
+  const [journalSearch, setJournalSearch] = useState('');
+  const [journalSort, setJournalSort] = useState({ column: 'entry_date', direction: 'desc' });
+  const [journalFilters, setJournalFilters] = useState({
+    date: { start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] },
+    time: { start: '00:00', end: '23:59' },
+    drawer: [],
+    employee: [],
+    transactionType: [],
+    moneyIn: { min: '', max: '' },
+    moneyOut: { min: '', max: '' },
+    tenderType: []
+  });
+  const [filterAnchor, setFilterAnchor] = useState({});
+  const [sortAnchor, setSortAnchor] = useState({});
 
   // Manager approval form states
   const [managerUsername, setManagerUsername] = useState('');
@@ -256,6 +290,12 @@ function CashDrawer() {
     fetchStores();
     fetchPendingInterStoreTransfers();
   }, []);
+
+  useEffect(() => {
+    if (tabValue === 2) {
+      fetchJournalEntries();
+    }
+  }, [tabValue]);
 
   // Update count mode when active session changes
   useEffect(() => {
@@ -768,6 +808,177 @@ function CashDrawer() {
       showSnackbar('Failed to load history', 'error');
     }
   };
+
+  const fetchJournalEntries = async () => {
+    try {
+      setJournalLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/cash-drawer/journal`);
+      setJournalEntries(response.data || []);
+      // Reset selection to first row
+      if (response.data && response.data.length > 0) {
+        setSelectedJournalRow(0);
+      }
+    } catch (err) {
+      console.error('Error fetching journal entries:', err);
+      const errorMessage = err.response?.data?.details || err.response?.data?.error || err.message || 'Failed to load transaction journal';
+      showSnackbar(errorMessage, 'error');
+    } finally {
+      setJournalLoading(false);
+    }
+  };
+
+  // Filter and sort journal entries
+  const filteredJournalEntries = useMemo(() => {
+    let filtered = [...journalEntries];
+
+    // Apply search filter
+    if (journalSearch) {
+      const searchLower = journalSearch.toLowerCase();
+      filtered = filtered.filter(entry => {
+        return (
+          entry.drawer_name?.toLowerCase().includes(searchLower) ||
+          entry.employee_name?.toLowerCase().includes(searchLower) ||
+          entry.transaction_type?.toLowerCase().includes(searchLower) ||
+          entry.tender_type?.toLowerCase().includes(searchLower) ||
+          entry.tender_type_name?.toLowerCase().includes(searchLower) ||
+          entry.entry_id?.toString().includes(searchLower) ||
+          entry.transaction_id?.toString().includes(searchLower) ||
+          formatCurrency(entry.money_in).toLowerCase().includes(searchLower) ||
+          formatCurrency(entry.money_out).toLowerCase().includes(searchLower)
+        );
+      });
+    }
+
+    // Apply date filter
+    if (journalFilters.date.start && journalFilters.date.end) {
+      filtered = filtered.filter(entry => {
+        const entryDate = new Date(entry.entry_date).toISOString().split('T')[0];
+        return entryDate >= journalFilters.date.start && entryDate <= journalFilters.date.end;
+      });
+    }
+
+    // Apply time filter
+    if (journalFilters.time.start && journalFilters.time.end) {
+      filtered = filtered.filter(entry => {
+        const entryTime = entry.entry_time || new Date(entry.entry_date).toTimeString().split(' ')[0];
+        return entryTime >= journalFilters.time.start && entryTime <= journalFilters.time.end;
+      });
+    }
+
+    // Apply drawer filter
+    if (journalFilters.drawer.length > 0) {
+      filtered = filtered.filter(entry => journalFilters.drawer.includes(entry.drawer_id));
+    }
+
+    // Apply employee filter
+    if (journalFilters.employee.length > 0) {
+      filtered = filtered.filter(entry => journalFilters.employee.includes(entry.employee_id));
+    }
+
+    // Apply transaction type filter
+    if (journalFilters.transactionType.length > 0) {
+      filtered = filtered.filter(entry => journalFilters.transactionType.includes(entry.transaction_type));
+    }
+
+    // Apply money IN filter
+    if (journalFilters.moneyIn.min !== '' || journalFilters.moneyIn.max !== '') {
+      filtered = filtered.filter(entry => {
+        const amount = parseFloat(entry.money_in || 0);
+        const min = journalFilters.moneyIn.min !== '' ? parseFloat(journalFilters.moneyIn.min) : 0;
+        const max = journalFilters.moneyIn.max !== '' ? parseFloat(journalFilters.moneyIn.max) : Infinity;
+        return amount >= min && amount <= max;
+      });
+    }
+
+    // Apply money OUT filter
+    if (journalFilters.moneyOut.min !== '' || journalFilters.moneyOut.max !== '') {
+      filtered = filtered.filter(entry => {
+        const amount = parseFloat(entry.money_out || 0);
+        const min = journalFilters.moneyOut.min !== '' ? parseFloat(journalFilters.moneyOut.min) : 0;
+        const max = journalFilters.moneyOut.max !== '' ? parseFloat(journalFilters.moneyOut.max) : Infinity;
+        return amount >= min && amount <= max;
+      });
+    }
+
+    // Apply tender type filter
+    if (journalFilters.tenderType.length > 0) {
+      filtered = filtered.filter(entry => journalFilters.tenderType.includes(entry.tender_type));
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) => {
+      const { column, direction } = journalSort;
+      let aVal = a[column];
+      let bVal = b[column];
+
+      if (column === 'entry_date' || column === 'entry_time') {
+        aVal = new Date(a.entry_date + ' ' + (a.entry_time || ''));
+        bVal = new Date(b.entry_date + ' ' + (b.entry_time || ''));
+      }
+
+      if (typeof aVal === 'string') {
+        aVal = aVal.toLowerCase();
+        bVal = (bVal || '').toLowerCase();
+      }
+
+      if (aVal < bVal) return direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return filtered;
+  }, [journalEntries, journalSearch, journalFilters, journalSort]);
+
+  // Keyboard navigation for journal table
+  useEffect(() => {
+    if (tabValue !== 2) return;
+
+    const handleKeyDown = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedJournalRow(prev => Math.max(0, prev - 1));
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedJournalRow(prev => Math.min(filteredJournalEntries.length - 1, prev + 1));
+      } else if (e.key === 'Enter' && selectedJournalRow >= 0 && selectedJournalRow < filteredJournalEntries.length) {
+        e.preventDefault();
+        const entry = filteredJournalEntries[selectedJournalRow];
+        setSelectedJournalEntry(entry);
+        setJournalViewDialog(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [tabValue, selectedJournalRow, filteredJournalEntries]);
+
+  // Load transaction details when view dialog opens
+  useEffect(() => {
+    if (journalViewDialog && selectedJournalEntry?.transaction_id && selectedJournalEntry?.transaction_type === 'Payments') {
+      setJournalTransactionLoading(true);
+      Promise.all([
+        axios.get(`${API_BASE_URL}/transactions/${selectedJournalEntry.transaction_id}/items`),
+        axios.get(`${API_BASE_URL}/transactions/${selectedJournalEntry.transaction_id}/payments`)
+      ])
+        .then(([itemsRes, paymentsRes]) => {
+          setJournalTransactionDetails({
+            items: itemsRes.data || [],
+            payments: paymentsRes.data || []
+          });
+        })
+        .catch(err => {
+          console.error('Error loading transaction details:', err);
+          showSnackbar('Failed to load transaction details', 'error');
+        })
+        .finally(() => {
+          setJournalTransactionLoading(false);
+        });
+    } else {
+      setJournalTransactionDetails(null);
+    }
+  }, [journalViewDialog, selectedJournalEntry]);
 
   const fetchSessionDetails = async (sessionId) => {
     try {
@@ -2189,6 +2400,7 @@ function CashDrawer() {
       <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ mb: 3 }}>
         <Tab label="Active Session" />
         <Tab label="History" />
+        <Tab label="Transaction Journal" />
       </Tabs>
 
       {/* Active Session Tab */}
@@ -2595,6 +2807,764 @@ function CashDrawer() {
           </Table>
         </TableContainer>
       )}
+
+      {/* Transaction Journal Tab */}
+      {tabValue === 2 && (
+        <Box>
+          {/* Search Bar */}
+          <Paper sx={{ p: 2, mb: 2 }}>
+            <TextField
+              fullWidth
+              placeholder="Search by keyword or value..."
+              value={journalSearch}
+              onChange={(e) => setJournalSearch(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon />
+                  </InputAdornment>
+                ),
+              }}
+            />
+          </Paper>
+
+          {/* Journal Table */}
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  {/* Date Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, date: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Date</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'entry_date', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'entry_date', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Time Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, time: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Time</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'entry_time', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'entry_time', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Safe/Drawer Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, drawer: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Safe/Drawer</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'drawer_name', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'drawer_name', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Employee Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, employee: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Employee</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'employee_name', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'employee_name', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Transaction Type Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, transactionType: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Transaction Type</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'transaction_type', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'transaction_type', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Money IN Column */}
+                  <TableCell align="right">
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, moneyIn: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Money IN</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'money_in', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'money_in', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Money OUT Column */}
+                  <TableCell align="right">
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, moneyOut: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Money OUT</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'money_out', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'money_out', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* Tender Type Column */}
+                  <TableCell>
+                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                      <Box
+                        onClick={(e) => setFilterAnchor({ ...filterAnchor, tenderType: e.currentTarget })}
+                        sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                      >
+                        <Typography variant="subtitle2">Tender Type</Typography>
+                        <FilterIcon fontSize="small" />
+                      </Box>
+                      <Box display="flex" flexDirection="column">
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'tender_type', direction: 'asc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowUpIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => setJournalSort({ column: 'tender_type', direction: 'desc' })}
+                          sx={{ p: 0, height: 12 }}
+                        >
+                          <ArrowDownIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  {/* View Column */}
+                  <TableCell align="center">View</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {journalLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                      <CircularProgress />
+                    </TableCell>
+                  </TableRow>
+                ) : filteredJournalEntries.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                      No journal entries found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredJournalEntries.map((entry, index) => (
+                    <TableRow
+                      key={entry.entry_id}
+                      hover
+                      selected={index === selectedJournalRow}
+                      onClick={() => {
+                        setSelectedJournalRow(index);
+                        setSelectedJournalEntry(entry);
+                      }}
+                      onDoubleClick={() => {
+                        setSelectedJournalEntry(entry);
+                        setJournalViewDialog(true);
+                      }}
+                      sx={{
+                        cursor: 'pointer',
+                        backgroundColor: index === selectedJournalRow ? 'action.selected' : 'inherit',
+                        '&:hover': {
+                          backgroundColor: index === selectedJournalRow ? 'action.selected' : 'action.hover',
+                        },
+                      }}
+                    >
+                      <TableCell>{new Date(entry.entry_date).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        {entry.entry_time 
+                          ? entry.entry_time.split('.')[0].substring(0, 8) 
+                          : new Date(entry.entry_date).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                        }
+                      </TableCell>
+                      <TableCell>{entry.drawer_name || 'N/A'}</TableCell>
+                      <TableCell>{entry.employee_name || 'N/A'}</TableCell>
+                      <TableCell>{entry.transaction_type || 'N/A'}</TableCell>
+                      <TableCell align="right">{entry.money_in > 0 ? formatCurrency(entry.money_in) : '—'}</TableCell>
+                      <TableCell align="right">{entry.money_out > 0 ? formatCurrency(entry.money_out) : '—'}</TableCell>
+                      <TableCell>{entry.tender_type_name || entry.tender_type || 'N/A'}</TableCell>
+                      <TableCell align="center">
+                        {index === selectedJournalRow && (
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedJournalEntry(entry);
+                              setJournalViewDialog(true);
+                            }}
+                          >
+                            <ViewIcon />
+                          </IconButton>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      )}
+
+      {/* Filter Dialogs */}
+      {/* Date Filter */}
+      <Popover
+        open={Boolean(filterAnchor.date)}
+        anchorEl={filterAnchor.date}
+        onClose={() => setFilterAnchor({ ...filterAnchor, date: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 300 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Date Range</Typography>
+          <TextField
+            label="Start Date"
+            type="date"
+            value={journalFilters.date.start}
+            onChange={(e) => setJournalFilters({ ...journalFilters, date: { ...journalFilters.date, start: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputLabelProps={{ shrink: true }}
+          />
+          <TextField
+            label="End Date"
+            type="date"
+            value={journalFilters.date.end}
+            onChange={(e) => setJournalFilters({ ...journalFilters, date: { ...journalFilters.date, end: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputLabelProps={{ shrink: true }}
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => {
+              const today = new Date().toISOString().split('T')[0];
+              setJournalFilters({ ...journalFilters, date: { start: today, end: today } });
+            }}
+            fullWidth
+          >
+            Reset to Today
+          </Button>
+        </Box>
+      </Popover>
+
+      {/* Time Filter */}
+      <Popover
+        open={Boolean(filterAnchor.time)}
+        anchorEl={filterAnchor.time}
+        onClose={() => setFilterAnchor({ ...filterAnchor, time: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 300 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Time Range</Typography>
+          <TextField
+            label="Start Time"
+            type="time"
+            value={journalFilters.time.start}
+            onChange={(e) => setJournalFilters({ ...journalFilters, time: { ...journalFilters.time, start: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputLabelProps={{ shrink: true }}
+          />
+          <TextField
+            label="End Time"
+            type="time"
+            value={journalFilters.time.end}
+            onChange={(e) => setJournalFilters({ ...journalFilters, time: { ...journalFilters.time, end: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputLabelProps={{ shrink: true }}
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setJournalFilters({ ...journalFilters, time: { start: '00:00', end: '23:59' } })}
+            fullWidth
+          >
+            Reset to Full Day
+          </Button>
+        </Box>
+      </Popover>
+
+      {/* Drawer Filter */}
+      <Popover
+        open={Boolean(filterAnchor.drawer)}
+        anchorEl={filterAnchor.drawer}
+        onClose={() => setFilterAnchor({ ...filterAnchor, drawer: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250, maxHeight: 400, overflow: 'auto' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Safe/Drawer</Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={journalFilters.drawer.length === 0}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setJournalFilters({ ...journalFilters, drawer: [] });
+                  }
+                }}
+              />
+            }
+            label="All"
+          />
+          {drawers.map((drawer) => (
+            <FormControlLabel
+              key={drawer.drawer_id}
+              control={
+                <Checkbox
+                  checked={journalFilters.drawer.includes(drawer.drawer_id)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setJournalFilters({ ...journalFilters, drawer: [...journalFilters.drawer, drawer.drawer_id] });
+                    } else {
+                      setJournalFilters({ ...journalFilters, drawer: journalFilters.drawer.filter(id => id !== drawer.drawer_id) });
+                    }
+                  }}
+                />
+              }
+              label={drawer.drawer_name}
+            />
+          ))}
+        </Box>
+      </Popover>
+
+      {/* Employee Filter */}
+      <Popover
+        open={Boolean(filterAnchor.employee)}
+        anchorEl={filterAnchor.employee}
+        onClose={() => setFilterAnchor({ ...filterAnchor, employee: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250, maxHeight: 400, overflow: 'auto' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Employee</Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={journalFilters.employee.length === 0}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setJournalFilters({ ...journalFilters, employee: [] });
+                  }
+                }}
+              />
+            }
+            label="All"
+          />
+          {employees.map((emp) => (
+            <FormControlLabel
+              key={emp.employee_id}
+              control={
+                <Checkbox
+                  checked={journalFilters.employee.includes(emp.employee_id)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setJournalFilters({ ...journalFilters, employee: [...journalFilters.employee, emp.employee_id] });
+                    } else {
+                      setJournalFilters({ ...journalFilters, employee: journalFilters.employee.filter(id => id !== emp.employee_id) });
+                    }
+                  }}
+                />
+              }
+              label={`${emp.first_name} ${emp.last_name}`}
+            />
+          ))}
+        </Box>
+      </Popover>
+
+      {/* Transaction Type Filter */}
+      <Popover
+        open={Boolean(filterAnchor.transactionType)}
+        anchorEl={filterAnchor.transactionType}
+        onClose={() => setFilterAnchor({ ...filterAnchor, transactionType: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250, maxHeight: 400, overflow: 'auto' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Transaction Type</Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={journalFilters.transactionType.length === 0}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setJournalFilters({ ...journalFilters, transactionType: [] });
+                  }
+                }}
+              />
+            }
+            label="All"
+          />
+          {['Open', 'Close', 'Transfer', 'Over/Short', 'Payments', 'Petty Cash Payout'].map((type) => (
+            <FormControlLabel
+              key={type}
+              control={
+                <Checkbox
+                  checked={journalFilters.transactionType.includes(type)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setJournalFilters({ ...journalFilters, transactionType: [...journalFilters.transactionType, type] });
+                    } else {
+                      setJournalFilters({ ...journalFilters, transactionType: journalFilters.transactionType.filter(t => t !== type) });
+                    }
+                  }}
+                />
+              }
+              label={type}
+            />
+          ))}
+        </Box>
+      </Popover>
+
+      {/* Money IN Filter */}
+      <Popover
+        open={Boolean(filterAnchor.moneyIn)}
+        anchorEl={filterAnchor.moneyIn}
+        onClose={() => setFilterAnchor({ ...filterAnchor, moneyIn: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Money IN Range</Typography>
+          <TextField
+            label="Min Amount"
+            type="number"
+            value={journalFilters.moneyIn.min}
+            onChange={(e) => setJournalFilters({ ...journalFilters, moneyIn: { ...journalFilters.moneyIn, min: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
+          />
+          <TextField
+            label="Max Amount"
+            type="number"
+            value={journalFilters.moneyIn.max}
+            onChange={(e) => setJournalFilters({ ...journalFilters, moneyIn: { ...journalFilters.moneyIn, max: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setJournalFilters({ ...journalFilters, moneyIn: { min: '', max: '' } })}
+            fullWidth
+          >
+            Clear Filter
+          </Button>
+        </Box>
+      </Popover>
+
+      {/* Money OUT Filter */}
+      <Popover
+        open={Boolean(filterAnchor.moneyOut)}
+        anchorEl={filterAnchor.moneyOut}
+        onClose={() => setFilterAnchor({ ...filterAnchor, moneyOut: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Money OUT Range</Typography>
+          <TextField
+            label="Min Amount"
+            type="number"
+            value={journalFilters.moneyOut.min}
+            onChange={(e) => setJournalFilters({ ...journalFilters, moneyOut: { ...journalFilters.moneyOut, min: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
+          />
+          <TextField
+            label="Max Amount"
+            type="number"
+            value={journalFilters.moneyOut.max}
+            onChange={(e) => setJournalFilters({ ...journalFilters, moneyOut: { ...journalFilters.moneyOut, max: e.target.value } })}
+            fullWidth
+            sx={{ mb: 2 }}
+            InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
+          />
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setJournalFilters({ ...journalFilters, moneyOut: { min: '', max: '' } })}
+            fullWidth
+          >
+            Clear Filter
+          </Button>
+        </Box>
+      </Popover>
+
+      {/* Tender Type Filter */}
+      <Popover
+        open={Boolean(filterAnchor.tenderType)}
+        anchorEl={filterAnchor.tenderType}
+        onClose={() => setFilterAnchor({ ...filterAnchor, tenderType: null })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, minWidth: 250, maxHeight: 400, overflow: 'auto' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Filter by Tender Type</Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={journalFilters.tenderType.length === 0}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setJournalFilters({ ...journalFilters, tenderType: [] });
+                  }
+                }}
+              />
+            }
+            label="All"
+          />
+          {Array.from(new Set(journalEntries.map(e => e.tender_type).filter(Boolean))).map((tender) => {
+            const tenderName = journalEntries.find(e => e.tender_type === tender)?.tender_type_name || tender;
+            return (
+              <FormControlLabel
+                key={tender}
+                control={
+                  <Checkbox
+                    checked={journalFilters.tenderType.includes(tender)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setJournalFilters({ ...journalFilters, tenderType: [...journalFilters.tenderType, tender] });
+                      } else {
+                        setJournalFilters({ ...journalFilters, tenderType: journalFilters.tenderType.filter(t => t !== tender) });
+                      }
+                    }}
+                  />
+                }
+                label={tenderName}
+              />
+            );
+          })}
+        </Box>
+      </Popover>
+
+      {/* Journal View Dialog */}
+      <Dialog
+        open={journalViewDialog}
+        onClose={() => {
+          setJournalViewDialog(false);
+          setJournalTransactionDetails(null);
+        }}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          Transaction Details - {selectedJournalEntry?.transaction_type || 'Entry'}
+        </DialogTitle>
+        <DialogContent>
+          {selectedJournalEntry && (
+            <Box sx={{ mt: 2 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Date</Typography>
+                  <Typography variant="body1">{new Date(selectedJournalEntry.entry_date).toLocaleDateString()}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Time</Typography>
+                  <Typography variant="body1">
+                    {selectedJournalEntry.entry_time 
+                      ? selectedJournalEntry.entry_time.split('.')[0].substring(0, 8)
+                      : new Date(selectedJournalEntry.entry_date).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                    }
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Safe/Drawer</Typography>
+                  <Typography variant="body1">{selectedJournalEntry.drawer_name || 'N/A'}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Employee</Typography>
+                  <Typography variant="body1">{selectedJournalEntry.employee_name || 'N/A'}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Transaction Type</Typography>
+                  <Typography variant="body1">{selectedJournalEntry.transaction_type || 'N/A'}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Tender Type</Typography>
+                  <Typography variant="body1">{selectedJournalEntry.tender_type_name || selectedJournalEntry.tender_type || 'N/A'}</Typography>
+                </Grid>
+                {selectedJournalEntry.money_in > 0 && (
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">Money IN</Typography>
+                    <Typography variant="body1" sx={{ color: 'success.main', fontWeight: 600 }}>
+                      {formatCurrency(selectedJournalEntry.money_in)}
+                    </Typography>
+                  </Grid>
+                )}
+                {selectedJournalEntry.money_out > 0 && (
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">Money OUT</Typography>
+                    <Typography variant="body1" sx={{ color: 'error.main', fontWeight: 600 }}>
+                      {formatCurrency(selectedJournalEntry.money_out)}
+                    </Typography>
+                  </Grid>
+                )}
+                {selectedJournalEntry.transaction_id && (
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="text.secondary">Transaction ID</Typography>
+                    <Typography variant="body1">{selectedJournalEntry.transaction_id}</Typography>
+                  </Grid>
+                )}
+                {selectedJournalEntry.notes && (
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="text.secondary">Notes</Typography>
+                    <Typography variant="body1">{selectedJournalEntry.notes}</Typography>
+                  </Grid>
+                )}
+              </Grid>
+
+              {/* For store transactions, show items and payments */}
+              {selectedJournalEntry.transaction_id && selectedJournalEntry.transaction_type === 'Payments' && (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 600 }}>Transaction Items</Typography>
+                  <Box sx={{ maxHeight: 300, overflow: 'auto' }}>
+                    <CircularProgress size={24} />
+                    <Typography variant="body2" color="text.secondary">Loading transaction details...</Typography>
+                  </Box>
+                </>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setJournalViewDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Open Drawer Dialog */}
       <Dialog open={openDrawerDialog} onClose={() => {
