@@ -143,6 +143,13 @@ function CashDrawer() {
   const [bankDepositReference, setBankDepositReference] = useState('');
   const [bankDepositNotes, setBankDepositNotes] = useState('');
 
+  // Bank withdrawal dialog states
+  const [bankWithdrawalDialog, setBankWithdrawalDialog] = useState(false);
+  const [selectedWithdrawalBank, setSelectedWithdrawalBank] = useState('');
+  const [bankWithdrawalAmount, setBankWithdrawalAmount] = useState('');
+  const [bankWithdrawalReference, setBankWithdrawalReference] = useState('');
+  const [bankWithdrawalNotes, setBankWithdrawalNotes] = useState('');
+
   // Denomination states for Open Count mode
   const [openingDenominations, setOpeningDenominations] = useState({
     bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
@@ -1466,6 +1473,73 @@ function CashDrawer() {
     }
   };
 
+  const resetBankWithdrawalForm = () => {
+    setBankWithdrawalAmount('');
+    setBankWithdrawalReference('');
+    setBankWithdrawalNotes('');
+    // Keep selected bank as default
+    const defaultBank = banks.find(b => b.is_default);
+    if (defaultBank) {
+      setSelectedWithdrawalBank(defaultBank.bank_id);
+    }
+  };
+
+  const openBankWithdrawalDialog = () => {
+    fetchBanks();
+    resetBankWithdrawalForm();
+    setBankWithdrawalDialog(true);
+  };
+
+  const handleBankWithdrawal = async () => {
+    if (!selectedWithdrawalBank) {
+      showSnackbar('Please select a bank', 'error');
+      return;
+    }
+
+    const withdrawalTotal = parseFloat(bankWithdrawalAmount) || 0;
+
+    if (withdrawalTotal <= 0) {
+      showSnackbar('Please enter a valid withdrawal amount', 'error');
+      return;
+    }
+
+    // Verify we're on master safe
+    if (activeSession?.drawer_type !== 'master_safe') {
+      showSnackbar('Bank withdrawals can only be made to the Master Safe', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      await axios.post(
+        `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/bank-withdrawal`,
+        {
+          bank_id: selectedWithdrawalBank,
+          amount: withdrawalTotal,
+          withdrawal_reference: bankWithdrawalReference || null,
+          notes: bankWithdrawalNotes || null,
+          performed_by: currentUser.id
+        }
+      );
+
+      const bankName = banks.find(b => b.bank_id === selectedWithdrawalBank)?.bank_name || 'Bank';
+      showSnackbar(`Bank withdrawal of ${formatCurrency(withdrawalTotal)} from ${bankName} completed`, 'success');
+      setBankWithdrawalDialog(false);
+      resetBankWithdrawalForm();
+
+      // Refresh sessions and overview
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview()
+      ]);
+    } catch (err) {
+      console.error('Error processing bank withdrawal:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to process bank withdrawal', 'error');
+    }
+  };
+
   const handleTransfer = async () => {
     if (!transferSource || !transferDestination) {
       showSnackbar('Please select both source and destination', 'error');
@@ -2026,16 +2100,26 @@ function CashDrawer() {
                       >
                         Transfer
                       </Button>
-                      {/* Show Bank Deposit button only for Master Safe */}
+                      {/* Show Bank Deposit and Withdrawal buttons only for Master Safe */}
                       {activeSession.drawer_type === 'master_safe' && (
-                        <Button
-                          variant="outlined"
-                          startIcon={<AccountBalanceIcon />}
-                          disabled={isStoreClosed}
-                          onClick={openBankDepositDialog}
-                        >
-                          Bank Deposit
-                        </Button>
+                        <>
+                          <Button
+                            variant="outlined"
+                            startIcon={<AccountBalanceIcon />}
+                            disabled={isStoreClosed}
+                            onClick={openBankDepositDialog}
+                          >
+                            Bank Deposit
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            startIcon={<AccountBalanceIcon />}
+                            disabled={isStoreClosed}
+                            onClick={openBankWithdrawalDialog}
+                          >
+                            Bank Withdrawal
+                          </Button>
+                        </>
                       )}
                       <Button
                         variant="outlined"
@@ -3687,6 +3771,90 @@ function CashDrawer() {
             disabled={!selectedBank || !bankDepositAmount || parseFloat(bankDepositAmount) <= 0 || isStoreClosed}
           >
             Complete Deposit
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bank Withdrawal Dialog */}
+      <Dialog
+        open={bankWithdrawalDialog}
+        onClose={() => {
+          setBankWithdrawalDialog(false);
+          resetBankWithdrawalForm();
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AccountBalanceIcon />
+            Bank Withdrawal to Master Safe
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {/* Bank Selection */}
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel>Select Bank</InputLabel>
+              <Select
+                value={selectedWithdrawalBank}
+                onChange={(e) => setSelectedWithdrawalBank(e.target.value)}
+                label="Select Bank"
+              >
+                {banks.map((bank) => (
+                  <MenuItem key={bank.bank_id} value={bank.bank_id}>
+                    {bank.bank_name} {bank.is_default && '(Default)'}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {/* Withdrawal Amount */}
+            <TextField
+              fullWidth
+              label="Withdrawal Amount"
+              type="number"
+              value={bankWithdrawalAmount}
+              onChange={(e) => setBankWithdrawalAmount(e.target.value)}
+              inputProps={{ min: 0, step: '0.01' }}
+              sx={{ mb: 2 }}
+              required
+            />
+
+            {/* Reference Number */}
+            <TextField
+              fullWidth
+              label="Bank Reference / Confirmation Number (Optional)"
+              value={bankWithdrawalReference}
+              onChange={(e) => setBankWithdrawalReference(e.target.value)}
+              sx={{ mb: 2 }}
+            />
+
+            {/* Notes */}
+            <TextField
+              fullWidth
+              label="Notes (Optional)"
+              multiline
+              rows={2}
+              value={bankWithdrawalNotes}
+              onChange={(e) => setBankWithdrawalNotes(e.target.value)}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setBankWithdrawalDialog(false);
+            resetBankWithdrawalForm();
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleBankWithdrawal}
+            variant="contained"
+            color="primary"
+            disabled={!selectedWithdrawalBank || !bankWithdrawalAmount || parseFloat(bankWithdrawalAmount) <= 0 || isStoreClosed}
+          >
+            Complete Withdrawal
           </Button>
         </DialogActions>
       </Dialog>

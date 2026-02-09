@@ -1939,6 +1939,101 @@ app.get('/api/bank-deposits', async (req, res) => {
   }
 });
 
+// POST /api/cash-drawer/:sessionId/bank-withdrawal - Withdraw cash from bank to master safe
+app.post('/api/cash-drawer/:sessionId/bank-withdrawal', async (req, res) => {
+  const { sessionId } = req.params;
+  const { bank_id, amount, withdrawal_reference, notes, performed_by } = req.body;
+
+  // Validation
+  if (!bank_id || !amount || !performed_by) {
+    return res.status(400).json({
+      error: 'bank_id, amount, and performed_by are required'
+    });
+  }
+
+  if (parseFloat(amount) <= 0) {
+    return res.status(400).json({
+      error: 'Withdrawal amount must be positive'
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Verify session exists, is open, and is a master_safe
+    const sessionCheck = await client.query(`
+      SELECT s.session_id, s.status, d.drawer_type, d.drawer_name
+      FROM cash_drawer_sessions s
+      JOIN drawers d ON s.drawer_id = d.drawer_id
+      WHERE s.session_id = $1
+    `, [sessionId]);
+
+    if (sessionCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (sessionCheck.rows[0].status !== 'open') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Session is not open' });
+    }
+
+    if (sessionCheck.rows[0].drawer_type !== 'master_safe') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Bank withdrawals can only be made to the Master Safe' });
+    }
+
+    // Verify bank exists and is active
+    const bankCheck = await client.query(
+      'SELECT bank_id, bank_name FROM banks WHERE bank_id = $1 AND is_active = TRUE',
+      [bank_id]
+    );
+
+    if (bankCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Bank not found or inactive' });
+    }
+
+    const bankName = bankCheck.rows[0].bank_name;
+    const withdrawalAmount = parseFloat(amount);
+
+    // Create positive adjustment on master safe (cash coming in from bank)
+    const adjustmentResult = await client.query(`
+      INSERT INTO cash_drawer_adjustments
+        (session_id, amount, adjustment_type, reason, performed_by)
+      VALUES ($1, $2, 'bank_withdrawal', $3, $4)
+      RETURNING *
+    `, [sessionId, withdrawalAmount, `Bank withdrawal from ${bankName}${notes ? ': ' + notes : ''}`, performed_by]);
+
+    const adjustmentId = adjustmentResult.rows[0].adjustment_id;
+
+    // Create bank withdrawal record (reuse bank_deposits table with negative indicator or create separate tracking)
+    // For simplicity, we'll track in bank_deposits with a note indicating withdrawal
+    const withdrawalResult = await client.query(`
+      INSERT INTO bank_deposits
+        (session_id, bank_id, amount, adjustment_id, deposit_reference, notes, performed_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `, [sessionId, bank_id, -withdrawalAmount, adjustmentId, withdrawal_reference || null, `WITHDRAWAL: ${notes || ''}`, performed_by]);
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      message: 'Bank withdrawal completed successfully',
+      withdrawal: withdrawalResult.rows[0],
+      adjustment: adjustmentResult.rows[0],
+      bank_name: bankName
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error processing bank withdrawal:', error);
+    res.status(500).json({ error: 'Failed to process bank withdrawal' });
+  } finally {
+    client.release();
+  }
+});
+
 // POST /api/cash-drawer/:sessionId/transaction - Link a cash transaction to a drawer session
 app.post('/api/cash-drawer/:sessionId/transaction', async (req, res) => {
   const { sessionId } = req.params;

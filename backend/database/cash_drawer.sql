@@ -622,8 +622,21 @@ CREATE TABLE IF NOT EXISTS bank_deposits (
     FOREIGN KEY (adjustment_id) REFERENCES cash_drawer_adjustments(adjustment_id) ON DELETE SET NULL,
     FOREIGN KEY (performed_by) REFERENCES employees(employee_id),
 
-    CONSTRAINT chk_positive_deposit CHECK (amount > 0)
+    CONSTRAINT chk_nonzero_amount CHECK (amount != 0)
 );
+
+-- Alter existing constraint to allow negative amounts (for withdrawals)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_positive_deposit'
+        AND conrelid = 'bank_deposits'::regclass
+    ) THEN
+        ALTER TABLE bank_deposits DROP CONSTRAINT chk_positive_deposit;
+        ALTER TABLE bank_deposits ADD CONSTRAINT chk_nonzero_amount CHECK (amount != 0);
+    END IF;
+END $$;
 
 -- Create indexes for bank_deposits
 CREATE INDEX IF NOT EXISTS idx_bank_deposits_session ON bank_deposits(session_id);
@@ -631,5 +644,5 @@ CREATE INDEX IF NOT EXISTS idx_bank_deposits_bank ON bank_deposits(bank_id);
 CREATE INDEX IF NOT EXISTS idx_bank_deposits_date ON bank_deposits(created_at);
 
 -- Add comments for documentation
-COMMENT ON TABLE bank_deposits IS 'Tracks cash deposits from master safe to bank accounts';
-COMMENT ON COLUMN bank_deposits.deposit_reference IS 'Bank reference or confirmation number for the deposit';
+COMMENT ON TABLE bank_deposits IS 'Tracks cash deposits and withdrawals between master safe and bank accounts. Positive amount = deposit to bank, Negative amount = withdrawal from bank';
+COMMENT ON COLUMN bank_deposits.deposit_reference IS 'Bank reference or confirmation number for the transaction';
