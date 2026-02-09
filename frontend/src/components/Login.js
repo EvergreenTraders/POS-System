@@ -21,6 +21,10 @@ import {
     DialogContent,
     DialogActions,
     Grid,
+    FormControl,
+    InputLabel,
+    Select,
+    MenuItem,
 } from '@mui/material';
 import {
     Person as PersonIcon,
@@ -28,6 +32,7 @@ import {
     Visibility as VisibilityIcon,
     VisibilityOff as VisibilityOffIcon,
     AccessTime as ClockIcon,
+    Store as StoreIcon,
 } from '@mui/icons-material';
 
 const API_BASE_URL = config.apiUrl;
@@ -96,6 +101,8 @@ const Login = () => {
     const [clockError, setClockError] = useState('');
     const [currentDateTime, setCurrentDateTime] = useState(new Date());
     const [businessLogo, setBusinessLogo] = useState(null);
+    const [stores, setStores] = useState([]);
+    const [selectedStore, setSelectedStore] = useState('');
 
     const navigate = useNavigate();
     const { setUser } = useAuth();
@@ -111,6 +118,27 @@ const Login = () => {
             setLockedUser(user);
             setIdentifier(user.username || user.email);
         }
+    }, []);
+
+    // Fetch stores on component mount
+    useEffect(() => {
+        const fetchStores = async () => {
+            try {
+                const response = await axios.get(`${API_BASE_URL}/stores`);
+                const activeStores = response.data.filter(s => s.is_active);
+                setStores(activeStores);
+                // Select the current store by default
+                const currentStore = activeStores.find(s => s.is_current_store);
+                if (currentStore) {
+                    setSelectedStore(currentStore.store_id);
+                } else if (activeStores.length > 0) {
+                    setSelectedStore(activeStores[0].store_id);
+                }
+            } catch (error) {
+                console.error('Failed to fetch stores:', error);
+            }
+        };
+        fetchStores();
     }, []);
 
     const requestFullScreen = async (element) => {
@@ -159,10 +187,20 @@ const Login = () => {
         try {
             const response = await axios.post(`${API_BASE_URL}/auth/login`, {
                 identifier,
-                password
+                password,
+                store_id: selectedStore || undefined
             });
 
             if (response.data.token) {
+                // Set selected store as current store before logging in
+                if (selectedStore) {
+                    try {
+                        await axios.post(`${API_BASE_URL}/stores/${selectedStore}/set-current`);
+                    } catch (storeErr) {
+                        console.error('Failed to set current store:', storeErr);
+                    }
+                }
+
                 localStorage.setItem('token', response.data.token);
                 localStorage.setItem('user', JSON.stringify(response.data.user));
                 localStorage.removeItem('lockedSession'); // Clear locked session flag
@@ -182,7 +220,11 @@ const Login = () => {
                 }
             }
         } catch (err) {
-            setError('Invalid credentials. Please try again.');
+            if (err.response?.status === 403) {
+                setError(err.response.data.error || 'You are not assigned to this store');
+            } else {
+                setError('Invalid credentials. Please try again.');
+            }
             console.error('Login error:', err);
         }
     };
@@ -442,6 +484,29 @@ const Login = () => {
                             ),
                         }}
                     />
+
+                    {!isLocked && stores.length > 1 && (
+                        <FormControl fullWidth sx={{ mb: 2 }}>
+                            <InputLabel id="store-select-label">Store Location</InputLabel>
+                            <Select
+                                labelId="store-select-label"
+                                value={selectedStore}
+                                label="Store Location"
+                                onChange={(e) => setSelectedStore(e.target.value)}
+                                startAdornment={
+                                    <InputAdornment position="start">
+                                        <StoreIcon color="primary" />
+                                    </InputAdornment>
+                                }
+                            >
+                                {stores.map((store) => (
+                                    <MenuItem key={store.store_id} value={store.store_id}>
+                                        {store.store_name} {store.store_code ? `(${store.store_code})` : ''}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                    )}
 
                     {!isLocked && (
                         <WorkingDateSelector

@@ -299,17 +299,22 @@ app.use(storeClosedMiddleware);
 // Authentication route
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { identifier, password } = req.body;
+    const { identifier, password, store_id } = req.body;
 
     // Check if identifier is email or username
     const query = 'SELECT * FROM employees WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)';
     const userQuery = await pool.query(query, [identifier]);
-    
+
     if (userQuery.rows.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const user = userQuery.rows[0];
+
+    // Verify employee belongs to the selected store
+    if (store_id && user.store_id && user.store_id !== parseInt(store_id)) {
+      return res.status(403).json({ error: 'You are not assigned to this store' });
+    }
 
     // For debugging: Log password comparison
     const isValidPassword = password === user.password;
@@ -2385,6 +2390,45 @@ app.put('/api/stores/:storeId', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error updating store:', error);
     res.status(500).json({ error: 'Failed to update store' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/stores/:storeId/set-current - Switch to a different store
+app.post('/api/stores/:storeId/set-current', async (req, res) => {
+  const { storeId } = req.params;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Verify store exists and is active
+    const storeCheck = await client.query(
+      'SELECT * FROM stores WHERE store_id = $1 AND is_active = TRUE',
+      [storeId]
+    );
+
+    if (storeCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Store not found or inactive' });
+    }
+
+    // Unset current store flag from all stores
+    await client.query('UPDATE stores SET is_current_store = FALSE WHERE is_current_store = TRUE');
+
+    // Set the new current store
+    const result = await client.query(
+      'UPDATE stores SET is_current_store = TRUE, updated_at = CURRENT_TIMESTAMP WHERE store_id = $1 RETURNING *',
+      [storeId]
+    );
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error switching store:', error);
+    res.status(500).json({ error: 'Failed to switch store' });
   } finally {
     client.release();
   }
