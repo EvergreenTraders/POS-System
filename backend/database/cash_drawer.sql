@@ -176,6 +176,60 @@ END $$;
 -- Add comment documenting transfer rules
 COMMENT ON TABLE cash_drawer_adjustments IS 'Records manual cash additions/removals during shifts. Transfer rules: Physical drawers receive from physical/safe. Safe drawers receive from physical/master_safe. Master safe receives from safe/bank.';
 
+-- Create adjustment_denominations table to store denomination counts for adjustments/transfers
+CREATE TABLE IF NOT EXISTS adjustment_denominations (
+    id SERIAL PRIMARY KEY,
+    adjustment_id INTEGER NOT NULL,
+
+    -- Bill denominations (CAD)
+    bill_100 INTEGER DEFAULT 0,
+    bill_50 INTEGER DEFAULT 0,
+    bill_20 INTEGER DEFAULT 0,
+    bill_10 INTEGER DEFAULT 0,
+    bill_5 INTEGER DEFAULT 0,
+
+    -- Coin denominations (CAD)
+    coin_2 INTEGER DEFAULT 0,
+    coin_1 INTEGER DEFAULT 0,
+    coin_0_25 INTEGER DEFAULT 0,
+    coin_0_10 INTEGER DEFAULT 0,
+    coin_0_05 INTEGER DEFAULT 0,
+
+    -- Calculated total
+    total_amount DECIMAL(10,2) GENERATED ALWAYS AS (
+        (bill_100 * 100) +
+        (bill_50 * 50) +
+        (bill_20 * 20) +
+        (bill_10 * 10) +
+        (bill_5 * 5) +
+        (coin_2 * 2) +
+        (coin_1 * 1) +
+        (coin_0_25 * 0.25) +
+        (coin_0_10 * 0.10) +
+        (coin_0_05 * 0.05)
+    ) STORED,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (adjustment_id) REFERENCES cash_drawer_adjustments(adjustment_id) ON DELETE CASCADE,
+
+    CONSTRAINT chk_adj_non_negative_bills CHECK (
+        bill_100 >= 0 AND bill_50 >= 0 AND bill_20 >= 0 AND
+        bill_10 >= 0 AND bill_5 >= 0
+    ),
+    CONSTRAINT chk_adj_non_negative_coins CHECK (
+        coin_2 >= 0 AND coin_1 >= 0 AND coin_0_25 >= 0 AND
+        coin_0_10 >= 0 AND coin_0_05 >= 0
+    )
+);
+
+-- Create index for adjustment_denominations
+CREATE INDEX IF NOT EXISTS idx_adjustment_denominations_adjustment ON adjustment_denominations(adjustment_id);
+
+-- Add comments for documentation
+COMMENT ON TABLE adjustment_denominations IS 'Stores denomination counts for cash drawer adjustments (transfers, deposits, etc.)';
+COMMENT ON COLUMN adjustment_denominations.total_amount IS 'Automatically calculated total from all denominations';
+
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_drawer_sessions_employee ON cash_drawer_sessions(employee_id);
 CREATE INDEX IF NOT EXISTS idx_drawer_sessions_status ON cash_drawer_sessions(status);
@@ -526,3 +580,133 @@ CREATE INDEX IF NOT EXISTS idx_drawer_connections_active ON drawer_session_conne
 -- Add comments for documentation
 COMMENT ON TABLE drawer_session_connections IS 'Tracks employees connected to shared drawer sessions (safe/master_safe). When an employee opens a shared drawer that is already open, they connect to the existing session.';
 COMMENT ON COLUMN drawer_session_connections.is_active IS 'Whether this connection is currently active. Set to FALSE when employee disconnects.';
+
+-- Create banks table to store bank account configurations for deposits
+CREATE TABLE IF NOT EXISTS banks (
+    bank_id SERIAL PRIMARY KEY,
+    bank_name VARCHAR(100) NOT NULL,
+    account_number VARCHAR(50),
+    routing_number VARCHAR(50),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+-- Create index for banks
+CREATE INDEX IF NOT EXISTS idx_banks_active ON banks(is_active);
+
+-- Add comments for documentation
+COMMENT ON TABLE banks IS 'Stores bank account configurations for cash deposits from master safe';
+COMMENT ON COLUMN banks.is_default IS 'Default bank to use when making deposits';
+
+-- Insert a default bank if none exists
+INSERT INTO banks (bank_name, is_default)
+SELECT 'Primary Bank', TRUE
+WHERE NOT EXISTS (SELECT 1 FROM banks LIMIT 1);
+
+-- Create bank_deposits table to track deposits from master safe to bank
+CREATE TABLE IF NOT EXISTS bank_deposits (
+    deposit_id SERIAL PRIMARY KEY,
+    session_id INTEGER NOT NULL,
+    bank_id INTEGER NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    adjustment_id INTEGER, -- Reference to the adjustment record
+    deposit_reference VARCHAR(100), -- Bank reference/confirmation number
+    notes TEXT,
+    performed_by INTEGER NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE CASCADE,
+    FOREIGN KEY (bank_id) REFERENCES banks(bank_id),
+    FOREIGN KEY (adjustment_id) REFERENCES cash_drawer_adjustments(adjustment_id) ON DELETE SET NULL,
+    FOREIGN KEY (performed_by) REFERENCES employees(employee_id),
+
+    CONSTRAINT chk_nonzero_amount CHECK (amount != 0)
+);
+
+-- Alter existing constraint to allow negative amounts (for withdrawals)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_positive_deposit'
+        AND conrelid = 'bank_deposits'::regclass
+    ) THEN
+        ALTER TABLE bank_deposits DROP CONSTRAINT chk_positive_deposit;
+        ALTER TABLE bank_deposits ADD CONSTRAINT chk_nonzero_amount CHECK (amount != 0);
+    END IF;
+END $$;
+
+-- Create indexes for bank_deposits
+CREATE INDEX IF NOT EXISTS idx_bank_deposits_session ON bank_deposits(session_id);
+CREATE INDEX IF NOT EXISTS idx_bank_deposits_bank ON bank_deposits(bank_id);
+CREATE INDEX IF NOT EXISTS idx_bank_deposits_date ON bank_deposits(created_at);
+
+-- Add comments for documentation
+COMMENT ON TABLE bank_deposits IS 'Tracks cash deposits and withdrawals between master safe and bank accounts. Positive amount = deposit to bank, Negative amount = withdrawal from bank';
+COMMENT ON COLUMN bank_deposits.deposit_reference IS 'Bank reference or confirmation number for the transaction';
+
+-- Create petty_cash_accounts table to store pre-configured expense accounts
+CREATE TABLE IF NOT EXISTS petty_cash_accounts (
+    account_id SERIAL PRIMARY KEY,
+    account_name VARCHAR(100) NOT NULL,
+    account_code VARCHAR(50),
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
+-- Create index for petty_cash_accounts
+CREATE INDEX IF NOT EXISTS idx_petty_cash_accounts_active ON petty_cash_accounts(is_active);
+
+-- Add comments for documentation
+COMMENT ON TABLE petty_cash_accounts IS 'Stores pre-configured expense accounts for petty cash payouts';
+COMMENT ON COLUMN petty_cash_accounts.account_code IS 'Optional accounting code for integration with accounting systems';
+
+-- Insert some default petty cash accounts
+INSERT INTO petty_cash_accounts (account_name, account_code)
+SELECT * FROM (VALUES
+    ('Office Supplies', 'EXP-001'),
+    ('Postage & Shipping', 'EXP-002'),
+    ('Repairs & Maintenance', 'EXP-003'),
+    ('Travel & Transportation', 'EXP-004'),
+    ('Meals & Entertainment', 'EXP-005'),
+    ('Miscellaneous', 'EXP-999')
+) AS defaults(account_name, account_code)
+WHERE NOT EXISTS (SELECT 1 FROM petty_cash_accounts LIMIT 1);
+
+-- Create petty_cash_payouts table to track petty cash disbursements
+CREATE TABLE IF NOT EXISTS petty_cash_payouts (
+    payout_id SERIAL PRIMARY KEY,
+    session_id INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    adjustment_id INTEGER, -- Reference to the adjustment record
+    invoice_number VARCHAR(100),
+    description TEXT NOT NULL,
+    performed_by INTEGER NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE CASCADE,
+    FOREIGN KEY (account_id) REFERENCES petty_cash_accounts(account_id),
+    FOREIGN KEY (adjustment_id) REFERENCES cash_drawer_adjustments(adjustment_id) ON DELETE SET NULL,
+    FOREIGN KEY (performed_by) REFERENCES employees(employee_id),
+
+    CONSTRAINT chk_positive_payout CHECK (amount > 0)
+);
+
+-- Create indexes for petty_cash_payouts
+CREATE INDEX IF NOT EXISTS idx_petty_cash_payouts_session ON petty_cash_payouts(session_id);
+CREATE INDEX IF NOT EXISTS idx_petty_cash_payouts_account ON petty_cash_payouts(account_id);
+CREATE INDEX IF NOT EXISTS idx_petty_cash_payouts_date ON petty_cash_payouts(created_at);
+
+-- Add comments for documentation
+COMMENT ON TABLE petty_cash_payouts IS 'Tracks petty cash disbursements from drawers and safes';
+COMMENT ON COLUMN petty_cash_payouts.invoice_number IS 'Invoice or receipt number for the expense';
+
+-- Add store_id to drawers table to associate drawers with specific stores
+ALTER TABLE drawers ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+UPDATE drawers SET store_id = 1 WHERE store_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_drawers_store_id ON drawers(store_id);

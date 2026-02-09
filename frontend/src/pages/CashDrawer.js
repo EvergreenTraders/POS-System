@@ -41,7 +41,10 @@ import {
   Add as AddIcon,
   History as HistoryIcon,
   AccountBalance as BankIcon,
+  AccountBalance as AccountBalanceIcon,
   Store as StoreIcon,
+  ArrowForward as ArrowForwardIcon,
+  SwapHoriz as SwapHorizIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -121,6 +124,59 @@ function CashDrawer() {
   const [adjustmentReason, setAdjustmentReason] = useState('');
   const [transferSourceSession, setTransferSourceSession] = useState('');
 
+  // Enhanced transfer dialog states
+  const [transferDialog, setTransferDialog] = useState(false);
+  const [transferSource, setTransferSource] = useState(null); // Source session object
+  const [transferDestination, setTransferDestination] = useState(null); // Destination session object
+  const [transferDenominations, setTransferDenominations] = useState({
+    bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+    coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+  });
+  const [transferTenderAmounts, setTransferTenderAmounts] = useState({}); // { check: 500, debit: 1234.56, etc. }
+  const [transferNotes, setTransferNotes] = useState('');
+
+  // Bank deposit dialog states
+  const [bankDepositDialog, setBankDepositDialog] = useState(false);
+  const [banks, setBanks] = useState([]);
+  const [selectedBank, setSelectedBank] = useState('');
+  const [bankDepositAmount, setBankDepositAmount] = useState('');
+  const [bankDepositReference, setBankDepositReference] = useState('');
+  const [bankDepositNotes, setBankDepositNotes] = useState('');
+
+  // Bank withdrawal dialog states
+  const [bankWithdrawalDialog, setBankWithdrawalDialog] = useState(false);
+  const [selectedWithdrawalBank, setSelectedWithdrawalBank] = useState('');
+  const [bankWithdrawalAmount, setBankWithdrawalAmount] = useState('');
+  const [bankWithdrawalReference, setBankWithdrawalReference] = useState('');
+  const [bankWithdrawalNotes, setBankWithdrawalNotes] = useState('');
+
+  // Petty cash payout dialog states
+  const [pettyCashDialog, setPettyCashDialog] = useState(false);
+  const [pettyCashAccounts, setPettyCashAccounts] = useState([]);
+  const [selectedPettyCashAccount, setSelectedPettyCashAccount] = useState('');
+  const [pettyCashAmount, setPettyCashAmount] = useState('');
+  const [pettyCashInvoice, setPettyCashInvoice] = useState('');
+  const [pettyCashDescription, setPettyCashDescription] = useState('');
+  const [pettyCashDenominations, setPettyCashDenominations] = useState({
+    bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+    coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+  });
+  const [pettyCashSourceSession, setPettyCashSourceSession] = useState(null);
+
+  // Inter-store transfer states
+  const [stores, setStores] = useState([]);
+  const [currentStore, setCurrentStore] = useState(null);
+  const [interStoreTransferDialog, setInterStoreTransferDialog] = useState(false);
+  const [selectedDestinationStore, setSelectedDestinationStore] = useState('');
+  const [interStoreTransferAmount, setInterStoreTransferAmount] = useState('');
+  const [interStoreTransferNotes, setInterStoreTransferNotes] = useState('');
+  const [interStoreTransferSourceSession, setInterStoreTransferSourceSession] = useState(null);
+  const [pendingInterStoreTransfers, setPendingInterStoreTransfers] = useState([]);
+  const [receiveInterStoreDialog, setReceiveInterStoreDialog] = useState(false);
+  const [selectedPendingTransfer, setSelectedPendingTransfer] = useState(null);
+  const [receiveDestinationSession, setReceiveDestinationSession] = useState('');
+  const [receiveInterStoreNotes, setReceiveInterStoreNotes] = useState('');
+
   // Denomination states for Open Count mode
   const [openingDenominations, setOpeningDenominations] = useState({
     bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
@@ -189,6 +245,10 @@ function CashDrawer() {
     fetchHistory();
     fetchPhysicalPaymentMethods();
     fetchElectronicPaymentMethods();
+    fetchBanks();
+    fetchPettyCashAccounts();
+    fetchStores();
+    fetchPendingInterStoreTransfers();
   }, []);
 
   // Update count mode when active session changes
@@ -443,6 +503,54 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching drawer overview:', err);
       setOverviewData({ safes: [], drawers: [] });
+    }
+  };
+
+  const fetchBanks = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/banks`);
+      setBanks(Array.isArray(response.data) ? response.data : []);
+      // Set default bank if available
+      const defaultBank = response.data.find(b => b.is_default);
+      if (defaultBank) {
+        setSelectedBank(defaultBank.bank_id);
+      }
+    } catch (err) {
+      console.error('Error fetching banks:', err);
+      setBanks([]);
+    }
+  };
+
+  const fetchPettyCashAccounts = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/petty-cash-accounts`);
+      setPettyCashAccounts(Array.isArray(response.data) ? response.data : []);
+    } catch (err) {
+      console.error('Error fetching petty cash accounts:', err);
+      setPettyCashAccounts([]);
+    }
+  };
+
+  const fetchStores = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/stores`);
+      setStores(Array.isArray(response.data) ? response.data : []);
+      // Find and set current store
+      const current = response.data.find(s => s.is_current_store);
+      setCurrentStore(current || null);
+    } catch (err) {
+      console.error('Error fetching stores:', err);
+      setStores([]);
+    }
+  };
+
+  const fetchPendingInterStoreTransfers = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/inter-store-transfers/pending`);
+      setPendingInterStoreTransfers(Array.isArray(response.data) ? response.data : []);
+    } catch (err) {
+      console.error('Error fetching pending inter-store transfers:', err);
+      setPendingInterStoreTransfers([]);
     }
   };
 
@@ -1294,7 +1402,8 @@ function CashDrawer() {
       // Refresh both current user's sessions and all active sessions
       await Promise.all([
         checkActiveSession(),
-        fetchAllActiveSessions()
+        fetchAllActiveSessions(),
+        fetchOverview()
       ]);
     } catch (err) {
       console.error('Error adding adjustment:', err);
@@ -1337,6 +1446,402 @@ function CashDrawer() {
     setAdjustmentType('bank_deposit');
     setAdjustmentReason('');
     setTransferSourceSession('');
+  };
+
+  const resetTransferForm = () => {
+    setTransferSource(null);
+    setTransferDestination(null);
+    setTransferDenominations({
+      bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+      coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+    });
+    setTransferTenderAmounts({});
+    setTransferNotes('');
+  };
+
+  const openTransferDialog = (sourceSession = null, destinationSession = null) => {
+    fetchAllActiveSessions();
+    setTransferSource(sourceSession);
+    setTransferDestination(destinationSession);
+    resetTransferForm();
+    if (sourceSession) setTransferSource(sourceSession);
+    if (destinationSession) setTransferDestination(destinationSession);
+    setTransferDialog(true);
+  };
+
+  const resetBankDepositForm = () => {
+    setBankDepositAmount('');
+    setBankDepositReference('');
+    setBankDepositNotes('');
+    // Keep selected bank as default
+    const defaultBank = banks.find(b => b.is_default);
+    if (defaultBank) {
+      setSelectedBank(defaultBank.bank_id);
+    }
+  };
+
+  const openBankDepositDialog = () => {
+    fetchBanks();
+    resetBankDepositForm();
+    setBankDepositDialog(true);
+  };
+
+  const handleBankDeposit = async () => {
+    if (!selectedBank) {
+      showSnackbar('Please select a bank', 'error');
+      return;
+    }
+
+    const depositTotal = parseFloat(bankDepositAmount) || 0;
+
+    if (depositTotal <= 0) {
+      showSnackbar('Please enter a valid deposit amount', 'error');
+      return;
+    }
+
+    // Verify we're on master safe
+    if (activeSession?.drawer_type !== 'master_safe') {
+      showSnackbar('Bank deposits can only be made from the Master Safe', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      await axios.post(
+        `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/bank-deposit`,
+        {
+          bank_id: selectedBank,
+          amount: depositTotal,
+          deposit_reference: bankDepositReference || null,
+          notes: bankDepositNotes || null,
+          performed_by: currentUser.id
+        }
+      );
+
+      const bankName = banks.find(b => b.bank_id === selectedBank)?.bank_name || 'Bank';
+      showSnackbar(`Bank deposit of ${formatCurrency(depositTotal)} to ${bankName} completed`, 'success');
+      setBankDepositDialog(false);
+      resetBankDepositForm();
+
+      // Refresh sessions and overview
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview()
+      ]);
+    } catch (err) {
+      console.error('Error processing bank deposit:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to process bank deposit', 'error');
+    }
+  };
+
+  const resetBankWithdrawalForm = () => {
+    setBankWithdrawalAmount('');
+    setBankWithdrawalReference('');
+    setBankWithdrawalNotes('');
+    // Keep selected bank as default
+    const defaultBank = banks.find(b => b.is_default);
+    if (defaultBank) {
+      setSelectedWithdrawalBank(defaultBank.bank_id);
+    }
+  };
+
+  const openBankWithdrawalDialog = () => {
+    fetchBanks();
+    resetBankWithdrawalForm();
+    setBankWithdrawalDialog(true);
+  };
+
+  const handleBankWithdrawal = async () => {
+    if (!selectedWithdrawalBank) {
+      showSnackbar('Please select a bank', 'error');
+      return;
+    }
+
+    const withdrawalTotal = parseFloat(bankWithdrawalAmount) || 0;
+
+    if (withdrawalTotal <= 0) {
+      showSnackbar('Please enter a valid withdrawal amount', 'error');
+      return;
+    }
+
+    // Verify we're on master safe
+    if (activeSession?.drawer_type !== 'master_safe') {
+      showSnackbar('Bank withdrawals can only be made to the Master Safe', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      await axios.post(
+        `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/bank-withdrawal`,
+        {
+          bank_id: selectedWithdrawalBank,
+          amount: withdrawalTotal,
+          withdrawal_reference: bankWithdrawalReference || null,
+          notes: bankWithdrawalNotes || null,
+          performed_by: currentUser.id
+        }
+      );
+
+      const bankName = banks.find(b => b.bank_id === selectedWithdrawalBank)?.bank_name || 'Bank';
+      showSnackbar(`Bank withdrawal of ${formatCurrency(withdrawalTotal)} from ${bankName} completed`, 'success');
+      setBankWithdrawalDialog(false);
+      resetBankWithdrawalForm();
+
+      // Refresh sessions and overview
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview()
+      ]);
+    } catch (err) {
+      console.error('Error processing bank withdrawal:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to process bank withdrawal', 'error');
+    }
+  };
+
+  const resetPettyCashForm = () => {
+    setSelectedPettyCashAccount('');
+    setPettyCashAmount('');
+    setPettyCashInvoice('');
+    setPettyCashDescription('');
+    setPettyCashDenominations({
+      bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+      coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+    });
+    setPettyCashSourceSession(null);
+  };
+
+  const openPettyCashDialog = () => {
+    fetchPettyCashAccounts();
+    fetchAllActiveSessions();
+    resetPettyCashForm();
+
+    // Determine source session: prefer physical drawer, then safe
+    if (activeSession) {
+      setPettyCashSourceSession(activeSession);
+    }
+    setPettyCashDialog(true);
+  };
+
+  const handlePettyCashPayout = async () => {
+    if (!selectedPettyCashAccount) {
+      showSnackbar('Please select an expense account', 'error');
+      return;
+    }
+
+    if (!pettyCashDescription.trim()) {
+      showSnackbar('Please enter a description', 'error');
+      return;
+    }
+
+    if (!pettyCashSourceSession) {
+      showSnackbar('Please select a source drawer/safe', 'error');
+      return;
+    }
+
+    // Check if denominations are required
+    const sourceDrawerType = pettyCashSourceSession.drawer_type;
+    const usesDenominations = sourceDrawerType === 'physical' ||
+      ((sourceDrawerType === 'safe' || sourceDrawerType === 'master_safe') && drawerIndividualDenominationsPrefs.safe);
+
+    let payoutTotal;
+    if (usesDenominations) {
+      payoutTotal = calculateDenominationTotal(pettyCashDenominations);
+    } else {
+      payoutTotal = parseFloat(pettyCashAmount) || 0;
+    }
+
+    if (payoutTotal <= 0) {
+      showSnackbar('Please enter a valid payout amount', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      await axios.post(
+        `${API_BASE_URL}/cash-drawer/${pettyCashSourceSession.session_id}/petty-cash-payout`,
+        {
+          account_id: selectedPettyCashAccount,
+          amount: payoutTotal,
+          invoice_number: pettyCashInvoice || null,
+          description: pettyCashDescription,
+          performed_by: currentUser.id,
+          denominations: usesDenominations ? pettyCashDenominations : null
+        }
+      );
+
+      const accountName = pettyCashAccounts.find(a => a.account_id === selectedPettyCashAccount)?.account_name || 'Account';
+      showSnackbar(`Petty cash payout of ${formatCurrency(payoutTotal)} to ${accountName} completed`, 'success');
+      setPettyCashDialog(false);
+      resetPettyCashForm();
+
+      // Refresh sessions and overview
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview()
+      ]);
+    } catch (err) {
+      console.error('Error processing petty cash payout:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to process petty cash payout', 'error');
+    }
+  };
+
+  const handleTransfer = async () => {
+    if (!transferSource || !transferDestination) {
+      showSnackbar('Please select both source and destination', 'error');
+      return;
+    }
+
+    // Calculate total cash from denominations
+    const cashTotal = calculateDenominationTotal(transferDenominations);
+
+    // Calculate total from other tenders
+    const otherTendersTotal = Object.values(transferTenderAmounts)
+      .reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
+
+    const totalTransfer = cashTotal + otherTendersTotal;
+
+    if (totalTransfer <= 0) {
+      showSnackbar('Please enter amounts to transfer', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      // Call the transfer API
+      await axios.post(
+        `${API_BASE_URL}/cash-drawer/${transferDestination.session_id}/transfer`,
+        {
+          source_session_id: transferSource.session_id,
+          amount: totalTransfer,
+          reason: transferNotes || `Transfer from ${transferSource.drawer_name} to ${transferDestination.drawer_name}`,
+          performed_by: currentUser.id,
+          denominations: cashTotal > 0 ? transferDenominations : null,
+          tender_breakdown: Object.entries(transferTenderAmounts)
+            .filter(([_, amount]) => parseFloat(amount) > 0)
+            .map(([method, amount]) => ({ method, amount: parseFloat(amount) }))
+        }
+      );
+
+      showSnackbar(`Transfer of ${formatCurrency(totalTransfer)} completed successfully`, 'success');
+      setTransferDialog(false);
+      resetTransferForm();
+
+      // Refresh sessions and overview
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview()
+      ]);
+    } catch (err) {
+      console.error('Error processing transfer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to process transfer', 'error');
+    }
+  };
+
+  // Inter-store transfer functions
+  const openInterStoreTransferDialog = (sourceSession) => {
+    setInterStoreTransferSourceSession(sourceSession);
+    setSelectedDestinationStore('');
+    setInterStoreTransferAmount('');
+    setInterStoreTransferNotes('');
+    setInterStoreTransferDialog(true);
+  };
+
+  const handleSendInterStoreTransfer = async () => {
+    if (!selectedDestinationStore || !interStoreTransferSourceSession) {
+      showSnackbar('Please select a destination store', 'error');
+      return;
+    }
+
+    const transferAmount = parseFloat(interStoreTransferAmount) || 0;
+
+    if (transferAmount <= 0) {
+      showSnackbar('Please enter an amount to transfer', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/inter-store-transfers`, {
+        destination_store_id: parseInt(selectedDestinationStore),
+        source_session_id: interStoreTransferSourceSession.session_id,
+        amount: transferAmount,
+        transfer_type: 'cash',
+        send_notes: interStoreTransferNotes,
+        performed_by: currentUser.id
+      });
+
+      showSnackbar(`Inter-store transfer of ${formatCurrency(transferAmount)} sent successfully. Reference: ${response.data.reference_number}`, 'success');
+      setInterStoreTransferDialog(false);
+
+      // Refresh data
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview(),
+        fetchPendingInterStoreTransfers()
+      ]);
+    } catch (err) {
+      console.error('Error sending inter-store transfer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to send inter-store transfer', 'error');
+    }
+  };
+
+  const openReceiveInterStoreDialog = () => {
+    setSelectedPendingTransfer(null);
+    setReceiveDestinationSession('');
+    setReceiveInterStoreNotes('');
+    fetchPendingInterStoreTransfers();
+    setReceiveInterStoreDialog(true);
+  };
+
+  const handleReceiveInterStoreTransfer = async () => {
+    if (!selectedPendingTransfer || !receiveDestinationSession) {
+      showSnackbar('Please select a transfer and destination', 'error');
+      return;
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+    try {
+      await axios.post(`${API_BASE_URL}/inter-store-transfers/${selectedPendingTransfer.transfer_id}/receive`, {
+        destination_session_id: parseInt(receiveDestinationSession),
+        receive_notes: receiveInterStoreNotes,
+        performed_by: currentUser.id
+      });
+
+      showSnackbar(`Inter-store transfer of ${formatCurrency(selectedPendingTransfer.amount)} received successfully`, 'success');
+      setReceiveInterStoreDialog(false);
+
+      // Refresh data
+      await Promise.all([
+        checkActiveSession(),
+        fetchAllActiveSessions(),
+        fetchOverview(),
+        fetchPendingInterStoreTransfers()
+      ]);
+    } catch (err) {
+      console.error('Error receiving inter-store transfer:', err);
+      showSnackbar(err.response?.data?.error || 'Failed to receive inter-store transfer', 'error');
+    }
+  };
+
+  // Check if drawer uses denominations (physical drawers always do, safes based on preference)
+  const drawerUsesDenominations = (drawerType) => {
+    if (drawerType === 'physical') return true;
+    if (drawerType === 'safe' || drawerType === 'master_safe') {
+      return drawerIndividualDenominationsPrefs.safe;
+    }
+    return false;
   };
 
   const resetManagerApprovalForm = () => {
@@ -1830,18 +2335,64 @@ function CashDrawer() {
                       </Button>
                       <Button
                         variant="outlined"
-                        startIcon={<AddIcon />}
+                        startIcon={<SwapHorizIcon />}
                         disabled={isStoreClosed}
-                        onClick={() => setAdjustmentDialog(true)}
+                        onClick={() => openTransferDialog(activeSession, null)}
                       >
-                        Add Adjustment
+                        Transfer
                       </Button>
+                      {/* Inter-store transfer buttons */}
+                      <Button
+                        variant="outlined"
+                        startIcon={<StoreIcon />}
+                        disabled={isStoreClosed || stores.filter(s => !s.is_current_store && s.is_active).length === 0}
+                        onClick={() => openInterStoreTransferDialog(activeSession)}
+                      >
+                        Send Inter-store
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        startIcon={<StoreIcon />}
+                        disabled={isStoreClosed || pendingInterStoreTransfers.length === 0}
+                        onClick={openReceiveInterStoreDialog}
+                      >
+                        Receive Inter-store {pendingInterStoreTransfers.length > 0 && `(${pendingInterStoreTransfers.length})`}
+                      </Button>
+                      {/* Show Bank Deposit and Withdrawal buttons only for Master Safe */}
+                      {activeSession.drawer_type === 'master_safe' && (
+                        <>
+                          <Button
+                            variant="outlined"
+                            startIcon={<AccountBalanceIcon />}
+                            disabled={isStoreClosed}
+                            onClick={openBankDepositDialog}
+                          >
+                            Bank Deposit
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            startIcon={<AccountBalanceIcon />}
+                            disabled={isStoreClosed}
+                            onClick={openBankWithdrawalDialog}
+                          >
+                            Bank Withdrawal
+                          </Button>
+                        </>
+                      )}
                       <Button
                         variant="outlined"
                         startIcon={<HistoryIcon />}
                         onClick={() => fetchSessionDetails(activeSession.session_id)}
                       >
                         View Details
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        startIcon={<MoneyIcon />}
+                        disabled={isStoreClosed}
+                        onClick={openPettyCashDialog}
+                      >
+                        Petty Cash
                       </Button>
                       {/* Show Open Cash Drawer button if no physical session exists */}
                       {!activeSessions.some(s => s.drawer_type === 'physical') && allDrawers.some(d => d.drawer_type === 'physical' && d.is_active) && (
@@ -3144,6 +3695,837 @@ function CashDrawer() {
           <Button onClick={() => setAdjustmentDialog(false)}>Cancel</Button>
           <Button onClick={handleAddAdjustment} variant="contained" color="primary" disabled={isStoreClosed}>
             Add Adjustment
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Enhanced Transfer Dialog */}
+      <Dialog
+        open={transferDialog}
+        onClose={() => {
+          setTransferDialog(false);
+          resetTransferForm();
+        }}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <SwapHorizIcon />
+            Transfer Between Drawers/Safes
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {/* Source and Destination Selection */}
+            <Grid container spacing={2} alignItems="center" sx={{ mb: 3 }}>
+              {/* Source Selection */}
+              <Grid item xs={5}>
+                <FormControl fullWidth>
+                  <InputLabel>Source (From)</InputLabel>
+                  <Select
+                    value={transferSource?.session_id || ''}
+                    onChange={(e) => {
+                      const session = allActiveSessions.find(s => s.session_id === e.target.value);
+                      setTransferSource(session || null);
+                    }}
+                    label="Source (From)"
+                  >
+                    {allActiveSessions
+                      .filter(session => {
+                        // Can't be same as destination
+                        if (transferDestination && session.session_id === transferDestination.session_id) return false;
+                        return true;
+                      })
+                      .map((session) => (
+                        <MenuItem key={session.session_id} value={session.session_id}>
+                          {session.drawer_name}
+                          {session.drawer_type === 'physical' && ` - ${session.employee_name}`}
+                          {` (${formatCurrency(session.current_expected_balance || 0)})`}
+                        </MenuItem>
+                      ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              {/* Arrow */}
+              <Grid item xs={2} sx={{ textAlign: 'center' }}>
+                <Box sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  color: 'primary.main'
+                }}>
+                  <ArrowForwardIcon sx={{ fontSize: 48 }} />
+                  <Typography variant="caption" color="text.secondary">Transfer</Typography>
+                </Box>
+              </Grid>
+
+              {/* Destination Selection */}
+              <Grid item xs={5}>
+                <FormControl fullWidth>
+                  <InputLabel>Destination (To)</InputLabel>
+                  <Select
+                    value={transferDestination?.session_id || ''}
+                    onChange={(e) => {
+                      const session = allActiveSessions.find(s => s.session_id === e.target.value);
+                      setTransferDestination(session || null);
+                    }}
+                    label="Destination (To)"
+                  >
+                    {allActiveSessions
+                      .filter(session => {
+                        // Can't be same as source
+                        if (transferSource && session.session_id === transferSource.session_id) return false;
+                        // Apply transfer rules
+                        if (transferSource) {
+                          const allowedTargets = {
+                            'physical': ['physical', 'safe'],
+                            'safe': ['physical', 'master_safe'],
+                            'master_safe': ['safe']
+                          };
+                          return allowedTargets[transferSource.drawer_type]?.includes(session.drawer_type) || false;
+                        }
+                        return true;
+                      })
+                      .map((session) => (
+                        <MenuItem key={session.session_id} value={session.session_id}>
+                          {session.drawer_name}
+                          {session.drawer_type === 'physical' && ` - ${session.employee_name}`}
+                          {` (${formatCurrency(session.current_expected_balance || 0)})`}
+                        </MenuItem>
+                      ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            </Grid>
+
+            {/* Transfer hierarchy note */}
+            {transferSource && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <Typography variant="body2">
+                  {transferSource.drawer_type === 'physical' && 'Physical drawers can transfer to: Physical Drawers, Safe'}
+                  {transferSource.drawer_type === 'safe' && 'Safe can transfer to: Physical Drawers, Master Safe'}
+                  {transferSource.drawer_type === 'master_safe' && 'Master Safe can transfer to: Safe'}
+                </Typography>
+              </Alert>
+            )}
+
+            {/* Tender Entry Section - shown once both source and destination are selected */}
+            {transferSource && transferDestination && (
+              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2 }}>
+                {/* Cash Section with Denominations */}
+                <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1 }}>
+                  Cash {(drawerUsesDenominations(transferSource.drawer_type) || drawerUsesDenominations(transferDestination.drawer_type)) && '(Denominations Required)'}
+                </Typography>
+
+                {(drawerUsesDenominations(transferSource.drawer_type) || drawerUsesDenominations(transferDestination.drawer_type)) ? (
+                  <Box component="table" sx={{ width: '100%', mb: 3, borderCollapse: 'collapse', '& td, & th': { p: 0.5, fontSize: '0.9rem' } }}>
+                    <tbody>
+                      {[
+                        { label: '$100', field: 'bill_100', value: 100 },
+                        { label: '$50', field: 'bill_50', value: 50 },
+                        { label: '$20', field: 'bill_20', value: 20 },
+                        { label: '$10', field: 'bill_10', value: 10 },
+                        { label: '$5', field: 'bill_5', value: 5 },
+                        { label: '$2', field: 'coin_2', value: 2 },
+                        { label: '$1', field: 'coin_1', value: 1 },
+                        { label: '$0.25', field: 'coin_0_25', value: 0.25 },
+                        { label: '$0.10', field: 'coin_0_10', value: 0.10 },
+                        { label: '$0.05', field: 'coin_0_05', value: 0.05 },
+                      ].map(item => (
+                        <tr key={item.field}>
+                          <td style={{ width: '80px' }}>{item.label}</td>
+                          <td style={{ width: '100px' }}>
+                            <TextField
+                              type="number"
+                              size="small"
+                              value={transferDenominations[item.field] || 0}
+                              onChange={(e) => setTransferDenominations(prev => ({
+                                ...prev,
+                                [item.field]: parseInt(e.target.value) || 0
+                              }))}
+                              inputProps={{ min: 0, style: { textAlign: 'center', width: '60px', padding: '6px' } }}
+                              sx={{ '& .MuiInputBase-root': { height: '32px' } }}
+                            />
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {formatCurrency((transferDenominations[item.field] || 0) * item.value)}
+                          </td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: '2px solid #ccc', fontWeight: 'bold' }}>
+                        <td colSpan={2}>Cash Total:</td>
+                        <td style={{ textAlign: 'right' }}>{formatCurrency(calculateDenominationTotal(transferDenominations))}</td>
+                      </tr>
+                    </tbody>
+                  </Box>
+                ) : (
+                  <TextField
+                    label="Cash Amount"
+                    type="number"
+                    size="small"
+                    fullWidth
+                    value={transferTenderAmounts.cash || ''}
+                    onChange={(e) => setTransferTenderAmounts(prev => ({
+                      ...prev,
+                      cash: e.target.value
+                    }))}
+                    inputProps={{ min: 0, step: '0.01' }}
+                    sx={{ mb: 2 }}
+                  />
+                )}
+
+                {/* Other Tenders Section */}
+                <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1 }}>Other Tenders</Typography>
+                <Grid container spacing={2}>
+                  {/* Physical tenders */}
+                  {physicalPaymentMethods.map(method => (
+                    <Grid item xs={6} key={method.method_value}>
+                      <TextField
+                        label={method.method_name}
+                        type="number"
+                        size="small"
+                        fullWidth
+                        value={transferTenderAmounts[method.method_value] || ''}
+                        onChange={(e) => setTransferTenderAmounts(prev => ({
+                          ...prev,
+                          [method.method_value]: e.target.value
+                        }))}
+                        inputProps={{ min: 0, step: '0.01' }}
+                      />
+                    </Grid>
+                  ))}
+                  {/* Electronic tenders */}
+                  {electronicPaymentMethods.map(method => (
+                    <Grid item xs={6} key={method.method_value}>
+                      <TextField
+                        label={method.method_name}
+                        type="number"
+                        size="small"
+                        fullWidth
+                        value={transferTenderAmounts[method.method_value] || ''}
+                        onChange={(e) => setTransferTenderAmounts(prev => ({
+                          ...prev,
+                          [method.method_value]: e.target.value
+                        }))}
+                        inputProps={{ min: 0, step: '0.01' }}
+                      />
+                    </Grid>
+                  ))}
+                </Grid>
+
+                {/* Total */}
+                <Box sx={{ mt: 3, p: 2, bgcolor: 'success.light', borderRadius: 1 }}>
+                  <Typography variant="h6" sx={{ textAlign: 'center' }}>
+                    Total Transfer: {formatCurrency(
+                      calculateDenominationTotal(transferDenominations) +
+                      Object.values(transferTenderAmounts).reduce((sum, val) => sum + (parseFloat(val) || 0), 0)
+                    )}
+                  </Typography>
+                </Box>
+
+                {/* Notes */}
+                <TextField
+                  label="Transfer Notes (Optional)"
+                  fullWidth
+                  multiline
+                  rows={2}
+                  value={transferNotes}
+                  onChange={(e) => setTransferNotes(e.target.value)}
+                  sx={{ mt: 2 }}
+                />
+              </Box>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setTransferDialog(false);
+            resetTransferForm();
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleTransfer}
+            variant="contained"
+            color="primary"
+            disabled={!transferSource || !transferDestination || isStoreClosed}
+          >
+            Complete Transfer
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bank Deposit Dialog */}
+      <Dialog
+        open={bankDepositDialog}
+        onClose={() => {
+          setBankDepositDialog(false);
+          resetBankDepositForm();
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AccountBalanceIcon />
+            Bank Deposit from Master Safe
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {/* Bank Selection */}
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel>Select Bank</InputLabel>
+              <Select
+                value={selectedBank}
+                onChange={(e) => setSelectedBank(e.target.value)}
+                label="Select Bank"
+              >
+                {banks.map((bank) => (
+                  <MenuItem key={bank.bank_id} value={bank.bank_id}>
+                    {bank.bank_name} {bank.is_default && '(Default)'}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {/* Deposit Amount */}
+            <TextField
+              fullWidth
+              label="Deposit Amount"
+              type="number"
+              value={bankDepositAmount}
+              onChange={(e) => setBankDepositAmount(e.target.value)}
+              inputProps={{ min: 0, step: '0.01' }}
+              sx={{ mb: 2 }}
+              required
+            />
+
+            {/* Reference Number */}
+            <TextField
+              fullWidth
+              label="Bank Reference / Confirmation Number (Optional)"
+              value={bankDepositReference}
+              onChange={(e) => setBankDepositReference(e.target.value)}
+              sx={{ mb: 2 }}
+            />
+
+            {/* Notes */}
+            <TextField
+              fullWidth
+              label="Notes (Optional)"
+              multiline
+              rows={2}
+              value={bankDepositNotes}
+              onChange={(e) => setBankDepositNotes(e.target.value)}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setBankDepositDialog(false);
+            resetBankDepositForm();
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleBankDeposit}
+            variant="contained"
+            color="primary"
+            disabled={!selectedBank || !bankDepositAmount || parseFloat(bankDepositAmount) <= 0 || isStoreClosed}
+          >
+            Complete Deposit
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bank Withdrawal Dialog */}
+      <Dialog
+        open={bankWithdrawalDialog}
+        onClose={() => {
+          setBankWithdrawalDialog(false);
+          resetBankWithdrawalForm();
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AccountBalanceIcon />
+            Bank Withdrawal to Master Safe
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {/* Bank Selection */}
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel>Select Bank</InputLabel>
+              <Select
+                value={selectedWithdrawalBank}
+                onChange={(e) => setSelectedWithdrawalBank(e.target.value)}
+                label="Select Bank"
+              >
+                {banks.map((bank) => (
+                  <MenuItem key={bank.bank_id} value={bank.bank_id}>
+                    {bank.bank_name} {bank.is_default && '(Default)'}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {/* Withdrawal Amount */}
+            <TextField
+              fullWidth
+              label="Withdrawal Amount"
+              type="number"
+              value={bankWithdrawalAmount}
+              onChange={(e) => setBankWithdrawalAmount(e.target.value)}
+              inputProps={{ min: 0, step: '0.01' }}
+              sx={{ mb: 2 }}
+              required
+            />
+
+            {/* Reference Number */}
+            <TextField
+              fullWidth
+              label="Bank Reference / Confirmation Number (Optional)"
+              value={bankWithdrawalReference}
+              onChange={(e) => setBankWithdrawalReference(e.target.value)}
+              sx={{ mb: 2 }}
+            />
+
+            {/* Notes */}
+            <TextField
+              fullWidth
+              label="Notes (Optional)"
+              multiline
+              rows={2}
+              value={bankWithdrawalNotes}
+              onChange={(e) => setBankWithdrawalNotes(e.target.value)}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setBankWithdrawalDialog(false);
+            resetBankWithdrawalForm();
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleBankWithdrawal}
+            variant="contained"
+            color="primary"
+            disabled={!selectedWithdrawalBank || !bankWithdrawalAmount || parseFloat(bankWithdrawalAmount) <= 0 || isStoreClosed}
+          >
+            Complete Withdrawal
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Petty Cash Payout Dialog */}
+      <Dialog
+        open={pettyCashDialog}
+        onClose={() => {
+          setPettyCashDialog(false);
+          resetPettyCashForm();
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <MoneyIcon />
+            Petty Cash Payout
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {/* Source Session Selection */}
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel>Source Drawer/Safe</InputLabel>
+              <Select
+                value={pettyCashSourceSession?.session_id || ''}
+                onChange={(e) => {
+                  const session = allActiveSessions.find(s => s.session_id === e.target.value);
+                  setPettyCashSourceSession(session || null);
+                  // Reset denominations when source changes
+                  setPettyCashDenominations({
+                    bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+                    coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+                  });
+                }}
+                label="Source Drawer/Safe"
+              >
+                {allActiveSessions.map((session) => (
+                  <MenuItem key={session.session_id} value={session.session_id}>
+                    {session.drawer_name} ({formatCurrency(session.current_expected_balance || 0)})
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {/* Expense Account Selection */}
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel>Expense Account</InputLabel>
+              <Select
+                value={selectedPettyCashAccount}
+                onChange={(e) => setSelectedPettyCashAccount(e.target.value)}
+                label="Expense Account"
+              >
+                {pettyCashAccounts.map((account) => (
+                  <MenuItem key={account.account_id} value={account.account_id}>
+                    {account.account_name} {account.account_code && `(${account.account_code})`}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {/* Amount Entry - denominations or simple input based on drawer type */}
+            {pettyCashSourceSession && (
+              (pettyCashSourceSession.drawer_type === 'physical' ||
+               ((pettyCashSourceSession.drawer_type === 'safe' || pettyCashSourceSession.drawer_type === 'master_safe') && drawerIndividualDenominationsPrefs.safe)) ? (
+                <>
+                  <Typography variant="subtitle1" gutterBottom>
+                    Enter Payout Amount by Denomination
+                  </Typography>
+                  <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Denomination</TableCell>
+                          <TableCell align="center">Count</TableCell>
+                          <TableCell align="right">Subtotal</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {[
+                          { label: '$100', field: 'bill_100', value: 100 },
+                          { label: '$50', field: 'bill_50', value: 50 },
+                          { label: '$20', field: 'bill_20', value: 20 },
+                          { label: '$10', field: 'bill_10', value: 10 },
+                          { label: '$5', field: 'bill_5', value: 5 },
+                          { label: '$2', field: 'coin_2', value: 2 },
+                          { label: '$1', field: 'coin_1', value: 1 },
+                          { label: '25¢', field: 'coin_0_25', value: 0.25 },
+                          { label: '10¢', field: 'coin_0_10', value: 0.10 },
+                          { label: '5¢', field: 'coin_0_05', value: 0.05 },
+                        ].map((item) => (
+                          <TableRow key={item.field}>
+                            <TableCell>{item.label}</TableCell>
+                            <TableCell align="center">
+                              <TextField
+                                type="number"
+                                size="small"
+                                inputProps={{ min: 0, style: { textAlign: 'center' } }}
+                                sx={{ width: 80 }}
+                                value={pettyCashDenominations[item.field] || 0}
+                                onChange={(e) => {
+                                  const val = Math.max(0, parseInt(e.target.value) || 0);
+                                  setPettyCashDenominations(prev => ({ ...prev, [item.field]: val }));
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell align="right">
+                              {formatCurrency((pettyCashDenominations[item.field] || 0) * item.value)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow>
+                          <TableCell colSpan={2}><strong>Total Payout</strong></TableCell>
+                          <TableCell align="right">
+                            <strong>{formatCurrency(calculateDenominationTotal(pettyCashDenominations))}</strong>
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </>
+              ) : (
+                <TextField
+                  fullWidth
+                  label="Payout Amount"
+                  type="number"
+                  value={pettyCashAmount}
+                  onChange={(e) => setPettyCashAmount(e.target.value)}
+                  inputProps={{ min: 0, step: '0.01' }}
+                  sx={{ mb: 2 }}
+                  required
+                />
+              )
+            )}
+
+            {/* Invoice/Receipt Number */}
+            <TextField
+              fullWidth
+              label="Invoice / Receipt Number (Optional)"
+              value={pettyCashInvoice}
+              onChange={(e) => setPettyCashInvoice(e.target.value)}
+              sx={{ mb: 2 }}
+            />
+
+            {/* Description */}
+            <TextField
+              fullWidth
+              label="Description"
+              multiline
+              rows={2}
+              value={pettyCashDescription}
+              onChange={(e) => setPettyCashDescription(e.target.value)}
+              required
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setPettyCashDialog(false);
+            resetPettyCashForm();
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handlePettyCashPayout}
+            variant="contained"
+            color="primary"
+            disabled={
+              !selectedPettyCashAccount ||
+              !pettyCashDescription.trim() ||
+              !pettyCashSourceSession ||
+              isStoreClosed ||
+              (pettyCashSourceSession && (
+                (pettyCashSourceSession.drawer_type === 'physical' ||
+                 ((pettyCashSourceSession.drawer_type === 'safe' || pettyCashSourceSession.drawer_type === 'master_safe') && drawerIndividualDenominationsPrefs.safe))
+                  ? calculateDenominationTotal(pettyCashDenominations) <= 0
+                  : (!pettyCashAmount || parseFloat(pettyCashAmount) <= 0)
+              ))
+            }
+          >
+            Complete Payout
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Send Inter-Store Transfer Dialog */}
+      <Dialog
+        open={interStoreTransferDialog}
+        onClose={() => setInterStoreTransferDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <StoreIcon />
+            Send Inter-Store Transfer
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {/* Source info */}
+            {interStoreTransferSourceSession && (
+              <Box sx={{ mb: 3, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+                <Typography variant="subtitle2" color="text.secondary">From</Typography>
+                <Typography variant="body1">
+                  {interStoreTransferSourceSession.drawer_name} - {currentStore?.store_name || 'This Store'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Balance: {formatCurrency(interStoreTransferSourceSession.current_expected_balance || 0)}
+                </Typography>
+              </Box>
+            )}
+
+            {/* Destination Store Selection */}
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel>Destination Store</InputLabel>
+              <Select
+                value={selectedDestinationStore}
+                onChange={(e) => setSelectedDestinationStore(e.target.value)}
+                label="Destination Store"
+              >
+                {stores.filter(s => !s.is_current_store && s.is_active).map((store) => (
+                  <MenuItem key={store.store_id} value={store.store_id}>
+                    {store.store_name} {store.store_code && `(${store.store_code})`}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {/* Transfer Amount */}
+            <TextField
+              fullWidth
+              label="Transfer Amount"
+              type="number"
+              value={interStoreTransferAmount}
+              onChange={(e) => setInterStoreTransferAmount(e.target.value)}
+              inputProps={{ min: 0, step: '0.01' }}
+              sx={{ mb: 2 }}
+              required
+            />
+
+            {/* Notes */}
+            <TextField
+              fullWidth
+              label="Notes (Optional)"
+              multiline
+              rows={2}
+              value={interStoreTransferNotes}
+              onChange={(e) => setInterStoreTransferNotes(e.target.value)}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setInterStoreTransferDialog(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSendInterStoreTransfer}
+            variant="contained"
+            color="primary"
+            disabled={
+              !selectedDestinationStore ||
+              !interStoreTransferSourceSession ||
+              isStoreClosed ||
+              !interStoreTransferAmount ||
+              parseFloat(interStoreTransferAmount) <= 0
+            }
+          >
+            Send Transfer
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Receive Inter-Store Transfer Dialog */}
+      <Dialog
+        open={receiveInterStoreDialog}
+        onClose={() => setReceiveInterStoreDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <StoreIcon />
+            Receive Inter-Store Transfer
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {pendingInterStoreTransfers.length === 0 ? (
+              <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                No pending inter-store transfers to receive.
+              </Typography>
+            ) : (
+              <>
+                {/* Pending Transfers List */}
+                <Typography variant="subtitle1" gutterBottom>
+                  Select a Transfer to Receive
+                </Typography>
+                <TableContainer component={Paper} variant="outlined" sx={{ mb: 3, maxHeight: 300 }}>
+                  <Table size="small" stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell padding="checkbox"></TableCell>
+                        <TableCell>Reference</TableCell>
+                        <TableCell>From Store</TableCell>
+                        <TableCell>Amount</TableCell>
+                        <TableCell>Sent By</TableCell>
+                        <TableCell>Sent At</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {pendingInterStoreTransfers.map((transfer) => (
+                        <TableRow
+                          key={transfer.transfer_id}
+                          hover
+                          selected={selectedPendingTransfer?.transfer_id === transfer.transfer_id}
+                          onClick={() => setSelectedPendingTransfer(transfer)}
+                          sx={{ cursor: 'pointer' }}
+                        >
+                          <TableCell padding="checkbox">
+                            <input
+                              type="radio"
+                              checked={selectedPendingTransfer?.transfer_id === transfer.transfer_id}
+                              onChange={() => setSelectedPendingTransfer(transfer)}
+                            />
+                          </TableCell>
+                          <TableCell>{transfer.reference_number}</TableCell>
+                          <TableCell>{transfer.source_store_name}</TableCell>
+                          <TableCell>{formatCurrency(transfer.amount)}</TableCell>
+                          <TableCell>{transfer.sent_by_name}</TableCell>
+                          <TableCell>{new Date(transfer.sent_at).toLocaleString()}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+
+                {/* Selected transfer details */}
+                {selectedPendingTransfer && (
+                  <Box sx={{ mb: 3, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Transfer Details
+                    </Typography>
+                    <Grid container spacing={2}>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" color="text.secondary">Reference</Typography>
+                        <Typography>{selectedPendingTransfer.reference_number}</Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" color="text.secondary">Amount</Typography>
+                        <Typography>{formatCurrency(selectedPendingTransfer.amount)}</Typography>
+                      </Grid>
+                      <Grid item xs={12}>
+                        <Typography variant="caption" color="text.secondary">Notes</Typography>
+                        <Typography>{selectedPendingTransfer.send_notes || 'No notes'}</Typography>
+                      </Grid>
+                    </Grid>
+                  </Box>
+                )}
+
+                {/* Destination Selection */}
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>Deposit Into</InputLabel>
+                  <Select
+                    value={receiveDestinationSession}
+                    onChange={(e) => setReceiveDestinationSession(e.target.value)}
+                    label="Deposit Into"
+                  >
+                    {allActiveSessions.map((session) => (
+                      <MenuItem key={session.session_id} value={session.session_id}>
+                        {session.drawer_name} ({formatCurrency(session.current_expected_balance || 0)})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                {/* Notes */}
+                <TextField
+                  fullWidth
+                  label="Receive Notes (Optional)"
+                  multiline
+                  rows={2}
+                  value={receiveInterStoreNotes}
+                  onChange={(e) => setReceiveInterStoreNotes(e.target.value)}
+                />
+              </>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReceiveInterStoreDialog(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleReceiveInterStoreTransfer}
+            variant="contained"
+            color="primary"
+            disabled={
+              !selectedPendingTransfer ||
+              !receiveDestinationSession ||
+              isStoreClosed
+            }
+          >
+            Receive Transfer
           </Button>
         </DialogActions>
       </Dialog>

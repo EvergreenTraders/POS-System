@@ -96,3 +96,8 @@ COMMENT ON COLUMN store_sessions.closed_by IS 'Employee who closed the store';
 
 -- Ensure session_id starts at 1000 for 4-digit IDs
 SELECT setval('store_sessions_session_id_seq', GREATEST(COALESCE((SELECT MAX(session_id) FROM store_sessions), 0) + 1, 1000), false);
+
+-- Add store_id to store_sessions table to associate sessions with specific stores
+ALTER TABLE store_sessions ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+UPDATE store_sessions SET store_id = 1 WHERE store_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_store_sessions_store_id ON store_sessions(store_id);
