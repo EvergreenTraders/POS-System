@@ -3406,7 +3406,7 @@ app.get('/api/drawer-config', async (req, res) => {
 
 // PUT /api/drawer-config - Update drawer configuration
 app.put('/api/drawer-config', async (req, res) => {
-  const { number_of_drawers } = req.body;
+  const { number_of_drawers, min_close, max_close } = req.body;
 
   if (number_of_drawers === undefined || number_of_drawers < 0 || number_of_drawers > 50) {
     return res.status(400).json({ error: 'number_of_drawers must be between 0 and 50' });
@@ -3450,13 +3450,16 @@ app.put('/api/drawer-config', async (req, res) => {
     const currentCount = currentDrawers.rows.length;
 
     if (number_of_drawers > currentCount) {
-      // Add new drawers for current store
+      // Add new drawers for current store with min/max values
+      const minCloseValue = min_close !== undefined ? parseFloat(min_close) : 0;
+      const maxCloseValue = max_close !== undefined ? parseFloat(max_close) : 0;
+      
       for (let i = currentCount + 1; i <= number_of_drawers; i++) {
         await pool.query(`
-          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id)
-          VALUES ($1, 'physical', TRUE, $2, $3)
-          ON CONFLICT (drawer_name, store_id) DO NOTHING
-        `, [`Drawer ${i}`, i, currentStoreId]);
+          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id, min_close, max_close)
+          VALUES ($1, 'physical', TRUE, $2, $3, $4, $5)
+          ON CONFLICT (drawer_name, store_id) DO UPDATE SET min_close = $4, max_close = $5
+        `, [`Drawer ${i}`, i, currentStoreId, minCloseValue, maxCloseValue]);
       }
     } else if (number_of_drawers < currentCount) {
       // Remove excess drawers - delete drawers beyond the new count
@@ -3761,7 +3764,7 @@ app.put('/api/drawers/:drawerId/sharing-mode', async (req, res) => {
 
 // PUT /api/safe-drawers-config - Update safe drawers configuration
 app.put('/api/safe-drawers-config', async (req, res) => {
-  const { number_of_safe_drawers } = req.body;
+  const { number_of_safe_drawers, min_close, max_close } = req.body;
 
   if (number_of_safe_drawers === undefined || number_of_safe_drawers < 0 || number_of_safe_drawers > 50) {
     return res.status(400).json({ error: 'number_of_safe_drawers must be between 0 and 50' });
@@ -3782,13 +3785,16 @@ app.put('/api/safe-drawers-config', async (req, res) => {
     const currentCount = currentSafeDrawers.rows.length;
 
     if (number_of_safe_drawers > currentCount) {
-      // Add new safe drawers for current store
+      // Add new safe drawers for current store with min/max values
+      const minCloseValue = min_close !== undefined ? parseFloat(min_close) : 0;
+      const maxCloseValue = max_close !== undefined ? parseFloat(max_close) : 0;
+      
       for (let i = currentCount + 1; i <= number_of_safe_drawers; i++) {
         await pool.query(`
-          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id)
-          VALUES ($1, 'safe', TRUE, $2, $3)
-          ON CONFLICT (drawer_name, store_id) DO NOTHING
-        `, [`Safe ${i}`, i, currentStoreId]);
+          INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id, min_close, max_close)
+          VALUES ($1, 'safe', TRUE, $2, $3, $4, $5)
+          ON CONFLICT (drawer_name, store_id) DO UPDATE SET min_close = $4, max_close = $5
+        `, [`Safe ${i}`, i, currentStoreId, minCloseValue, maxCloseValue]);
       }
     } else if (number_of_safe_drawers < currentCount) {
       // Remove excess safe drawers - delete drawers beyond the new count

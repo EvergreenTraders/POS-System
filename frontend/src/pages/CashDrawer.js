@@ -300,6 +300,7 @@ function CashDrawer() {
   useEffect(() => {
     fetchEmployees();
     fetchDrawers();
+    fetchConfigDrawers();
     fetchDiscrepancyThreshold();
     fetchMinMaxClose();
     fetchBlindCountPreference();
@@ -318,6 +319,9 @@ function CashDrawer() {
   useEffect(() => {
     if (tabValue === 2) {
       fetchJournalEntries();
+    }
+    if (tabValue === 3) {
+      fetchConfigDrawers();
     }
   }, [tabValue]);
 
@@ -2481,75 +2485,82 @@ function CashDrawer() {
 
         <Divider sx={{ mb: 3 }} />
 
-        {/* SAFE Section */}
-        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>SAFE</Typography>
-        <TableContainer sx={{ mb: 3 }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ bgcolor: '#1976d2' }}>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>SAFE</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {overviewData.safes.map((safe) => (
-                <TableRow
-                  key={safe.drawer_id}
-                  sx={{
-                    bgcolor: safe.status === 'OPEN' ? '#e3f2fd' : 'white',
-                    '&:hover': { bgcolor: safe.status === 'OPEN' ? '#bbdefb' : '#f5f5f5' }
-                  }}
-                >
-                  <TableCell>{safe.drawer_name}</TableCell>
-                  <TableCell>{safe.status}</TableCell>
-                  <TableCell>
-                    {safe.status === 'OPEN' && safe.balance !== null
-                      ? `$${parseFloat(safe.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : '—'}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        {/* SAFE and DRAWER Sections - Side by Side */}
+        <Grid container spacing={3} sx={{ mb: 3 }}>
+          {/* SAFE Section */}
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>SAFE</Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: '#1976d2' }}>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>SAFE</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {overviewData.safes.map((safe) => (
+                    <TableRow
+                      key={safe.drawer_id}
+                      sx={{
+                        bgcolor: safe.status === 'OPEN' ? '#e3f2fd' : 'white',
+                        '&:hover': { bgcolor: safe.status === 'OPEN' ? '#bbdefb' : '#f5f5f5' }
+                      }}
+                    >
+                      <TableCell>{safe.drawer_name}</TableCell>
+                      <TableCell>{safe.status}</TableCell>
+                      <TableCell>
+                        {safe.status === 'OPEN' && safe.balance !== null
+                          ? `$${parseFloat(safe.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : '—'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Grid>
 
-        {/* DRAWER Section */}
-        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>DRAWER</Typography>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ bgcolor: '#1976d2' }}>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>DRAWER</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
-                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Connected Employees</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {overviewData.drawers.map((drawer) => (
-                <TableRow
-                  key={drawer.drawer_id}
-                  sx={{
-                    bgcolor: drawer.status === 'OPEN' ? '#e3f2fd' : 'white',
-                    '&:hover': { bgcolor: drawer.status === 'OPEN' ? '#bbdefb' : '#f5f5f5' }
-                  }}
-                >
-                  <TableCell>{drawer.drawer_name}</TableCell>
-                  <TableCell>{drawer.status}</TableCell>
-                  <TableCell>{drawer.type}</TableCell>
-                  <TableCell>
-                    {drawer.status === 'OPEN' && drawer.balance !== null
-                      ? `$${parseFloat(drawer.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : '—'}
-                  </TableCell>
-                  <TableCell>{drawer.connected_employees || '—'}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+          {/* DRAWER Section */}
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>DRAWER</Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: '#1976d2' }}>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>DRAWER</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Connected Employees</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {overviewData.drawers.map((drawer) => (
+                    <TableRow
+                      key={drawer.drawer_id}
+                      sx={{
+                        bgcolor: drawer.status === 'OPEN' ? '#e3f2fd' : 'white',
+                        '&:hover': { bgcolor: drawer.status === 'OPEN' ? '#bbdefb' : '#f5f5f5' }
+                      }}
+                    >
+                      <TableCell>{drawer.drawer_name}</TableCell>
+                      <TableCell>{drawer.status}</TableCell>
+                      <TableCell>{drawer.type}</TableCell>
+                      <TableCell>
+                        {drawer.status === 'OPEN' && drawer.balance !== null
+                          ? `$${parseFloat(drawer.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : '—'}
+                      </TableCell>
+                      <TableCell>{drawer.connected_employees || '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Grid>
+        </Grid>
       </Paper>
 
       <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ mb: 3 }}>
@@ -3864,7 +3875,9 @@ function CashDrawer() {
                         </TableCell>
                         <TableCell>{drawer.drawer_name}</TableCell>
                         <TableCell>{drawer.is_active ? 'Y' : 'N'}</TableCell>
-                        <TableCell>{drawer.is_shared ? 'Shared' : 'Single'}</TableCell>
+                        <TableCell>
+                          {drawer.is_shared === null ? 'Shared' : (drawer.is_shared ? 'Shared' : 'Single')}
+                        </TableCell>
                         <TableCell>Balance</TableCell>
                         <TableCell>Blind</TableCell>
                         <TableCell>Open</TableCell>
