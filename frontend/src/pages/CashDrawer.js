@@ -45,6 +45,7 @@ import {
   Store as StoreIcon,
   ArrowForward as ArrowForwardIcon,
   SwapHoriz as SwapHorizIcon,
+  Assignment as AssignmentIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -89,6 +90,7 @@ function CashDrawer() {
   const [minMaxWarningDialog, setMinMaxWarningDialog] = useState(false);
   const [physicalTenderWarningDialog, setPhysicalTenderWarningDialog] = useState(false);
   const [showManagerOverrideView, setShowManagerOverrideView] = useState(false); // For showing expected values
+  const [quickReportDialog, setQuickReportDialog] = useState(false);
 
   // Manager approval form states
   const [managerUsername, setManagerUsername] = useState('');
@@ -771,6 +773,17 @@ function CashDrawer() {
     } catch (err) {
       console.error('Error fetching session details:', err);
       showSnackbar('Failed to load session details', 'error');
+    }
+  };
+
+  const openQuickReport = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/cash-drawer/${activeSession.session_id}/details`);
+      setSessionDetails(response.data);
+      setQuickReportDialog(true);
+    } catch (err) {
+      console.error('Error fetching quick report:', err);
+      showSnackbar('Failed to load drawer report', 'error');
     }
   };
 
@@ -2385,6 +2398,13 @@ function CashDrawer() {
                         onClick={() => fetchSessionDetails(activeSession.session_id)}
                       >
                         View Details
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        startIcon={<AssignmentIcon />}
+                        onClick={openQuickReport}
+                      >
+                        Quick Report
                       </Button>
                       <Button
                         variant="outlined"
@@ -4615,6 +4635,165 @@ function CashDrawer() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDetailsDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Quick Cash Drawer Report Dialog */}
+      <Dialog open={quickReportDialog} onClose={() => setQuickReportDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">Quick Drawer Report</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {new Date().toLocaleDateString()}
+            </Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {sessionDetails && (
+            <Box sx={{ pt: 1 }}>
+              {/* Header */}
+              <Typography variant="h5" gutterBottom>
+                {activeSession?.drawer_name}
+              </Typography>
+              <Grid container spacing={2} sx={{ mb: 2 }}>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Employee</Typography>
+                  <Typography>{sessionDetails.session.employee_name}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Status</Typography>
+                  <Box>{getStatusChip(sessionDetails.session.status)}</Box>
+                </Grid>
+              </Grid>
+
+              {/* Session Info */}
+              <Divider sx={{ my: 2 }} />
+              <Grid container spacing={2} sx={{ mb: 2 }}>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="text.secondary">Opened At</Typography>
+                  <Typography>{formatDateTime(sessionDetails.session.opened_at)}</Typography>
+                </Grid>
+                {sessionDetails.session.status === 'closed' && (
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">Closed At</Typography>
+                    <Typography>{formatDateTime(sessionDetails.session.closed_at)}</Typography>
+                  </Grid>
+                )}
+              </Grid>
+
+              {/* Opening Balance */}
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Opening Balance</Typography>
+              <Typography variant="h5">{formatCurrency(sessionDetails.session.opening_balance)}</Typography>
+
+              {/* Transactions Summary */}
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Transactions</Typography>
+              {(() => {
+                const txns = sessionDetails.transactions || [];
+                const salesTxns = txns.filter(t => t.transaction_type === 'sale');
+                const refundTxns = txns.filter(t => t.transaction_type === 'refund');
+                const totalSales = salesTxns.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+                const totalRefunds = refundTxns.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+                const netCash = txns.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+
+                return txns.length === 0 ? (
+                  <Typography color="text.secondary">No transactions yet</Typography>
+                ) : (
+                  <Grid container spacing={2}>
+                    <Grid item xs={4}>
+                      <Typography variant="body2" color="text.secondary">Sales</Typography>
+                      <Typography>{salesTxns.length} transactions</Typography>
+                      <Typography color="success.main" sx={{ fontWeight: 600 }}>{formatCurrency(totalSales)}</Typography>
+                    </Grid>
+                    <Grid item xs={4}>
+                      <Typography variant="body2" color="text.secondary">Refunds</Typography>
+                      <Typography>{refundTxns.length} transactions</Typography>
+                      <Typography color="error.main" sx={{ fontWeight: 600 }}>{formatCurrency(Math.abs(totalRefunds))}</Typography>
+                    </Grid>
+                    <Grid item xs={4}>
+                      <Typography variant="body2" color="text.secondary">Net Cash</Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 600 }}>{formatCurrency(netCash)}</Typography>
+                    </Grid>
+                  </Grid>
+                );
+              })()}
+
+              {/* Adjustments */}
+              {sessionDetails.adjustments && sessionDetails.adjustments.length > 0 && (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Adjustments</Typography>
+                  <TableContainer>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Type</TableCell>
+                          <TableCell align="right">Amount</TableCell>
+                          <TableCell>Reason</TableCell>
+                          <TableCell>Performed By</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {sessionDetails.adjustments.map((adj) => (
+                          <TableRow key={adj.adjustment_id}>
+                            <TableCell sx={{ textTransform: 'capitalize' }}>
+                              {adj.adjustment_type.replace(/_/g, ' ')}
+                            </TableCell>
+                            <TableCell align="right" sx={{
+                              color: parseFloat(adj.amount) >= 0 ? 'success.main' : 'error.main'
+                            }}>
+                              {formatCurrency(adj.amount)}
+                            </TableCell>
+                            <TableCell>{adj.reason}</TableCell>
+                            <TableCell>{adj.performed_by_name}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </>
+              )}
+
+              {/* Expected Balance - respect blind count mode */}
+              {(!isBlindCount || sessionDetails.session.status === 'closed') && (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                    {sessionDetails.session.status === 'closed' ? 'Expected Balance' : 'Current Expected Balance'}
+                  </Typography>
+                  <Typography variant="h4" color="primary.main">
+                    {formatCurrency(sessionDetails.session.current_expected_balance || sessionDetails.session.expected_balance)}
+                  </Typography>
+                </>
+              )}
+
+              {/* Closing Summary - only for closed sessions */}
+              {sessionDetails.session.status === 'closed' && (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>Closing Summary</Typography>
+                  <Grid container spacing={2}>
+                    <Grid item xs={4}>
+                      <Typography variant="body2" color="text.secondary">Actual Balance</Typography>
+                      <Typography variant="h6">{formatCurrency(sessionDetails.session.actual_balance)}</Typography>
+                    </Grid>
+                    <Grid item xs={4}>
+                      <Typography variant="body2" color="text.secondary">Discrepancy</Typography>
+                      <Box sx={{ mt: 0.5 }}>{getDiscrepancyChip(sessionDetails.session.discrepancy)}</Box>
+                    </Grid>
+                    <Grid item xs={4}>
+                      <Typography variant="body2" color="text.secondary">Closing Notes</Typography>
+                      <Typography>{sessionDetails.session.closing_notes || 'None'}</Typography>
+                    </Grid>
+                  </Grid>
+                </>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setQuickReportDialog(false)}>Close</Button>
         </DialogActions>
       </Dialog>
 

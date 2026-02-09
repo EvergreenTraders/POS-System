@@ -55,15 +55,15 @@ COMMENT ON COLUMN drawers.drawer_type IS 'Type of drawer: safe (vault/safe - mul
 COMMENT ON COLUMN drawers.is_active IS 'Whether this drawer is currently active and usable';
 COMMENT ON COLUMN drawers.display_order IS 'Order in which drawers should be displayed in the UI';
 
--- Insert default safe drawer
-INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
-VALUES ('Safe', 'safe', TRUE, 0)
-ON CONFLICT (drawer_name) DO NOTHING;
+-- Insert default safe drawer for store 1
+INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id)
+VALUES ('Safe', 'safe', TRUE, 0, 1)
+ON CONFLICT (drawer_name, store_id) DO NOTHING;
 
--- Insert default master safe drawer
-INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order)
-VALUES ('Master Safe', 'master_safe', TRUE, 0)
-ON CONFLICT (drawer_name) DO NOTHING;
+-- Insert default master safe drawer for store 1
+INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id)
+VALUES ('Master Safe', 'master_safe', TRUE, 0, 1)
+ON CONFLICT (drawer_name, store_id) DO NOTHING;
 
 -- Create cash_drawer_sessions table
 CREATE TABLE IF NOT EXISTS cash_drawer_sessions (
@@ -710,3 +710,13 @@ COMMENT ON COLUMN petty_cash_payouts.invoice_number IS 'Invoice or receipt numbe
 ALTER TABLE drawers ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
 UPDATE drawers SET store_id = 1 WHERE store_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_drawers_store_id ON drawers(store_id);
+
+-- Replace single drawer_name unique constraint with per-store unique (drawer_name + store_id)
+ALTER TABLE drawers DROP CONSTRAINT IF EXISTS drawers_drawer_name_key;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'drawers_drawer_name_store_unique'
+  ) THEN
+    ALTER TABLE drawers ADD CONSTRAINT drawers_drawer_name_store_unique UNIQUE (drawer_name, store_id);
+  END IF;
+END $$;
