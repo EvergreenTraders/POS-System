@@ -104,6 +104,8 @@ function CashDrawer() {
   const [openingDiscrepancyDialog, setOpeningDiscrepancyDialog] = useState(false);
   const [managerApprovalDialog, setManagerApprovalDialog] = useState(false);
   const [minMaxWarningDialog, setMinMaxWarningDialog] = useState(false);
+  const [transferMinMaxWarningDialog, setTransferMinMaxWarningDialog] = useState(false);
+  const [transferMinMaxWarningData, setTransferMinMaxWarningData] = useState(null); // { resultingBalance, minClose, maxClose, drawerName, transferAmount }
   const [physicalTenderWarningDialog, setPhysicalTenderWarningDialog] = useState(false);
   const [showManagerOverrideView, setShowManagerOverrideView] = useState(false); // For showing expected values
   const [quickReportDialog, setQuickReportDialog] = useState(false);
@@ -2222,7 +2224,7 @@ function CashDrawer() {
     }
   };
 
-  const handleTransfer = async () => {
+  const handleTransfer = async (bypassMinMaxWarning = false) => {
     if (!transferSource || !transferDestination) {
       showSnackbar('Please select both source and destination', 'error');
       return;
@@ -2240,6 +2242,45 @@ function CashDrawer() {
     if (totalTransfer <= 0) {
       showSnackbar('Please enter amounts to transfer', 'error');
       return;
+    }
+
+    // Check min/max range for destination drawer (cash only)
+    if (!bypassMinMaxWarning && cashTotal > 0) {
+      // Get destination drawer info to check min/max
+      const destinationDrawer = allDrawers.find(d => d.drawer_id === transferDestination.drawer_id);
+      if (destinationDrawer) {
+        const minCloseValue = parseFloat(destinationDrawer.min_close || 0);
+        const maxCloseValue = parseFloat(destinationDrawer.max_close || 0);
+        
+        // Get current expected balance for destination
+        const currentBalance = parseFloat(transferDestination.current_expected_balance || 0);
+        // Calculate resulting balance after transfer (cash only affects balance)
+        const resultingBalance = currentBalance + cashTotal;
+        
+        // Check if resulting balance is outside range
+        let isOutsideRange = false;
+        if (minCloseValue > 0 && maxCloseValue > 0) {
+          isOutsideRange = resultingBalance < minCloseValue || resultingBalance > maxCloseValue;
+        } else if (minCloseValue > 0) {
+          isOutsideRange = resultingBalance < minCloseValue;
+        } else if (maxCloseValue > 0) {
+          isOutsideRange = resultingBalance > maxCloseValue;
+        }
+        
+        if (isOutsideRange) {
+          // Show warning dialog
+          setTransferMinMaxWarningData({
+            resultingBalance,
+            minClose: minCloseValue,
+            maxClose: maxCloseValue,
+            drawerName: transferDestination.drawer_name,
+            transferAmount: cashTotal,
+            currentBalance
+          });
+          setTransferMinMaxWarningDialog(true);
+          return; // Don't proceed with transfer yet
+        }
+      }
     }
 
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -2689,21 +2730,41 @@ function CashDrawer() {
       {/* Active Session Tab */}
       {tabValue === 0 && (
         <>
-          {/* Low cash balance warnings - only for employee's connected drawers */}
+          {/* Cash balance warnings (min/max) - only for employee's connected drawers */}
           {(() => {
             const myDrawerIds = activeSessions.map(s => s.drawer_id);
             const allOverviewDrawers = [...(overviewData.safes || []), ...(overviewData.drawers || [])];
-            const lowBalanceDrawers = allOverviewDrawers.filter(d =>
-              d.status === 'OPEN' && d.min_close > 0 && parseFloat(d.balance) < parseFloat(d.min_close)
-              && myDrawerIds.includes(d.drawer_id)
-            );
-            return lowBalanceDrawers.length > 0 ? (
+            const balanceWarnings = allOverviewDrawers.filter(d => {
+              if (d.status !== 'OPEN' || !myDrawerIds.includes(d.drawer_id)) return false;
+              const balance = parseFloat(d.balance);
+              const minClose = parseFloat(d.min_close || 0);
+              const maxClose = parseFloat(d.max_close || 0);
+              return (minClose > 0 && balance < minClose) || (maxClose > 0 && balance > maxClose);
+            });
+            return balanceWarnings.length > 0 ? (
               <Box sx={{ mb: 2 }}>
-                {lowBalanceDrawers.map(d => (
-                  <Alert key={d.drawer_id} severity="warning" sx={{ mb: 1 }}>
-                    Low cash balance: <strong>{d.drawer_name}</strong> is at {formatCurrency(parseFloat(d.balance))} (minimum: {formatCurrency(parseFloat(d.min_close))})
-                  </Alert>
-                ))}
+                {balanceWarnings.map(d => {
+                  const balance = parseFloat(d.balance);
+                  const minClose = parseFloat(d.min_close || 0);
+                  const maxClose = parseFloat(d.max_close || 0);
+                  const isBelowMin = minClose > 0 && balance < minClose;
+                  const isAboveMax = maxClose > 0 && balance > maxClose;
+                  
+                  if (isBelowMin) {
+                    return (
+                      <Alert key={d.drawer_id} severity="warning" sx={{ mb: 1 }}>
+                        Low cash balance: <strong>{d.drawer_name}</strong> is at {formatCurrency(balance)} (minimum: {formatCurrency(minClose)})
+                      </Alert>
+                    );
+                  } else if (isAboveMax) {
+                    return (
+                      <Alert key={d.drawer_id} severity="warning" sx={{ mb: 1 }}>
+                        High cash balance: <strong>{d.drawer_name}</strong> is at {formatCurrency(balance)} (maximum: {formatCurrency(maxClose)})
+                      </Alert>
+                    );
+                  }
+                  return null;
+                })}
               </Box>
             ) : null;
           })()}
@@ -5658,12 +5719,79 @@ function CashDrawer() {
             Cancel
           </Button>
           <Button
-            onClick={handleTransfer}
+            onClick={() => handleTransfer(false)}
             variant="contained"
             color="primary"
             disabled={!transferSource || !transferDestination || isStoreClosed}
           >
             Complete Transfer
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Transfer Min/Max Warning Dialog */}
+      <Dialog open={transferMinMaxWarningDialog} onClose={() => setTransferMinMaxWarningDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarningIcon color="warning" />
+            <Typography variant="h6">Transfer Will Put Drawer Outside Recommended Range</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="warning">
+              This transfer will put the destination drawer outside its recommended min/max range.
+            </Alert>
+            {transferMinMaxWarningData && (
+              <Box>
+                <Typography variant="body1" gutterBottom>
+                  <strong>Destination Drawer:</strong> {transferMinMaxWarningData.drawerName}
+                </Typography>
+                <Typography variant="body1" gutterBottom>
+                  <strong>Current Balance:</strong> {formatCurrency(transferMinMaxWarningData.currentBalance)}
+                </Typography>
+                <Typography variant="body1" gutterBottom>
+                  <strong>Transfer Amount (Cash):</strong> {formatCurrency(transferMinMaxWarningData.transferAmount)}
+                </Typography>
+                <Typography variant="body1" gutterBottom>
+                  <strong>Resulting Balance:</strong> {formatCurrency(transferMinMaxWarningData.resultingBalance)}
+                </Typography>
+                {transferMinMaxWarningData.minClose > 0 && transferMinMaxWarningData.maxClose > 0 && (
+                  <Typography variant="body1" gutterBottom>
+                    <strong>Recommended Range:</strong> {formatCurrency(transferMinMaxWarningData.minClose)} - {formatCurrency(transferMinMaxWarningData.maxClose)}
+                  </Typography>
+                )}
+                {transferMinMaxWarningData.minClose > 0 && transferMinMaxWarningData.maxClose === 0 && (
+                  <Typography variant="body1" gutterBottom>
+                    <strong>Minimum Recommended:</strong> {formatCurrency(transferMinMaxWarningData.minClose)}
+                  </Typography>
+                )}
+                {transferMinMaxWarningData.maxClose > 0 && transferMinMaxWarningData.minClose === 0 && (
+                  <Typography variant="body1" gutterBottom>
+                    <strong>Maximum Recommended:</strong> {formatCurrency(transferMinMaxWarningData.maxClose)}
+                  </Typography>
+                )}
+              </Box>
+            )}
+            <Typography variant="body2" color="text.secondary">
+              This is a warning only. You can proceed with the transfer if the amount is correct, or cancel to adjust the transfer amount.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTransferMinMaxWarningDialog(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setTransferMinMaxWarningDialog(false);
+              handleTransfer(true); // Bypass warning and proceed with transfer
+            }}
+            variant="contained"
+            color="warning"
+            disabled={isStoreClosed}
+          >
+            Proceed with Transfer
           </Button>
         </DialogActions>
       </Dialog>

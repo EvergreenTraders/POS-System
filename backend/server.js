@@ -789,7 +789,7 @@ app.get('/api/cash-drawer/overview', async (req, res) => {
   }
 });
 
-// GET /api/cash-drawer/low-balance-alerts - Get drawers/safes where cash balance is below min_close
+// GET /api/cash-drawer/low-balance-alerts - Get drawers/safes where cash balance is below min_close or above max_close
 app.get('/api/cash-drawer/low-balance-alerts', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -798,18 +798,26 @@ app.get('/api/cash-drawer/low-balance-alerts', async (req, res) => {
         d.drawer_name,
         d.drawer_type,
         d.min_close,
+        d.max_close,
         ads.session_id,
         ads.current_expected_balance as current_balance,
-        ads.employee_id as opener_id
+        ads.employee_id as opener_id,
+        CASE
+          WHEN d.min_close > 0 AND ads.current_expected_balance < d.min_close THEN 'below_minimum'
+          WHEN d.max_close > 0 AND ads.current_expected_balance > d.max_close THEN 'above_maximum'
+          ELSE NULL
+        END as alert_type
       FROM active_drawer_sessions ads
       JOIN drawers d ON ads.drawer_id = d.drawer_id
-      WHERE d.min_close > 0
-        AND ads.current_expected_balance < d.min_close
+      WHERE (
+        (d.min_close > 0 AND ads.current_expected_balance < d.min_close)
+        OR (d.max_close > 0 AND ads.current_expected_balance > d.max_close)
+      )
         AND d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY d.drawer_type, d.drawer_name
     `);
 
-    // For each low-balance session, get connected employee IDs
+    // For each alert session, get connected employee IDs
     const alerts = await Promise.all(result.rows.map(async (row) => {
       const connectionsResult = await pool.query(`
         SELECT employee_id FROM drawer_session_connections
@@ -827,8 +835,8 @@ app.get('/api/cash-drawer/low-balance-alerts', async (req, res) => {
 
     res.json(alerts);
   } catch (error) {
-    console.error('Error fetching low balance alerts:', error);
-    res.status(500).json({ error: 'Failed to fetch low balance alerts' });
+    console.error('Error fetching balance alerts:', error);
+    res.status(500).json({ error: 'Failed to fetch balance alerts' });
   }
 });
 

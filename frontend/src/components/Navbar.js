@@ -52,7 +52,7 @@ function Navbar() {
   const [clockLoading, setClockLoading] = useState(false);
   const [clockOutDialogOpen, setClockOutDialogOpen] = useState(false);
   const [storeClosingPromptOpen, setStoreClosingPromptOpen] = useState(false);
-  const [lowBalanceAlerts, setLowBalanceAlerts] = useState([]);
+  const [balanceAlerts, setBalanceAlerts] = useState([]);
   const { cartItems } = useCart();
   const { user, logout, lockScreen } = useAuth();
   const { workingDate, isWorkingDateEnabled } = useWorkingDate();
@@ -90,11 +90,11 @@ function Navbar() {
     checkClockStatus();
   }, [user]);
 
-  // Poll for low cash balance alerts
+  // Poll for cash balance alerts (min and max)
   useEffect(() => {
     if (!user) return;
 
-    const checkLowBalance = async () => {
+    const checkBalanceAlerts = async () => {
       try {
         const response = await fetch(`${config.apiUrl}/cash-drawer/low-balance-alerts`);
         if (response.ok) {
@@ -104,15 +104,15 @@ function Navbar() {
           const myAlerts = alerts.filter(a =>
             a.connected_employee_ids.includes(userId)
           );
-          setLowBalanceAlerts(myAlerts);
+          setBalanceAlerts(myAlerts);
         }
       } catch (error) {
         // Silently fail - non-critical polling
       }
     };
 
-    checkLowBalance();
-    const interval = setInterval(checkLowBalance, 30000);
+    checkBalanceAlerts();
+    const interval = setInterval(checkBalanceAlerts, 30000);
     return () => clearInterval(interval);
   }, [user]);
 
@@ -514,18 +514,23 @@ function Navbar() {
                 />
               )}
 
-              {lowBalanceAlerts.length > 0 && (
+              {balanceAlerts.length > 0 && (
                 <Tooltip
-                  title={lowBalanceAlerts.map(a =>
-                    `${a.drawer_name}: $${parseFloat(a.current_balance).toFixed(2)} (min: $${parseFloat(a.min_close).toFixed(2)})`
-                  ).join('\n')}
+                  title={balanceAlerts.map(a => {
+                    if (a.alert_type === 'below_minimum') {
+                      return `${a.drawer_name}: $${parseFloat(a.current_balance).toFixed(2)} (min: $${parseFloat(a.min_close).toFixed(2)})`;
+                    } else if (a.alert_type === 'above_maximum') {
+                      return `${a.drawer_name}: $${parseFloat(a.current_balance).toFixed(2)} (max: $${parseFloat(a.max_close).toFixed(2)})`;
+                    }
+                    return `${a.drawer_name}: Balance alert`;
+                  }).join('\n')}
                 >
                   <IconButton
                     color="inherit"
                     onClick={() => navigate('/cash-drawer')}
                     sx={{ mr: 1 }}
                   >
-                    <Badge badgeContent={lowBalanceAlerts.length} color="error">
+                    <Badge badgeContent={balanceAlerts.length} color="error">
                       <WarningIcon sx={{ color: '#ffb74d' }} />
                     </Badge>
                   </IconButton>
