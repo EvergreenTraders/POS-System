@@ -32,6 +32,7 @@ import JewelryEdit from './pages/JewelryEdit';
 import SalesHistory from './pages/SalesHistory';
 import Layaway from './pages/Layaway';
 import CashDrawer from './pages/CashDrawer';
+import TimeClock from './pages/TimeClock';
 
 const theme = createTheme({
   palette: {
@@ -488,6 +489,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <CashDrawer />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/time-clock"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <TimeClock />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

@@ -25,6 +25,8 @@ import {
   Snackbar,
   Alert,
   CircularProgress,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -59,7 +61,8 @@ function Employees() {
     role: '',
     salary: '40000',
     status: 'Active',
-    discrepancyThreshold: ''
+    discrepancyThreshold: '',
+    trackHours: true
   });
 
   useEffect(() => {
@@ -94,7 +97,8 @@ function Employees() {
         salary: employee.salary,
         status: employee.status,
         password: '',
-        discrepancyThreshold: employee.discrepancy_threshold || ''
+        discrepancyThreshold: employee.discrepancy_threshold || '',
+        trackHours: employee.track_hours !== false
       });
     } else {
       setFormData({
@@ -108,6 +112,7 @@ function Employees() {
         salary: '40000',
         status: 'Active',
         discrepancyThreshold: '',
+        trackHours: true,
         autocomplete: 'off'
       });
     }
@@ -140,7 +145,8 @@ function Employees() {
           role: formData.role,
           salary: 40000,
           status: formData.status,
-          discrepancyThreshold: formData.discrepancyThreshold ? parseFloat(formData.discrepancyThreshold) : null
+          discrepancyThreshold: formData.discrepancyThreshold ? parseFloat(formData.discrepancyThreshold) : null,
+          trackHours: formData.trackHours
         });
 
         setEmployees([...employees, response.data]);
@@ -152,7 +158,8 @@ function Employees() {
       } else {
         await axios.put(`${API_BASE_URL}/employees/${selectedEmployee.employee_id}`, {
           ...formData,
-          discrepancyThreshold: formData.discrepancyThreshold ? parseFloat(formData.discrepancyThreshold) : null
+          discrepancyThreshold: formData.discrepancyThreshold ? parseFloat(formData.discrepancyThreshold) : null,
+          trackHours: formData.trackHours
         });
         setSnackbar({
           open: true,
@@ -258,6 +265,7 @@ function Employees() {
               <TableCell>Phone</TableCell>
               <TableCell>Role</TableCell>
               <TableCell>Discrepancy Threshold</TableCell>
+              <TableCell>Track Hours</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
@@ -279,6 +287,13 @@ function Employees() {
                   {employee.discrepancy_threshold !== null && employee.discrepancy_threshold !== undefined
                     ? `$${parseFloat(employee.discrepancy_threshold).toFixed(2)}`
                     : 'System Default'}
+                </TableCell>
+                <TableCell>
+                  <Chip
+                    label={employee.track_hours !== false ? 'Yes' : 'No'}
+                    color={employee.track_hours !== false ? 'success' : 'default'}
+                    size="small"
+                  />
                 </TableCell>
                 <TableCell>
                   <Chip
@@ -403,6 +418,15 @@ function Employees() {
               fullWidth
               helperText="Leave empty to use system default"
               inputProps={{ min: 0, step: 0.01 }}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.trackHours}
+                  onChange={(e) => setFormData(prev => ({ ...prev, trackHours: e.target.checked }))}
+                />
+              }
+              label="Track Hours"
             />
             {dialogMode === 'edit' && (
               <FormControl fullWidth required>

@@ -30,6 +30,7 @@ import {
   Schedule as LayawayIcon,
   PointOfSale as TransactionsIcon,
   AccountBalance as CashDrawerIcon,
+  AccessTime as TimeClockIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
@@ -164,6 +165,15 @@ function Sidebar() {
               <CashDrawerIcon />
             </ListItemIcon>
             {isOpen && <ListItemText primary="Cash Drawer" />}
+          </StyledListItem>
+        </StyledLink>
+
+        <StyledLink to="/time-clock">
+          <StyledListItem active={isActive('/time-clock')}>
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+              <TimeClockIcon />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Time Clock" />}
           </StyledListItem>
         </StyledLink>
 

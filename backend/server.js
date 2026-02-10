@@ -297,6 +297,11 @@ const storeClosedMiddleware = async (req, res, next) => {
 app.use(storeClosedMiddleware);
 
 // Authentication route
+// Ensure track_hours column exists on employees table
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS track_hours BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('track_hours migration:', err.message));
+
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { identifier, password, store_id } = req.body;
@@ -344,7 +349,8 @@ app.post('/api/auth/login', async (req, res) => {
           role: user.role,
           firstName: user.first_name,
           lastName: user.last_name,
-          image: imageBase64
+          image: imageBase64,
+          track_hours: user.track_hours !== false
         }
       });
     } else {
@@ -377,7 +383,8 @@ app.get('/api/employees', async (req, res) => {
         hire_date,
         salary,
         status,
-        discrepancy_threshold
+        discrepancy_threshold,
+        track_hours
       FROM employees
       ORDER BY employee_id ASC
     `;
@@ -391,7 +398,7 @@ app.get('/api/employees', async (req, res) => {
 
 app.post('/api/employees', async (req, res) => {
   try {
-    const { username, firstName, lastName, email, password, phone, role, salary, discrepancyThreshold } = req.body;
+    const { username, firstName, lastName, email, password, phone, role, salary, discrepancyThreshold, trackHours } = req.body;
 
     // Check if username or email already exists
     const checkQuery = 'SELECT * FROM employees WHERE username = $1 OR email = $2';
@@ -404,12 +411,12 @@ app.post('/api/employees', async (req, res) => {
     const query = `
       INSERT INTO employees (
         username, first_name, last_name, email, password, phone, role,
-        hire_date, salary, status, discrepancy_threshold
+        hire_date, salary, status, discrepancy_threshold, track_hours
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8, 'Active', $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8, 'Active', $9, $10)
       RETURNING
         employee_id, username, first_name, last_name, email, phone, role,
-        hire_date, salary, status, discrepancy_threshold
+        hire_date, salary, status, discrepancy_threshold, track_hours
     `;
     const result = await pool.query(query, [
       username,
@@ -420,7 +427,8 @@ app.post('/api/employees', async (req, res) => {
       phone || null,
       role,
       salary,
-      discrepancyThreshold || null
+      discrepancyThreshold || null,
+      trackHours !== false
     ]);
 
     res.status(201).json(result.rows[0]);
@@ -433,7 +441,7 @@ app.post('/api/employees', async (req, res) => {
 app.put('/api/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { username, firstName, lastName, email, phone, role, salary, status, discrepancyThreshold } = req.body;
+    const { username, firstName, lastName, email, phone, role, salary, status, discrepancyThreshold, trackHours } = req.body;
 
     // Check if username or email already exists for other employees
     const checkQuery = `
@@ -451,11 +459,12 @@ app.put('/api/employees/:id', async (req, res) => {
       UPDATE employees
       SET username = $1, first_name = $2, last_name = $3,
           email = $4, phone = $5, role = $6, salary = $7,
-          status = $8, discrepancy_threshold = $9, updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $10
+          status = $8, discrepancy_threshold = $9, track_hours = $10,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE employee_id = $11
       RETURNING
         employee_id, username, first_name, last_name, email, phone, role,
-        hire_date, salary, status, discrepancy_threshold
+        hire_date, salary, status, discrepancy_threshold, track_hours
     `;
     const result = await pool.query(query, [
       username,
@@ -467,6 +476,7 @@ app.put('/api/employees/:id', async (req, res) => {
       salary,
       status,
       discrepancyThreshold || null,
+      trackHours !== false,
       id
     ]);
 
@@ -678,6 +688,93 @@ app.get('/api/employee-sessions/closing-notification', async (req, res) => {
   } catch (error) {
     console.error('Error checking store closing notification:', error);
     res.status(500).json({ error: 'Failed to check notification' });
+  }
+});
+
+// GET /api/employee-sessions/report - Get time clock report for date range
+app.get('/api/employee-sessions/report', async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+
+    if (!start_date || !end_date) {
+      return res.status(400).json({ error: 'start_date and end_date are required' });
+    }
+
+    // Get current store
+    const storeResult = await pool.query(
+      'SELECT store_id, store_name, store_code FROM stores WHERE is_current_store = TRUE LIMIT 1'
+    );
+    const currentStore = storeResult.rows[0] || { store_id: null, store_name: 'Unknown', store_code: 'N/A' };
+
+    // Get employees for the current store only
+    const employeesResult = await pool.query(`
+      SELECT employee_id, first_name, last_name, username, status
+      FROM employees
+      WHERE status = 'Active'
+        AND ($1::int IS NULL OR store_id = $1)
+      ORDER BY first_name ASC
+    `, [currentStore.store_id]);
+
+    // Get sessions within date range
+    const sessionsResult = await pool.query(`
+      SELECT
+        es.session_id,
+        es.employee_id,
+        es.clock_in_time,
+        es.clock_out_time,
+        es.clock_in_notes,
+        es.clock_out_notes,
+        es.status
+      FROM employee_sessions es
+      WHERE es.clock_in_time >= $1::date
+        AND es.clock_in_time < ($2::date + INTERVAL '1 day')
+      ORDER BY es.clock_in_time ASC
+    `, [start_date, end_date]);
+
+    // Build report: group sessions by employee
+    const report = employeesResult.rows.map(emp => {
+      const empSessions = sessionsResult.rows.filter(s => s.employee_id === emp.employee_id);
+      return {
+        employee_id: emp.employee_id,
+        employee_name: `${emp.first_name} ${emp.last_name}`,
+        store_code: currentStore.store_code,
+        store_name: currentStore.store_name,
+        sessions: empSessions
+      };
+    });
+
+    res.json({
+      store: currentStore,
+      report
+    });
+  } catch (error) {
+    console.error('Error generating time clock report:', error);
+    res.status(500).json({ error: 'Failed to generate time clock report' });
+  }
+});
+
+// PUT /api/employee-sessions/:id - Update a session (manager edit)
+app.put('/api/employee-sessions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { clock_in_time, clock_out_time } = req.body;
+
+    const result = await pool.query(`
+      UPDATE employee_sessions
+      SET clock_in_time = COALESCE($1, clock_in_time),
+          clock_out_time = COALESCE($2, clock_out_time)
+      WHERE session_id = $3
+      RETURNING *
+    `, [clock_in_time || null, clock_out_time || null, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating employee session:', error);
+    res.status(500).json({ error: 'Failed to update session' });
   }
 });
 

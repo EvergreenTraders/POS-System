@@ -111,6 +111,7 @@ function CashDrawer() {
   const [quickReportDialog, setQuickReportDialog] = useState(false);
   const [quickReportTxnDetail, setQuickReportTxnDetail] = useState(null);
   const [quickReportTxnLoading, setQuickReportTxnLoading] = useState(false);
+  const [clockInWarningOpen, setClockInWarningOpen] = useState(false);
 
   // Transaction Journal states
   const [journalEntries, setJournalEntries] = useState([]);
@@ -1317,6 +1318,28 @@ function CashDrawer() {
     // Get current logged-in user
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = selectedEmployee || currentUser.id;
+
+    // Check if employee has track_hours enabled and is not clocked in
+    try {
+      const [empResponse, clockResponse] = await Promise.all([
+        fetch(`${config.apiUrl}/employees`),
+        fetch(`${config.apiUrl}/employee-sessions/clocked-in`)
+      ]);
+      if (empResponse.ok && clockResponse.ok) {
+        const employees = await empResponse.json();
+        const currentEmployee = employees.find(e => e.employee_id === currentUser.id);
+        if (currentEmployee && currentEmployee.track_hours !== false) {
+          const clockedInList = await clockResponse.json();
+          const isClockedIn = clockedInList.some(emp => emp.employee_id === currentUser.id);
+          if (!isClockedIn) {
+            setClockInWarningOpen(true);
+            return;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error checking clock-in status:', err);
+    }
 
     // Calculate balance based on opening mode (individual denominations vs drawer total)
     const calculatedBalance = isIndividualDenominations
@@ -6893,6 +6916,44 @@ function CashDrawer() {
             startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
           >
             Close Store
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Clock-In Warning Dialog */}
+      <Dialog
+        open={clockInWarningOpen}
+        onClose={() => setClockInWarningOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ bgcolor: '#f44336', color: 'white', fontWeight: 'bold' }}>
+          Clock In Required
+        </DialogTitle>
+        <DialogContent sx={{ pt: 3 }}>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            You must be clocked in before opening a drawer.
+          </Alert>
+          <Typography variant="body1">
+            Please go to the Time Clock to clock in first.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setClockInWarningOpen(false)}
+            color="inherit"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setClockInWarningOpen(false);
+              navigate('/time-clock');
+            }}
+            variant="contained"
+            color="primary"
+          >
+            Go to Time Clock
           </Button>
         </DialogActions>
       </Dialog>

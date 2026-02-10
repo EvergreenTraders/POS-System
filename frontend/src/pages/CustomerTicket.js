@@ -457,6 +457,36 @@ const CustomerTicket = () => {
   const { getCurrentDateObject } = useWorkingDate(); // Get working date for calculations
   const { isStoreClosed } = useStoreStatus();
 
+  // Clock-in warning
+  const [clockInWarningOpen, setClockInWarningOpen] = React.useState(false);
+
+  // Check clock-in status on mount for employees with track_hours enabled
+  React.useEffect(() => {
+    const checkClockInWarning = async () => {
+      if (!user) return;
+      try {
+        // Fetch current employee data from server to get up-to-date track_hours
+        const empResponse = await fetch(`${config.apiUrl}/employees`);
+        if (!empResponse.ok) return;
+        const employees = await empResponse.json();
+        const currentEmployee = employees.find(e => e.employee_id === user.id);
+        if (!currentEmployee || currentEmployee.track_hours === false) return;
+
+        const response = await fetch(`${config.apiUrl}/employee-sessions/clocked-in`);
+        if (response.ok) {
+          const clockedInList = await response.json();
+          const isClockedIn = clockedInList.some(emp => emp.employee_id === user.id);
+          if (!isClockedIn) {
+            setClockInWarningOpen(true);
+          }
+        }
+      } catch (err) {
+        console.error('Error checking clock-in status:', err);
+      }
+    };
+    checkClockInWarning();
+  }, [user]);
+
   // Pawn configuration for calculations
   const [interestRate, setInterestRate] = React.useState(2.9);
   const [frequencyDays, setFrequencyDays] = React.useState(30);
@@ -6036,8 +6066,46 @@ return (
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Clock-In Warning Dialog */}
+      <Dialog
+        open={clockInWarningOpen}
+        onClose={() => setClockInWarningOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ bgcolor: '#f44336', color: 'white', fontWeight: 'bold' }}>
+          Clock In Required
+        </DialogTitle>
+        <DialogContent sx={{ pt: 3 }}>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            You must be clocked in before accessing the transactions screen.
+          </Alert>
+          <Typography variant="body1">
+            Please go to the Time Clock to clock in first.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setClockInWarningOpen(false)}
+            color="inherit"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setClockInWarningOpen(false);
+              navigate('/time-clock');
+            }}
+            variant="contained"
+            color="primary"
+          >
+            Go to Time Clock
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };
-                      
+
 export default CustomerTicket;

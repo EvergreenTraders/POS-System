@@ -88,6 +88,12 @@ function Navbar() {
     };
 
     checkClockStatus();
+
+    // Listen for clock status changes from other pages (e.g. TimeClock)
+    window.addEventListener('clockStatusChanged', checkClockStatus);
+    return () => {
+      window.removeEventListener('clockStatusChanged', checkClockStatus);
+    };
   }, [user]);
 
   // Poll for cash balance alerts (min and max)
@@ -272,6 +278,7 @@ function Navbar() {
         const data = await response.json();
         setClockedIn(true);
         setClockInTime(new Date(data.clock_in_time));
+        window.dispatchEvent(new CustomEvent('clockStatusChanged'));
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to clock in');
@@ -307,6 +314,7 @@ function Navbar() {
       if (response.ok) {
         setClockedIn(false);
         setClockInTime(null);
+        window.dispatchEvent(new CustomEvent('clockStatusChanged'));
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to clock out');
@@ -561,7 +569,13 @@ function Navbar() {
                   color="inherit"
                 >
                   <Avatar
-                    sx={{ width: 40, height: 40, bgcolor: 'secondary.main' }}
+                    sx={{
+                      width: 40,
+                      height: 40,
+                      bgcolor: 'secondary.main',
+                      border: 3,
+                      borderColor: (user?.track_hours === false || clockedIn) ? '#4caf50' : '#f44336',
+                    }}
                     src={user.image ? `data:image/jpeg;base64,${user.image}` : undefined}
                   >
                     {!user.image && (user.username ? user.username[0].toUpperCase() : <AccountIcon />)}
