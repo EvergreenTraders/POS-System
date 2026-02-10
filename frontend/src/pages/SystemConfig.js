@@ -3418,7 +3418,7 @@ function SystemConfig() {
               Employee Configuration
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Configure per-employee permissions. Changes take effect immediately.
+              Configure per-employee permissions, transfer limits, and petty cash settings. Changes take effect immediately.
             </Typography>
 
             {employeePermissionsLoading ? (
@@ -3426,8 +3426,8 @@ function SystemConfig() {
                 <CircularProgress />
               </Box>
             ) : (
-              <TableContainer>
-                <Table size="small">
+              <TableContainer sx={{ overflowX: 'auto' }}>
+                <Table size="small" stickyHeader sx={{ minWidth: 1200 }}>
                   <TableHead>
                     <TableRow>
                       <TableCell>Employee</TableCell>
@@ -3436,78 +3436,6 @@ function SystemConfig() {
                       <TableCell align="center">Can Open Drawer</TableCell>
                       <TableCell align="center">Can View Drawer</TableCell>
                       <TableCell align="center">Can View Safe</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {employeePermissions.map((emp) => (
-                      <TableRow key={emp.employee_id}>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight={500}>
-                            {emp.first_name} {emp.last_name}
-                          </Typography>
-                          <Chip label={emp.role} size="small" sx={{ mt: 0.5 }} />
-                        </TableCell>
-                        <TableCell align="center">
-                          <Switch
-                            checked={emp.track_hours !== false}
-                            onChange={() => handlePermissionToggle(emp.employee_id, 'track_hours', emp.track_hours !== false)}
-                            color="primary"
-                          />
-                        </TableCell>
-                        <TableCell align="center">
-                          <Switch
-                            checked={emp.can_open_store !== false}
-                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_open_store', emp.can_open_store !== false)}
-                            color="primary"
-                          />
-                        </TableCell>
-                        <TableCell align="center">
-                          <Switch
-                            checked={emp.can_open_drawer !== false}
-                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_open_drawer', emp.can_open_drawer !== false)}
-                            color="primary"
-                          />
-                        </TableCell>
-                        <TableCell align="center">
-                          <Switch
-                            checked={emp.can_view_drawer !== false}
-                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_view_drawer', emp.can_view_drawer !== false)}
-                            color="primary"
-                          />
-                        </TableCell>
-                        <TableCell align="center">
-                          <Switch
-                            checked={emp.can_view_safe !== false}
-                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_view_safe', emp.can_view_safe !== false)}
-                            color="primary"
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-          </ConfigSection>
-
-          <ConfigSection>
-            <Typography variant="h6" gutterBottom>
-              Transfer & Cash Handling
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Configure per-employee transfer restrictions, limits, and petty cash permissions.
-            </Typography>
-
-            {employeePermissionsLoading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <CircularProgress />
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Employee</TableCell>
                       <TableCell align="center">Over/Short Limit</TableCell>
                       <TableCell align="center">Transfers Allowed</TableCell>
                       <TableCell align="center">Transfer Limit</TableCell>
@@ -3524,6 +3452,46 @@ function SystemConfig() {
                           </Typography>
                           <Chip label={emp.role} size="small" sx={{ mt: 0.5 }} />
                         </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.track_hours !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'track_hours', emp.track_hours !== false)}
+                            color="primary"
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.can_open_store !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_open_store', emp.can_open_store !== false)}
+                            color="primary"
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.can_open_drawer !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_open_drawer', emp.can_open_drawer !== false)}
+                            color="primary"
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.can_view_drawer !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_view_drawer', emp.can_view_drawer !== false)}
+                            color="primary"
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.can_view_safe !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_view_safe', emp.can_view_safe !== false)}
+                            color="primary"
+                            size="small"
+                          />
+                        </TableCell>
                         <TableCell align="center">
                           <TextField
                             size="small"
@@ -3539,27 +3507,27 @@ function SystemConfig() {
                             InputProps={{ startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography> }}
                           />
                         </TableCell>
-                        <TableCell align="center">
-                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0 }}>
                             <FormControlLabel
                               control={<Checkbox size="small" checked={emp.transfer_allowed_drawer !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_drawer', emp.transfer_allowed_drawer !== false)} />}
                               label={<Typography variant="caption">Drawer</Typography>}
-                              sx={{ m: 0, height: 28 }}
+                              sx={{ m: 0 }}
                             />
                             <FormControlLabel
                               control={<Checkbox size="small" checked={emp.transfer_allowed_safe !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_safe', emp.transfer_allowed_safe !== false)} />}
                               label={<Typography variant="caption">Safe</Typography>}
-                              sx={{ m: 0, height: 28 }}
+                              sx={{ m: 0 }}
                             />
                             <FormControlLabel
                               control={<Checkbox size="small" checked={emp.transfer_allowed_bank !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_bank', emp.transfer_allowed_bank !== false)} />}
                               label={<Typography variant="caption">Bank</Typography>}
-                              sx={{ m: 0, height: 28 }}
+                              sx={{ m: 0 }}
                             />
                             <FormControlLabel
                               control={<Checkbox size="small" checked={emp.transfer_allowed_store !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_store', emp.transfer_allowed_store !== false)} />}
                               label={<Typography variant="caption">Store</Typography>}
-                              sx={{ m: 0, height: 28 }}
+                              sx={{ m: 0 }}
                             />
                           </Box>
                         </TableCell>
@@ -3578,11 +3546,12 @@ function SystemConfig() {
                             InputProps={{ startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography> }}
                           />
                         </TableCell>
-                        <TableCell align="center">
-                          <Switch
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
                             checked={emp.can_petty_cash !== false}
                             onChange={() => handlePermissionToggle(emp.employee_id, 'can_petty_cash', emp.can_petty_cash !== false)}
                             color="primary"
+                            size="small"
                           />
                         </TableCell>
                         <TableCell align="center">
