@@ -136,6 +136,7 @@ function TimeClock() {
         setClockedIn(true);
         setClockInTime(new Date(data.clock_in_time));
         fetchReport();
+        window.dispatchEvent(new CustomEvent('clockStatusChanged'));
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to clock in');
@@ -166,6 +167,7 @@ function TimeClock() {
         setClockedIn(false);
         setClockInTime(null);
         fetchReport();
+        window.dispatchEvent(new CustomEvent('clockStatusChanged'));
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to clock out');
@@ -368,6 +370,7 @@ function TimeClock() {
         setForceTarget(null);
         fetchClockStatus();
         fetchReport();
+        window.dispatchEvent(new CustomEvent('clockStatusChanged'));
       } else {
         const err = await response.json();
         setSnackbar({ open: true, message: err.error || 'Failed to force clock', severity: 'error' });

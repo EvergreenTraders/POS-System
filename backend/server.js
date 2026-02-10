@@ -297,6 +297,11 @@ const storeClosedMiddleware = async (req, res, next) => {
 app.use(storeClosedMiddleware);
 
 // Authentication route
+// Ensure track_hours column exists on employees table
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS track_hours BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('track_hours migration:', err.message));
+
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { identifier, password, store_id } = req.body;
@@ -344,7 +349,8 @@ app.post('/api/auth/login', async (req, res) => {
           role: user.role,
           firstName: user.first_name,
           lastName: user.last_name,
-          image: imageBase64
+          image: imageBase64,
+          track_hours: user.track_hours !== false
         }
       });
     } else {
@@ -377,7 +383,8 @@ app.get('/api/employees', async (req, res) => {
         hire_date,
         salary,
         status,
-        discrepancy_threshold
+        discrepancy_threshold,
+        track_hours
       FROM employees
       ORDER BY employee_id ASC
     `;
@@ -391,7 +398,7 @@ app.get('/api/employees', async (req, res) => {
 
 app.post('/api/employees', async (req, res) => {
   try {
-    const { username, firstName, lastName, email, password, phone, role, salary, discrepancyThreshold } = req.body;
+    const { username, firstName, lastName, email, password, phone, role, salary, discrepancyThreshold, trackHours } = req.body;
 
     // Check if username or email already exists
     const checkQuery = 'SELECT * FROM employees WHERE username = $1 OR email = $2';
@@ -404,12 +411,12 @@ app.post('/api/employees', async (req, res) => {
     const query = `
       INSERT INTO employees (
         username, first_name, last_name, email, password, phone, role,
-        hire_date, salary, status, discrepancy_threshold
+        hire_date, salary, status, discrepancy_threshold, track_hours
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8, 'Active', $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8, 'Active', $9, $10)
       RETURNING
         employee_id, username, first_name, last_name, email, phone, role,
-        hire_date, salary, status, discrepancy_threshold
+        hire_date, salary, status, discrepancy_threshold, track_hours
     `;
     const result = await pool.query(query, [
       username,
@@ -420,7 +427,8 @@ app.post('/api/employees', async (req, res) => {
       phone || null,
       role,
       salary,
-      discrepancyThreshold || null
+      discrepancyThreshold || null,
+      trackHours !== false
     ]);
 
     res.status(201).json(result.rows[0]);
@@ -433,7 +441,7 @@ app.post('/api/employees', async (req, res) => {
 app.put('/api/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { username, firstName, lastName, email, phone, role, salary, status, discrepancyThreshold } = req.body;
+    const { username, firstName, lastName, email, phone, role, salary, status, discrepancyThreshold, trackHours } = req.body;
 
     // Check if username or email already exists for other employees
     const checkQuery = `
@@ -451,11 +459,12 @@ app.put('/api/employees/:id', async (req, res) => {
       UPDATE employees
       SET username = $1, first_name = $2, last_name = $3,
           email = $4, phone = $5, role = $6, salary = $7,
-          status = $8, discrepancy_threshold = $9, updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $10
+          status = $8, discrepancy_threshold = $9, track_hours = $10,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE employee_id = $11
       RETURNING
         employee_id, username, first_name, last_name, email, phone, role,
-        hire_date, salary, status, discrepancy_threshold
+        hire_date, salary, status, discrepancy_threshold, track_hours
     `;
     const result = await pool.query(query, [
       username,
@@ -467,6 +476,7 @@ app.put('/api/employees/:id', async (req, res) => {
       salary,
       status,
       discrepancyThreshold || null,
+      trackHours !== false,
       id
     ]);
 
