@@ -463,8 +463,15 @@ const CustomerTicket = () => {
   // Check clock-in status on mount for employees with track_hours enabled
   React.useEffect(() => {
     const checkClockInWarning = async () => {
-      if (!user || user.track_hours === false) return;
+      if (!user) return;
       try {
+        // Fetch current employee data from server to get up-to-date track_hours
+        const empResponse = await fetch(`${config.apiUrl}/employees`);
+        if (!empResponse.ok) return;
+        const employees = await empResponse.json();
+        const currentEmployee = employees.find(e => e.employee_id === user.id);
+        if (!currentEmployee || currentEmployee.track_hours === false) return;
+
         const response = await fetch(`${config.apiUrl}/employee-sessions/clocked-in`);
         if (response.ok) {
           const clockedInList = await response.json();

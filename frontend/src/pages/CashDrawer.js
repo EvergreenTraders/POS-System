@@ -1320,20 +1320,25 @@ function CashDrawer() {
     const employeeId = selectedEmployee || currentUser.id;
 
     // Check if employee has track_hours enabled and is not clocked in
-    if (currentUser.track_hours !== false) {
-      try {
-        const response = await fetch(`${config.apiUrl}/employee-sessions/clocked-in`);
-        if (response.ok) {
-          const clockedInList = await response.json();
+    try {
+      const [empResponse, clockResponse] = await Promise.all([
+        fetch(`${config.apiUrl}/employees`),
+        fetch(`${config.apiUrl}/employee-sessions/clocked-in`)
+      ]);
+      if (empResponse.ok && clockResponse.ok) {
+        const employees = await empResponse.json();
+        const currentEmployee = employees.find(e => e.employee_id === currentUser.id);
+        if (currentEmployee && currentEmployee.track_hours !== false) {
+          const clockedInList = await clockResponse.json();
           const isClockedIn = clockedInList.some(emp => emp.employee_id === currentUser.id);
           if (!isClockedIn) {
             setClockInWarningOpen(true);
             return;
           }
         }
-      } catch (err) {
-        console.error('Error checking clock-in status:', err);
       }
+    } catch (err) {
+      console.error('Error checking clock-in status:', err);
     }
 
     // Calculate balance based on opening mode (individual denominations vs drawer total)
