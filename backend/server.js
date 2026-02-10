@@ -10005,14 +10005,44 @@ app.get('/api/payment-methods', async (req, res) => {
 // Create a new payment method
 app.post('/api/payment-methods', async (req, res) => {
   try {
-    const { method_name, method_value, is_active, is_physical } = req.body;
+    const { 
+      method_name, 
+      method_value, 
+      is_active, 
+      is_physical,
+      currency,
+      accounting_code,
+      store_designator,
+      post_type,
+      usage,
+      accepted_for_pawn_payments,
+      accepted_for_pawn_redeems
+    } = req.body;
 
     if (!method_name || !method_value) {
       return res.status(400).json({ error: 'Method name and method value are required' });
     }
 
+    // Check if method_name already exists (must be unique)
+    const nameCheck = await pool.query(
+      'SELECT id FROM payment_methods WHERE LOWER(method_name) = LOWER($1)',
+      [method_name]
+    );
+    if (nameCheck.rows.length > 0) {
+      return res.status(400).json({ error: 'A payment method with this name already exists' });
+    }
+
     // Validate method_value format (should be lowercase with underscores)
     const validMethodValue = method_value.toLowerCase().replace(/\s+/g, '_');
+
+    // Check if method_value already exists (must be unique)
+    const valueCheck = await pool.query(
+      'SELECT id FROM payment_methods WHERE method_value = $1',
+      [validMethodValue]
+    );
+    if (valueCheck.rows.length > 0) {
+      return res.status(400).json({ error: 'A payment method with this value already exists' });
+    }
 
     // Only the method_value 'cash' can be the default cash
     // Check if there's already a default cash and if this new one is trying to be default
@@ -10026,8 +10056,21 @@ app.post('/api/payment-methods', async (req, res) => {
     const isDefaultCash = validMethodValue === 'cash' && existingDefaultCash.rows.length === 0;
 
     const query = `
-      INSERT INTO payment_methods (method_name, method_value, is_active, is_physical, is_default_cash)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO payment_methods (
+        method_name, 
+        method_value, 
+        is_active, 
+        is_physical, 
+        is_default_cash,
+        currency,
+        accounting_code,
+        store_designator,
+        post_type,
+        usage,
+        accepted_for_pawn_payments,
+        accepted_for_pawn_redeems
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *
     `;
     const result = await pool.query(query, [
@@ -10035,7 +10078,14 @@ app.post('/api/payment-methods', async (req, res) => {
       validMethodValue,
       is_active !== undefined ? is_active : true,
       is_physical !== undefined ? is_physical : false,
-      isDefaultCash
+      isDefaultCash,
+      currency || null,
+      accounting_code || null,
+      store_designator !== undefined ? store_designator : false,
+      post_type || 'SUM',
+      usage || 'Both',
+      accepted_for_pawn_payments !== undefined ? accepted_for_pawn_payments : false,
+      accepted_for_pawn_redeems !== undefined ? accepted_for_pawn_redeems : false
     ]);
 
     res.status(201).json(result.rows[0]);
@@ -10052,7 +10102,19 @@ app.post('/api/payment-methods', async (req, res) => {
 app.put('/api/payment-methods/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { method_name, method_value, is_active, is_physical } = req.body;
+    const { 
+      method_name, 
+      method_value, 
+      is_active, 
+      is_physical,
+      currency,
+      accounting_code,
+      store_designator,
+      post_type,
+      usage,
+      accepted_for_pawn_payments,
+      accepted_for_pawn_redeems
+    } = req.body;
 
     if (!method_name || !method_value) {
       return res.status(400).json({ error: 'Method name and method value are required' });
@@ -10060,7 +10122,7 @@ app.put('/api/payment-methods/:id', async (req, res) => {
 
     // Check if this is the default cash - prevent changing method_value
     const currentMethod = await pool.query(
-      'SELECT is_default_cash, method_value FROM payment_methods WHERE id = $1',
+      'SELECT is_default_cash, method_value, method_name FROM payment_methods WHERE id = $1',
       [id]
     );
 
@@ -10068,10 +10130,32 @@ app.put('/api/payment-methods/:id', async (req, res) => {
       return res.status(404).json({ error: 'Payment method not found' });
     }
 
+    // Check if method_name already exists (must be unique, excluding current record)
+    if (method_name.toLowerCase() !== currentMethod.rows[0].method_name.toLowerCase()) {
+      const nameCheck = await pool.query(
+        'SELECT id FROM payment_methods WHERE LOWER(method_name) = LOWER($1) AND id != $2',
+        [method_name, id]
+      );
+      if (nameCheck.rows.length > 0) {
+        return res.status(400).json({ error: 'A payment method with this name already exists' });
+      }
+    }
+
     // If it's the default cash, don't allow changing the method_value
     const validMethodValue = currentMethod.rows[0].is_default_cash 
       ? currentMethod.rows[0].method_value 
       : method_value.toLowerCase().replace(/\s+/g, '_');
+
+    // Check if method_value already exists (must be unique, excluding current record)
+    if (validMethodValue !== currentMethod.rows[0].method_value) {
+      const valueCheck = await pool.query(
+        'SELECT id FROM payment_methods WHERE method_value = $1 AND id != $2',
+        [validMethodValue, id]
+      );
+      if (valueCheck.rows.length > 0) {
+        return res.status(400).json({ error: 'A payment method with this value already exists' });
+      }
+    }
 
     // If it's the default cash, ensure is_physical is always true
     const finalIsPhysical = currentMethod.rows[0].is_default_cash 
@@ -10084,8 +10168,15 @@ app.put('/api/payment-methods/:id', async (req, res) => {
           method_value = $2,
           is_active = $3,
           is_physical = $4,
+          currency = $5,
+          accounting_code = $6,
+          store_designator = $7,
+          post_type = $8,
+          usage = $9,
+          accepted_for_pawn_payments = $10,
+          accepted_for_pawn_redeems = $11,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = $5
+      WHERE id = $12
       RETURNING *
     `;
     const result = await pool.query(query, [
@@ -10093,6 +10184,13 @@ app.put('/api/payment-methods/:id', async (req, res) => {
       validMethodValue,
       is_active !== undefined ? is_active : true,
       finalIsPhysical,
+      currency || null,
+      accounting_code || null,
+      store_designator !== undefined ? store_designator : false,
+      post_type || 'SUM',
+      usage || 'Both',
+      accepted_for_pawn_payments !== undefined ? accepted_for_pawn_payments : false,
+      accepted_for_pawn_redeems !== undefined ? accepted_for_pawn_redeems : false,
       id
     ]);
 

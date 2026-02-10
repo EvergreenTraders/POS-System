@@ -252,7 +252,14 @@ function SystemConfig() {
     method_name: '',
     method_value: '',
     is_active: true,
-    is_physical: false
+    is_physical: false,
+    currency: '',
+    accounting_code: '',
+    store_designator: false,
+    post_type: 'SUM',
+    usage: 'Both',
+    accepted_for_pawn_payments: false,
+    accepted_for_pawn_redeems: false
   });
 
   const fetchDrawerConfig = async () => {
@@ -2262,11 +2269,22 @@ function SystemConfig() {
   // Handle add tender type
   const handleAddTenderType = () => {
     setEditingTenderType(null);
+    // Get default currency from currency types
+    const activeCurrencies = currencyTypes.filter(c => !c._delete);
+    const defaultCurrency = activeCurrencies.find(c => c.isDefault) || activeCurrencies[0] || { code: generalSettings.currency || 'CAD' };
+    
     setTenderTypeForm({
       method_name: '',
       method_value: '',
       is_active: true,
-      is_physical: false
+      is_physical: false,
+      currency: defaultCurrency.code || '',
+      accounting_code: '',
+      store_designator: false,
+      post_type: 'SUM',
+      usage: 'Both',
+      accepted_for_pawn_payments: false,
+      accepted_for_pawn_redeems: false
     });
     setTenderTypeDialogOpen(true);
   };
@@ -2278,7 +2296,14 @@ function SystemConfig() {
       method_name: tenderType.method_name,
       method_value: tenderType.method_value,
       is_active: tenderType.is_active,
-      is_physical: tenderType.is_physical
+      is_physical: tenderType.is_physical,
+      currency: tenderType.currency || '',
+      accounting_code: tenderType.accounting_code || '',
+      store_designator: tenderType.store_designator || false,
+      post_type: tenderType.post_type || 'SUM',
+      usage: tenderType.usage || 'Both',
+      accepted_for_pawn_payments: tenderType.accepted_for_pawn_payments || false,
+      accepted_for_pawn_redeems: tenderType.accepted_for_pawn_redeems || false
     });
     setTenderTypeDialogOpen(true);
   };
@@ -2987,15 +3012,20 @@ function SystemConfig() {
                 <CircularProgress />
               </Box>
             ) : (
-              <TableContainer>
+              <TableContainer sx={{ maxHeight: '70vh' }}>
                 <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Method Name</TableCell>
-                      <TableCell>Method Value</TableCell>
+                      <TableCell>Name</TableCell>
+                      <TableCell>Currency</TableCell>
+                      <TableCell>Accounting Code</TableCell>
+                      <TableCell align="center">Store Designator</TableCell>
+                      <TableCell align="center">Physical/Electronic</TableCell>
+                      <TableCell align="center">Post Type</TableCell>
+                      <TableCell align="center">Usage</TableCell>
+                      <TableCell align="center">Pawn Payments</TableCell>
+                      <TableCell align="center">Pawn Redeems</TableCell>
                       <TableCell align="center">Active</TableCell>
-                      <TableCell align="center">Physical Tender</TableCell>
-                      <TableCell align="center">Denominations</TableCell>
                       <TableCell align="center">Actions</TableCell>
                     </TableRow>
                   </TableHead>
@@ -3020,16 +3050,21 @@ function SystemConfig() {
                             </Box>
                           </TableCell>
                           <TableCell>
-                            <Typography variant="body2" color="text.secondary">
-                              {tenderType.method_value}
+                            <Typography variant="body2">
+                              {tenderType.currency || '—'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {tenderType.accounting_code || '—'}
                             </Typography>
                           </TableCell>
                           <TableCell align="center">
-                            <Chip
-                              label={tenderType.is_active ? 'Active' : 'Inactive'}
-                              color={tenderType.is_active ? 'success' : 'default'}
-                              size="small"
-                            />
+                            {tenderType.store_designator ? (
+                              <Chip label="Yes" color="primary" size="small" />
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">No</Typography>
+                            )}
                           </TableCell>
                           <TableCell align="center">
                             <Chip
@@ -3039,43 +3074,63 @@ function SystemConfig() {
                             />
                           </TableCell>
                           <TableCell align="center">
-                            {isDefaultCash ? (
-                              <Chip
-                                label="Tracks Denominations"
-                                color="info"
-                                size="small"
-                              />
+                            <Typography variant="body2">
+                              {tenderType.post_type || 'SUM'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="center">
+                            <Typography variant="body2">
+                              {tenderType.usage || 'Both'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="center">
+                            {tenderType.accepted_for_pawn_payments ? (
+                              <Chip label="Yes" color="success" size="small" />
                             ) : (
-                              <Typography variant="body2" color="text.secondary">
-                                Total Only
-                              </Typography>
+                              <Typography variant="body2" color="text.secondary">No</Typography>
                             )}
                           </TableCell>
                           <TableCell align="center">
-                            <IconButton
-                              onClick={() => handleEditTenderType(tenderType)}
+                            {tenderType.accepted_for_pawn_redeems ? (
+                              <Chip label="Yes" color="success" size="small" />
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">No</Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Chip
+                              label={tenderType.is_active ? 'Active' : 'Inactive'}
+                              color={tenderType.is_active ? 'success' : 'default'}
                               size="small"
-                              color="primary"
-                              title="Edit"
-                            >
-                              <EditIcon />
-                            </IconButton>
-                            <IconButton
-                              onClick={() => handleDeleteTenderType(tenderType)}
-                              size="small"
-                              color="error"
-                              title={isDefaultCash ? "Default cash cannot be deleted" : "Delete"}
-                              disabled={isDefaultCash}
-                            >
-                              <DeleteIcon />
-                            </IconButton>
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
+                              <IconButton
+                                onClick={() => handleEditTenderType(tenderType)}
+                                size="small"
+                                color="primary"
+                                title="Edit"
+                              >
+                                <EditIcon />
+                              </IconButton>
+                              <IconButton
+                                onClick={() => handleDeleteTenderType(tenderType)}
+                                size="small"
+                                color="error"
+                                title={isDefaultCash ? "Default cash cannot be deleted" : "Delete"}
+                                disabled={isDefaultCash}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Box>
                           </TableCell>
                         </TableRow>
                       );
                     })}
                     {tenderTypes.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} align="center">
+                        <TableCell colSpan={11} align="center">
                           No tender types found. Click "Add Tender Type" to create one.
                         </TableCell>
                       </TableRow>
@@ -4602,7 +4657,7 @@ function SystemConfig() {
       <Dialog
         open={tenderTypeDialogOpen}
         onClose={() => setTenderTypeDialogOpen(false)}
-        maxWidth="sm"
+        maxWidth="md"
         fullWidth
       >
         <DialogTitle>
@@ -4616,29 +4671,158 @@ function SystemConfig() {
               </Alert>
             )}
             <Grid container spacing={2}>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  label="Method Name"
+                  label="Name"
                   value={tenderTypeForm.method_name}
                   onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, method_name: e.target.value })}
-                  placeholder="e.g., Cash, Credit Card, Check"
+                  placeholder="e.g., Cash, Credit Card, Check, US Cash"
                   required
+                  helperText="Must be unique (e.g., can't create a second 'Cash', but can create 'US Cash')"
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
                   label="Method Value"
                   value={tenderTypeForm.method_value}
                   onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, method_value: e.target.value })}
-                  placeholder="e.g., cash, credit_card, check"
+                  placeholder="e.g., cash, credit_card, check, us_cash"
                   helperText="Lowercase with underscores (e.g., credit_card)"
                   required
                   disabled={editingTenderType?.is_default_cash}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Currency</InputLabel>
+                  <Select
+                    value={tenderTypeForm.currency || ''}
+                    onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, currency: e.target.value })}
+                    label="Currency"
+                    disabled={currencyTypes.filter(c => !c._delete).length === 0}
+                  >
+                    {currencyTypes.filter(c => !c._delete).map((currency) => (
+                      <MenuItem key={currency.code} value={currency.code}>
+                        {currency.code} - {currency.description}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                  {currencyTypes.filter(c => !c._delete).length === 1 && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Defaulted to the only configured currency
+                    </Typography>
+                  )}
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Accounting Code"
+                  value={tenderTypeForm.accounting_code}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '').slice(0, 8);
+                    setTenderTypeForm({ ...tenderTypeForm, accounting_code: value });
+                  }}
+                  placeholder="e.g., 5001"
+                  helperText="Up to 8 digits (will be appended with store code if store designator is enabled)"
+                  inputProps={{ maxLength: 8 }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={tenderTypeForm.store_designator}
+                      onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, store_designator: e.target.checked })}
+                    />
+                  }
+                  label="Store Designator"
+                />
+                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Append store number to accounting code (e.g., 5001-0001)
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Physical or Electronic</InputLabel>
+                  <Select
+                    value={tenderTypeForm.is_physical ? 'Physical' : 'Electronic'}
+                    onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, is_physical: e.target.value === 'Physical' })}
+                    label="Physical or Electronic"
+                    disabled={editingTenderType?.is_default_cash}
+                  >
+                    <MenuItem value="Physical">Physical</MenuItem>
+                    <MenuItem value="Electronic">Electronic</MenuItem>
+                  </Select>
+                  <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                    Electronic tenders auto-transfer to master safe at drawer close and to bank at store close. Physical tenders must be manually transferred.
+                  </Typography>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Post Type</InputLabel>
+                  <Select
+                    value={tenderTypeForm.post_type}
+                    onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, post_type: e.target.value })}
+                    label="Post Type"
+                  >
+                    <MenuItem value="SUM">SUM</MenuItem>
+                    <MenuItem value="COUNT">COUNT</MenuItem>
+                  </Select>
+                  <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                    SUM: Total posted at EOD. COUNT: Each transaction posted individually (e.g., e-transfers).
+                  </Typography>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Usage</InputLabel>
+                  <Select
+                    value={tenderTypeForm.usage}
+                    onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, usage: e.target.value })}
+                    label="Usage"
+                  >
+                    <MenuItem value="Payments">Payments</MenuItem>
+                    <MenuItem value="Pay-outs">Pay-outs</MenuItem>
+                    <MenuItem value="Both">Both</MenuItem>
+                  </Select>
+                  <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                    Payments: Customer pays store. Pay-outs: Store pays customer. Both: Can be used for either.
+                  </Typography>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={tenderTypeForm.accepted_for_pawn_payments}
+                      onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, accepted_for_pawn_payments: e.target.checked })}
+                    />
+                  }
+                  label="Accepted for Pawn Payments"
+                />
+                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Applies to extensions or renewals
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={tenderTypeForm.accepted_for_pawn_redeems}
+                      onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, accepted_for_pawn_redeems: e.target.checked })}
+                    />
+                  }
+                  label="Accepted for Pawn Redeems"
+                />
+                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Most credit cards don't allow paying off debts/loans
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
                 <FormControlLabel
                   control={
                     <Checkbox
@@ -4648,22 +4832,6 @@ function SystemConfig() {
                   }
                   label="Active"
                 />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={tenderTypeForm.is_physical}
-                      onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, is_physical: e.target.checked })}
-                      disabled={editingTenderType?.is_default_cash}
-                    />
-                  }
-                  label="Physical Tender"
-                />
-                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
-                  Physical tenders are kept in the drawer (cash, checks, gift cards). Electronic tenders are credit/debit cards, store credit, etc.
-                  {editingTenderType?.is_default_cash && ' The default cash is always physical.'}
-                </Typography>
               </Grid>
             </Grid>
           </Box>
