@@ -715,6 +715,8 @@ function SystemConfig() {
         trackHours: field === 'track_hours' ? !currentValue : employee.track_hours !== false,
         canOpenStore: field === 'can_open_store' ? !currentValue : employee.can_open_store !== false,
         canOpenDrawer: field === 'can_open_drawer' ? !currentValue : employee.can_open_drawer !== false,
+        canViewDrawer: field === 'can_view_drawer' ? !currentValue : employee.can_view_drawer !== false,
+        canViewSafe: field === 'can_view_safe' ? !currentValue : employee.can_view_safe !== false,
       };
 
       await axios.put(`${API_BASE_URL}/employees/${employeeId}/permissions`, payload);
@@ -3391,6 +3393,8 @@ function SystemConfig() {
                       <TableCell align="center">Track Hours</TableCell>
                       <TableCell align="center">Can Open/Close Store</TableCell>
                       <TableCell align="center">Can Open Drawer</TableCell>
+                      <TableCell align="center">Can View Drawer</TableCell>
+                      <TableCell align="center">Can View Safe</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -3425,6 +3429,20 @@ function SystemConfig() {
                           <Switch
                             checked={emp.can_open_drawer !== false}
                             onChange={() => handlePermissionToggle(emp.employee_id, 'can_open_drawer', emp.can_open_drawer !== false)}
+                            color="primary"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Switch
+                            checked={emp.can_view_drawer !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_view_drawer', emp.can_view_drawer !== false)}
+                            color="primary"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Switch
+                            checked={emp.can_view_safe !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_view_safe', emp.can_view_safe !== false)}
                             color="primary"
                           />
                         </TableCell>

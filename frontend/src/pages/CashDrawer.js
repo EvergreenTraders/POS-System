@@ -86,6 +86,9 @@ function CashDrawer() {
   const [history, setHistory] = useState([]);
   const [sessionDetails, setSessionDetails] = useState(null);
   const [overviewData, setOverviewData] = useState({ safes: [], drawers: [] });
+  const currentEmployee = employees.find(e => e.employee_id === currentUser?.id);
+  const canViewDrawer = !currentEmployee || currentEmployee.can_view_drawer !== false;
+  const canViewSafe = !currentEmployee || currentEmployee.can_view_safe !== false;
 
   // Store status states
   const [storeStatus, setStoreStatus] = useState({ status: 'closed', session: null, lastClosed: null });
@@ -2725,9 +2728,11 @@ function CashDrawer() {
                       <TableCell>{safe.drawer_name}</TableCell>
                       <TableCell>{safe.status}</TableCell>
                       <TableCell>
-                        {safe.status === 'OPEN' && safe.balance !== null
-                          ? `$${parseFloat(safe.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : '—'}
+                        {canViewSafe
+                          ? (safe.status === 'OPEN' && safe.balance !== null
+                            ? `$${parseFloat(safe.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : '—')
+                          : '***'}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -2763,9 +2768,11 @@ function CashDrawer() {
                       <TableCell>{drawer.status}</TableCell>
                       <TableCell>{drawer.type}</TableCell>
                       <TableCell>
-                        {drawer.status === 'OPEN' && drawer.balance !== null
-                          ? `$${parseFloat(drawer.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : '—'}
+                        {canViewDrawer
+                          ? (drawer.status === 'OPEN' && drawer.balance !== null
+                            ? `$${parseFloat(drawer.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : '—')
+                          : '***'}
                       </TableCell>
                       <TableCell>{drawer.connected_employees || '—'}</TableCell>
                     </TableRow>
@@ -2790,9 +2797,13 @@ function CashDrawer() {
           {/* Cash balance warnings (min/max) - only for employee's connected drawers */}
           {(() => {
             const myDrawerIds = activeSessions.map(s => s.drawer_id);
+            const safeIds = (overviewData.safes || []).map(s => s.drawer_id);
             const allOverviewDrawers = [...(overviewData.safes || []), ...(overviewData.drawers || [])];
             const balanceWarnings = allOverviewDrawers.filter(d => {
               if (d.status !== 'OPEN' || !myDrawerIds.includes(d.drawer_id)) return false;
+              const isSafeType = safeIds.includes(d.drawer_id);
+              if (isSafeType && !canViewSafe) return false;
+              if (!isSafeType && !canViewDrawer) return false;
               const balance = parseFloat(d.balance);
               const minClose = parseFloat(d.min_close || 0);
               const maxClose = parseFloat(d.max_close || 0);
@@ -2935,12 +2946,20 @@ function CashDrawer() {
                       </Grid>
                       <Grid item xs={12} md={4}>
                         <Typography variant="body2" color="text.secondary">Opening Balance</Typography>
-                        <Typography variant="h6">{formatCurrency(activeSession.opening_balance)}</Typography>
+                        <Typography variant="h6">
+                          {((activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                            ? formatCurrency(activeSession.opening_balance)
+                            : '***'}
+                        </Typography>
                       </Grid>
                       {!isBlindCount && (
                         <Grid item xs={12} md={4}>
                           <Typography variant="body2" color="text.secondary">Current Expected Balance</Typography>
-                          <Typography variant="h6">{formatCurrency(activeSession.current_expected_balance)}</Typography>
+                          <Typography variant="h6">
+                            {((activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                              ? formatCurrency(activeSession.current_expected_balance)
+                              : '***'}
+                          </Typography>
                         </Grid>
                       )}
                       <Grid item xs={12} md={6}>
@@ -3210,10 +3229,22 @@ function CashDrawer() {
                   <TableCell>{session.employee_name}</TableCell>
                   <TableCell>{formatDateTime(session.opened_at)}</TableCell>
                   <TableCell>{formatDateTime(session.closed_at)}</TableCell>
-                  <TableCell align="right">{formatCurrency(session.opening_balance)}</TableCell>
-                  <TableCell align="right">{formatCurrency(session.expected_balance)}</TableCell>
-                  <TableCell align="right">{formatCurrency(session.actual_balance)}</TableCell>
-                  <TableCell>{getDiscrepancyChip(session.discrepancy)}</TableCell>
+                  <TableCell align="right">
+                    {((session.drawer_type === 'safe' || session.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                      ? formatCurrency(session.opening_balance) : '***'}
+                  </TableCell>
+                  <TableCell align="right">
+                    {((session.drawer_type === 'safe' || session.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                      ? formatCurrency(session.expected_balance) : '***'}
+                  </TableCell>
+                  <TableCell align="right">
+                    {((session.drawer_type === 'safe' || session.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                      ? formatCurrency(session.actual_balance) : '***'}
+                  </TableCell>
+                  <TableCell>
+                    {((session.drawer_type === 'safe' || session.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                      ? getDiscrepancyChip(session.discrepancy) : '***'}
+                  </TableCell>
                   <TableCell>{getStatusChip(session.status)}</TableCell>
                   <TableCell>
                     <Button

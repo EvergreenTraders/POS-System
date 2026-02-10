@@ -309,6 +309,12 @@ pool.query(`
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_open_drawer BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('can_open_drawer migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_view_drawer BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_view_drawer migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_view_safe BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_view_safe migration:', err.message));
 
 app.post('/api/auth/login', async (req, res) => {
   try {
@@ -360,7 +366,9 @@ app.post('/api/auth/login', async (req, res) => {
           image: imageBase64,
           track_hours: user.track_hours !== false,
           can_open_store: user.can_open_store !== false,
-          can_open_drawer: user.can_open_drawer !== false
+          can_open_drawer: user.can_open_drawer !== false,
+          can_view_drawer: user.can_view_drawer !== false,
+          can_view_safe: user.can_view_safe !== false
         }
       });
     } else {
@@ -533,19 +541,22 @@ app.delete('/api/employees/:id', async (req, res) => {
 app.put('/api/employees/:id/permissions', async (req, res) => {
   try {
     const { id } = req.params;
-    const { trackHours, canOpenStore, canOpenDrawer } = req.body;
+    const { trackHours, canOpenStore, canOpenDrawer, canViewDrawer, canViewSafe } = req.body;
 
     const query = `
       UPDATE employees
       SET track_hours = $1, can_open_store = $2, can_open_drawer = $3,
+          can_view_drawer = $4, can_view_safe = $5,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $4
-      RETURNING employee_id, username, first_name, last_name, role, track_hours, can_open_store, can_open_drawer
+      WHERE employee_id = $6
+      RETURNING employee_id, username, first_name, last_name, role, track_hours, can_open_store, can_open_drawer, can_view_drawer, can_view_safe
     `;
     const result = await pool.query(query, [
       trackHours !== false,
       canOpenStore !== false,
       canOpenDrawer !== false,
+      canViewDrawer !== false,
+      canViewSafe !== false,
       id
     ]);
 
