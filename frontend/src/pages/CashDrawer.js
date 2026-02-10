@@ -5978,7 +5978,7 @@ function CashDrawer() {
               >
                 {banks.map((bank) => (
                   <MenuItem key={bank.bank_id} value={bank.bank_id}>
-                    {bank.bank_name} {bank.is_default && '(Default)'}
+                    {bank.pos_name || bank.bank_name} {bank.is_default && '(Default)'}
                   </MenuItem>
                 ))}
               </Select>
@@ -6062,7 +6062,7 @@ function CashDrawer() {
               >
                 {banks.map((bank) => (
                   <MenuItem key={bank.bank_id} value={bank.bank_id}>
-                    {bank.bank_name} {bank.is_default && '(Default)'}
+                    {bank.pos_name || bank.bank_name} {bank.is_default && '(Default)'}
                   </MenuItem>
                 ))}
               </Select>

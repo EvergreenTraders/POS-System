@@ -339,6 +339,23 @@ pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS petty_cash_limit DECIMAL(10,2) DEFAULT NULL
 `).catch(err => console.error('petty_cash_limit migration:', err.message));
 
+// Bank account migrations
+pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS pos_name VARCHAR(100)
+`).catch(err => console.error('banks pos_name migration:', err.message));
+pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS currency VARCHAR(10) NOT NULL DEFAULT 'CAD'
+`).catch(err => console.error('banks currency migration:', err.message));
+pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS accounting_number VARCHAR(20)
+`).catch(err => console.error('banks accounting_number migration:', err.message));
+pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_designator BOOLEAN NOT NULL DEFAULT FALSE
+`).catch(err => console.error('banks store_designator migration:', err.message));
+pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
+`).catch(err => console.error('banks store_id migration:', err.message));
+
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { identifier, password, store_id } = req.body;
@@ -2187,12 +2204,13 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
 
 // ============ BANK ENDPOINTS ============
 
-// GET /api/banks - Get all active banks
+// GET /api/banks - Get all active banks for current store
 app.get('/api/banks', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT * FROM banks
       WHERE is_active = TRUE
+        AND (store_id IS NULL OR store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1))
       ORDER BY is_default DESC, bank_name ASC
     `);
     res.json(result.rows);
@@ -2204,7 +2222,7 @@ app.get('/api/banks', async (req, res) => {
 
 // POST /api/banks - Create a new bank
 app.post('/api/banks', async (req, res) => {
-  const { bank_name, account_number, routing_number, is_default } = req.body;
+  const { pos_name, bank_name, account_number, currency, accounting_number, store_designator, is_default } = req.body;
 
   if (!bank_name) {
     return res.status(400).json({ error: 'bank_name is required' });
@@ -2214,16 +2232,20 @@ app.post('/api/banks', async (req, res) => {
   try {
     await client.query('BEGIN');
 
+    // Get current store id
+    const storeResult = await client.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const storeId = storeResult.rows.length > 0 ? storeResult.rows[0].store_id : null;
+
     // If this bank is set as default, unset other defaults
     if (is_default) {
       await client.query('UPDATE banks SET is_default = FALSE WHERE is_default = TRUE');
     }
 
     const result = await client.query(`
-      INSERT INTO banks (bank_name, account_number, routing_number, is_default)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO banks (pos_name, bank_name, account_number, currency, accounting_number, store_designator, is_default, store_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
-    `, [bank_name, account_number || null, routing_number || null, is_default || false]);
+    `, [pos_name || null, bank_name, account_number || null, currency || 'CAD', accounting_number || null, store_designator || false, is_default || false, storeId]);
 
     await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
@@ -2239,7 +2261,7 @@ app.post('/api/banks', async (req, res) => {
 // PUT /api/banks/:bankId - Update a bank
 app.put('/api/banks/:bankId', async (req, res) => {
   const { bankId } = req.params;
-  const { bank_name, account_number, routing_number, is_default, is_active } = req.body;
+  const { pos_name, bank_name, account_number, currency, accounting_number, store_designator, is_default, is_active } = req.body;
 
   const client = await pool.connect();
   try {
@@ -2252,15 +2274,18 @@ app.put('/api/banks/:bankId', async (req, res) => {
 
     const result = await client.query(`
       UPDATE banks SET
-        bank_name = COALESCE($1, bank_name),
-        account_number = COALESCE($2, account_number),
-        routing_number = COALESCE($3, routing_number),
-        is_default = COALESCE($4, is_default),
-        is_active = COALESCE($5, is_active),
+        pos_name = $1,
+        bank_name = COALESCE($2, bank_name),
+        account_number = $3,
+        currency = COALESCE($4, currency),
+        accounting_number = $5,
+        store_designator = COALESCE($6, store_designator),
+        is_default = COALESCE($7, is_default),
+        is_active = COALESCE($8, is_active),
         updated_at = CURRENT_TIMESTAMP
-      WHERE bank_id = $6
+      WHERE bank_id = $9
       RETURNING *
-    `, [bank_name, account_number, routing_number, is_default, is_active, bankId]);
+    `, [pos_name || null, bank_name, account_number || null, currency, accounting_number || null, store_designator, is_default, is_active, bankId]);
 
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -2275,6 +2300,24 @@ app.put('/api/banks/:bankId', async (req, res) => {
     res.status(500).json({ error: 'Failed to update bank' });
   } finally {
     client.release();
+  }
+});
+
+// DELETE /api/banks/:bankId - Soft delete a bank
+app.delete('/api/banks/:bankId', async (req, res) => {
+  const { bankId } = req.params;
+  try {
+    const result = await pool.query(
+      'UPDATE banks SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP WHERE bank_id = $1 RETURNING *',
+      [bankId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Bank not found' });
+    }
+    res.json({ message: 'Bank deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting bank:', error);
+    res.status(500).json({ error: 'Failed to delete bank' });
   }
 });
 

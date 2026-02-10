@@ -35,7 +35,7 @@ import {
   DialogContent,
   DialogActions
 } from '@mui/material';
-import { CloudUpload as UploadIcon, Delete as DeleteIcon, Store as StoreIcon } from '@mui/icons-material';
+import { CloudUpload as UploadIcon, Delete as DeleteIcon, Store as StoreIcon, Edit as EditIcon, Save as SaveIcon, Close as CancelIcon, Add as AddIcon } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
 import config from '../config';
@@ -150,6 +150,21 @@ function SystemConfig() {
     { code: 'CAD', description: 'Canadian Dollar', isDefault: true }
   ]);
   const [newCurrency, setNewCurrency] = useState({ code: '', description: '' });
+
+  // Bank accounts
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [bankEditId, setBankEditId] = useState(null);
+  const [bankEditData, setBankEditData] = useState({});
+  const [newBank, setNewBank] = useState({ pos_name: '', bank_name: '', account_number: '', currency: 'CAD', accounting_number: '', store_designator: false, is_default: false });
+  const [currentStoreId, setCurrentStoreId] = useState(null);
+
+  const formatAccountingNumber = (acctNum, storeDesignator) => {
+    if (!acctNum) return '—';
+    if (storeDesignator && currentStoreId != null) {
+      return `${acctNum}-${String(currentStoreId).padStart(4, '0')}`;
+    }
+    return acctNum;
+  };
 
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState(null);
@@ -696,8 +711,55 @@ function SystemConfig() {
     fetchAuthorizationTemplate();
     fetchReceiptConfig();
     fetchPawnConfig();
+    fetchBankAccounts();
+    axios.get(`${API_BASE_URL}/stores/current`).then(res => setCurrentStoreId(res.data.store_id)).catch(() => {});
   }, []);
-  
+
+  const fetchBankAccounts = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/banks`);
+      setBankAccounts(response.data);
+    } catch (err) {
+      console.error('Error fetching banks:', err);
+    }
+  };
+
+  const handleAddBank = async () => {
+    if (!newBank.bank_name.trim()) {
+      setSnackbar({ open: true, message: 'Bank name is required', severity: 'error' });
+      return;
+    }
+    try {
+      await axios.post(`${API_BASE_URL}/banks`, newBank);
+      setNewBank({ pos_name: '', bank_name: '', account_number: '', currency: 'CAD', accounting_number: '', store_designator: false, is_default: false });
+      fetchBankAccounts();
+      setSnackbar({ open: true, message: 'Bank added', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to add bank', severity: 'error' });
+    }
+  };
+
+  const handleSaveBank = async (bankId) => {
+    try {
+      await axios.put(`${API_BASE_URL}/banks/${bankId}`, bankEditData);
+      setBankEditId(null);
+      fetchBankAccounts();
+      setSnackbar({ open: true, message: 'Bank updated', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to update bank', severity: 'error' });
+    }
+  };
+
+  const handleDeleteBank = async (bankId) => {
+    try {
+      await axios.delete(`${API_BASE_URL}/banks/${bankId}`);
+      fetchBankAccounts();
+      setSnackbar({ open: true, message: 'Bank deleted', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to delete bank', severity: 'error' });
+    }
+  };
+
   // Fetch employee permissions
   const fetchEmployeePermissions = async () => {
     setEmployeePermissionsLoading(true);
@@ -2334,6 +2396,102 @@ function SystemConfig() {
                 </Typography>
               </Box>
             )}
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Bank Accounts
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Manage bank accounts for deposits, withdrawals, and accounting exports.
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>POS Name</TableCell>
+                    <TableCell>Bank Name</TableCell>
+                    <TableCell>Acct # (Last 4)</TableCell>
+                    <TableCell>Currency</TableCell>
+                    <TableCell>Accounting #</TableCell>
+                    <TableCell align="center">Default</TableCell>
+                    <TableCell align="center">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {bankAccounts.map((bank) => (
+                    <TableRow key={bank.bank_id}>
+                      {bankEditId === bank.bank_id ? (
+                        <>
+                          <TableCell><TextField size="small" value={bankEditData.pos_name || ''} onChange={(e) => setBankEditData(prev => ({ ...prev, pos_name: e.target.value }))} placeholder="e.g. Primary" /></TableCell>
+                          <TableCell><TextField size="small" value={bankEditData.bank_name || ''} onChange={(e) => setBankEditData(prev => ({ ...prev, bank_name: e.target.value }))} placeholder="e.g. Royal Bank" /></TableCell>
+                          <TableCell><TextField size="small" value={bankEditData.account_number || ''} onChange={(e) => setBankEditData(prev => ({ ...prev, account_number: e.target.value.slice(0, 4) }))} placeholder="Last 4" inputProps={{ maxLength: 4 }} sx={{ width: 80 }} /></TableCell>
+                          <TableCell><TextField size="small" value={bankEditData.currency || 'CAD'} onChange={(e) => setBankEditData(prev => ({ ...prev, currency: e.target.value.toUpperCase() }))} inputProps={{ maxLength: 3 }} sx={{ width: 70 }} /></TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <TextField size="small" value={bankEditData.accounting_number || ''} onChange={(e) => setBankEditData(prev => ({ ...prev, accounting_number: e.target.value }))} placeholder="e.g. 1001" inputProps={{ maxLength: 4 }} sx={{ width: 80 }} />
+                              <FormControlLabel
+                                control={<Checkbox size="small" checked={bankEditData.store_designator || false} onChange={(e) => setBankEditData(prev => ({ ...prev, store_designator: e.target.checked }))} />}
+                                label={<Typography variant="caption">Store #</Typography>}
+                                sx={{ m: 0 }}
+                              />
+                            </Box>
+                            {bankEditData.accounting_number && (
+                              <Typography variant="caption" color="text.secondary">
+                                Export: {formatAccountingNumber(bankEditData.accounting_number, bankEditData.store_designator)}
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="center"><Checkbox size="small" checked={bankEditData.is_default || false} onChange={(e) => setBankEditData(prev => ({ ...prev, is_default: e.target.checked }))} /></TableCell>
+                          <TableCell align="center">
+                            <IconButton size="small" color="primary" onClick={() => handleSaveBank(bank.bank_id)}><SaveIcon fontSize="small" /></IconButton>
+                            <IconButton size="small" onClick={() => setBankEditId(null)}><CancelIcon fontSize="small" /></IconButton>
+                          </TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell>{bank.pos_name || '—'}</TableCell>
+                          <TableCell>{bank.bank_name}</TableCell>
+                          <TableCell>{bank.account_number || '—'}</TableCell>
+                          <TableCell>{bank.currency || 'CAD'}</TableCell>
+                          <TableCell>{formatAccountingNumber(bank.accounting_number, bank.store_designator)}</TableCell>
+                          <TableCell align="center">{bank.is_default ? 'Yes' : '—'}</TableCell>
+                          <TableCell align="center">
+                            <IconButton size="small" onClick={() => { setBankEditId(bank.bank_id); setBankEditData({ pos_name: bank.pos_name || '', bank_name: bank.bank_name, account_number: bank.account_number || '', currency: bank.currency || 'CAD', accounting_number: bank.accounting_number || '', store_designator: bank.store_designator || false, is_default: bank.is_default || false }); }}><EditIcon fontSize="small" /></IconButton>
+                            <IconButton size="small" color="error" onClick={() => handleDeleteBank(bank.bank_id)}><DeleteIcon fontSize="small" /></IconButton>
+                          </TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  ))}
+                  <TableRow>
+                    <TableCell><TextField size="small" value={newBank.pos_name} onChange={(e) => setNewBank(prev => ({ ...prev, pos_name: e.target.value }))} placeholder="POS Name" /></TableCell>
+                    <TableCell><TextField size="small" value={newBank.bank_name} onChange={(e) => setNewBank(prev => ({ ...prev, bank_name: e.target.value }))} placeholder="Bank Name" /></TableCell>
+                    <TableCell><TextField size="small" value={newBank.account_number} onChange={(e) => setNewBank(prev => ({ ...prev, account_number: e.target.value.slice(0, 4) }))} placeholder="Last 4" inputProps={{ maxLength: 4 }} sx={{ width: 80 }} /></TableCell>
+                    <TableCell><TextField size="small" value={newBank.currency} onChange={(e) => setNewBank(prev => ({ ...prev, currency: e.target.value.toUpperCase() }))} inputProps={{ maxLength: 3 }} sx={{ width: 70 }} /></TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <TextField size="small" value={newBank.accounting_number} onChange={(e) => setNewBank(prev => ({ ...prev, accounting_number: e.target.value }))} placeholder="e.g. 1001" inputProps={{ maxLength: 4 }} sx={{ width: 80 }} />
+                        <FormControlLabel
+                          control={<Checkbox size="small" checked={newBank.store_designator} onChange={(e) => setNewBank(prev => ({ ...prev, store_designator: e.target.checked }))} />}
+                          label={<Typography variant="caption">Store #</Typography>}
+                          sx={{ m: 0 }}
+                        />
+                      </Box>
+                      {newBank.accounting_number && (
+                        <Typography variant="caption" color="text.secondary">
+                          Export: {formatAccountingNumber(newBank.accounting_number, newBank.store_designator)}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell align="center"><Checkbox size="small" checked={newBank.is_default} onChange={(e) => setNewBank(prev => ({ ...prev, is_default: e.target.checked }))} /></TableCell>
+                    <TableCell align="center">
+                      <IconButton size="small" color="primary" onClick={handleAddBank}><AddIcon fontSize="small" /></IconButton>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
           </ConfigSection>
 
           <ConfigSection>
