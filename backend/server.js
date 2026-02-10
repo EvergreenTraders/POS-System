@@ -696,13 +696,14 @@ app.get('/api/employee-sessions/report', async (req, res) => {
     );
     const currentStore = storeResult.rows[0] || { store_id: null, store_name: 'Unknown', store_code: 'N/A' };
 
-    // Get all employees for the current store (or all if no store)
+    // Get employees for the current store only
     const employeesResult = await pool.query(`
       SELECT employee_id, first_name, last_name, username, status
       FROM employees
       WHERE status = 'Active'
+        AND ($1::int IS NULL OR store_id = $1)
       ORDER BY first_name ASC
-    `);
+    `, [currentStore.store_id]);
 
     // Get sessions within date range
     const sessionsResult = await pool.query(`

@@ -25,6 +25,7 @@ import {
   Login as ClockInIcon,
   Logout as ClockOutIcon,
   Edit as EditIcon,
+  SupervisorAccount as ForceIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
@@ -53,6 +54,9 @@ function TimeClock() {
   const [editClockOut, setEditClockOut] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
+  // Session picker state (for employees with multiple sessions)
+  const [editPickerTarget, setEditPickerTarget] = useState(null);
+
   // Manager auth state
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [managerUsername, setManagerUsername] = useState('');
@@ -60,6 +64,12 @@ function TimeClock() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
+
+  // Force clock state
+  const [forceDialogOpen, setForceDialogOpen] = useState(false);
+  const [forceTarget, setForceTarget] = useState(null); // { employee_id, employee_name, action: 'in'|'out' }
+  const [forceLoading, setForceLoading] = useState(false);
+  const [clockedInEmployeeIds, setClockedInEmployeeIds] = useState(new Set());
 
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
@@ -69,6 +79,7 @@ function TimeClock() {
       const response = await fetch(`${config.apiUrl}/employee-sessions/clocked-in`);
       if (response.ok) {
         const clockedInEmployees = await response.json();
+        setClockedInEmployeeIds(new Set(clockedInEmployees.map(e => e.employee_id)));
         const currentSession = clockedInEmployees.find(
           emp => emp.employee_id === user.id
         );
@@ -232,6 +243,12 @@ function TimeClock() {
   // Edit handlers
   const handleEditClick = () => {
     if (isAuthorized) return; // already authorized
+    // Auto-authorize if the current user is a Store Manager or Store Owner
+    if (user?.role === 'Store Manager' || user?.role === 'Store Owner') {
+      setIsAuthorized(true);
+      setSnackbar({ open: true, message: 'Edit mode enabled', severity: 'success' });
+      return;
+    }
     setAuthDialogOpen(true);
   };
 
@@ -321,6 +338,44 @@ function TimeClock() {
       setSnackbar({ open: true, message: 'Failed to update time entry', severity: 'error' });
     } finally {
       setEditSaving(false);
+    }
+  };
+
+  // Force clock handlers
+  const handleForceClick = (employeeId, employeeName, action) => {
+    setForceTarget({ employee_id: employeeId, employee_name: employeeName, action });
+    setForceDialogOpen(true);
+  };
+
+  const confirmForceClock = async () => {
+    if (!forceTarget) return;
+    setForceLoading(true);
+    try {
+      const endpoint = forceTarget.action === 'in' ? 'clock-in' : 'clock-out';
+      const response = await fetch(`${config.apiUrl}/employee-sessions/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employee_id: forceTarget.employee_id }),
+      });
+
+      if (response.ok) {
+        setSnackbar({
+          open: true,
+          message: `${forceTarget.employee_name} force clocked ${forceTarget.action === 'in' ? 'IN' : 'OUT'}`,
+          severity: 'success',
+        });
+        setForceDialogOpen(false);
+        setForceTarget(null);
+        fetchClockStatus();
+        fetchReport();
+      } else {
+        const err = await response.json();
+        setSnackbar({ open: true, message: err.error || 'Failed to force clock', severity: 'error' });
+      }
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to force clock employee', severity: 'error' });
+    } finally {
+      setForceLoading(false);
     }
   };
 
@@ -511,16 +566,47 @@ function TimeClock() {
                           </TableCell>
                           {isAuthorized && (
                             <TableCell>
-                              {emp.sessions.map((session) => (
-                                <Button
-                                  key={session.session_id}
-                                  size="small"
-                                  onClick={() => openEditDialog(emp.employee_name, session)}
-                                  sx={{ minWidth: 'auto', p: 0.5 }}
-                                >
-                                  <EditIcon fontSize="small" />
-                                </Button>
-                              ))}
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                {hasSessions && (
+                                  <Button
+                                    size="small"
+                                    startIcon={<EditIcon />}
+                                    onClick={() => {
+                                      if (emp.sessions.length === 1) {
+                                        openEditDialog(emp.employee_name, emp.sessions[0]);
+                                      } else {
+                                        setEditPickerTarget(emp);
+                                      }
+                                    }}
+                                    sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+                                  >
+                                    Edit
+                                  </Button>
+                                )}
+                                {clockedInEmployeeIds.has(emp.employee_id) ? (
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    color="error"
+                                    startIcon={<ForceIcon />}
+                                    onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'out')}
+                                    sx={{ ml: 0.5, textTransform: 'none', fontSize: '0.75rem' }}
+                                  >
+                                    Force OUT
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    color="success"
+                                    startIcon={<ForceIcon />}
+                                    onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'in')}
+                                    sx={{ ml: 0.5, textTransform: 'none', fontSize: '0.75rem' }}
+                                  >
+                                    Force IN
+                                  </Button>
+                                )}
+                              </Box>
                             </TableCell>
                           )}
                         </TableRow>
@@ -680,6 +766,96 @@ function TimeClock() {
           </Button>
           <Button onClick={handleSaveEdit} variant="contained" disabled={editSaving}>
             {editSaving ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Session Picker Dialog (for employees with multiple sessions) */}
+      <Dialog
+        open={Boolean(editPickerTarget)}
+        onClose={() => setEditPickerTarget(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Select Session to Edit — {editPickerTarget?.employee_name}</DialogTitle>
+        <DialogContent>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Clock In</TableCell>
+                <TableCell>Clock Out</TableCell>
+                <TableCell />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {editPickerTarget?.sessions.map((session) => (
+                <TableRow key={session.session_id}>
+                  <TableCell>
+                    {new Date(session.clock_in_time).toLocaleTimeString('en-US', {
+                      hour: '2-digit', minute: '2-digit', hour12: true,
+                    })}
+                  </TableCell>
+                  <TableCell>
+                    {session.clock_out_time
+                      ? new Date(session.clock_out_time).toLocaleTimeString('en-US', {
+                          hour: '2-digit', minute: '2-digit', hour12: true,
+                        })
+                      : '\u2014'}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        openEditDialog(editPickerTarget.employee_name, session);
+                        setEditPickerTarget(null);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditPickerTarget(null)} color="inherit">
+            Cancel
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Force Clock Confirmation Dialog */}
+      <Dialog
+        open={forceDialogOpen}
+        onClose={() => { setForceDialogOpen(false); setForceTarget(null); }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>
+          Force Clock {forceTarget?.action === 'in' ? 'IN' : 'OUT'}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1">
+            Are you sure you want to force clock{' '}
+            <strong>{forceTarget?.employee_name}</strong>{' '}
+            {forceTarget?.action === 'in' ? 'IN' : 'OUT'}?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => { setForceDialogOpen(false); setForceTarget(null); }}
+            color="inherit"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmForceClock}
+            variant="contained"
+            color={forceTarget?.action === 'in' ? 'success' : 'error'}
+            disabled={forceLoading}
+          >
+            {forceLoading ? 'Processing...' : `Force Clock ${forceTarget?.action === 'in' ? 'IN' : 'OUT'}`}
           </Button>
         </DialogActions>
       </Dialog>
