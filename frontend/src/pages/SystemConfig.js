@@ -2559,7 +2559,14 @@ function SystemConfig() {
                             <Checkbox
                               size="small"
                               checked={bankEditData.store_designator || false}
-                              onChange={(e) => setBankEditData(prev => ({ ...prev, store_designator: e.target.checked }))}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setBankEditData(prev => ({
+                                  ...prev,
+                                  store_designator: checked,
+                                  store_number: checked && currentStoreId ? String(currentStoreId).padStart(4, '0') : ''
+                                }));
+                              }}
                               color="primary"
                             />
                           </TableCell>
@@ -2599,9 +2606,10 @@ function SystemConfig() {
                               checked={bank.store_designator || false}
                               onChange={async (e) => {
                                 const newValue = e.target.checked;
+                                const newStoreNumber = newValue && currentStoreId ? String(currentStoreId).padStart(4, '0') : null;
                                 // Optimistically update UI
                                 setBankAccounts(prev =>
-                                  prev.map(b => b.bank_id === bank.bank_id ? { ...b, store_designator: newValue } : b)
+                                  prev.map(b => b.bank_id === bank.bank_id ? { ...b, store_designator: newValue, store_number: newStoreNumber } : b)
                                 );
                                 try {
                                   await axios.put(`${API_BASE_URL}/banks/${bank.bank_id}`, {
@@ -2611,7 +2619,7 @@ function SystemConfig() {
                                     currency: bank.currency,
                                     accounting_number: bank.accounting_number,
                                     store_designator: newValue,
-                                    store_number: bank.store_number,
+                                    store_number: newStoreNumber,
                                     is_default: bank.is_default,
                                     is_active: bank.is_active
                                   });
@@ -2619,7 +2627,7 @@ function SystemConfig() {
                                 } catch (err) {
                                   // Revert on error
                                   setBankAccounts(prev =>
-                                    prev.map(b => b.bank_id === bank.bank_id ? { ...b, store_designator: !newValue } : b)
+                                    prev.map(b => b.bank_id === bank.bank_id ? { ...b, store_designator: !newValue, store_number: bank.store_number } : b)
                                   );
                                   setSnackbar({ open: true, message: 'Failed to update store designator', severity: 'error' });
                                 }
@@ -2669,7 +2677,14 @@ function SystemConfig() {
                       <Checkbox
                         size="small"
                         checked={newBank.store_designator}
-                        onChange={(e) => setNewBank(prev => ({ ...prev, store_designator: e.target.checked }))}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setNewBank(prev => ({
+                            ...prev,
+                            store_designator: checked,
+                            store_number: checked && currentStoreId ? String(currentStoreId).padStart(4, '0') : ''
+                          }));
+                        }}
                         color="primary"
                       />
                     </TableCell>

@@ -353,6 +353,9 @@ pool.query(`
   ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_designator BOOLEAN NOT NULL DEFAULT FALSE
 `).catch(err => console.error('banks store_designator migration:', err.message));
 pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_number VARCHAR(4)
+`).catch(err => console.error('banks store_number migration:', err.message));
+pool.query(`
   ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
 `).catch(err => console.error('banks store_id migration:', err.message));
 
