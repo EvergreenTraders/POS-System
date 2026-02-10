@@ -2222,7 +2222,7 @@ app.get('/api/banks', async (req, res) => {
 
 // POST /api/banks - Create a new bank
 app.post('/api/banks', async (req, res) => {
-  const { pos_name, bank_name, account_number, currency, accounting_number, store_designator, is_default } = req.body;
+  const { pos_name, bank_name, account_number, currency, accounting_number, store_designator, store_number, is_default } = req.body;
 
   if (!bank_name) {
     return res.status(400).json({ error: 'bank_name is required' });
@@ -2242,10 +2242,10 @@ app.post('/api/banks', async (req, res) => {
     }
 
     const result = await client.query(`
-      INSERT INTO banks (pos_name, bank_name, account_number, currency, accounting_number, store_designator, is_default, store_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO banks (pos_name, bank_name, account_number, currency, accounting_number, store_designator, store_number, is_default, store_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
-    `, [pos_name || null, bank_name, account_number || null, currency || 'CAD', accounting_number || null, store_designator || false, is_default || false, storeId]);
+    `, [pos_name || null, bank_name, account_number || null, currency || 'CAD', accounting_number || null, store_designator || false, store_number || null, is_default || false, storeId]);
 
     await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
@@ -2261,7 +2261,7 @@ app.post('/api/banks', async (req, res) => {
 // PUT /api/banks/:bankId - Update a bank
 app.put('/api/banks/:bankId', async (req, res) => {
   const { bankId } = req.params;
-  const { pos_name, bank_name, account_number, currency, accounting_number, store_designator, is_default, is_active } = req.body;
+  const { pos_name, bank_name, account_number, currency, accounting_number, store_designator, store_number, is_default, is_active } = req.body;
 
   const client = await pool.connect();
   try {
@@ -2280,12 +2280,13 @@ app.put('/api/banks/:bankId', async (req, res) => {
         currency = COALESCE($4, currency),
         accounting_number = $5,
         store_designator = COALESCE($6, store_designator),
-        is_default = COALESCE($7, is_default),
-        is_active = COALESCE($8, is_active),
+        store_number = $7,
+        is_default = COALESCE($8, is_default),
+        is_active = COALESCE($9, is_active),
         updated_at = CURRENT_TIMESTAMP
-      WHERE bank_id = $9
+      WHERE bank_id = $10
       RETURNING *
-    `, [pos_name || null, bank_name, account_number || null, currency, accounting_number || null, store_designator, is_default, is_active, bankId]);
+    `, [pos_name || null, bank_name, account_number || null, currency, accounting_number || null, store_designator, store_number || null, is_default, is_active, bankId]);
 
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');

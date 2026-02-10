@@ -155,13 +155,14 @@ function SystemConfig() {
   const [bankAccounts, setBankAccounts] = useState([]);
   const [bankEditId, setBankEditId] = useState(null);
   const [bankEditData, setBankEditData] = useState({});
-  const [newBank, setNewBank] = useState({ pos_name: '', bank_name: '', account_number: '', currency: 'CAD', accounting_number: '', store_designator: false, is_default: false });
+  const [newBank, setNewBank] = useState({ pos_name: '', bank_name: '', account_number: '', currency: 'CAD', accounting_number: '', store_designator: false, store_number: '', is_default: false });
   const [currentStoreId, setCurrentStoreId] = useState(null);
+  const [allStoreDesignatorsChecked, setAllStoreDesignatorsChecked] = useState(false);
 
-  const formatAccountingNumber = (acctNum, storeDesignator) => {
+  const formatAccountingNumber = (acctNum, storeDesignator, storeNumber) => {
     if (!acctNum) return '—';
-    if (storeDesignator && currentStoreId != null) {
-      return `${acctNum}-${String(currentStoreId).padStart(4, '0')}`;
+    if (storeDesignator && storeNumber) {
+      return `${acctNum}-${String(storeNumber).padStart(4, '0')}`;
     }
     return acctNum;
   };
@@ -719,8 +720,48 @@ function SystemConfig() {
     try {
       const response = await axios.get(`${API_BASE_URL}/banks`);
       setBankAccounts(response.data);
+      // Check if all store designators are checked
+      if (response.data.length > 0) {
+        const allChecked = response.data.every(bank => bank.store_designator === true);
+        setAllStoreDesignatorsChecked(allChecked);
+      } else {
+        setAllStoreDesignatorsChecked(false);
+      }
     } catch (err) {
       console.error('Error fetching banks:', err);
+    }
+  };
+
+  const handleToggleAllStoreDesignators = async (checked) => {
+    setAllStoreDesignatorsChecked(checked);
+    
+    // Update all banks' store_designator
+    const updatePromises = bankAccounts.map(bank => {
+      return axios.put(`${API_BASE_URL}/banks/${bank.bank_id}`, {
+        pos_name: bank.pos_name,
+        bank_name: bank.bank_name,
+        account_number: bank.account_number,
+        currency: bank.currency,
+        accounting_number: bank.accounting_number,
+        store_designator: checked,
+        store_number: bank.store_number,
+        is_default: bank.is_default,
+        is_active: bank.is_active
+      });
+    });
+
+    try {
+      await Promise.all(updatePromises);
+      fetchBankAccounts();
+      setSnackbar({ 
+        open: true, 
+        message: `All store designators ${checked ? 'enabled' : 'disabled'}`, 
+        severity: 'success' 
+      });
+    } catch (err) {
+      console.error('Error updating store designators:', err);
+      setSnackbar({ open: true, message: 'Failed to update store designators', severity: 'error' });
+      setAllStoreDesignatorsChecked(!checked); // Revert on error
     }
   };
 
@@ -731,7 +772,7 @@ function SystemConfig() {
     }
     try {
       await axios.post(`${API_BASE_URL}/banks`, newBank);
-      setNewBank({ pos_name: '', bank_name: '', account_number: '', currency: 'CAD', accounting_number: '', store_designator: false, is_default: false });
+      setNewBank({ pos_name: '', bank_name: '', account_number: '', currency: 'CAD', accounting_number: '', store_designator: false, store_number: '', is_default: false });
       fetchBankAccounts();
       setSnackbar({ open: true, message: 'Bank added', severity: 'success' });
     } catch (err) {
@@ -2411,10 +2452,11 @@ function SystemConfig() {
                   <TableRow>
                     <TableCell>POS Name</TableCell>
                     <TableCell>Bank Name</TableCell>
-                    <TableCell>Acct # (Last 4)</TableCell>
+                    <TableCell>Acct #</TableCell>
                     <TableCell>Currency</TableCell>
                     <TableCell>Accounting #</TableCell>
-                    <TableCell align="center">Default</TableCell>
+                    <TableCell>Store #</TableCell>
+                    <TableCell align="center">Store Number</TableCell>
                     <TableCell align="center">Actions</TableCell>
                   </TableRow>
                 </TableHead>
@@ -2428,24 +2470,54 @@ function SystemConfig() {
                           <TableCell><TextField size="small" value={bankEditData.account_number || ''} onChange={(e) => setBankEditData(prev => ({ ...prev, account_number: e.target.value.slice(0, 4) }))} placeholder="Last 4" inputProps={{ maxLength: 4 }} sx={{ width: 80 }} /></TableCell>
                           <TableCell><TextField size="small" value={bankEditData.currency || 'CAD'} onChange={(e) => setBankEditData(prev => ({ ...prev, currency: e.target.value.toUpperCase() }))} inputProps={{ maxLength: 3 }} sx={{ width: 70 }} /></TableCell>
                           <TableCell>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <TextField size="small" value={bankEditData.accounting_number || ''} onChange={(e) => setBankEditData(prev => ({ ...prev, accounting_number: e.target.value }))} placeholder="e.g. 1001" inputProps={{ maxLength: 4 }} sx={{ width: 80 }} />
-                              <FormControlLabel
-                                control={<Checkbox size="small" checked={bankEditData.store_designator || false} onChange={(e) => setBankEditData(prev => ({ ...prev, store_designator: e.target.checked }))} />}
-                                label={<Typography variant="caption">Store #</Typography>}
-                                sx={{ m: 0 }}
-                              />
-                            </Box>
+                            <TextField 
+                              size="small" 
+                              value={bankEditData.accounting_number || ''} 
+                              onChange={(e) => {
+                                const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                setBankEditData(prev => ({ ...prev, accounting_number: value }));
+                              }} 
+                              placeholder="e.g. 1001" 
+                              inputProps={{ maxLength: 4, inputMode: 'numeric', pattern: '[0-9]*' }} 
+                              sx={{ width: 80 }} 
+                              helperText={bankEditData.accounting_number && bankEditData.accounting_number.length !== 4 ? 'Must be 4 digits' : ''}
+                              error={bankEditData.accounting_number && bankEditData.accounting_number.length !== 4}
+                            />
                             {bankEditData.accounting_number && (
-                              <Typography variant="caption" color="text.secondary">
-                                Export: {formatAccountingNumber(bankEditData.accounting_number, bankEditData.store_designator)}
+                              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                                Export: {formatAccountingNumber(bankEditData.accounting_number, bankEditData.store_designator, bankEditData.store_number)}
                               </Typography>
                             )}
                           </TableCell>
+                          <TableCell align="center">
+                            <Checkbox
+                              size="small"
+                              checked={bankEditData.store_designator || false}
+                              onChange={(e) => setBankEditData(prev => ({ ...prev, store_designator: e.target.checked }))}
+                              color="primary"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <TextField
+                              size="small"
+                              value={bankEditData.store_number || ''}
+                              onChange={(e) => {
+                                const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                setBankEditData(prev => ({ ...prev, store_number: value }));
+                              }}
+                              placeholder="0001"
+                              inputProps={{ maxLength: 4, inputMode: 'numeric', pattern: '[0-9]*' }}
+                              sx={{ width: 80 }}
+                              helperText={bankEditData.store_number && bankEditData.store_number.length !== 4 ? 'Must be 4 digits' : ''}
+                              error={bankEditData.store_number && bankEditData.store_number.length !== 4}
+                            />
+                          </TableCell>
                           <TableCell align="center"><Checkbox size="small" checked={bankEditData.is_default || false} onChange={(e) => setBankEditData(prev => ({ ...prev, is_default: e.target.checked }))} /></TableCell>
                           <TableCell align="center">
-                            <IconButton size="small" color="primary" onClick={() => handleSaveBank(bank.bank_id)}><SaveIcon fontSize="small" /></IconButton>
-                            <IconButton size="small" onClick={() => setBankEditId(null)}><CancelIcon fontSize="small" /></IconButton>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                              <IconButton size="small" color="primary" onClick={() => handleSaveBank(bank.bank_id)}><SaveIcon fontSize="small" /></IconButton>
+                              <IconButton size="small" onClick={() => setBankEditId(null)}><CancelIcon fontSize="small" /></IconButton>
+                            </Box>
                           </TableCell>
                         </>
                       ) : (
@@ -2454,11 +2526,49 @@ function SystemConfig() {
                           <TableCell>{bank.bank_name}</TableCell>
                           <TableCell>{bank.account_number || '—'}</TableCell>
                           <TableCell>{bank.currency || 'CAD'}</TableCell>
-                          <TableCell>{formatAccountingNumber(bank.accounting_number, bank.store_designator)}</TableCell>
-                          <TableCell align="center">{bank.is_default ? 'Yes' : '—'}</TableCell>
+                          <TableCell>{formatAccountingNumber(bank.accounting_number, bank.store_designator, bank.store_number)}</TableCell>
                           <TableCell align="center">
-                            <IconButton size="small" onClick={() => { setBankEditId(bank.bank_id); setBankEditData({ pos_name: bank.pos_name || '', bank_name: bank.bank_name, account_number: bank.account_number || '', currency: bank.currency || 'CAD', accounting_number: bank.accounting_number || '', store_designator: bank.store_designator || false, is_default: bank.is_default || false }); }}><EditIcon fontSize="small" /></IconButton>
-                            <IconButton size="small" color="error" onClick={() => handleDeleteBank(bank.bank_id)}><DeleteIcon fontSize="small" /></IconButton>
+                            <Checkbox
+                              size="small"
+                              checked={bank.store_designator || false}
+                              onChange={async (e) => {
+                                const newValue = e.target.checked;
+                                // Optimistically update UI
+                                setBankAccounts(prev =>
+                                  prev.map(b => b.bank_id === bank.bank_id ? { ...b, store_designator: newValue } : b)
+                                );
+                                try {
+                                  await axios.put(`${API_BASE_URL}/banks/${bank.bank_id}`, {
+                                    pos_name: bank.pos_name,
+                                    bank_name: bank.bank_name,
+                                    account_number: bank.account_number,
+                                    currency: bank.currency,
+                                    accounting_number: bank.accounting_number,
+                                    store_designator: newValue,
+                                    store_number: bank.store_number,
+                                    is_default: bank.is_default,
+                                    is_active: bank.is_active
+                                  });
+                                  fetchBankAccounts(); // Refresh to sync state
+                                } catch (err) {
+                                  // Revert on error
+                                  setBankAccounts(prev =>
+                                    prev.map(b => b.bank_id === bank.bank_id ? { ...b, store_designator: !newValue } : b)
+                                  );
+                                  setSnackbar({ open: true, message: 'Failed to update store designator', severity: 'error' });
+                                }
+                              }}
+                              color="primary"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            {bank.store_number ? String(bank.store_number).padStart(4, '0') : '—'}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                              <IconButton size="small" onClick={() => { setBankEditId(bank.bank_id); setBankEditData({ pos_name: bank.pos_name || '', bank_name: bank.bank_name, account_number: bank.account_number || '', currency: bank.currency || 'CAD', accounting_number: bank.accounting_number || '', store_designator: bank.store_designator || false, store_number: bank.store_number || '', is_default: bank.is_default || false }); }}><EditIcon fontSize="small" /></IconButton>
+                              <IconButton size="small" color="error" onClick={() => handleDeleteBank(bank.bank_id)}><DeleteIcon fontSize="small" /></IconButton>
+                            </Box>
                           </TableCell>
                         </>
                       )}
@@ -2470,19 +2580,47 @@ function SystemConfig() {
                     <TableCell><TextField size="small" value={newBank.account_number} onChange={(e) => setNewBank(prev => ({ ...prev, account_number: e.target.value.slice(0, 4) }))} placeholder="Last 4" inputProps={{ maxLength: 4 }} sx={{ width: 80 }} /></TableCell>
                     <TableCell><TextField size="small" value={newBank.currency} onChange={(e) => setNewBank(prev => ({ ...prev, currency: e.target.value.toUpperCase() }))} inputProps={{ maxLength: 3 }} sx={{ width: 70 }} /></TableCell>
                     <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <TextField size="small" value={newBank.accounting_number} onChange={(e) => setNewBank(prev => ({ ...prev, accounting_number: e.target.value }))} placeholder="e.g. 1001" inputProps={{ maxLength: 4 }} sx={{ width: 80 }} />
-                        <FormControlLabel
-                          control={<Checkbox size="small" checked={newBank.store_designator} onChange={(e) => setNewBank(prev => ({ ...prev, store_designator: e.target.checked }))} />}
-                          label={<Typography variant="caption">Store #</Typography>}
-                          sx={{ m: 0 }}
-                        />
-                      </Box>
+                      <TextField 
+                        size="small" 
+                        value={newBank.accounting_number} 
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                          setNewBank(prev => ({ ...prev, accounting_number: value }));
+                        }} 
+                        placeholder="e.g. 1001" 
+                        inputProps={{ maxLength: 4, inputMode: 'numeric', pattern: '[0-9]*' }} 
+                        sx={{ width: 80 }} 
+                        helperText={newBank.accounting_number && newBank.accounting_number.length !== 4 ? 'Must be 4 digits' : ''}
+                        error={newBank.accounting_number && newBank.accounting_number.length !== 4}
+                      />
                       {newBank.accounting_number && (
-                        <Typography variant="caption" color="text.secondary">
-                          Export: {formatAccountingNumber(newBank.accounting_number, newBank.store_designator)}
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                          Export: {formatAccountingNumber(newBank.accounting_number, newBank.store_designator, newBank.store_number)}
                         </Typography>
                       )}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Checkbox
+                        size="small"
+                        checked={newBank.store_designator}
+                        onChange={(e) => setNewBank(prev => ({ ...prev, store_designator: e.target.checked }))}
+                        color="primary"
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <TextField
+                        size="small"
+                        value={newBank.store_number || ''}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                          setNewBank(prev => ({ ...prev, store_number: value }));
+                        }}
+                        placeholder="0001"
+                        inputProps={{ maxLength: 4, inputMode: 'numeric', pattern: '[0-9]*' }}
+                        sx={{ width: 80 }}
+                        helperText={newBank.store_number && newBank.store_number.length !== 4 ? 'Must be 4 digits' : ''}
+                        error={newBank.store_number && newBank.store_number.length !== 4}
+                      />
                     </TableCell>
                     <TableCell align="center"><Checkbox size="small" checked={newBank.is_default} onChange={(e) => setNewBank(prev => ({ ...prev, is_default: e.target.checked }))} /></TableCell>
                     <TableCell align="center">
