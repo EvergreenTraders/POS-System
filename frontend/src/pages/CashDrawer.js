@@ -2091,6 +2091,16 @@ function CashDrawer() {
       return;
     }
 
+    // Check bank transfer permission
+    if (currentEmployee && currentEmployee.transfer_allowed_bank === false) {
+      showSnackbar('You do not have permission to make bank transfers', 'error');
+      return;
+    }
+    if (currentEmployee && currentEmployee.transfer_limit != null && depositTotal > parseFloat(currentEmployee.transfer_limit)) {
+      showSnackbar(`Transfer amount exceeds your limit of $${parseFloat(currentEmployee.transfer_limit).toFixed(2)}. Manager override required.`, 'error');
+      return;
+    }
+
     // Verify we're on master safe
     if (activeSession?.drawer_type !== 'master_safe') {
       showSnackbar('Bank deposits can only be made from the Master Safe', 'error');
@@ -2155,6 +2165,16 @@ function CashDrawer() {
 
     if (withdrawalTotal <= 0) {
       showSnackbar('Please enter a valid withdrawal amount', 'error');
+      return;
+    }
+
+    // Check bank transfer permission
+    if (currentEmployee && currentEmployee.transfer_allowed_bank === false) {
+      showSnackbar('You do not have permission to make bank transfers', 'error');
+      return;
+    }
+    if (currentEmployee && currentEmployee.transfer_limit != null && withdrawalTotal > parseFloat(currentEmployee.transfer_limit)) {
+      showSnackbar(`Transfer amount exceeds your limit of $${parseFloat(currentEmployee.transfer_limit).toFixed(2)}. Manager override required.`, 'error');
       return;
     }
 
@@ -2252,6 +2272,16 @@ function CashDrawer() {
       return;
     }
 
+    // Check petty cash permission and limit
+    if (currentEmployee && currentEmployee.can_petty_cash === false) {
+      showSnackbar('You do not have permission to make petty cash payouts', 'error');
+      return;
+    }
+    if (currentEmployee && currentEmployee.petty_cash_limit != null && payoutTotal > parseFloat(currentEmployee.petty_cash_limit)) {
+      showSnackbar(`Petty cash payout exceeds your limit of $${parseFloat(currentEmployee.petty_cash_limit).toFixed(2)}. Manager override required.`, 'error');
+      return;
+    }
+
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
     try {
@@ -2290,6 +2320,20 @@ function CashDrawer() {
       return;
     }
 
+    // Check employee transfer permissions
+    if (currentEmployee) {
+      const srcType = transferSource.drawer_type;
+      const destType = transferDestination.drawer_type;
+      if ((srcType === 'physical' || destType === 'physical') && currentEmployee.transfer_allowed_drawer === false) {
+        showSnackbar('You do not have permission to transfer to/from drawers', 'error');
+        return;
+      }
+      if (((srcType === 'safe' || srcType === 'master_safe') || (destType === 'safe' || destType === 'master_safe')) && currentEmployee.transfer_allowed_safe === false) {
+        showSnackbar('You do not have permission to transfer to/from safes', 'error');
+        return;
+      }
+    }
+
     // Calculate total cash from denominations
     const cashTotal = calculateDenominationTotal(transferDenominations);
 
@@ -2301,6 +2345,12 @@ function CashDrawer() {
 
     if (totalTransfer <= 0) {
       showSnackbar('Please enter amounts to transfer', 'error');
+      return;
+    }
+
+    // Check transfer limit
+    if (currentEmployee && currentEmployee.transfer_limit != null && totalTransfer > parseFloat(currentEmployee.transfer_limit)) {
+      showSnackbar(`Transfer amount exceeds your limit of $${parseFloat(currentEmployee.transfer_limit).toFixed(2)}. Manager override required.`, 'error');
       return;
     }
 
@@ -2396,6 +2446,16 @@ function CashDrawer() {
 
     if (transferAmount <= 0) {
       showSnackbar('Please enter an amount to transfer', 'error');
+      return;
+    }
+
+    // Check inter-store transfer permission
+    if (currentEmployee && currentEmployee.transfer_allowed_store === false) {
+      showSnackbar('You do not have permission to make inter-store transfers', 'error');
+      return;
+    }
+    if (currentEmployee && currentEmployee.transfer_limit != null && transferAmount > parseFloat(currentEmployee.transfer_limit)) {
+      showSnackbar(`Transfer amount exceeds your limit of $${parseFloat(currentEmployee.transfer_limit).toFixed(2)}. Manager override required.`, 'error');
       return;
     }
 
@@ -3085,8 +3145,14 @@ function CashDrawer() {
                       <Button
                         variant="outlined"
                         startIcon={<MoneyIcon />}
-                        disabled={isStoreClosed}
-                        onClick={openPettyCashDialog}
+                        disabled={isStoreClosed || (currentEmployee && currentEmployee.can_petty_cash === false)}
+                        onClick={() => {
+                          if (currentEmployee && currentEmployee.can_petty_cash === false) {
+                            showSnackbar('You do not have permission to make petty cash payouts', 'error');
+                            return;
+                          }
+                          openPettyCashDialog();
+                        }}
                       >
                         Petty Cash
                       </Button>

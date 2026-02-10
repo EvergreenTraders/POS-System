@@ -701,6 +701,28 @@ function SystemConfig() {
     }
   };
 
+  const buildPermissionPayload = (employee, overrideField, overrideValue) => {
+    const get = (field, defaultTrue) => {
+      if (field === overrideField) return overrideValue;
+      return defaultTrue ? employee[field] !== false : employee[field];
+    };
+    return {
+      trackHours: get('track_hours', true),
+      canOpenStore: get('can_open_store', true),
+      canOpenDrawer: get('can_open_drawer', true),
+      canViewDrawer: get('can_view_drawer', true),
+      canViewSafe: get('can_view_safe', true),
+      transferAllowedDrawer: get('transfer_allowed_drawer', true),
+      transferAllowedSafe: get('transfer_allowed_safe', true),
+      transferAllowedBank: get('transfer_allowed_bank', true),
+      transferAllowedStore: get('transfer_allowed_store', true),
+      transferLimit: overrideField === 'transfer_limit' ? overrideValue : (employee.transfer_limit != null ? employee.transfer_limit : null),
+      canPettyCash: get('can_petty_cash', true),
+      pettyCashLimit: overrideField === 'petty_cash_limit' ? overrideValue : (employee.petty_cash_limit != null ? employee.petty_cash_limit : null),
+      discrepancyThreshold: overrideField === 'discrepancy_threshold' ? overrideValue : (employee.discrepancy_threshold != null ? employee.discrepancy_threshold : null),
+    };
+  };
+
   const handlePermissionToggle = async (employeeId, field, currentValue) => {
     // Optimistically update UI
     setEmployeePermissions(prev =>
@@ -711,13 +733,7 @@ function SystemConfig() {
 
     try {
       const employee = employeePermissions.find(e => e.employee_id === employeeId);
-      const payload = {
-        trackHours: field === 'track_hours' ? !currentValue : employee.track_hours !== false,
-        canOpenStore: field === 'can_open_store' ? !currentValue : employee.can_open_store !== false,
-        canOpenDrawer: field === 'can_open_drawer' ? !currentValue : employee.can_open_drawer !== false,
-        canViewDrawer: field === 'can_view_drawer' ? !currentValue : employee.can_view_drawer !== false,
-        canViewSafe: field === 'can_view_safe' ? !currentValue : employee.can_view_safe !== false,
-      };
+      const payload = buildPermissionPayload(employee, field, !currentValue);
 
       await axios.put(`${API_BASE_URL}/employees/${employeeId}/permissions`, payload);
       setSnackbar({ open: true, message: 'Permission updated', severity: 'success' });
@@ -729,6 +745,32 @@ function SystemConfig() {
         )
       );
       setSnackbar({ open: true, message: 'Failed to update permission', severity: 'error' });
+    }
+  };
+
+  const handlePermissionValueChange = async (employeeId, field, value) => {
+    const parsedValue = value === '' ? null : parseFloat(value);
+    const employee = employeePermissions.find(e => e.employee_id === employeeId);
+    const previousValue = employee[field];
+
+    // Optimistically update UI
+    setEmployeePermissions(prev =>
+      prev.map(emp =>
+        emp.employee_id === employeeId ? { ...emp, [field]: parsedValue } : emp
+      )
+    );
+
+    try {
+      const payload = buildPermissionPayload(employee, field, parsedValue);
+      await axios.put(`${API_BASE_URL}/employees/${employeeId}/permissions`, payload);
+      setSnackbar({ open: true, message: 'Setting updated', severity: 'success' });
+    } catch (err) {
+      setEmployeePermissions(prev =>
+        prev.map(emp =>
+          emp.employee_id === employeeId ? { ...emp, [field]: previousValue } : emp
+        )
+      );
+      setSnackbar({ open: true, message: 'Failed to update setting', severity: 'error' });
     }
   };
 
@@ -3389,7 +3431,6 @@ function SystemConfig() {
                   <TableHead>
                     <TableRow>
                       <TableCell>Employee</TableCell>
-                      <TableCell>Role</TableCell>
                       <TableCell align="center">Track Hours</TableCell>
                       <TableCell align="center">Can Open/Close Store</TableCell>
                       <TableCell align="center">Can Open Drawer</TableCell>
@@ -3404,12 +3445,7 @@ function SystemConfig() {
                           <Typography variant="body2" fontWeight={500}>
                             {emp.first_name} {emp.last_name}
                           </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {emp.username}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip label={emp.role} size="small" />
+                          <Chip label={emp.role} size="small" sx={{ mt: 0.5 }} />
                         </TableCell>
                         <TableCell align="center">
                           <Switch
@@ -3444,6 +3480,125 @@ function SystemConfig() {
                             checked={emp.can_view_safe !== false}
                             onChange={() => handlePermissionToggle(emp.employee_id, 'can_view_safe', emp.can_view_safe !== false)}
                             color="primary"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Transfer & Cash Handling
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              Configure per-employee transfer restrictions, limits, and petty cash permissions.
+            </Typography>
+
+            {employeePermissionsLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Employee</TableCell>
+                      <TableCell align="center">Over/Short Limit</TableCell>
+                      <TableCell align="center">Transfers Allowed</TableCell>
+                      <TableCell align="center">Transfer Limit</TableCell>
+                      <TableCell align="center">Petty Cash</TableCell>
+                      <TableCell align="center">Petty Cash Limit</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {employeePermissions.map((emp) => (
+                      <TableRow key={emp.employee_id}>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight={500}>
+                            {emp.first_name} {emp.last_name}
+                          </Typography>
+                          <Chip label={emp.role} size="small" sx={{ mt: 0.5 }} />
+                        </TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={emp.discrepancy_threshold != null ? emp.discrepancy_threshold : ''}
+                            onChange={(e) => setEmployeePermissions(prev =>
+                              prev.map(p => p.employee_id === emp.employee_id ? { ...p, discrepancy_threshold: e.target.value === '' ? null : e.target.value } : p)
+                            )}
+                            onBlur={(e) => handlePermissionValueChange(emp.employee_id, 'discrepancy_threshold', e.target.value)}
+                            placeholder="Unlimited"
+                            inputProps={{ min: 0, step: '0.01' }}
+                            sx={{ width: 110 }}
+                            InputProps={{ startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography> }}
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                            <FormControlLabel
+                              control={<Checkbox size="small" checked={emp.transfer_allowed_drawer !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_drawer', emp.transfer_allowed_drawer !== false)} />}
+                              label={<Typography variant="caption">Drawer</Typography>}
+                              sx={{ m: 0, height: 28 }}
+                            />
+                            <FormControlLabel
+                              control={<Checkbox size="small" checked={emp.transfer_allowed_safe !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_safe', emp.transfer_allowed_safe !== false)} />}
+                              label={<Typography variant="caption">Safe</Typography>}
+                              sx={{ m: 0, height: 28 }}
+                            />
+                            <FormControlLabel
+                              control={<Checkbox size="small" checked={emp.transfer_allowed_bank !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_bank', emp.transfer_allowed_bank !== false)} />}
+                              label={<Typography variant="caption">Bank</Typography>}
+                              sx={{ m: 0, height: 28 }}
+                            />
+                            <FormControlLabel
+                              control={<Checkbox size="small" checked={emp.transfer_allowed_store !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_store', emp.transfer_allowed_store !== false)} />}
+                              label={<Typography variant="caption">Store</Typography>}
+                              sx={{ m: 0, height: 28 }}
+                            />
+                          </Box>
+                        </TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={emp.transfer_limit != null ? emp.transfer_limit : ''}
+                            onChange={(e) => setEmployeePermissions(prev =>
+                              prev.map(p => p.employee_id === emp.employee_id ? { ...p, transfer_limit: e.target.value === '' ? null : e.target.value } : p)
+                            )}
+                            onBlur={(e) => handlePermissionValueChange(emp.employee_id, 'transfer_limit', e.target.value)}
+                            placeholder="Unlimited"
+                            inputProps={{ min: 0, step: '0.01' }}
+                            sx={{ width: 110 }}
+                            InputProps={{ startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography> }}
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Switch
+                            checked={emp.can_petty_cash !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_petty_cash', emp.can_petty_cash !== false)}
+                            color="primary"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={emp.petty_cash_limit != null ? emp.petty_cash_limit : ''}
+                            onChange={(e) => setEmployeePermissions(prev =>
+                              prev.map(p => p.employee_id === emp.employee_id ? { ...p, petty_cash_limit: e.target.value === '' ? null : e.target.value } : p)
+                            )}
+                            onBlur={(e) => handlePermissionValueChange(emp.employee_id, 'petty_cash_limit', e.target.value)}
+                            placeholder="Unlimited"
+                            inputProps={{ min: 0, step: '0.01' }}
+                            sx={{ width: 110 }}
+                            disabled={emp.can_petty_cash === false}
+                            InputProps={{ startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography> }}
                           />
                         </TableCell>
                       </TableRow>

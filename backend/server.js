@@ -316,6 +316,29 @@ pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_view_safe BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('can_view_safe migration:', err.message));
 
+// Transfer and cash handling permissions
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_drawer BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('transfer_allowed_drawer migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_safe BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('transfer_allowed_safe migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_bank BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('transfer_allowed_bank migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_store BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('transfer_allowed_store migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_limit DECIMAL(10,2) DEFAULT NULL
+`).catch(err => console.error('transfer_limit migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_petty_cash BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_petty_cash migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS petty_cash_limit DECIMAL(10,2) DEFAULT NULL
+`).catch(err => console.error('petty_cash_limit migration:', err.message));
+
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { identifier, password, store_id } = req.body;
@@ -368,7 +391,15 @@ app.post('/api/auth/login', async (req, res) => {
           can_open_store: user.can_open_store !== false,
           can_open_drawer: user.can_open_drawer !== false,
           can_view_drawer: user.can_view_drawer !== false,
-          can_view_safe: user.can_view_safe !== false
+          can_view_safe: user.can_view_safe !== false,
+          transfer_allowed_drawer: user.transfer_allowed_drawer !== false,
+          transfer_allowed_safe: user.transfer_allowed_safe !== false,
+          transfer_allowed_bank: user.transfer_allowed_bank !== false,
+          transfer_allowed_store: user.transfer_allowed_store !== false,
+          transfer_limit: user.transfer_limit != null ? parseFloat(user.transfer_limit) : null,
+          can_petty_cash: user.can_petty_cash !== false,
+          petty_cash_limit: user.petty_cash_limit != null ? parseFloat(user.petty_cash_limit) : null,
+          discrepancy_threshold: user.discrepancy_threshold != null ? parseFloat(user.discrepancy_threshold) : null
         }
       });
     } else {
@@ -404,8 +435,18 @@ app.get('/api/employees', async (req, res) => {
         discrepancy_threshold,
         track_hours,
         can_open_store,
-        can_open_drawer
+        can_open_drawer,
+        can_view_drawer,
+        can_view_safe,
+        transfer_allowed_drawer,
+        transfer_allowed_safe,
+        transfer_allowed_bank,
+        transfer_allowed_store,
+        transfer_limit,
+        can_petty_cash,
+        petty_cash_limit
       FROM employees
+      WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY employee_id ASC
     `;
     const result = await pool.query(query);
@@ -541,15 +582,24 @@ app.delete('/api/employees/:id', async (req, res) => {
 app.put('/api/employees/:id/permissions', async (req, res) => {
   try {
     const { id } = req.params;
-    const { trackHours, canOpenStore, canOpenDrawer, canViewDrawer, canViewSafe } = req.body;
+    const { trackHours, canOpenStore, canOpenDrawer, canViewDrawer, canViewSafe,
+            transferAllowedDrawer, transferAllowedSafe, transferAllowedBank, transferAllowedStore,
+            transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold } = req.body;
 
     const query = `
       UPDATE employees
       SET track_hours = $1, can_open_store = $2, can_open_drawer = $3,
           can_view_drawer = $4, can_view_safe = $5,
+          transfer_allowed_drawer = $6, transfer_allowed_safe = $7,
+          transfer_allowed_bank = $8, transfer_allowed_store = $9,
+          transfer_limit = $10, can_petty_cash = $11, petty_cash_limit = $12,
+          discrepancy_threshold = $13,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $6
-      RETURNING employee_id, username, first_name, last_name, role, track_hours, can_open_store, can_open_drawer, can_view_drawer, can_view_safe
+      WHERE employee_id = $14
+      RETURNING employee_id, username, first_name, last_name, role,
+        track_hours, can_open_store, can_open_drawer, can_view_drawer, can_view_safe,
+        transfer_allowed_drawer, transfer_allowed_safe, transfer_allowed_bank, transfer_allowed_store,
+        transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold
     `;
     const result = await pool.query(query, [
       trackHours !== false,
@@ -557,6 +607,14 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
       canOpenDrawer !== false,
       canViewDrawer !== false,
       canViewSafe !== false,
+      transferAllowedDrawer !== false,
+      transferAllowedSafe !== false,
+      transferAllowedBank !== false,
+      transferAllowedStore !== false,
+      transferLimit != null && transferLimit !== '' ? parseFloat(transferLimit) : null,
+      canPettyCash !== false,
+      pettyCashLimit != null && pettyCashLimit !== '' ? parseFloat(pettyCashLimit) : null,
+      discrepancyThreshold != null && discrepancyThreshold !== '' ? parseFloat(discrepancyThreshold) : null,
       id
     ]);
 
@@ -1955,6 +2013,32 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
     const sourceDrawerName = sourceCheck.rows[0].drawer_name;
     const targetDrawerName = targetCheck.rows[0].drawer_name;
 
+    // Check employee transfer permissions
+    const empPermResult = await client.query(
+      'SELECT transfer_allowed_drawer, transfer_allowed_safe, transfer_allowed_bank, transfer_allowed_store, transfer_limit FROM employees WHERE employee_id = $1',
+      [performed_by]
+    );
+    if (empPermResult.rows.length > 0) {
+      const empPerms = empPermResult.rows[0];
+      // Check transfer type restrictions
+      const typesToCheck = [sourceDrawerType, targetDrawerType];
+      for (const dtype of typesToCheck) {
+        if ((dtype === 'physical') && empPerms.transfer_allowed_drawer === false) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'You do not have permission to transfer to/from drawers' });
+        }
+        if ((dtype === 'safe' || dtype === 'master_safe') && empPerms.transfer_allowed_safe === false) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'You do not have permission to transfer to/from safes' });
+        }
+      }
+      // Check transfer limit
+      if (empPerms.transfer_limit != null && parseFloat(amount) > parseFloat(empPerms.transfer_limit)) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: `Transfer amount exceeds your limit of $${parseFloat(empPerms.transfer_limit).toFixed(2)}. Manager override required.`, requiresOverride: true });
+      }
+    }
+
     // Validate transfer based on drawer type hierarchy:
     // - Physical drawers can receive from: other physical drawers, safe drawers
     // - Safe drawers can receive from: physical drawers, master_safe
@@ -2212,6 +2296,20 @@ app.post('/api/cash-drawer/:sessionId/bank-deposit', async (req, res) => {
     });
   }
 
+  // Check employee bank transfer permission
+  const empPermResult = await pool.query(
+    'SELECT transfer_allowed_bank, transfer_limit FROM employees WHERE employee_id = $1',
+    [performed_by]
+  );
+  if (empPermResult.rows.length > 0) {
+    if (empPermResult.rows[0].transfer_allowed_bank === false) {
+      return res.status(403).json({ error: 'You do not have permission to make bank transfers' });
+    }
+    if (empPermResult.rows[0].transfer_limit != null && parseFloat(amount) > parseFloat(empPermResult.rows[0].transfer_limit)) {
+      return res.status(403).json({ error: `Transfer amount exceeds your limit of $${parseFloat(empPermResult.rows[0].transfer_limit).toFixed(2)}. Manager override required.`, requiresOverride: true });
+    }
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -2380,6 +2478,20 @@ app.post('/api/cash-drawer/:sessionId/bank-withdrawal', async (req, res) => {
     });
   }
 
+  // Check employee bank transfer permission
+  const empPermResult = await pool.query(
+    'SELECT transfer_allowed_bank, transfer_limit FROM employees WHERE employee_id = $1',
+    [performed_by]
+  );
+  if (empPermResult.rows.length > 0) {
+    if (empPermResult.rows[0].transfer_allowed_bank === false) {
+      return res.status(403).json({ error: 'You do not have permission to make bank transfers' });
+    }
+    if (empPermResult.rows[0].transfer_limit != null && parseFloat(amount) > parseFloat(empPermResult.rows[0].transfer_limit)) {
+      return res.status(403).json({ error: `Transfer amount exceeds your limit of $${parseFloat(empPermResult.rows[0].transfer_limit).toFixed(2)}. Manager override required.`, requiresOverride: true });
+    }
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -2540,6 +2652,20 @@ app.post('/api/cash-drawer/:sessionId/petty-cash-payout', async (req, res) => {
     return res.status(400).json({
       error: 'Payout amount must be positive'
     });
+  }
+
+  // Check employee petty cash permission
+  const empPermResult = await pool.query(
+    'SELECT can_petty_cash, petty_cash_limit FROM employees WHERE employee_id = $1',
+    [performed_by]
+  );
+  if (empPermResult.rows.length > 0) {
+    if (empPermResult.rows[0].can_petty_cash === false) {
+      return res.status(403).json({ error: 'You do not have permission to make petty cash payouts' });
+    }
+    if (empPermResult.rows[0].petty_cash_limit != null && parseFloat(amount) > parseFloat(empPermResult.rows[0].petty_cash_limit)) {
+      return res.status(403).json({ error: `Petty cash payout exceeds your limit of $${parseFloat(empPermResult.rows[0].petty_cash_limit).toFixed(2)}. Manager override required.`, requiresOverride: true });
+    }
   }
 
   const client = await pool.connect();
@@ -2927,6 +3053,20 @@ app.post('/api/inter-store-transfers', async (req, res) => {
 
   if (parseFloat(amount) <= 0) {
     return res.status(400).json({ error: 'Transfer amount must be positive' });
+  }
+
+  // Check employee inter-store transfer permission
+  const empPermResult = await pool.query(
+    'SELECT transfer_allowed_store, transfer_limit FROM employees WHERE employee_id = $1',
+    [performed_by]
+  );
+  if (empPermResult.rows.length > 0) {
+    if (empPermResult.rows[0].transfer_allowed_store === false) {
+      return res.status(403).json({ error: 'You do not have permission to make inter-store transfers' });
+    }
+    if (empPermResult.rows[0].transfer_limit != null && parseFloat(amount) > parseFloat(empPermResult.rows[0].transfer_limit)) {
+      return res.status(403).json({ error: `Transfer amount exceeds your limit of $${parseFloat(empPermResult.rows[0].transfer_limit).toFixed(2)}. Manager override required.`, requiresOverride: true });
+    }
   }
 
   const client = await pool.connect();
