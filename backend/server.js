@@ -302,6 +302,14 @@ pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS track_hours BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('track_hours migration:', err.message));
 
+// Ensure can_open_store and can_open_drawer columns exist on employees table
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_open_store BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_open_store migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_open_drawer BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_open_drawer migration:', err.message));
+
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { identifier, password, store_id } = req.body;
@@ -350,7 +358,9 @@ app.post('/api/auth/login', async (req, res) => {
           firstName: user.first_name,
           lastName: user.last_name,
           image: imageBase64,
-          track_hours: user.track_hours !== false
+          track_hours: user.track_hours !== false,
+          can_open_store: user.can_open_store !== false,
+          can_open_drawer: user.can_open_drawer !== false
         }
       });
     } else {
@@ -384,7 +394,9 @@ app.get('/api/employees', async (req, res) => {
         salary,
         status,
         discrepancy_threshold,
-        track_hours
+        track_hours,
+        can_open_store,
+        can_open_drawer
       FROM employees
       ORDER BY employee_id ASC
     `;
@@ -398,7 +410,7 @@ app.get('/api/employees', async (req, res) => {
 
 app.post('/api/employees', async (req, res) => {
   try {
-    const { username, firstName, lastName, email, password, phone, role, salary, discrepancyThreshold, trackHours } = req.body;
+    const { username, firstName, lastName, email, password, phone, role, salary, discrepancyThreshold, trackHours, canOpenStore, canOpenDrawer } = req.body;
 
     // Check if username or email already exists
     const checkQuery = 'SELECT * FROM employees WHERE username = $1 OR email = $2';
@@ -411,12 +423,14 @@ app.post('/api/employees', async (req, res) => {
     const query = `
       INSERT INTO employees (
         username, first_name, last_name, email, password, phone, role,
-        hire_date, salary, status, discrepancy_threshold, track_hours
+        hire_date, salary, status, discrepancy_threshold, track_hours,
+        can_open_store, can_open_drawer
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8, 'Active', $9, $10)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8, 'Active', $9, $10, $11, $12)
       RETURNING
         employee_id, username, first_name, last_name, email, phone, role,
-        hire_date, salary, status, discrepancy_threshold, track_hours
+        hire_date, salary, status, discrepancy_threshold, track_hours,
+        can_open_store, can_open_drawer
     `;
     const result = await pool.query(query, [
       username,
@@ -428,7 +442,9 @@ app.post('/api/employees', async (req, res) => {
       role,
       salary,
       discrepancyThreshold || null,
-      trackHours !== false
+      trackHours !== false,
+      canOpenStore !== false,
+      canOpenDrawer !== false
     ]);
 
     res.status(201).json(result.rows[0]);
@@ -441,7 +457,7 @@ app.post('/api/employees', async (req, res) => {
 app.put('/api/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { username, firstName, lastName, email, phone, role, salary, status, discrepancyThreshold, trackHours } = req.body;
+    const { username, firstName, lastName, email, phone, role, salary, status, discrepancyThreshold, trackHours, canOpenStore, canOpenDrawer } = req.body;
 
     // Check if username or email already exists for other employees
     const checkQuery = `
@@ -460,11 +476,13 @@ app.put('/api/employees/:id', async (req, res) => {
       SET username = $1, first_name = $2, last_name = $3,
           email = $4, phone = $5, role = $6, salary = $7,
           status = $8, discrepancy_threshold = $9, track_hours = $10,
+          can_open_store = $11, can_open_drawer = $12,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $11
+      WHERE employee_id = $13
       RETURNING
         employee_id, username, first_name, last_name, email, phone, role,
-        hire_date, salary, status, discrepancy_threshold, track_hours
+        hire_date, salary, status, discrepancy_threshold, track_hours,
+        can_open_store, can_open_drawer
     `;
     const result = await pool.query(query, [
       username,
@@ -477,6 +495,8 @@ app.put('/api/employees/:id', async (req, res) => {
       status,
       discrepancyThreshold || null,
       trackHours !== false,
+      canOpenStore !== false,
+      canOpenDrawer !== false,
       id
     ]);
 
@@ -506,6 +526,37 @@ app.delete('/api/employees/:id', async (req, res) => {
   } catch (err) {
     console.error('Error deleting employee:', err);
     res.status(500).json({ error: 'Failed to delete employee' });
+  }
+});
+
+// PUT /api/employees/:id/permissions - Update employee permission flags only
+app.put('/api/employees/:id/permissions', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { trackHours, canOpenStore, canOpenDrawer } = req.body;
+
+    const query = `
+      UPDATE employees
+      SET track_hours = $1, can_open_store = $2, can_open_drawer = $3,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE employee_id = $4
+      RETURNING employee_id, username, first_name, last_name, role, track_hours, can_open_store, can_open_drawer
+    `;
+    const result = await pool.query(query, [
+      trackHours !== false,
+      canOpenStore !== false,
+      canOpenDrawer !== false,
+      id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating employee permissions:', err);
+    res.status(500).json({ error: 'Failed to update employee permissions' });
   }
 });
 
@@ -1295,6 +1346,12 @@ app.post('/api/cash-drawer/open', async (req, res) => {
   }
 
   try {
+    // Check if employee has permission to open drawers
+    const empPermResult = await pool.query('SELECT can_open_drawer FROM employees WHERE employee_id = $1', [employee_id]);
+    if (empPermResult.rows.length > 0 && empPermResult.rows[0].can_open_drawer === false) {
+      return res.status(403).json({ error: 'You do not have permission to open a drawer' });
+    }
+
     // Get current store
     const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
     const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
@@ -11761,6 +11818,12 @@ app.post('/api/store-sessions/open', async (req, res) => {
       return res.status(400).json({ error: 'Employee ID is required' });
     }
 
+    // Check if employee has permission to open/close store
+    const empPermResult = await pool.query('SELECT can_open_store FROM employees WHERE employee_id = $1', [employee_id]);
+    if (empPermResult.rows.length > 0 && empPermResult.rows[0].can_open_store === false) {
+      return res.status(403).json({ error: 'You do not have permission to open the store' });
+    }
+
     // Get current store
     const currentStoreResult = await pool.query(
       'SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1'
@@ -11845,6 +11908,12 @@ app.post('/api/store-sessions/close', async (req, res) => {
 
     if (!employee_id) {
       return res.status(400).json({ error: 'Employee ID is required' });
+    }
+
+    // Check if employee has permission to open/close store
+    const empPermResult = await pool.query('SELECT can_open_store FROM employees WHERE employee_id = $1', [employee_id]);
+    if (empPermResult.rows.length > 0 && empPermResult.rows[0].can_open_store === false) {
+      return res.status(403).json({ error: 'You do not have permission to close the store' });
     }
 
     // Find open session for current store

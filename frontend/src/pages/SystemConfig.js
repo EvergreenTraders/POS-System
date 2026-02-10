@@ -96,6 +96,10 @@ function SystemConfig() {
     severity: 'success',
   });
   
+  // Employee Configuration state
+  const [employeePermissions, setEmployeePermissions] = useState([]);
+  const [employeePermissionsLoading, setEmployeePermissionsLoading] = useState(false);
+
   // Pricing Calculator state
   const [calculatorSettings, setCalculatorSettings] = useState({
     weight: '',
@@ -684,8 +688,54 @@ function SystemConfig() {
     fetchPawnConfig();
   }, []);
   
+  // Fetch employee permissions
+  const fetchEmployeePermissions = async () => {
+    setEmployeePermissionsLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/employees`);
+      setEmployeePermissions(response.data);
+    } catch (err) {
+      console.error('Error fetching employee permissions:', err);
+    } finally {
+      setEmployeePermissionsLoading(false);
+    }
+  };
+
+  const handlePermissionToggle = async (employeeId, field, currentValue) => {
+    // Optimistically update UI
+    setEmployeePermissions(prev =>
+      prev.map(emp =>
+        emp.employee_id === employeeId ? { ...emp, [field]: !currentValue } : emp
+      )
+    );
+
+    try {
+      const employee = employeePermissions.find(e => e.employee_id === employeeId);
+      const payload = {
+        trackHours: field === 'track_hours' ? !currentValue : employee.track_hours !== false,
+        canOpenStore: field === 'can_open_store' ? !currentValue : employee.can_open_store !== false,
+        canOpenDrawer: field === 'can_open_drawer' ? !currentValue : employee.can_open_drawer !== false,
+      };
+
+      await axios.put(`${API_BASE_URL}/employees/${employeeId}/permissions`, payload);
+      setSnackbar({ open: true, message: 'Permission updated', severity: 'success' });
+    } catch (err) {
+      // Revert on error
+      setEmployeePermissions(prev =>
+        prev.map(emp =>
+          emp.employee_id === employeeId ? { ...emp, [field]: currentValue } : emp
+        )
+      );
+      setSnackbar({ open: true, message: 'Failed to update permission', severity: 'error' });
+    }
+  };
+
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
+    // Fetch employee permissions when switching to that tab (index 6)
+    if (newValue === 6) {
+      fetchEmployeePermissions();
+    }
   };
 
   const handleGeneralSettingsChange = (event) => {
@@ -1841,6 +1891,7 @@ function SystemConfig() {
           <Tab label="Pricing Calculator" />
           <Tab label="Account Authorization" />
           <Tab label="Item Attributes" />
+          <Tab label="Employee Configuration" />
         </Tabs>
       </Box>
 
@@ -3312,6 +3363,77 @@ function SystemConfig() {
                 </Grid>
               ))}
             </Grid>
+          </ConfigSection>
+        </StyledPaper>
+      </TabPanel>
+
+      <TabPanel value={activeTab} index={6}>
+        <StyledPaper elevation={2}>
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Employee Configuration
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              Configure per-employee permissions. Changes take effect immediately.
+            </Typography>
+
+            {employeePermissionsLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Employee</TableCell>
+                      <TableCell>Role</TableCell>
+                      <TableCell align="center">Track Hours</TableCell>
+                      <TableCell align="center">Can Open/Close Store</TableCell>
+                      <TableCell align="center">Can Open Drawer</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {employeePermissions.map((emp) => (
+                      <TableRow key={emp.employee_id}>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight={500}>
+                            {emp.first_name} {emp.last_name}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {emp.username}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip label={emp.role} size="small" />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Switch
+                            checked={emp.track_hours !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'track_hours', emp.track_hours !== false)}
+                            color="primary"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Switch
+                            checked={emp.can_open_store !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_open_store', emp.can_open_store !== false)}
+                            color="primary"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Switch
+                            checked={emp.can_open_drawer !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_open_drawer', emp.can_open_drawer !== false)}
+                            color="primary"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
           </ConfigSection>
         </StyledPaper>
       </TabPanel>

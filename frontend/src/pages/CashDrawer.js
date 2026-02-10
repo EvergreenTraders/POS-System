@@ -886,7 +886,7 @@ function CashDrawer() {
 
   const fetchStoreStatus = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/store-sessions/status`);
+      const response = await axios.get(`${API_BASE_URL}/store-status`);
       setStoreStatus(response.data);
     } catch (error) {
       console.error('Error fetching store status:', error);
@@ -894,6 +894,19 @@ function CashDrawer() {
   };
 
   const handleOpenStore = async () => {
+    // Check permission
+    try {
+      const empResp = await axios.get(`${API_BASE_URL}/employees`);
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const currentEmp = empResp.data.find(e => e.employee_id === user.id);
+      if (currentEmp && currentEmp.can_open_store === false) {
+        showSnackbar('You do not have permission to open the store', 'error');
+        return;
+      }
+    } catch (err) {
+      console.error('Error checking store permission:', err);
+    }
+
     setStoreStatusLoading(true);
     try {
       const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -913,6 +926,19 @@ function CashDrawer() {
   };
 
   const handleCloseStoreClick = async () => {
+    // Check permission
+    try {
+      const empResp = await axios.get(`${API_BASE_URL}/employees`);
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const currentEmp = empResp.data.find(e => e.employee_id === user.id);
+      if (currentEmp && currentEmp.can_open_store === false) {
+        showSnackbar('You do not have permission to close the store', 'error');
+        return;
+      }
+    } catch (err) {
+      console.error('Error checking store permission:', err);
+    }
+
     setStoreStatusLoading(true);
     try {
       // First check for open drawers/safes
@@ -1319,7 +1345,7 @@ function CashDrawer() {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = selectedEmployee || currentUser.id;
 
-    // Check if employee has track_hours enabled and is not clocked in
+    // Check employee permissions and clock-in status
     try {
       const [empResponse, clockResponse] = await Promise.all([
         fetch(`${config.apiUrl}/employees`),
@@ -1328,6 +1354,14 @@ function CashDrawer() {
       if (empResponse.ok && clockResponse.ok) {
         const employees = await empResponse.json();
         const currentEmployee = employees.find(e => e.employee_id === currentUser.id);
+
+        // Check if employee has permission to open drawers
+        if (currentEmployee && currentEmployee.can_open_drawer === false) {
+          showSnackbar('You do not have permission to open a drawer', 'error');
+          return;
+        }
+
+        // Check if employee has track_hours enabled and is not clocked in
         if (currentEmployee && currentEmployee.track_hours !== false) {
           const clockedInList = await clockResponse.json();
           const isClockedIn = clockedInList.some(emp => emp.employee_id === currentUser.id);
@@ -1338,7 +1372,7 @@ function CashDrawer() {
         }
       }
     } catch (err) {
-      console.error('Error checking clock-in status:', err);
+      console.error('Error checking employee permissions:', err);
     }
 
     // Calculate balance based on opening mode (individual denominations vs drawer total)
