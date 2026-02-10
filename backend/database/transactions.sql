@@ -53,6 +53,99 @@ UPDATE payment_methods SET is_physical = false WHERE method_value IN ('credit_ca
 
 COMMENT ON COLUMN payment_methods.is_physical IS 'Whether this payment method results in physical tender in the drawer (cash, checks, gift cards) vs electronic (credit cards, debit cards)';
 
+-- Add is_default_cash column to mark the default cash that tracks denominations
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'payment_methods' AND column_name = 'is_default_cash'
+    ) THEN
+        ALTER TABLE payment_methods ADD COLUMN is_default_cash BOOLEAN NOT NULL DEFAULT false;
+    END IF;
+END $$;
+
+-- Set the default cash (method_value = 'cash') as the default cash that tracks denominations
+UPDATE payment_methods SET is_default_cash = true WHERE method_value = 'cash';
+
+COMMENT ON COLUMN payment_methods.is_default_cash IS 'Whether this is the default cash payment method that tracks denominations. Only one payment method can be the default cash.';
+
+-- Add additional columns for tender type configuration
+DO $$
+BEGIN
+    -- Currency column
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'payment_methods' AND column_name = 'currency'
+    ) THEN
+        ALTER TABLE payment_methods ADD COLUMN currency VARCHAR(10);
+    END IF;
+
+    -- Accounting code column (up to 8 digits)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'payment_methods' AND column_name = 'accounting_code'
+    ) THEN
+        ALTER TABLE payment_methods ADD COLUMN accounting_code VARCHAR(8);
+    END IF;
+
+    -- Store designator checkbox
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'payment_methods' AND column_name = 'store_designator'
+    ) THEN
+        ALTER TABLE payment_methods ADD COLUMN store_designator BOOLEAN NOT NULL DEFAULT false;
+    END IF;
+
+    -- Post type: SUM or COUNT
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'payment_methods' AND column_name = 'post_type'
+    ) THEN
+        ALTER TABLE payment_methods ADD COLUMN post_type VARCHAR(10) CHECK (post_type IN ('SUM', 'COUNT'));
+    END IF;
+
+    -- Usage: Payments, Pay-outs, or Both
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'payment_methods' AND column_name = 'usage'
+    ) THEN
+        ALTER TABLE payment_methods ADD COLUMN usage VARCHAR(20) CHECK (usage IN ('Payments', 'Pay-outs', 'Both'));
+    END IF;
+
+    -- Accepted for pawn payments
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'payment_methods' AND column_name = 'accepted_for_pawn_payments'
+    ) THEN
+        ALTER TABLE payment_methods ADD COLUMN accepted_for_pawn_payments BOOLEAN NOT NULL DEFAULT false;
+    END IF;
+
+    -- Accepted for pawn redeems
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'payment_methods' AND column_name = 'accepted_for_pawn_redeems'
+    ) THEN
+        ALTER TABLE payment_methods ADD COLUMN accepted_for_pawn_redeems BOOLEAN NOT NULL DEFAULT false;
+    END IF;
+END $$;
+
+-- Set default values for existing payment methods
+UPDATE payment_methods SET 
+    currency = 'CAD',
+    post_type = 'SUM',
+    usage = 'Both',
+    accepted_for_pawn_payments = true,
+    accepted_for_pawn_redeems = true
+WHERE currency IS NULL;
+
+COMMENT ON COLUMN payment_methods.currency IS 'Currency code (CAD, USD, etc.)';
+COMMENT ON COLUMN payment_methods.accounting_code IS 'Accounting code (up to 8 digits)';
+COMMENT ON COLUMN payment_methods.store_designator IS 'Whether to append store number to accounting code';
+COMMENT ON COLUMN payment_methods.post_type IS 'How tender is posted: SUM (total posted) or COUNT (each transaction posted individually)';
+COMMENT ON COLUMN payment_methods.usage IS 'Usage type: Payments, Pay-outs, or Both';
+COMMENT ON COLUMN payment_methods.accepted_for_pawn_payments IS 'Whether this tender type is accepted for pawn payments (extensions/renewals)';
+COMMENT ON COLUMN payment_methods.accepted_for_pawn_redeems IS 'Whether this tender type is accepted for pawn redeems';
+
 -- Create transaction_type table
 CREATE TABLE IF NOT EXISTS transaction_type (
     id SERIAL PRIMARY KEY,

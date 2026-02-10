@@ -302,6 +302,63 @@ pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS track_hours BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('track_hours migration:', err.message));
 
+// Ensure can_open_store and can_open_drawer columns exist on employees table
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_open_store BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_open_store migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_open_drawer BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_open_drawer migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_view_drawer BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_view_drawer migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_view_safe BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_view_safe migration:', err.message));
+
+// Transfer and cash handling permissions
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_drawer BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('transfer_allowed_drawer migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_safe BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('transfer_allowed_safe migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_bank BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('transfer_allowed_bank migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_store BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('transfer_allowed_store migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_limit DECIMAL(10,2) DEFAULT NULL
+`).catch(err => console.error('transfer_limit migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_petty_cash BOOLEAN NOT NULL DEFAULT TRUE
+`).catch(err => console.error('can_petty_cash migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS petty_cash_limit DECIMAL(10,2) DEFAULT NULL
+`).catch(err => console.error('petty_cash_limit migration:', err.message));
+
+// Bank account migrations
+pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS pos_name VARCHAR(100)
+`).catch(err => console.error('banks pos_name migration:', err.message));
+pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS currency VARCHAR(10) NOT NULL DEFAULT 'CAD'
+`).catch(err => console.error('banks currency migration:', err.message));
+pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS accounting_number VARCHAR(20)
+`).catch(err => console.error('banks accounting_number migration:', err.message));
+pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_designator BOOLEAN NOT NULL DEFAULT FALSE
+`).catch(err => console.error('banks store_designator migration:', err.message));
+pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_number VARCHAR(4)
+`).catch(err => console.error('banks store_number migration:', err.message));
+pool.query(`
+  ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
+`).catch(err => console.error('banks store_id migration:', err.message));
+
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { identifier, password, store_id } = req.body;
@@ -350,7 +407,19 @@ app.post('/api/auth/login', async (req, res) => {
           firstName: user.first_name,
           lastName: user.last_name,
           image: imageBase64,
-          track_hours: user.track_hours !== false
+          track_hours: user.track_hours !== false,
+          can_open_store: user.can_open_store !== false,
+          can_open_drawer: user.can_open_drawer !== false,
+          can_view_drawer: user.can_view_drawer !== false,
+          can_view_safe: user.can_view_safe !== false,
+          transfer_allowed_drawer: user.transfer_allowed_drawer !== false,
+          transfer_allowed_safe: user.transfer_allowed_safe !== false,
+          transfer_allowed_bank: user.transfer_allowed_bank !== false,
+          transfer_allowed_store: user.transfer_allowed_store !== false,
+          transfer_limit: user.transfer_limit != null ? parseFloat(user.transfer_limit) : null,
+          can_petty_cash: user.can_petty_cash !== false,
+          petty_cash_limit: user.petty_cash_limit != null ? parseFloat(user.petty_cash_limit) : null,
+          discrepancy_threshold: user.discrepancy_threshold != null ? parseFloat(user.discrepancy_threshold) : null
         }
       });
     } else {
@@ -384,8 +453,20 @@ app.get('/api/employees', async (req, res) => {
         salary,
         status,
         discrepancy_threshold,
-        track_hours
+        track_hours,
+        can_open_store,
+        can_open_drawer,
+        can_view_drawer,
+        can_view_safe,
+        transfer_allowed_drawer,
+        transfer_allowed_safe,
+        transfer_allowed_bank,
+        transfer_allowed_store,
+        transfer_limit,
+        can_petty_cash,
+        petty_cash_limit
       FROM employees
+      WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY employee_id ASC
     `;
     const result = await pool.query(query);
@@ -398,7 +479,7 @@ app.get('/api/employees', async (req, res) => {
 
 app.post('/api/employees', async (req, res) => {
   try {
-    const { username, firstName, lastName, email, password, phone, role, salary, discrepancyThreshold, trackHours } = req.body;
+    const { username, firstName, lastName, email, password, phone, role, salary, discrepancyThreshold, trackHours, canOpenStore, canOpenDrawer } = req.body;
 
     // Check if username or email already exists
     const checkQuery = 'SELECT * FROM employees WHERE username = $1 OR email = $2';
@@ -411,12 +492,14 @@ app.post('/api/employees', async (req, res) => {
     const query = `
       INSERT INTO employees (
         username, first_name, last_name, email, password, phone, role,
-        hire_date, salary, status, discrepancy_threshold, track_hours
+        hire_date, salary, status, discrepancy_threshold, track_hours,
+        can_open_store, can_open_drawer
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8, 'Active', $9, $10)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8, 'Active', $9, $10, $11, $12)
       RETURNING
         employee_id, username, first_name, last_name, email, phone, role,
-        hire_date, salary, status, discrepancy_threshold, track_hours
+        hire_date, salary, status, discrepancy_threshold, track_hours,
+        can_open_store, can_open_drawer
     `;
     const result = await pool.query(query, [
       username,
@@ -428,7 +511,9 @@ app.post('/api/employees', async (req, res) => {
       role,
       salary,
       discrepancyThreshold || null,
-      trackHours !== false
+      trackHours !== false,
+      canOpenStore !== false,
+      canOpenDrawer !== false
     ]);
 
     res.status(201).json(result.rows[0]);
@@ -441,7 +526,7 @@ app.post('/api/employees', async (req, res) => {
 app.put('/api/employees/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { username, firstName, lastName, email, phone, role, salary, status, discrepancyThreshold, trackHours } = req.body;
+    const { username, firstName, lastName, email, phone, role, salary, status, discrepancyThreshold, trackHours, canOpenStore, canOpenDrawer } = req.body;
 
     // Check if username or email already exists for other employees
     const checkQuery = `
@@ -460,11 +545,13 @@ app.put('/api/employees/:id', async (req, res) => {
       SET username = $1, first_name = $2, last_name = $3,
           email = $4, phone = $5, role = $6, salary = $7,
           status = $8, discrepancy_threshold = $9, track_hours = $10,
+          can_open_store = $11, can_open_drawer = $12,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $11
+      WHERE employee_id = $13
       RETURNING
         employee_id, username, first_name, last_name, email, phone, role,
-        hire_date, salary, status, discrepancy_threshold, track_hours
+        hire_date, salary, status, discrepancy_threshold, track_hours,
+        can_open_store, can_open_drawer
     `;
     const result = await pool.query(query, [
       username,
@@ -477,6 +564,8 @@ app.put('/api/employees/:id', async (req, res) => {
       status,
       discrepancyThreshold || null,
       trackHours !== false,
+      canOpenStore !== false,
+      canOpenDrawer !== false,
       id
     ]);
 
@@ -506,6 +595,57 @@ app.delete('/api/employees/:id', async (req, res) => {
   } catch (err) {
     console.error('Error deleting employee:', err);
     res.status(500).json({ error: 'Failed to delete employee' });
+  }
+});
+
+// PUT /api/employees/:id/permissions - Update employee permission flags only
+app.put('/api/employees/:id/permissions', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { trackHours, canOpenStore, canOpenDrawer, canViewDrawer, canViewSafe,
+            transferAllowedDrawer, transferAllowedSafe, transferAllowedBank, transferAllowedStore,
+            transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold } = req.body;
+
+    const query = `
+      UPDATE employees
+      SET track_hours = $1, can_open_store = $2, can_open_drawer = $3,
+          can_view_drawer = $4, can_view_safe = $5,
+          transfer_allowed_drawer = $6, transfer_allowed_safe = $7,
+          transfer_allowed_bank = $8, transfer_allowed_store = $9,
+          transfer_limit = $10, can_petty_cash = $11, petty_cash_limit = $12,
+          discrepancy_threshold = $13,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE employee_id = $14
+      RETURNING employee_id, username, first_name, last_name, role,
+        track_hours, can_open_store, can_open_drawer, can_view_drawer, can_view_safe,
+        transfer_allowed_drawer, transfer_allowed_safe, transfer_allowed_bank, transfer_allowed_store,
+        transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold
+    `;
+    const result = await pool.query(query, [
+      trackHours !== false,
+      canOpenStore !== false,
+      canOpenDrawer !== false,
+      canViewDrawer !== false,
+      canViewSafe !== false,
+      transferAllowedDrawer !== false,
+      transferAllowedSafe !== false,
+      transferAllowedBank !== false,
+      transferAllowedStore !== false,
+      transferLimit != null && transferLimit !== '' ? parseFloat(transferLimit) : null,
+      canPettyCash !== false,
+      pettyCashLimit != null && pettyCashLimit !== '' ? parseFloat(pettyCashLimit) : null,
+      discrepancyThreshold != null && discrepancyThreshold !== '' ? parseFloat(discrepancyThreshold) : null,
+      id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating employee permissions:', err);
+    res.status(500).json({ error: 'Failed to update employee permissions' });
   }
 });
 
@@ -1295,6 +1435,12 @@ app.post('/api/cash-drawer/open', async (req, res) => {
   }
 
   try {
+    // Check if employee has permission to open drawers
+    const empPermResult = await pool.query('SELECT can_open_drawer FROM employees WHERE employee_id = $1', [employee_id]);
+    if (empPermResult.rows.length > 0 && empPermResult.rows[0].can_open_drawer === false) {
+      return res.status(403).json({ error: 'You do not have permission to open a drawer' });
+    }
+
     // Get current store
     const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
     const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
@@ -1887,6 +2033,32 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
     const sourceDrawerName = sourceCheck.rows[0].drawer_name;
     const targetDrawerName = targetCheck.rows[0].drawer_name;
 
+    // Check employee transfer permissions
+    const empPermResult = await client.query(
+      'SELECT transfer_allowed_drawer, transfer_allowed_safe, transfer_allowed_bank, transfer_allowed_store, transfer_limit FROM employees WHERE employee_id = $1',
+      [performed_by]
+    );
+    if (empPermResult.rows.length > 0) {
+      const empPerms = empPermResult.rows[0];
+      // Check transfer type restrictions
+      const typesToCheck = [sourceDrawerType, targetDrawerType];
+      for (const dtype of typesToCheck) {
+        if ((dtype === 'physical') && empPerms.transfer_allowed_drawer === false) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'You do not have permission to transfer to/from drawers' });
+        }
+        if ((dtype === 'safe' || dtype === 'master_safe') && empPerms.transfer_allowed_safe === false) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'You do not have permission to transfer to/from safes' });
+        }
+      }
+      // Check transfer limit
+      if (empPerms.transfer_limit != null && parseFloat(amount) > parseFloat(empPerms.transfer_limit)) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: `Transfer amount exceeds your limit of $${parseFloat(empPerms.transfer_limit).toFixed(2)}. Manager override required.`, requiresOverride: true });
+      }
+    }
+
     // Validate transfer based on drawer type hierarchy:
     // - Physical drawers can receive from: other physical drawers, safe drawers
     // - Safe drawers can receive from: physical drawers, master_safe
@@ -2035,12 +2207,13 @@ app.post('/api/cash-drawer/:sessionId/transfer', async (req, res) => {
 
 // ============ BANK ENDPOINTS ============
 
-// GET /api/banks - Get all active banks
+// GET /api/banks - Get all active banks for current store
 app.get('/api/banks', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT * FROM banks
       WHERE is_active = TRUE
+        AND (store_id IS NULL OR store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1))
       ORDER BY is_default DESC, bank_name ASC
     `);
     res.json(result.rows);
@@ -2052,7 +2225,7 @@ app.get('/api/banks', async (req, res) => {
 
 // POST /api/banks - Create a new bank
 app.post('/api/banks', async (req, res) => {
-  const { bank_name, account_number, routing_number, is_default } = req.body;
+  const { pos_name, bank_name, account_number, currency, accounting_number, store_designator, store_number, is_default } = req.body;
 
   if (!bank_name) {
     return res.status(400).json({ error: 'bank_name is required' });
@@ -2062,16 +2235,20 @@ app.post('/api/banks', async (req, res) => {
   try {
     await client.query('BEGIN');
 
+    // Get current store id
+    const storeResult = await client.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const storeId = storeResult.rows.length > 0 ? storeResult.rows[0].store_id : null;
+
     // If this bank is set as default, unset other defaults
     if (is_default) {
       await client.query('UPDATE banks SET is_default = FALSE WHERE is_default = TRUE');
     }
 
     const result = await client.query(`
-      INSERT INTO banks (bank_name, account_number, routing_number, is_default)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO banks (pos_name, bank_name, account_number, currency, accounting_number, store_designator, store_number, is_default, store_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
-    `, [bank_name, account_number || null, routing_number || null, is_default || false]);
+    `, [pos_name || null, bank_name, account_number || null, currency || 'CAD', accounting_number || null, store_designator || false, store_number || null, is_default || false, storeId]);
 
     await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
@@ -2087,7 +2264,7 @@ app.post('/api/banks', async (req, res) => {
 // PUT /api/banks/:bankId - Update a bank
 app.put('/api/banks/:bankId', async (req, res) => {
   const { bankId } = req.params;
-  const { bank_name, account_number, routing_number, is_default, is_active } = req.body;
+  const { pos_name, bank_name, account_number, currency, accounting_number, store_designator, store_number, is_default, is_active } = req.body;
 
   const client = await pool.connect();
   try {
@@ -2100,15 +2277,19 @@ app.put('/api/banks/:bankId', async (req, res) => {
 
     const result = await client.query(`
       UPDATE banks SET
-        bank_name = COALESCE($1, bank_name),
-        account_number = COALESCE($2, account_number),
-        routing_number = COALESCE($3, routing_number),
-        is_default = COALESCE($4, is_default),
-        is_active = COALESCE($5, is_active),
+        pos_name = $1,
+        bank_name = COALESCE($2, bank_name),
+        account_number = $3,
+        currency = COALESCE($4, currency),
+        accounting_number = $5,
+        store_designator = COALESCE($6, store_designator),
+        store_number = $7,
+        is_default = COALESCE($8, is_default),
+        is_active = COALESCE($9, is_active),
         updated_at = CURRENT_TIMESTAMP
-      WHERE bank_id = $6
+      WHERE bank_id = $10
       RETURNING *
-    `, [bank_name, account_number, routing_number, is_default, is_active, bankId]);
+    `, [pos_name || null, bank_name, account_number || null, currency, accounting_number || null, store_designator, store_number || null, is_default, is_active, bankId]);
 
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -2123,6 +2304,351 @@ app.put('/api/banks/:bankId', async (req, res) => {
     res.status(500).json({ error: 'Failed to update bank' });
   } finally {
     client.release();
+  }
+});
+
+// DELETE /api/banks/:bankId - Soft delete a bank
+app.delete('/api/banks/:bankId', async (req, res) => {
+  const { bankId } = req.params;
+  try {
+    const result = await pool.query(
+      'UPDATE banks SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP WHERE bank_id = $1 RETURNING *',
+      [bankId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Bank not found' });
+    }
+    res.json({ message: 'Bank deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting bank:', error);
+    res.status(500).json({ error: 'Failed to delete bank' });
+  }
+});
+
+// GET /api/petty-cash-expenses - Get all petty cash expenses
+app.get('/api/petty-cash-expenses', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM petty_cash_expenses
+      ORDER BY name ASC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching petty cash expenses:', error);
+    res.status(500).json({ error: 'Failed to fetch petty cash expenses' });
+  }
+});
+
+// POST /api/petty-cash-expenses - Create a new petty cash expense
+app.post('/api/petty-cash-expenses', async (req, res) => {
+  const { name, accounting_code, includes_sales_tax } = req.body;
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'name is required' });
+  }
+
+  if (!accounting_code || !accounting_code.trim()) {
+    return res.status(400).json({ error: 'accounting_code is required' });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO petty_cash_expenses (name, accounting_code, includes_sales_tax)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `, [name.trim(), accounting_code.trim(), includes_sales_tax || false]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'An expense with this name already exists' });
+    }
+    console.error('Error creating petty cash expense:', error);
+    res.status(500).json({ error: 'Failed to create petty cash expense' });
+  }
+});
+
+// PUT /api/petty-cash-expenses/:id - Update a petty cash expense
+app.put('/api/petty-cash-expenses/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, accounting_code, includes_sales_tax } = req.body;
+
+  if (name !== undefined && (!name || !name.trim())) {
+    return res.status(400).json({ error: 'name cannot be empty' });
+  }
+
+  if (accounting_code !== undefined && (!accounting_code || !accounting_code.trim())) {
+    return res.status(400).json({ error: 'accounting_code cannot be empty' });
+  }
+
+  try {
+    const result = await pool.query(`
+      UPDATE petty_cash_expenses SET
+        name = COALESCE($1, name),
+        accounting_code = COALESCE($2, accounting_code),
+        includes_sales_tax = COALESCE($3, includes_sales_tax),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE expense_id = $4
+      RETURNING *
+    `, [
+      name ? name.trim() : null,
+      accounting_code ? accounting_code.trim() : null,
+      includes_sales_tax !== undefined ? includes_sales_tax : null,
+      id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Petty cash expense not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'An expense with this name already exists' });
+    }
+    console.error('Error updating petty cash expense:', error);
+    res.status(500).json({ error: 'Failed to update petty cash expense' });
+  }
+});
+
+// DELETE /api/petty-cash-expenses/:id - Delete a petty cash expense
+app.delete('/api/petty-cash-expenses/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'DELETE FROM petty_cash_expenses WHERE expense_id = $1 RETURNING *',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Petty cash expense not found' });
+    }
+    res.json({ message: 'Petty cash expense deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting petty cash expense:', error);
+    res.status(500).json({ error: 'Failed to delete petty cash expense' });
+  }
+});
+
+// ==================== Backup Settings API ====================
+
+// GET /api/backup-settings - Get backup settings
+app.get('/api/backup-settings', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM backup_settings WHERE id = 1
+    `);
+    
+    if (result.rows.length === 0) {
+      // Create default settings if they don't exist
+      const insertResult = await pool.query(`
+        INSERT INTO backup_settings (id, enable_local_backup, designated_pcs_only, monthly_backup, monthly_backup_count, weekly_backup, weekly_backup_count, daily_backup, daily_backup_count, backup_file_path)
+        VALUES (1, FALSE, FALSE, FALSE, 12, FALSE, 4, FALSE, 7, NULL)
+        RETURNING *
+      `);
+      return res.json(insertResult.rows[0]);
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching backup settings:', error);
+    res.status(500).json({ error: 'Failed to fetch backup settings' });
+  }
+});
+
+// PUT /api/backup-settings - Update backup settings
+app.put('/api/backup-settings', async (req, res) => {
+  const {
+    enable_local_backup,
+    designated_pcs_only,
+    monthly_backup,
+    monthly_backup_count,
+    weekly_backup,
+    weekly_backup_count,
+    daily_backup,
+    daily_backup_count,
+    backup_file_path
+  } = req.body;
+
+  try {
+    // Validate backup counts
+    if (monthly_backup_count !== undefined && (monthly_backup_count < 1 || !Number.isInteger(monthly_backup_count))) {
+      return res.status(400).json({ error: 'monthly_backup_count must be a positive integer' });
+    }
+    if (weekly_backup_count !== undefined && (weekly_backup_count < 1 || !Number.isInteger(weekly_backup_count))) {
+      return res.status(400).json({ error: 'weekly_backup_count must be a positive integer' });
+    }
+    if (daily_backup_count !== undefined && (daily_backup_count < 1 || !Number.isInteger(daily_backup_count))) {
+      return res.status(400).json({ error: 'daily_backup_count must be a positive integer' });
+    }
+
+    const result = await pool.query(`
+      UPDATE backup_settings SET
+        enable_local_backup = COALESCE($1, enable_local_backup),
+        designated_pcs_only = COALESCE($2, designated_pcs_only),
+        monthly_backup = COALESCE($3, monthly_backup),
+        monthly_backup_count = COALESCE($4, monthly_backup_count),
+        weekly_backup = COALESCE($5, weekly_backup),
+        weekly_backup_count = COALESCE($6, weekly_backup_count),
+        daily_backup = COALESCE($7, daily_backup),
+        daily_backup_count = COALESCE($8, daily_backup_count),
+        backup_file_path = COALESCE($9, backup_file_path),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = 1
+      RETURNING *
+    `, [
+      enable_local_backup !== undefined ? enable_local_backup : null,
+      designated_pcs_only !== undefined ? designated_pcs_only : null,
+      monthly_backup !== undefined ? monthly_backup : null,
+      monthly_backup_count !== undefined ? monthly_backup_count : null,
+      weekly_backup !== undefined ? weekly_backup : null,
+      weekly_backup_count !== undefined ? weekly_backup_count : null,
+      daily_backup !== undefined ? daily_backup : null,
+      daily_backup_count !== undefined ? daily_backup_count : null,
+      backup_file_path !== undefined ? backup_file_path : null
+    ]);
+
+    if (result.rows.length === 0) {
+      // Create if doesn't exist
+      const insertResult = await pool.query(`
+        INSERT INTO backup_settings (id, enable_local_backup, designated_pcs_only, monthly_backup, monthly_backup_count, weekly_backup, weekly_backup_count, daily_backup, daily_backup_count, backup_file_path)
+        VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `, [
+        enable_local_backup || false,
+        designated_pcs_only || false,
+        monthly_backup || false,
+        monthly_backup_count || 12,
+        weekly_backup || false,
+        weekly_backup_count || 4,
+        daily_backup || false,
+        daily_backup_count || 7,
+        backup_file_path || null
+      ]);
+      return res.json(insertResult.rows[0]);
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating backup settings:', error);
+    res.status(500).json({ error: 'Failed to update backup settings' });
+  }
+});
+
+// ==================== Trusted PCs API ====================
+
+// GET /api/trusted-pcs - Get all trusted PCs
+app.get('/api/trusted-pcs', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, mac_address, created_at, updated_at
+      FROM trusted_pcs
+      ORDER BY name ASC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching trusted PCs:', error);
+    res.status(500).json({ error: 'Failed to fetch trusted PCs' });
+  }
+});
+
+// POST /api/trusted-pcs - Create a new trusted PC
+app.post('/api/trusted-pcs', async (req, res) => {
+  const { name, mac_address } = req.body;
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'name is required' });
+  }
+
+  if (!mac_address || !mac_address.trim()) {
+    return res.status(400).json({ error: 'mac_address is required' });
+  }
+
+  // Validate MAC address format (XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX)
+  const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+  if (!macRegex.test(mac_address.trim())) {
+    return res.status(400).json({ error: 'Invalid MAC address format. Use format: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX' });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO trusted_pcs (name, mac_address)
+      VALUES ($1, $2)
+      RETURNING id, name, mac_address, created_at, updated_at
+    `, [name.trim(), mac_address.trim().toUpperCase()]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A trusted PC with this MAC address already exists' });
+    }
+    console.error('Error creating trusted PC:', error);
+    res.status(500).json({ error: 'Failed to create trusted PC' });
+  }
+});
+
+// PUT /api/trusted-pcs/:id - Update a trusted PC
+app.put('/api/trusted-pcs/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, mac_address } = req.body;
+
+  if (name !== undefined && (!name || !name.trim())) {
+    return res.status(400).json({ error: 'name cannot be empty' });
+  }
+
+  if (mac_address !== undefined) {
+    if (!mac_address || !mac_address.trim()) {
+      return res.status(400).json({ error: 'mac_address cannot be empty' });
+    }
+    // Validate MAC address format
+    const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+    if (!macRegex.test(mac_address.trim())) {
+      return res.status(400).json({ error: 'Invalid MAC address format. Use format: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX' });
+    }
+  }
+
+  try {
+    const result = await pool.query(`
+      UPDATE trusted_pcs SET
+        name = COALESCE($1, name),
+        mac_address = COALESCE($2, mac_address),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING id, name, mac_address, created_at, updated_at
+    `, [
+      name ? name.trim() : null,
+      mac_address ? mac_address.trim().toUpperCase() : null,
+      id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Trusted PC not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A trusted PC with this MAC address already exists' });
+    }
+    console.error('Error updating trusted PC:', error);
+    res.status(500).json({ error: 'Failed to update trusted PC' });
+  }
+});
+
+// DELETE /api/trusted-pcs/:id - Delete a trusted PC
+app.delete('/api/trusted-pcs/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'DELETE FROM trusted_pcs WHERE id = $1 RETURNING *',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Trusted PC not found' });
+    }
+    res.json({ message: 'Trusted PC deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting trusted PC:', error);
+    res.status(500).json({ error: 'Failed to delete trusted PC' });
   }
 });
 
@@ -2142,6 +2668,20 @@ app.post('/api/cash-drawer/:sessionId/bank-deposit', async (req, res) => {
     return res.status(400).json({
       error: 'Deposit amount must be positive'
     });
+  }
+
+  // Check employee bank transfer permission
+  const empPermResult = await pool.query(
+    'SELECT transfer_allowed_bank, transfer_limit FROM employees WHERE employee_id = $1',
+    [performed_by]
+  );
+  if (empPermResult.rows.length > 0) {
+    if (empPermResult.rows[0].transfer_allowed_bank === false) {
+      return res.status(403).json({ error: 'You do not have permission to make bank transfers' });
+    }
+    if (empPermResult.rows[0].transfer_limit != null && parseFloat(amount) > parseFloat(empPermResult.rows[0].transfer_limit)) {
+      return res.status(403).json({ error: `Transfer amount exceeds your limit of $${parseFloat(empPermResult.rows[0].transfer_limit).toFixed(2)}. Manager override required.`, requiresOverride: true });
+    }
   }
 
   const client = await pool.connect();
@@ -2312,6 +2852,20 @@ app.post('/api/cash-drawer/:sessionId/bank-withdrawal', async (req, res) => {
     });
   }
 
+  // Check employee bank transfer permission
+  const empPermResult = await pool.query(
+    'SELECT transfer_allowed_bank, transfer_limit FROM employees WHERE employee_id = $1',
+    [performed_by]
+  );
+  if (empPermResult.rows.length > 0) {
+    if (empPermResult.rows[0].transfer_allowed_bank === false) {
+      return res.status(403).json({ error: 'You do not have permission to make bank transfers' });
+    }
+    if (empPermResult.rows[0].transfer_limit != null && parseFloat(amount) > parseFloat(empPermResult.rows[0].transfer_limit)) {
+      return res.status(403).json({ error: `Transfer amount exceeds your limit of $${parseFloat(empPermResult.rows[0].transfer_limit).toFixed(2)}. Manager override required.`, requiresOverride: true });
+    }
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -2472,6 +3026,20 @@ app.post('/api/cash-drawer/:sessionId/petty-cash-payout', async (req, res) => {
     return res.status(400).json({
       error: 'Payout amount must be positive'
     });
+  }
+
+  // Check employee petty cash permission
+  const empPermResult = await pool.query(
+    'SELECT can_petty_cash, petty_cash_limit FROM employees WHERE employee_id = $1',
+    [performed_by]
+  );
+  if (empPermResult.rows.length > 0) {
+    if (empPermResult.rows[0].can_petty_cash === false) {
+      return res.status(403).json({ error: 'You do not have permission to make petty cash payouts' });
+    }
+    if (empPermResult.rows[0].petty_cash_limit != null && parseFloat(amount) > parseFloat(empPermResult.rows[0].petty_cash_limit)) {
+      return res.status(403).json({ error: `Petty cash payout exceeds your limit of $${parseFloat(empPermResult.rows[0].petty_cash_limit).toFixed(2)}. Manager override required.`, requiresOverride: true });
+    }
   }
 
   const client = await pool.connect();
@@ -2859,6 +3427,20 @@ app.post('/api/inter-store-transfers', async (req, res) => {
 
   if (parseFloat(amount) <= 0) {
     return res.status(400).json({ error: 'Transfer amount must be positive' });
+  }
+
+  // Check employee inter-store transfer permission
+  const empPermResult = await pool.query(
+    'SELECT transfer_allowed_store, transfer_limit FROM employees WHERE employee_id = $1',
+    [performed_by]
+  );
+  if (empPermResult.rows.length > 0) {
+    if (empPermResult.rows[0].transfer_allowed_store === false) {
+      return res.status(403).json({ error: 'You do not have permission to make inter-store transfers' });
+    }
+    if (empPermResult.rows[0].transfer_limit != null && parseFloat(amount) > parseFloat(empPermResult.rows[0].transfer_limit)) {
+      return res.status(403).json({ error: `Transfer amount exceeds your limit of $${parseFloat(empPermResult.rows[0].transfer_limit).toFixed(2)}. Manager override required.`, requiresOverride: true });
+    }
   }
 
   const client = await pool.connect();
@@ -9626,14 +10208,277 @@ app.get('/api/transaction-types', async (req, res) => {
   }
 });
 
-// Get all payment methods
+// Get all payment methods (with optional includeInactive parameter for admin config)
 app.get('/api/payment-methods', async (req, res) => {
   try {
-    const query = 'SELECT * FROM payment_methods WHERE is_active = true ORDER BY id';
+    const includeInactive = req.query.includeInactive === 'true';
+    let query = 'SELECT * FROM payment_methods';
+    if (!includeInactive) {
+      query += ' WHERE is_active = true';
+    }
+    query += ' ORDER BY id';
     const result = await pool.query(query);
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching payment methods:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create a new payment method
+app.post('/api/payment-methods', async (req, res) => {
+  try {
+    const { 
+      method_name, 
+      method_value, 
+      is_active, 
+      is_physical,
+      currency,
+      accounting_code,
+      store_designator,
+      post_type,
+      usage,
+      accepted_for_pawn_payments,
+      accepted_for_pawn_redeems
+    } = req.body;
+
+    if (!method_name || !method_value) {
+      return res.status(400).json({ error: 'Method name and method value are required' });
+    }
+
+    // Check if method_name already exists (must be unique)
+    const nameCheck = await pool.query(
+      'SELECT id FROM payment_methods WHERE LOWER(method_name) = LOWER($1)',
+      [method_name]
+    );
+    if (nameCheck.rows.length > 0) {
+      return res.status(400).json({ error: 'A payment method with this name already exists' });
+    }
+
+    // Validate method_value format (should be lowercase with underscores)
+    const validMethodValue = method_value.toLowerCase().replace(/\s+/g, '_');
+
+    // Check if method_value already exists (must be unique)
+    const valueCheck = await pool.query(
+      'SELECT id FROM payment_methods WHERE method_value = $1',
+      [validMethodValue]
+    );
+    if (valueCheck.rows.length > 0) {
+      return res.status(400).json({ error: 'A payment method with this value already exists' });
+    }
+
+    // Only the method_value 'cash' can be the default cash
+    // Check if there's already a default cash and if this new one is trying to be default
+    const existingDefaultCash = await pool.query(
+      'SELECT id FROM payment_methods WHERE is_default_cash = true'
+    );
+
+    // If this is 'cash' and there's no default cash yet, make it default
+    // Otherwise, if it's 'cash' but there's already a default, don't make it default
+    // If it's not 'cash', never make it default
+    const isDefaultCash = validMethodValue === 'cash' && existingDefaultCash.rows.length === 0;
+
+    const query = `
+      INSERT INTO payment_methods (
+        method_name, 
+        method_value, 
+        is_active, 
+        is_physical, 
+        is_default_cash,
+        currency,
+        accounting_code,
+        store_designator,
+        post_type,
+        usage,
+        accepted_for_pawn_payments,
+        accepted_for_pawn_redeems
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING *
+    `;
+    const result = await pool.query(query, [
+      method_name,
+      validMethodValue,
+      is_active !== undefined ? is_active : true,
+      is_physical !== undefined ? is_physical : false,
+      isDefaultCash,
+      currency || null,
+      accounting_code || null,
+      store_designator !== undefined ? store_designator : false,
+      post_type || 'SUM',
+      usage || 'Both',
+      accepted_for_pawn_payments !== undefined ? accepted_for_pawn_payments : false,
+      accepted_for_pawn_redeems !== undefined ? accepted_for_pawn_redeems : false
+    ]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A payment method with this name or value already exists' });
+    }
+    console.error('Error creating payment method:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update a payment method
+app.put('/api/payment-methods/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { 
+      method_name, 
+      method_value, 
+      is_active, 
+      is_physical,
+      currency,
+      accounting_code,
+      store_designator,
+      post_type,
+      usage,
+      accepted_for_pawn_payments,
+      accepted_for_pawn_redeems
+    } = req.body;
+
+    if (!method_name || !method_value) {
+      return res.status(400).json({ error: 'Method name and method value are required' });
+    }
+
+    // Check if this is the default cash - prevent changing method_value
+    const currentMethod = await pool.query(
+      'SELECT is_default_cash, method_value, method_name FROM payment_methods WHERE id = $1',
+      [id]
+    );
+
+    if (currentMethod.rows.length === 0) {
+      return res.status(404).json({ error: 'Payment method not found' });
+    }
+
+    // Check if method_name already exists (must be unique, excluding current record)
+    if (method_name.toLowerCase() !== currentMethod.rows[0].method_name.toLowerCase()) {
+      const nameCheck = await pool.query(
+        'SELECT id FROM payment_methods WHERE LOWER(method_name) = LOWER($1) AND id != $2',
+        [method_name, id]
+      );
+      if (nameCheck.rows.length > 0) {
+        return res.status(400).json({ error: 'A payment method with this name already exists' });
+      }
+    }
+
+    // If it's the default cash, don't allow changing the method_value
+    const validMethodValue = currentMethod.rows[0].is_default_cash 
+      ? currentMethod.rows[0].method_value 
+      : method_value.toLowerCase().replace(/\s+/g, '_');
+
+    // Check if method_value already exists (must be unique, excluding current record)
+    if (validMethodValue !== currentMethod.rows[0].method_value) {
+      const valueCheck = await pool.query(
+        'SELECT id FROM payment_methods WHERE method_value = $1 AND id != $2',
+        [validMethodValue, id]
+      );
+      if (valueCheck.rows.length > 0) {
+        return res.status(400).json({ error: 'A payment method with this value already exists' });
+      }
+    }
+
+    // If it's the default cash, ensure is_physical is always true
+    const finalIsPhysical = currentMethod.rows[0].is_default_cash 
+      ? true 
+      : (is_physical !== undefined ? is_physical : false);
+
+    const query = `
+      UPDATE payment_methods
+      SET method_name = $1,
+          method_value = $2,
+          is_active = $3,
+          is_physical = $4,
+          currency = $5,
+          accounting_code = $6,
+          store_designator = $7,
+          post_type = $8,
+          usage = $9,
+          accepted_for_pawn_payments = $10,
+          accepted_for_pawn_redeems = $11,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $12
+      RETURNING *
+    `;
+    const result = await pool.query(query, [
+      method_name,
+      validMethodValue,
+      is_active !== undefined ? is_active : true,
+      finalIsPhysical,
+      currency || null,
+      accounting_code || null,
+      store_designator !== undefined ? store_designator : false,
+      post_type || 'SUM',
+      usage || 'Both',
+      accepted_for_pawn_payments !== undefined ? accepted_for_pawn_payments : false,
+      accepted_for_pawn_redeems !== undefined ? accepted_for_pawn_redeems : false,
+      id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Payment method not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A payment method with this name or value already exists' });
+    }
+    console.error('Error updating payment method:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Delete (deactivate) a payment method
+app.delete('/api/payment-methods/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if this is the default cash - it cannot be deleted
+    const defaultCashCheck = await pool.query(
+      'SELECT is_default_cash FROM payment_methods WHERE id = $1',
+      [id]
+    );
+
+    if (defaultCashCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Payment method not found' });
+    }
+
+    if (defaultCashCheck.rows[0].is_default_cash) {
+      return res.status(400).json({ error: 'The default cash payment method cannot be deleted. It is required for denomination tracking.' });
+    }
+
+    // Check if payment method is being used in any transactions
+    const usageCheck = await pool.query(
+      'SELECT COUNT(*) as count FROM payments WHERE payment_method = (SELECT method_value FROM payment_methods WHERE id = $1)',
+      [id]
+    );
+
+    if (parseInt(usageCheck.rows[0].count) > 0) {
+      // Instead of deleting, deactivate it
+      const query = `
+        UPDATE payment_methods
+        SET is_active = false, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        RETURNING *
+      `;
+      const result = await pool.query(query, [id]);
+
+      return res.json({ 
+        message: 'Payment method deactivated (it is being used in transactions)',
+        payment_method: result.rows[0]
+      });
+    }
+
+    // If not in use, we can actually delete it
+    const query = 'DELETE FROM payment_methods WHERE id = $1 RETURNING *';
+    const result = await pool.query(query, [id]);
+
+    res.json({ message: 'Payment method deleted successfully', payment_method: result.rows[0] });
+  } catch (error) {
+    console.error('Error deleting payment method:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -10966,6 +11811,103 @@ app.delete('/api/business-info/logo', async (req, res) => {
   }
 });
 
+// ==================== CURRENCY TYPES ENDPOINTS ====================
+
+// GET all currency types
+app.get('/api/currency-types', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, code, description, is_default, created_at, updated_at FROM currency_types ORDER BY is_default DESC, code ASC'
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching currency types:', error);
+    res.status(500).json({ error: 'Failed to fetch currency types' });
+  }
+});
+
+// PUT currency types (handles add, update, delete)
+app.put('/api/currency-types', async (req, res) => {
+  const { currencies } = req.body; // Array of currency objects: { id?, code, description, is_default, _delete? }
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Handle deletions first
+    const deleteIds = currencies.filter(c => c._delete && c.id).map(c => c.id);
+    if (deleteIds.length > 0) {
+      await client.query('DELETE FROM currency_types WHERE id = ANY($1)', [deleteIds]);
+    }
+
+    // Handle updates and inserts
+    for (const currency of currencies) {
+      if (currency._delete) continue; // Skip deleted items
+
+      const { id, code, description, is_default } = currency;
+
+      // Validate required fields
+      if (!code || !description) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Code and description are required' });
+      }
+
+      // If setting this as default, unset all other defaults first
+      if (is_default) {
+        await client.query('UPDATE currency_types SET is_default = FALSE WHERE is_default = TRUE');
+      }
+
+      if (id) {
+        // Update existing currency
+        // Check if code is being changed to one that already exists
+        const codeCheckResult = await client.query(
+          'SELECT id FROM currency_types WHERE code = $1 AND id != $2',
+          [code, id]
+        );
+        if (codeCheckResult.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: `Currency code "${code}" already exists` });
+        }
+
+        await client.query(
+          'UPDATE currency_types SET code = $1, description = $2, is_default = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4',
+          [code, description, is_default || false, id]
+        );
+      } else {
+        // Insert new currency
+        // Check if code already exists
+        const codeCheckResult = await client.query(
+          'SELECT id FROM currency_types WHERE code = $1',
+          [code]
+        );
+        if (codeCheckResult.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: `Currency code "${code}" already exists` });
+        }
+
+        await client.query(
+          'INSERT INTO currency_types (code, description, is_default) VALUES ($1, $2, $3)',
+          [code, description, is_default || false]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    // Return updated list
+    const result = await client.query(
+      'SELECT id, code, description, is_default, created_at, updated_at FROM currency_types ORDER BY is_default DESC, code ASC'
+    );
+    res.json(result.rows);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating currency types:', error);
+    res.status(500).json({ error: 'Failed to update currency types' });
+  } finally {
+    client.release();
+  }
+});
+
 // ==================== LAYAWAY ENDPOINTS ====================
 
 // GET layaways by view
@@ -11761,6 +12703,12 @@ app.post('/api/store-sessions/open', async (req, res) => {
       return res.status(400).json({ error: 'Employee ID is required' });
     }
 
+    // Check if employee has permission to open/close store
+    const empPermResult = await pool.query('SELECT can_open_store FROM employees WHERE employee_id = $1', [employee_id]);
+    if (empPermResult.rows.length > 0 && empPermResult.rows[0].can_open_store === false) {
+      return res.status(403).json({ error: 'You do not have permission to open the store' });
+    }
+
     // Get current store
     const currentStoreResult = await pool.query(
       'SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1'
@@ -11845,6 +12793,12 @@ app.post('/api/store-sessions/close', async (req, res) => {
 
     if (!employee_id) {
       return res.status(400).json({ error: 'Employee ID is required' });
+    }
+
+    // Check if employee has permission to open/close store
+    const empPermResult = await pool.query('SELECT can_open_store FROM employees WHERE employee_id = $1', [employee_id]);
+    if (empPermResult.rows.length > 0 && empPermResult.rows[0].can_open_store === false) {
+      return res.status(403).json({ error: 'You do not have permission to close the store' });
     }
 
     // Find open session for current store

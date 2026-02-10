@@ -587,6 +587,12 @@ CREATE TABLE IF NOT EXISTS banks (
     bank_name VARCHAR(100) NOT NULL,
     account_number VARCHAR(50),
     routing_number VARCHAR(50),
+    pos_name VARCHAR(100),
+    currency VARCHAR(10) DEFAULT 'CAD',
+    accounting_number VARCHAR(4),
+    store_designator BOOLEAN NOT NULL DEFAULT FALSE,
+    store_number VARCHAR(4),
+    store_id INTEGER,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     is_default BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -599,6 +605,12 @@ CREATE INDEX IF NOT EXISTS idx_banks_active ON banks(is_active);
 -- Add comments for documentation
 COMMENT ON TABLE banks IS 'Stores bank account configurations for cash deposits from master safe';
 COMMENT ON COLUMN banks.is_default IS 'Default bank to use when making deposits';
+COMMENT ON COLUMN banks.accounting_number IS '4-digit accounting number for export';
+COMMENT ON COLUMN banks.store_designator IS 'Whether to append store number to accounting number in export';
+COMMENT ON COLUMN banks.store_number IS '4-digit store number to append when store_designator is true';
+
+-- Add store_number column if it doesn't exist (for existing databases)
+ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_number VARCHAR(4);
 
 -- Insert a default bank if none exists
 INSERT INTO banks (bank_name, is_default)

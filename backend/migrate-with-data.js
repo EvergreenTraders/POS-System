@@ -61,6 +61,7 @@ const MIGRATION_FILES = [
   'quotes.sql',
   'tax_config.sql',
   'cash_drawer.sql',
+  'petty_cash_expenses.sql',
   'add_performance_indexes.sql',
   'customer_headers_preferences.sql',
   'pawn.sql'

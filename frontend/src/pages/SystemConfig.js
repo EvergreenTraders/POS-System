@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Container,
   Typography,
@@ -35,7 +35,7 @@ import {
   DialogContent,
   DialogActions
 } from '@mui/material';
-import { CloudUpload as UploadIcon, Delete as DeleteIcon, Store as StoreIcon } from '@mui/icons-material';
+import { CloudUpload as UploadIcon, Delete as DeleteIcon, Store as StoreIcon, Edit as EditIcon, Save as SaveIcon, Close as CancelIcon, Add as AddIcon } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
 import config from '../config';
@@ -96,6 +96,10 @@ function SystemConfig() {
     severity: 'success',
   });
   
+  // Employee Configuration state
+  const [employeePermissions, setEmployeePermissions] = useState([]);
+  const [employeePermissionsLoading, setEmployeePermissionsLoading] = useState(false);
+
   // Pricing Calculator state
   const [calculatorSettings, setCalculatorSettings] = useState({
     weight: '',
@@ -141,8 +145,40 @@ function SystemConfig() {
     logoMimetype: null
   });
 
+  // Currency types configuration (frontend-managed list)
+  const [currencyTypes, setCurrencyTypes] = useState([
+    { code: 'CAD', description: 'Canadian Dollar', isDefault: true }
+  ]);
+  const [newCurrency, setNewCurrency] = useState({ code: '', description: '' });
+
+  // Bank accounts
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [bankEditId, setBankEditId] = useState(null);
+  const [bankEditData, setBankEditData] = useState({});
+  const [newBank, setNewBank] = useState({ pos_name: '', bank_name: '', account_number: '', currency: 'CAD', accounting_number: '', store_designator: false, store_number: '', is_default: false });
+  const [currentStoreId, setCurrentStoreId] = useState(null);
+  const [allStoreDesignatorsChecked, setAllStoreDesignatorsChecked] = useState(false);
+
+  // Petty cash expenses
+  const [pettyCashExpenses, setPettyCashExpenses] = useState([]);
+  const [pettyCashEditId, setPettyCashEditId] = useState(null);
+  const [pettyCashEditData, setPettyCashEditData] = useState({});
+  const [newPettyCashExpense, setNewPettyCashExpense] = useState({ name: '', accounting_code: '', includes_sales_tax: false });
+
+  const formatAccountingNumber = (acctNum, storeDesignator, storeNumber) => {
+    if (!acctNum) return '—';
+    if (storeDesignator && storeNumber) {
+      return `${acctNum}-${String(storeNumber).padStart(4, '0')}`;
+    }
+    return acctNum;
+  };
+
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const isInitialLoad = useRef(true);
+  const saveTimeoutRef = useRef(null);
+  const currencySaveTimeoutRef = useRef(null);
 
   const [securitySettings, setSecuritySettings] = useState({
     requirePasswordChange: true,
@@ -206,6 +242,45 @@ function SystemConfig() {
   const [selectedCustomerColumns, setSelectedCustomerColumns] = useState({});
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [customerColumnPreferences, setCustomerColumnPreferences] = useState({});
+
+  // Tender Type Setup state
+  const [tenderTypes, setTenderTypes] = useState([]);
+  const [tenderTypesLoading, setTenderTypesLoading] = useState(false);
+  const [tenderTypeDialogOpen, setTenderTypeDialogOpen] = useState(false);
+  const [editingTenderType, setEditingTenderType] = useState(null);
+  const [tenderTypeForm, setTenderTypeForm] = useState({
+    method_name: '',
+    method_value: '',
+    is_active: true,
+    is_physical: false,
+    currency: '',
+    accounting_code: '',
+    store_designator: false,
+    post_type: 'SUM',
+    usage: 'Both',
+    accepted_for_pawn_payments: false,
+    accepted_for_pawn_redeems: false
+  });
+
+  // Backup Options state
+  const [backupSettings, setBackupSettings] = useState({
+    enableLocalBackup: false,
+    designatedPCsOnly: false,
+    monthlyBackup: false,
+    monthlyBackupCount: 12,
+    weeklyBackup: false,
+    weeklyBackupCount: 4,
+    dailyBackup: false,
+    dailyBackupCount: 7,
+    backupFilePath: ''
+  });
+  const [trustedPCs, setTrustedPCs] = useState([]);
+  const [trustedPCDialogOpen, setTrustedPCDialogOpen] = useState(false);
+  const [editingTrustedPC, setEditingTrustedPC] = useState(null);
+  const [trustedPCForm, setTrustedPCForm] = useState({
+    name: '',
+    macAddress: ''
+  });
 
   const fetchDrawerConfig = async () => {
     try {
@@ -681,11 +756,253 @@ function SystemConfig() {
     fetchTaxConfig();
     fetchAuthorizationTemplate();
     fetchReceiptConfig();
+    fetchPettyCashExpenses();
     fetchPawnConfig();
+    fetchBankAccounts();
+    axios.get(`${API_BASE_URL}/stores/current`).then(res => setCurrentStoreId(res.data.store_id)).catch(() => {});
   }, []);
-  
+
+  const fetchBankAccounts = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/banks`);
+      setBankAccounts(response.data);
+      // Check if all store designators are checked
+      if (response.data.length > 0) {
+        const allChecked = response.data.every(bank => bank.store_designator === true);
+        setAllStoreDesignatorsChecked(allChecked);
+      } else {
+        setAllStoreDesignatorsChecked(false);
+      }
+    } catch (err) {
+      console.error('Error fetching banks:', err);
+    }
+  };
+
+  const handleToggleAllStoreDesignators = async (checked) => {
+    setAllStoreDesignatorsChecked(checked);
+    
+    // Update all banks' store_designator
+    const updatePromises = bankAccounts.map(bank => {
+      return axios.put(`${API_BASE_URL}/banks/${bank.bank_id}`, {
+        pos_name: bank.pos_name,
+        bank_name: bank.bank_name,
+        account_number: bank.account_number,
+        currency: bank.currency,
+        accounting_number: bank.accounting_number,
+        store_designator: checked,
+        store_number: bank.store_number,
+        is_default: bank.is_default,
+        is_active: bank.is_active
+      });
+    });
+
+    try {
+      await Promise.all(updatePromises);
+      fetchBankAccounts();
+      setSnackbar({ 
+        open: true, 
+        message: `All store designators ${checked ? 'enabled' : 'disabled'}`, 
+        severity: 'success' 
+      });
+    } catch (err) {
+      console.error('Error updating store designators:', err);
+      setSnackbar({ open: true, message: 'Failed to update store designators', severity: 'error' });
+      setAllStoreDesignatorsChecked(!checked); // Revert on error
+    }
+  };
+
+  const handleAddBank = async () => {
+    if (!newBank.bank_name.trim()) {
+      setSnackbar({ open: true, message: 'Bank name is required', severity: 'error' });
+      return;
+    }
+    try {
+      await axios.post(`${API_BASE_URL}/banks`, newBank);
+      setNewBank({ pos_name: '', bank_name: '', account_number: '', currency: 'CAD', accounting_number: '', store_designator: false, store_number: '', is_default: false });
+      fetchBankAccounts();
+      setSnackbar({ open: true, message: 'Bank added', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to add bank', severity: 'error' });
+    }
+  };
+
+  const handleSaveBank = async (bankId) => {
+    try {
+      await axios.put(`${API_BASE_URL}/banks/${bankId}`, bankEditData);
+      setBankEditId(null);
+      fetchBankAccounts();
+      setSnackbar({ open: true, message: 'Bank updated', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to update bank', severity: 'error' });
+    }
+  };
+
+  const handleDeleteBank = async (bankId) => {
+    try {
+      await axios.delete(`${API_BASE_URL}/banks/${bankId}`);
+      fetchBankAccounts();
+      setSnackbar({ open: true, message: 'Bank deleted', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to delete bank', severity: 'error' });
+    }
+  };
+
+  // Petty Cash Expenses functions
+  const fetchPettyCashExpenses = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/petty-cash-expenses`);
+      setPettyCashExpenses(response.data);
+    } catch (err) {
+      console.error('Error fetching petty cash expenses:', err);
+      setSnackbar({ open: true, message: 'Failed to fetch petty cash expenses', severity: 'error' });
+    }
+  };
+
+  const handleAddPettyCashExpense = async () => {
+    if (!newPettyCashExpense.name.trim()) {
+      setSnackbar({ open: true, message: 'Name is required', severity: 'error' });
+      return;
+    }
+    if (!newPettyCashExpense.accounting_code.trim()) {
+      setSnackbar({ open: true, message: 'Accounting code is required', severity: 'error' });
+      return;
+    }
+    try {
+      await axios.post(`${API_BASE_URL}/petty-cash-expenses`, newPettyCashExpense);
+      setNewPettyCashExpense({ name: '', accounting_code: '', includes_sales_tax: false });
+      fetchPettyCashExpenses();
+      setSnackbar({ open: true, message: 'Petty cash expense added', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to add petty cash expense', severity: 'error' });
+    }
+  };
+
+  const handleSavePettyCashExpense = async (expenseId) => {
+    if (!pettyCashEditData.name?.trim()) {
+      setSnackbar({ open: true, message: 'Name is required', severity: 'error' });
+      return;
+    }
+    if (!pettyCashEditData.accounting_code?.trim()) {
+      setSnackbar({ open: true, message: 'Accounting code is required', severity: 'error' });
+      return;
+    }
+    try {
+      await axios.put(`${API_BASE_URL}/petty-cash-expenses/${expenseId}`, pettyCashEditData);
+      setPettyCashEditId(null);
+      fetchPettyCashExpenses();
+      setSnackbar({ open: true, message: 'Petty cash expense updated', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to update petty cash expense', severity: 'error' });
+    }
+  };
+
+  const handleDeletePettyCashExpense = async (expenseId) => {
+    try {
+      await axios.delete(`${API_BASE_URL}/petty-cash-expenses/${expenseId}`);
+      fetchPettyCashExpenses();
+      setSnackbar({ open: true, message: 'Petty cash expense deleted', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to delete petty cash expense', severity: 'error' });
+    }
+  };
+
+  // Fetch employee permissions
+  const fetchEmployeePermissions = async () => {
+    setEmployeePermissionsLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/employees`);
+      setEmployeePermissions(response.data);
+    } catch (err) {
+      console.error('Error fetching employee permissions:', err);
+    } finally {
+      setEmployeePermissionsLoading(false);
+    }
+  };
+
+  const buildPermissionPayload = (employee, overrideField, overrideValue) => {
+    const get = (field, defaultTrue) => {
+      if (field === overrideField) return overrideValue;
+      return defaultTrue ? employee[field] !== false : employee[field];
+    };
+    return {
+      trackHours: get('track_hours', true),
+      canOpenStore: get('can_open_store', true),
+      canOpenDrawer: get('can_open_drawer', true),
+      canViewDrawer: get('can_view_drawer', true),
+      canViewSafe: get('can_view_safe', true),
+      transferAllowedDrawer: get('transfer_allowed_drawer', true),
+      transferAllowedSafe: get('transfer_allowed_safe', true),
+      transferAllowedBank: get('transfer_allowed_bank', true),
+      transferAllowedStore: get('transfer_allowed_store', true),
+      transferLimit: overrideField === 'transfer_limit' ? overrideValue : (employee.transfer_limit != null ? employee.transfer_limit : null),
+      canPettyCash: get('can_petty_cash', true),
+      pettyCashLimit: overrideField === 'petty_cash_limit' ? overrideValue : (employee.petty_cash_limit != null ? employee.petty_cash_limit : null),
+      discrepancyThreshold: overrideField === 'discrepancy_threshold' ? overrideValue : (employee.discrepancy_threshold != null ? employee.discrepancy_threshold : null),
+    };
+  };
+
+  const handlePermissionToggle = async (employeeId, field, currentValue) => {
+    // Optimistically update UI
+    setEmployeePermissions(prev =>
+      prev.map(emp =>
+        emp.employee_id === employeeId ? { ...emp, [field]: !currentValue } : emp
+      )
+    );
+
+    try {
+      const employee = employeePermissions.find(e => e.employee_id === employeeId);
+      const payload = buildPermissionPayload(employee, field, !currentValue);
+
+      await axios.put(`${API_BASE_URL}/employees/${employeeId}/permissions`, payload);
+      setSnackbar({ open: true, message: 'Permission updated', severity: 'success' });
+    } catch (err) {
+      // Revert on error
+      setEmployeePermissions(prev =>
+        prev.map(emp =>
+          emp.employee_id === employeeId ? { ...emp, [field]: currentValue } : emp
+        )
+      );
+      setSnackbar({ open: true, message: 'Failed to update permission', severity: 'error' });
+    }
+  };
+
+  const handlePermissionValueChange = async (employeeId, field, value) => {
+    const parsedValue = value === '' ? null : parseFloat(value);
+    const employee = employeePermissions.find(e => e.employee_id === employeeId);
+    const previousValue = employee[field];
+
+    // Optimistically update UI
+    setEmployeePermissions(prev =>
+      prev.map(emp =>
+        emp.employee_id === employeeId ? { ...emp, [field]: parsedValue } : emp
+      )
+    );
+
+    try {
+      const payload = buildPermissionPayload(employee, field, parsedValue);
+      await axios.put(`${API_BASE_URL}/employees/${employeeId}/permissions`, payload);
+      setSnackbar({ open: true, message: 'Setting updated', severity: 'success' });
+    } catch (err) {
+      setEmployeePermissions(prev =>
+        prev.map(emp =>
+          emp.employee_id === employeeId ? { ...emp, [field]: previousValue } : emp
+        )
+      );
+      setSnackbar({ open: true, message: 'Failed to update setting', severity: 'error' });
+    }
+  };
+
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
+    // Fetch employee permissions when switching to that tab (index 6)
+    if (newValue === 6) {
+      fetchEmployeePermissions();
+    }
+    // Fetch backup settings when switching to General tab (index 0)
+    if (newValue === 0) {
+      fetchBackupSettings();
+      fetchTrustedPCs();
+    }
   };
 
   const handleGeneralSettingsChange = (event) => {
@@ -727,6 +1044,11 @@ function SystemConfig() {
         setLogoPreview(reader.result);
       };
       reader.readAsDataURL(file);
+
+      // Auto-save when logo is uploaded
+      setTimeout(() => {
+        autoSaveBusinessInfo(false);
+      }, 500);
     }
   };
 
@@ -761,16 +1083,27 @@ function SystemConfig() {
     }
   };
 
-  const handleSaveBusinessInfo = async () => {
+  const autoSaveBusinessInfo = async (showError = true) => {
+    // Skip auto-save on initial load
+    if (isInitialLoad.current) {
+      return;
+    }
+
     try {
+      setIsSaving(true);
       const token = localStorage.getItem('token');
       const formData = new FormData();
+
+      // Determine default currency from currencyTypes (excluding deleted)
+      const activeCurrencies = currencyTypes.filter(c => !c._delete);
+      const defaultCurrency =
+        activeCurrencies.find(c => c.isDefault) || activeCurrencies[0] || { code: generalSettings.currency || 'CAD' };
 
       formData.append('business_name', generalSettings.businessName);
       formData.append('email', generalSettings.email);
       formData.append('phone', generalSettings.phone);
       formData.append('address', generalSettings.address);
-      formData.append('currency', generalSettings.currency);
+      formData.append('currency', defaultCurrency.code);
       formData.append('timezone', generalSettings.timezone);
 
       if (logoFile) {
@@ -784,11 +1117,32 @@ function SystemConfig() {
         }
       });
 
-      setSnackbar({
-        open: true,
-        message: 'Business information saved successfully',
-        severity: 'success'
-      });
+      // Save currency types to database
+      try {
+        const currenciesPayload = currencyTypes.map(ct => ({
+          id: ct.id || undefined,
+          code: ct.code,
+          description: ct.description,
+          is_default: ct.isDefault || false,
+          _delete: ct._delete || false
+        }));
+
+        await axios.put(`${API_BASE_URL}/currency-types`, 
+          { currencies: currenciesPayload },
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        // Reload currency types to get updated IDs and remove deleted items
+        await loadCurrencyTypes();
+      } catch (currencyError) {
+        console.error('Error saving currency types:', currencyError);
+        // Don't fail the entire save if currency types fail
+      }
 
       // Dispatch event to notify Navbar of business settings change
       window.dispatchEvent(new CustomEvent('businessSettingsUpdated', {
@@ -796,14 +1150,41 @@ function SystemConfig() {
       }));
 
       // Clear logo file after successful save
-      setLogoFile(null);
+      if (logoFile) {
+        setLogoFile(null);
+      }
     } catch (error) {
       console.error('Error saving business info:', error);
-      setSnackbar({
-        open: true,
-        message: 'Failed to save business information',
-        severity: 'error'
+      if (showError) {
+        setSnackbar({
+          open: true,
+          message: 'Failed to save business information',
+          severity: 'error'
+        });
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const loadCurrencyTypes = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/currency-types`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
+
+      if (response.data && response.data.length > 0) {
+        setCurrencyTypes(response.data.map(ct => ({
+          id: ct.id,
+          code: ct.code,
+          description: ct.description,
+          isDefault: ct.is_default
+        })));
+      }
+    } catch (error) {
+      console.error('Error loading currency types:', error);
+      // If error, keep default currency types
     }
   };
 
@@ -827,12 +1208,29 @@ function SystemConfig() {
         logoMimetype: data.logo_mimetype
       });
 
+      // Load currency types from database
+      await loadCurrencyTypes();
+
+      // If no currency types loaded, initialize based on stored currency
+      setCurrencyTypes(prev => {
+        if (prev && prev.length > 0 && prev.some(ct => ct.id)) return prev;
+        const code = (data.currency || 'CAD').toUpperCase();
+        let description = code;
+        if (code === 'CAD') description = 'Canadian Dollar';
+        if (code === 'USD') description = 'US Dollar';
+        return [{ code, description, isDefault: true }];
+      });
+
       // Set logo preview if exists
       if (data.logo && data.logo_mimetype) {
         setLogoPreview(`data:${data.logo_mimetype};base64,${data.logo}`);
       }
+
+      // Mark initial load as complete
+      isInitialLoad.current = false;
     } catch (error) {
       console.error('Error loading business info:', error);
+      isInitialLoad.current = false;
     }
   };
 
@@ -1820,7 +2218,53 @@ function SystemConfig() {
   useEffect(() => {
     loadBusinessInfo();
     loadAttributeConfig();
+    loadTenderTypes();
+    fetchBackupSettings();
+    fetchTrustedPCs();
   }, []);
+
+  // Auto-save business info when generalSettings change (debounced)
+  useEffect(() => {
+    if (isInitialLoad.current) return;
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set new timeout for debounced save
+    saveTimeoutRef.current = setTimeout(() => {
+      autoSaveBusinessInfo(false);
+    }, 1000); // 1 second debounce
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [generalSettings.businessName, generalSettings.email, generalSettings.phone, generalSettings.address, generalSettings.timezone]);
+
+  // Auto-save currency types when they change (debounced)
+  useEffect(() => {
+    if (isInitialLoad.current) return;
+
+    // Clear existing timeout
+    if (currencySaveTimeoutRef.current) {
+      clearTimeout(currencySaveTimeoutRef.current);
+    }
+
+    // Set new timeout for debounced save
+    currencySaveTimeoutRef.current = setTimeout(() => {
+      autoSaveBusinessInfo(false);
+    }, 1000); // 1 second debounce
+
+    return () => {
+      if (currencySaveTimeoutRef.current) {
+        clearTimeout(currencySaveTimeoutRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(currencyTypes.map(ct => ({ code: ct.code, description: ct.description, isDefault: ct.isDefault, _delete: ct._delete })))]);
 
   const loadAttributeConfig = async () => {
     try {
@@ -1828,6 +2272,294 @@ function SystemConfig() {
       setItemAttributes(response.data);
     } catch (error) {
       console.error('Error loading attribute config:', error);
+    }
+  };
+
+  // Load tender types
+  const loadTenderTypes = async () => {
+    try {
+      setTenderTypesLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/payment-methods?includeInactive=true`);
+      setTenderTypes(response.data || []);
+    } catch (error) {
+      console.error('Error loading tender types:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to load tender types',
+        severity: 'error'
+      });
+    } finally {
+      setTenderTypesLoading(false);
+    }
+  };
+
+  // Handle add tender type
+  const handleAddTenderType = () => {
+    setEditingTenderType(null);
+    // Get default currency from currency types
+    const activeCurrencies = currencyTypes.filter(c => !c._delete);
+    const defaultCurrency = activeCurrencies.find(c => c.isDefault) || activeCurrencies[0] || { code: generalSettings.currency || 'CAD' };
+    
+    setTenderTypeForm({
+      method_name: '',
+      method_value: '',
+      is_active: true,
+      is_physical: false,
+      currency: defaultCurrency.code || '',
+      accounting_code: '',
+      store_designator: false,
+      post_type: 'SUM',
+      usage: 'Both',
+      accepted_for_pawn_payments: false,
+      accepted_for_pawn_redeems: false
+    });
+    setTenderTypeDialogOpen(true);
+  };
+
+  // Handle edit tender type
+  const handleEditTenderType = (tenderType) => {
+    setEditingTenderType(tenderType);
+    setTenderTypeForm({
+      method_name: tenderType.method_name,
+      method_value: tenderType.method_value,
+      is_active: tenderType.is_active,
+      is_physical: tenderType.is_physical,
+      currency: tenderType.currency || '',
+      accounting_code: tenderType.accounting_code || '',
+      store_designator: tenderType.store_designator || false,
+      post_type: tenderType.post_type || 'SUM',
+      usage: tenderType.usage || 'Both',
+      accepted_for_pawn_payments: tenderType.accepted_for_pawn_payments || false,
+      accepted_for_pawn_redeems: tenderType.accepted_for_pawn_redeems || false
+    });
+    setTenderTypeDialogOpen(true);
+  };
+
+  // Handle save tender type (add or update)
+  const handleSaveTenderType = async () => {
+    if (!tenderTypeForm.method_name.trim() || !tenderTypeForm.method_value.trim()) {
+      setSnackbar({
+        open: true,
+        message: 'Method name and value are required',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      if (editingTenderType) {
+        // Update existing
+        await axios.put(`${API_BASE_URL}/payment-methods/${editingTenderType.id}`, tenderTypeForm);
+        setSnackbar({
+          open: true,
+          message: 'Tender type updated successfully',
+          severity: 'success'
+        });
+      } else {
+        // Create new
+        await axios.post(`${API_BASE_URL}/payment-methods`, tenderTypeForm);
+        setSnackbar({
+          open: true,
+          message: 'Tender type added successfully',
+          severity: 'success'
+        });
+      }
+      setTenderTypeDialogOpen(false);
+      await loadTenderTypes();
+    } catch (error) {
+      console.error('Error saving tender type:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to save tender type',
+        severity: 'error'
+      });
+    }
+  };
+
+  // Handle delete tender type
+  const handleDeleteTenderType = async (tenderType) => {
+    if (!window.confirm(`Are you sure you want to delete "${tenderType.method_name}"?`)) {
+      return;
+    }
+
+    try {
+      await axios.delete(`${API_BASE_URL}/payment-methods/${tenderType.id}`);
+      setSnackbar({
+        open: true,
+        message: 'Tender type deleted successfully',
+        severity: 'success'
+      });
+      await loadTenderTypes();
+    } catch (error) {
+      console.error('Error deleting tender type:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to delete tender type',
+        severity: 'error'
+      });
+    }
+  };
+
+  // Backup Options handlers
+  const fetchBackupSettings = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/backup-settings`);
+      if (response.data) {
+        setBackupSettings({
+          enableLocalBackup: response.data.enable_local_backup || false,
+          designatedPCsOnly: response.data.designated_pcs_only || false,
+          monthlyBackup: response.data.monthly_backup || false,
+          monthlyBackupCount: response.data.monthly_backup_count || 12,
+          weeklyBackup: response.data.weekly_backup || false,
+          weeklyBackupCount: response.data.weekly_backup_count || 4,
+          dailyBackup: response.data.daily_backup || false,
+          dailyBackupCount: response.data.daily_backup_count || 7,
+          backupFilePath: response.data.backup_file_path || ''
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching backup settings:', error);
+      // If endpoint doesn't exist yet, use defaults
+    }
+  };
+
+  const fetchTrustedPCs = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/trusted-pcs`);
+      if (response.data) {
+        setTrustedPCs(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching trusted PCs:', error);
+      setTrustedPCs([]);
+    }
+  };
+
+  const handleBackupSettingsChange = (field, value) => {
+    setBackupSettings(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleSaveBackupSettings = async () => {
+    try {
+      await axios.put(`${API_BASE_URL}/backup-settings`, {
+        enable_local_backup: backupSettings.enableLocalBackup,
+        designated_pcs_only: backupSettings.designatedPCsOnly,
+        monthly_backup: backupSettings.monthlyBackup,
+        monthly_backup_count: backupSettings.monthlyBackupCount,
+        weekly_backup: backupSettings.weeklyBackup,
+        weekly_backup_count: backupSettings.weeklyBackupCount,
+        daily_backup: backupSettings.dailyBackup,
+        daily_backup_count: backupSettings.dailyBackupCount,
+        backup_file_path: backupSettings.backupFilePath
+      });
+      setSnackbar({
+        open: true,
+        message: 'Backup settings saved successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving backup settings:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to save backup settings',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleAddTrustedPC = () => {
+    setEditingTrustedPC(null);
+    setTrustedPCForm({ name: '', macAddress: '' });
+    setTrustedPCDialogOpen(true);
+  };
+
+  const handleEditTrustedPC = (pc) => {
+    setEditingTrustedPC(pc);
+    setTrustedPCForm({
+      name: pc.name || '',
+      macAddress: pc.mac_address || ''
+    });
+    setTrustedPCDialogOpen(true);
+  };
+
+  const handleSaveTrustedPC = async () => {
+    if (!trustedPCForm.name.trim() || !trustedPCForm.macAddress.trim()) {
+      setSnackbar({
+        open: true,
+        message: 'Name and MAC address are required',
+        severity: 'error'
+      });
+      return;
+    }
+
+    // Validate MAC address format (basic validation)
+    const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+    if (!macRegex.test(trustedPCForm.macAddress)) {
+      setSnackbar({
+        open: true,
+        message: 'Invalid MAC address format. Use format: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      if (editingTrustedPC) {
+        await axios.put(`${API_BASE_URL}/trusted-pcs/${editingTrustedPC.id}`, {
+          name: trustedPCForm.name,
+          mac_address: trustedPCForm.macAddress
+        });
+        setSnackbar({
+          open: true,
+          message: 'Trusted PC updated successfully',
+          severity: 'success'
+        });
+      } else {
+        await axios.post(`${API_BASE_URL}/trusted-pcs`, {
+          name: trustedPCForm.name,
+          mac_address: trustedPCForm.macAddress
+        });
+        setSnackbar({
+          open: true,
+          message: 'Trusted PC added successfully',
+          severity: 'success'
+        });
+      }
+      setTrustedPCDialogOpen(false);
+      await fetchTrustedPCs();
+    } catch (error) {
+      console.error('Error saving trusted PC:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to save trusted PC',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleDeleteTrustedPC = async (pc) => {
+    if (!window.confirm(`Are you sure you want to delete "${pc.name}"?`)) {
+      return;
+    }
+
+    try {
+      await axios.delete(`${API_BASE_URL}/trusted-pcs/${pc.id}`);
+      setSnackbar({
+        open: true,
+        message: 'Trusted PC deleted successfully',
+        severity: 'success'
+      });
+      await fetchTrustedPCs();
+    } catch (error) {
+      console.error('Error deleting trusted PC:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to delete trusted PC',
+        severity: 'error'
+      });
     }
   };
 
@@ -1841,6 +2573,7 @@ function SystemConfig() {
           <Tab label="Pricing Calculator" />
           <Tab label="Account Authorization" />
           <Tab label="Item Attributes" />
+          <Tab label="Employee Configuration" />
         </Tabs>
       </Box>
 
@@ -1851,28 +2584,9 @@ function SystemConfig() {
               Business Information
             </Typography>
             <Grid container spacing={1}>
-              {/* Row 1: Business Name, Email, Logo */}
-              <Grid item xs={12} sm={3}>
-                <TextField
-                  fullWidth
-                  label="Business Name"
-                  name="businessName"
-                  value={generalSettings.businessName}
-                  onChange={handleGeneralSettingsChange}
-                />
-              </Grid>
-              <Grid item xs={12} sm={3}>
-                <TextField
-                  fullWidth
-                  label="Email"
-                  name="email"
-                  type="email"
-                  value={generalSettings.email}
-                  onChange={handleGeneralSettingsChange}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6} sx={{ display: 'flex', alignItems: 'flex-start', rowSpan: 2 }}>
-                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, width: '100%' }}>
+              {/* Row 2: Logo, All Business Fields, Currency Types - 3 columns (25%, 50%, 75% ratio) */}
+              <Grid item xs={12} sm={2}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1.5, width: '100%' }}>
                   {logoPreview && (
                     <Avatar
                       src={logoPreview}
@@ -1881,7 +2595,7 @@ function SystemConfig() {
                       sx={{ width: 100, height: 100, objectFit: 'contain' }}
                     />
                   )}
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: '100%' }}>
                     <Button
                       variant="contained"
                       component="label"
@@ -1911,28 +2625,23 @@ function SystemConfig() {
                   </Box>
                 </Box>
               </Grid>
-
-              {/* Row 2: Phone, Currency, Timezone */}
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  label="Business Name"
+                  name="businessName"
+                  value={generalSettings.businessName}
+                  onChange={handleGeneralSettingsChange}
+                />
                 <TextField
                   fullWidth
                   label="Phone"
                   name="phone"
                   value={generalSettings.phone}
                   onChange={handleGeneralSettingsChange}
+                  sx={{ mt: 1 }}
                 />
-              </Grid>
-              <Grid item xs={12} sm={3}>
-                <TextField
-                  fullWidth
-                  label="Currency"
-                  name="currency"
-                  value={generalSettings.currency}
-                  onChange={handleGeneralSettingsChange}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
+                <FormControl fullWidth sx={{ mt: 1 }}>
                   <InputLabel>Timezone</InputLabel>
                   <Select
                     name="timezone"
@@ -1947,10 +2656,15 @@ function SystemConfig() {
                     ))}
                   </Select>
                 </FormControl>
-              </Grid>
-
-              {/* Row 3: Address (spans full width) */}
-              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Email"
+                  name="email"
+                  type="email"
+                  value={generalSettings.email}
+                  onChange={handleGeneralSettingsChange}
+                  sx={{ mt: 1 }}
+                />
                 <TextField
                   fullWidth
                   label="Address"
@@ -1959,18 +2673,879 @@ function SystemConfig() {
                   rows={2}
                   value={generalSettings.address}
                   onChange={handleGeneralSettingsChange}
+                  sx={{ mt: 1 }}
                 />
               </Grid>
+              <Grid item xs={12} sm={6}>
+                <Paper
+                  variant="outlined"
+                  sx={{ p: 1.5, borderRadius: 1, height: '100%' }}
+                >
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Currency Types
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Manage supported currencies. The default will be used as the store currency.
+                  </Typography>
+                  <TableContainer>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ width: 80 }}>Code</TableCell>
+                          <TableCell>Description</TableCell>
+                          <TableCell align="center" sx={{ width: 80 }}>Default</TableCell>
+                          <TableCell align="center" sx={{ width: 80 }}>Actions</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {currencyTypes.filter(c => !c._delete).map((cur, index) => {
+                          const actualIndex = currencyTypes.findIndex(ct => ct === cur);
+                          return (
+                            <TableRow key={cur.code || actualIndex}>
+                              <TableCell>
+                                <TextField
+                                  value={cur.code}
+                                  onChange={(e) => {
+                                    const value = e.target.value.toUpperCase();
+                                    setCurrencyTypes(prev =>
+                                      prev.map((c, i) => i === actualIndex ? { ...c, code: value } : c)
+                                    );
+                                  }}
+                                  size="small"
+                                  placeholder="CAD"
+                                  inputProps={{ maxLength: 3, style: { textTransform: 'uppercase' } }}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <TextField
+                                  value={cur.description}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setCurrencyTypes(prev =>
+                                      prev.map((c, i) => i === actualIndex ? { ...c, description: value } : c)
+                                    );
+                                  }}
+                                  size="small"
+                                  placeholder="Canadian Dollar"
+                                />
+                              </TableCell>
+                              <TableCell align="center">
+                                <Checkbox
+                                  checked={cur.isDefault === true}
+                                  onChange={() => {
+                                    setCurrencyTypes(prev =>
+                                      prev.map((c, i) => ({ ...c, isDefault: i === actualIndex }))
+                                    );
+                                  }}
+                                  color="primary"
+                                  size="small"
+                                />
+                              </TableCell>
+                              <TableCell align="center">
+                                <Button
+                                  size="small"
+                                  color="error"
+                                  disabled={currencyTypes.filter(c => !c._delete).length === 1}
+                                  onClick={() => {
+                                    setCurrencyTypes(prev => {
+                                      const updated = prev.map((c, i) => 
+                                        i === actualIndex ? { ...c, _delete: true } : c
+                                      );
+                                      // If deleting the default, set first non-deleted as default
+                                      if (cur.isDefault) {
+                                        const firstNonDeleted = updated.find(c => !c._delete);
+                                        if (firstNonDeleted) {
+                                          const firstIndex = updated.findIndex(c => c === firstNonDeleted);
+                                          updated[firstIndex] = { ...updated[firstIndex], isDefault: true };
+                                        }
+                                      }
+                                      return updated;
+                                    });
+                                  }}
+                                >
+                                  Delete
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                        <TableRow>
+                          <TableCell>
+                            <TextField
+                              value={newCurrency.code}
+                              onChange={(e) => setNewCurrency(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
+                              size="small"
+                              placeholder="Code"
+                              inputProps={{ maxLength: 3, style: { textTransform: 'uppercase' } }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              value={newCurrency.description}
+                              onChange={(e) => setNewCurrency(prev => ({ ...prev, description: e.target.value }))}
+                              size="small"
+                              placeholder="Description"
+                            />
+                          </TableCell>
+                          <TableCell />
+                          <TableCell align="center">
+                            <Button
+                              size="small"
+                              onClick={() => {
+                                const code = (newCurrency.code || '').trim().toUpperCase();
+                                const description = (newCurrency.description || '').trim();
+                                if (!code) {
+                                  setSnackbar({
+                                    open: true,
+                                    message: 'Currency code is required',
+                                    severity: 'error'
+                                  });
+                                  return;
+                                }
+                                if (currencyTypes.some(c => !c._delete && c.code === code)) {
+                                  setSnackbar({
+                                    open: true,
+                                    message: 'Currency code already exists',
+                                    severity: 'error'
+                                  });
+                                  return;
+                                }
+                                setCurrencyTypes(prev => {
+                                  const activeCurrencies = prev.filter(c => !c._delete);
+                                  return [
+                                    ...prev,
+                                    { code, description: description || code, isDefault: activeCurrencies.length === 0 }
+                                  ];
+                                });
+                                setNewCurrency({ code: '', description: '' });
+                              }}
+                            >
+                              Add
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Paper>
+              </Grid>
             </Grid>
-            <Box sx={{ mt: 3 }}>
+            {isSaving && (
+              <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CircularProgress size={16} />
+                <Typography variant="body2" color="text.secondary">
+                  Saving...
+                </Typography>
+              </Box>
+            )}
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Bank Accounts
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Manage bank accounts for deposits, withdrawals, and accounting exports.
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>POS Name</TableCell>
+                    <TableCell>Bank Name</TableCell>
+                    <TableCell>Acct #</TableCell>
+                    <TableCell>Currency</TableCell>
+                    <TableCell>Accounting #</TableCell>
+                    <TableCell>Store #</TableCell>
+                    <TableCell align="center">Store Number</TableCell>
+                    <TableCell align="center">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {bankAccounts.map((bank) => (
+                    <TableRow key={bank.bank_id}>
+                      {bankEditId === bank.bank_id ? (
+                        <>
+                          <TableCell><TextField size="small" value={bankEditData.pos_name || ''} onChange={(e) => setBankEditData(prev => ({ ...prev, pos_name: e.target.value }))} placeholder="e.g. Primary" /></TableCell>
+                          <TableCell><TextField size="small" value={bankEditData.bank_name || ''} onChange={(e) => setBankEditData(prev => ({ ...prev, bank_name: e.target.value }))} placeholder="e.g. Royal Bank" /></TableCell>
+                          <TableCell><TextField size="small" value={bankEditData.account_number || ''} onChange={(e) => setBankEditData(prev => ({ ...prev, account_number: e.target.value.slice(0, 4) }))} placeholder="Last 4" inputProps={{ maxLength: 4 }} sx={{ width: 80 }} /></TableCell>
+                          <TableCell><TextField size="small" value={bankEditData.currency || 'CAD'} onChange={(e) => setBankEditData(prev => ({ ...prev, currency: e.target.value.toUpperCase() }))} inputProps={{ maxLength: 3 }} sx={{ width: 70 }} /></TableCell>
+                          <TableCell>
+                            <TextField 
+                              size="small" 
+                              value={bankEditData.accounting_number || ''} 
+                              onChange={(e) => {
+                                const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                setBankEditData(prev => ({ ...prev, accounting_number: value }));
+                              }} 
+                              placeholder="e.g. 1001" 
+                              inputProps={{ maxLength: 4, inputMode: 'numeric', pattern: '[0-9]*' }} 
+                              sx={{ width: 80 }} 
+                              helperText={bankEditData.accounting_number && bankEditData.accounting_number.length !== 4 ? 'Must be 4 digits' : ''}
+                              error={bankEditData.accounting_number && bankEditData.accounting_number.length !== 4}
+                            />
+                            {bankEditData.accounting_number && (
+                              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                                Export: {formatAccountingNumber(bankEditData.accounting_number, bankEditData.store_designator, bankEditData.store_number)}
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Checkbox
+                              size="small"
+                              checked={bankEditData.store_designator || false}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setBankEditData(prev => ({
+                                  ...prev,
+                                  store_designator: checked,
+                                  store_number: checked && currentStoreId ? String(currentStoreId).padStart(4, '0') : ''
+                                }));
+                              }}
+                              color="primary"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <TextField
+                              size="small"
+                              value={bankEditData.store_number || ''}
+                              onChange={(e) => {
+                                const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                setBankEditData(prev => ({ ...prev, store_number: value }));
+                              }}
+                              placeholder="0001"
+                              inputProps={{ maxLength: 4, inputMode: 'numeric', pattern: '[0-9]*' }}
+                              sx={{ width: 80 }}
+                              helperText={bankEditData.store_number && bankEditData.store_number.length !== 4 ? 'Must be 4 digits' : ''}
+                              error={bankEditData.store_number && bankEditData.store_number.length !== 4}
+                            />
+                          </TableCell>
+                          <TableCell align="center"><Checkbox size="small" checked={bankEditData.is_default || false} onChange={(e) => setBankEditData(prev => ({ ...prev, is_default: e.target.checked }))} /></TableCell>
+                          <TableCell align="center">
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                              <IconButton size="small" color="primary" onClick={() => handleSaveBank(bank.bank_id)}><SaveIcon fontSize="small" /></IconButton>
+                              <IconButton size="small" onClick={() => setBankEditId(null)}><CancelIcon fontSize="small" /></IconButton>
+                            </Box>
+                          </TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell>{bank.pos_name || '—'}</TableCell>
+                          <TableCell>{bank.bank_name}</TableCell>
+                          <TableCell>{bank.account_number || '—'}</TableCell>
+                          <TableCell>{bank.currency || 'CAD'}</TableCell>
+                          <TableCell>{formatAccountingNumber(bank.accounting_number, bank.store_designator, bank.store_number)}</TableCell>
+                          <TableCell align="center">
+                            <Checkbox
+                              size="small"
+                              checked={bank.store_designator || false}
+                              onChange={async (e) => {
+                                const newValue = e.target.checked;
+                                const newStoreNumber = newValue && currentStoreId ? String(currentStoreId).padStart(4, '0') : null;
+                                // Optimistically update UI
+                                setBankAccounts(prev =>
+                                  prev.map(b => b.bank_id === bank.bank_id ? { ...b, store_designator: newValue, store_number: newStoreNumber } : b)
+                                );
+                                try {
+                                  await axios.put(`${API_BASE_URL}/banks/${bank.bank_id}`, {
+                                    pos_name: bank.pos_name,
+                                    bank_name: bank.bank_name,
+                                    account_number: bank.account_number,
+                                    currency: bank.currency,
+                                    accounting_number: bank.accounting_number,
+                                    store_designator: newValue,
+                                    store_number: newStoreNumber,
+                                    is_default: bank.is_default,
+                                    is_active: bank.is_active
+                                  });
+                                  fetchBankAccounts(); // Refresh to sync state
+                                } catch (err) {
+                                  // Revert on error
+                                  setBankAccounts(prev =>
+                                    prev.map(b => b.bank_id === bank.bank_id ? { ...b, store_designator: !newValue, store_number: bank.store_number } : b)
+                                  );
+                                  setSnackbar({ open: true, message: 'Failed to update store designator', severity: 'error' });
+                                }
+                              }}
+                              color="primary"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            {bank.store_number ? String(bank.store_number).padStart(4, '0') : '—'}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                              <IconButton size="small" onClick={() => { setBankEditId(bank.bank_id); setBankEditData({ pos_name: bank.pos_name || '', bank_name: bank.bank_name, account_number: bank.account_number || '', currency: bank.currency || 'CAD', accounting_number: bank.accounting_number || '', store_designator: bank.store_designator || false, store_number: bank.store_number || '', is_default: bank.is_default || false }); }}><EditIcon fontSize="small" /></IconButton>
+                              <IconButton size="small" color="error" onClick={() => handleDeleteBank(bank.bank_id)}><DeleteIcon fontSize="small" /></IconButton>
+                            </Box>
+                          </TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  ))}
+                  <TableRow>
+                    <TableCell><TextField size="small" value={newBank.pos_name} onChange={(e) => setNewBank(prev => ({ ...prev, pos_name: e.target.value }))} placeholder="POS Name" /></TableCell>
+                    <TableCell><TextField size="small" value={newBank.bank_name} onChange={(e) => setNewBank(prev => ({ ...prev, bank_name: e.target.value }))} placeholder="Bank Name" /></TableCell>
+                    <TableCell><TextField size="small" value={newBank.account_number} onChange={(e) => setNewBank(prev => ({ ...prev, account_number: e.target.value.slice(0, 4) }))} placeholder="Last 4" inputProps={{ maxLength: 4 }} sx={{ width: 80 }} /></TableCell>
+                    <TableCell><TextField size="small" value={newBank.currency} onChange={(e) => setNewBank(prev => ({ ...prev, currency: e.target.value.toUpperCase() }))} inputProps={{ maxLength: 3 }} sx={{ width: 70 }} /></TableCell>
+                    <TableCell>
+                      <TextField 
+                        size="small" 
+                        value={newBank.accounting_number} 
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                          setNewBank(prev => ({ ...prev, accounting_number: value }));
+                        }} 
+                        placeholder="e.g. 1001" 
+                        inputProps={{ maxLength: 4, inputMode: 'numeric', pattern: '[0-9]*' }} 
+                        sx={{ width: 80 }} 
+                        helperText={newBank.accounting_number && newBank.accounting_number.length !== 4 ? 'Must be 4 digits' : ''}
+                        error={newBank.accounting_number && newBank.accounting_number.length !== 4}
+                      />
+                      {newBank.accounting_number && (
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                          Export: {formatAccountingNumber(newBank.accounting_number, newBank.store_designator, newBank.store_number)}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Checkbox
+                        size="small"
+                        checked={newBank.store_designator}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setNewBank(prev => ({
+                            ...prev,
+                            store_designator: checked,
+                            store_number: checked && currentStoreId ? String(currentStoreId).padStart(4, '0') : ''
+                          }));
+                        }}
+                        color="primary"
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <TextField
+                        size="small"
+                        value={newBank.store_number || ''}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                          setNewBank(prev => ({ ...prev, store_number: value }));
+                        }}
+                        placeholder="0001"
+                        inputProps={{ maxLength: 4, inputMode: 'numeric', pattern: '[0-9]*' }}
+                        sx={{ width: 80 }}
+                        helperText={newBank.store_number && newBank.store_number.length !== 4 ? 'Must be 4 digits' : ''}
+                        error={newBank.store_number && newBank.store_number.length !== 4}
+                      />
+                    </TableCell>
+                    <TableCell align="center"><Checkbox size="small" checked={newBank.is_default} onChange={(e) => setNewBank(prev => ({ ...prev, is_default: e.target.checked }))} /></TableCell>
+                    <TableCell align="center">
+                      <IconButton size="small" color="primary" onClick={handleAddBank}><AddIcon fontSize="small" /></IconButton>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Petty Cash Expenses
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Manage petty cash expense categories. If "Includes Sales Tax" is enabled, payouts will be split between expense and tax based on the configured tax rate.
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Name</TableCell>
+                    <TableCell>Accounting Code</TableCell>
+                    <TableCell align="center">Includes Sales Tax</TableCell>
+                    <TableCell align="center">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {pettyCashExpenses.map((expense) => (
+                    <TableRow key={expense.expense_id}>
+                      {pettyCashEditId === expense.expense_id ? (
+                        <>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              value={pettyCashEditData.name || ''}
+                              onChange={(e) => setPettyCashEditData(prev => ({ ...prev, name: e.target.value }))}
+                              placeholder="e.g. Staff Rewards"
+                              fullWidth
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              value={pettyCashEditData.accounting_code || ''}
+                              onChange={(e) => setPettyCashEditData(prev => ({ ...prev, accounting_code: e.target.value }))}
+                              placeholder="e.g. 5001"
+                              fullWidth
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Checkbox
+                              size="small"
+                              checked={pettyCashEditData.includes_sales_tax || false}
+                              onChange={(e) => setPettyCashEditData(prev => ({ ...prev, includes_sales_tax: e.target.checked }))}
+                              color="primary"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                              <IconButton size="small" color="primary" onClick={() => handleSavePettyCashExpense(expense.expense_id)}>
+                                <SaveIcon fontSize="small" />
+                              </IconButton>
+                              <IconButton size="small" onClick={() => setPettyCashEditId(null)}>
+                                <CancelIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                          </TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell>{expense.name}</TableCell>
+                          <TableCell>{expense.accounting_code}</TableCell>
+                          <TableCell align="center">
+                            {expense.includes_sales_tax ? 'Yes' : 'No'}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  setPettyCashEditId(expense.expense_id);
+                                  setPettyCashEditData({
+                                    name: expense.name || '',
+                                    accounting_code: expense.accounting_code || '',
+                                    includes_sales_tax: expense.includes_sales_tax || false
+                                  });
+                                }}
+                              >
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleDeletePettyCashExpense(expense.expense_id)}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                          </TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  ))}
+                  <TableRow>
+                    <TableCell>
+                      <TextField
+                        size="small"
+                        value={newPettyCashExpense.name}
+                        onChange={(e) => setNewPettyCashExpense(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="e.g. Staff Rewards"
+                        fullWidth
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <TextField
+                        size="small"
+                        value={newPettyCashExpense.accounting_code}
+                        onChange={(e) => setNewPettyCashExpense(prev => ({ ...prev, accounting_code: e.target.value }))}
+                        placeholder="e.g. 5001"
+                        fullWidth
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <Checkbox
+                        size="small"
+                        checked={newPettyCashExpense.includes_sales_tax}
+                        onChange={(e) => setNewPettyCashExpense(prev => ({ ...prev, includes_sales_tax: e.target.checked }))}
+                        color="primary"
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <IconButton size="small" color="primary" onClick={handleAddPettyCashExpense}>
+                        <AddIcon fontSize="small" />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Backup Options
+            </Typography>
+            <Grid container spacing={3}>
+              {/* Left Column - Main Settings */}
+              <Grid item xs={12} md={6}>
+                {/* Enable Local Backup */}
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={backupSettings.enableLocalBackup}
+                      onChange={(e) => handleBackupSettingsChange('enableLocalBackup', e.target.checked)}
+                      color="primary"
+                    />
+                  }
+                  label="Enable Local Backup"
+                />
+                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>
+                  Enable automatic local backups of the system data
+                </Typography>
+
+                {/* Designated PCs Only */}
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={backupSettings.designatedPCsOnly}
+                      onChange={(e) => handleBackupSettingsChange('designatedPCsOnly', e.target.checked)}
+                      color="primary"
+                      disabled={!backupSettings.enableLocalBackup}
+                    />
+                  }
+                  label="Designated PCs Only"
+                />
+                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>
+                  Restrict backups to trusted PCs only to prevent off-site backups
+                </Typography>
+
+                {/* Trusted PCs List - shown when Designated PCs Only is enabled */}
+                {backupSettings.designatedPCsOnly && backupSettings.enableLocalBackup && (
+                  <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="subtitle1">Trusted PCs</Typography>
+                      <Button
+                        variant="contained"
+                        size="small"
+                        startIcon={<AddIcon />}
+                        onClick={handleAddTrustedPC}
+                      >
+                        Add PC
+                      </Button>
+                    </Box>
+                    {trustedPCs.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        No trusted PCs configured. Click "Add PC" to add one.
+                      </Typography>
+                    ) : (
+                      <TableContainer>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Name</TableCell>
+                              <TableCell>MAC Address</TableCell>
+                              <TableCell align="right">Actions</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {trustedPCs.map((pc) => (
+                              <TableRow key={pc.id}>
+                                <TableCell>{pc.name}</TableCell>
+                                <TableCell>{pc.mac_address}</TableCell>
+                                <TableCell align="right">
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleEditTrustedPC(pc)}
+                                    color="primary"
+                                  >
+                                    <EditIcon fontSize="small" />
+                                  </IconButton>
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleDeleteTrustedPC(pc)}
+                                    color="error"
+                                  >
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
+                  </Box>
+                )}
+
+                {/* File Path to Backups */}
+                <Box sx={{ mt: 3 }}>
+                  <TextField
+                    fullWidth
+                    label="File Path to Backups"
+                    value={backupSettings.backupFilePath}
+                    onChange={(e) => handleBackupSettingsChange('backupFilePath', e.target.value)}
+                    placeholder="e.g., C:\Backups or /var/backups"
+                    disabled={!backupSettings.enableLocalBackup}
+                    helperText="Enter the directory path where backups should be stored"
+                  />
+                </Box>
+              </Grid>
+
+              {/* Right Column - Backup Frequency Options */}
+              <Grid item xs={12} md={6}>
+                <Typography variant="subtitle1" gutterBottom>
+                  Backup Frequency
+                </Typography>
+
+                {/* Monthly Backup */}
+                <Box sx={{ mb: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={backupSettings.monthlyBackup}
+                        onChange={(e) => handleBackupSettingsChange('monthlyBackup', e.target.checked)}
+                        color="primary"
+                        disabled={!backupSettings.enableLocalBackup}
+                      />
+                    }
+                    label="Monthly Backup"
+                  />
+                  {backupSettings.monthlyBackup && backupSettings.enableLocalBackup && (
+                    <Box sx={{ mt: 1 }}>
+                      <TextField
+                        label="Number of Monthly Backups to Keep"
+                        type="number"
+                        value={backupSettings.monthlyBackupCount}
+                        onChange={(e) => handleBackupSettingsChange('monthlyBackupCount', parseInt(e.target.value) || 12)}
+                        inputProps={{ min: 1 }}
+                        size="small"
+                        fullWidth
+                      />
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Weekly Backup */}
+                <Box sx={{ mb: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={backupSettings.weeklyBackup}
+                        onChange={(e) => handleBackupSettingsChange('weeklyBackup', e.target.checked)}
+                        color="primary"
+                        disabled={!backupSettings.enableLocalBackup}
+                      />
+                    }
+                    label="Weekly Backup"
+                  />
+                  {backupSettings.weeklyBackup && backupSettings.enableLocalBackup && (
+                    <Box sx={{ mt: 1 }}>
+                      <TextField
+                        label="Number of Weekly Backups to Keep"
+                        type="number"
+                        value={backupSettings.weeklyBackupCount}
+                        onChange={(e) => handleBackupSettingsChange('weeklyBackupCount', parseInt(e.target.value) || 4)}
+                        inputProps={{ min: 1 }}
+                        size="small"
+                        fullWidth
+                      />
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Daily Backup */}
+                <Box sx={{ mb: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={backupSettings.dailyBackup}
+                        onChange={(e) => handleBackupSettingsChange('dailyBackup', e.target.checked)}
+                        color="primary"
+                        disabled={!backupSettings.enableLocalBackup}
+                      />
+                    }
+                    label="Daily Backup"
+                  />
+                  {backupSettings.dailyBackup && backupSettings.enableLocalBackup && (
+                    <Box sx={{ mt: 1 }}>
+                      <TextField
+                        label="Number of Daily Backups to Keep"
+                        type="number"
+                        value={backupSettings.dailyBackupCount}
+                        onChange={(e) => handleBackupSettingsChange('dailyBackupCount', parseInt(e.target.value) || 7)}
+                        inputProps={{ min: 1 }}
+                        size="small"
+                        fullWidth
+                      />
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Save Button */}
+                <Box sx={{ mt: 3 }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleSaveBackupSettings}
+                    disabled={!backupSettings.enableLocalBackup}
+                    startIcon={<SaveIcon />}
+                    fullWidth
+                  >
+                    Save Backup Settings
+                  </Button>
+                </Box>
+              </Grid>
+            </Grid>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography variant="h6" gutterBottom>
+                Tender Type Setup
+              </Typography>
               <Button
                 variant="contained"
-                color="primary"
-                onClick={handleSaveBusinessInfo}
+                size="small"
+                startIcon={<AddIcon />}
+                onClick={handleAddTenderType}
               >
-                Save Business Information
+                Add Tender Type
               </Button>
             </Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Configure payment methods (tender types) available in the system. Tender types can be physical (cash, checks) or electronic (credit cards, debit cards).
+            </Typography>
+            {tenderTypesLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <TableContainer sx={{ maxHeight: '70vh' }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Name</TableCell>
+                      <TableCell>Currency</TableCell>
+                      <TableCell>Accounting Code</TableCell>
+                      <TableCell align="center">Store Designator</TableCell>
+                      <TableCell align="center">Physical/Electronic</TableCell>
+                      <TableCell align="center">Post Type</TableCell>
+                      <TableCell align="center">Usage</TableCell>
+                      <TableCell align="center">Pawn Payments</TableCell>
+                      <TableCell align="center">Pawn Redeems</TableCell>
+                      <TableCell align="center">Active</TableCell>
+                      <TableCell align="center">Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {tenderTypes.map((tenderType) => {
+                      const isDefaultCash = tenderType.is_default_cash;
+                      return (
+                        <TableRow key={tenderType.id}>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography variant="body2" fontWeight={500}>
+                                {tenderType.method_name}
+                              </Typography>
+                              {isDefaultCash && (
+                                <Chip
+                                  label="Default"
+                                  color="primary"
+                                  size="small"
+                                  sx={{ height: 20, fontSize: '0.65rem' }}
+                                />
+                              )}
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {tenderType.currency || '—'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {tenderType.accounting_code || '—'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="center">
+                            {tenderType.store_designator ? (
+                              <Chip label="Yes" color="primary" size="small" />
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">No</Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Chip
+                              label={tenderType.is_physical ? 'Physical' : 'Electronic'}
+                              color={tenderType.is_physical ? 'primary' : 'secondary'}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Typography variant="body2">
+                              {tenderType.post_type || 'SUM'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="center">
+                            <Typography variant="body2">
+                              {tenderType.usage || 'Both'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="center">
+                            {tenderType.accepted_for_pawn_payments ? (
+                              <Chip label="Yes" color="success" size="small" />
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">No</Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="center">
+                            {tenderType.accepted_for_pawn_redeems ? (
+                              <Chip label="Yes" color="success" size="small" />
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">No</Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Chip
+                              label={tenderType.is_active ? 'Active' : 'Inactive'}
+                              color={tenderType.is_active ? 'success' : 'default'}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
+                              <IconButton
+                                onClick={() => handleEditTenderType(tenderType)}
+                                size="small"
+                                color="primary"
+                                title="Edit"
+                              >
+                                <EditIcon />
+                              </IconButton>
+                              <IconButton
+                                onClick={() => handleDeleteTenderType(tenderType)}
+                                size="small"
+                                color="error"
+                                title={isDefaultCash ? "Default cash cannot be deleted" : "Delete"}
+                                disabled={isDefaultCash}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {tenderTypes.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={11} align="center">
+                          No tender types found. Click "Add Tender Type" to create one.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
           </ConfigSection>
 
           <ConfigSection>
@@ -3315,6 +4890,416 @@ function SystemConfig() {
           </ConfigSection>
         </StyledPaper>
       </TabPanel>
+
+      <TabPanel value={activeTab} index={6}>
+        <StyledPaper elevation={2}>
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Employee Configuration
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              Configure per-employee permissions, transfer limits, and petty cash settings. Changes take effect immediately.
+            </Typography>
+
+            {employeePermissionsLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <TableContainer>
+                <Table size="small" stickyHeader sx={{ minWidth: 1200 }}>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Employee</TableCell>
+                      <TableCell align="center">Track Hours</TableCell>
+                      <TableCell align="center">Can Open/Close Store</TableCell>
+                      <TableCell align="center">Can Open Drawer</TableCell>
+                      <TableCell align="center">Can View Drawer</TableCell>
+                      <TableCell align="center">Can View Safe</TableCell>
+                      <TableCell align="center">Over/Short Limit</TableCell>
+                      <TableCell align="center">Transfers Allowed</TableCell>
+                      <TableCell align="center">Transfer Limit</TableCell>
+                      <TableCell align="center">Petty Cash</TableCell>
+                      <TableCell align="center">Petty Cash Limit</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {employeePermissions.map((emp) => (
+                      <TableRow key={emp.employee_id}>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight={500}>
+                            {emp.first_name} {emp.last_name}
+                          </Typography>
+                          <Chip label={emp.role} size="small" sx={{ mt: 0.5 }} />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.track_hours !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'track_hours', emp.track_hours !== false)}
+                            color="primary"
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.can_open_store !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_open_store', emp.can_open_store !== false)}
+                            color="primary"
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.can_open_drawer !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_open_drawer', emp.can_open_drawer !== false)}
+                            color="primary"
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.can_view_drawer !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_view_drawer', emp.can_view_drawer !== false)}
+                            color="primary"
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.can_view_safe !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_view_safe', emp.can_view_safe !== false)}
+                            color="primary"
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={emp.discrepancy_threshold != null ? emp.discrepancy_threshold : ''}
+                            onChange={(e) => setEmployeePermissions(prev =>
+                              prev.map(p => p.employee_id === emp.employee_id ? { ...p, discrepancy_threshold: e.target.value === '' ? null : e.target.value } : p)
+                            )}
+                            onBlur={(e) => handlePermissionValueChange(emp.employee_id, 'discrepancy_threshold', e.target.value)}
+                            placeholder="Unlimited"
+                            inputProps={{ min: 0, step: '0.01' }}
+                            sx={{ width: 110 }}
+                            InputProps={{ startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography> }}
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0 }}>
+                            <FormControlLabel
+                              control={<Checkbox size="small" checked={emp.transfer_allowed_drawer !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_drawer', emp.transfer_allowed_drawer !== false)} />}
+                              label={<Typography variant="caption">Drawer</Typography>}
+                              sx={{ m: 0 }}
+                            />
+                            <FormControlLabel
+                              control={<Checkbox size="small" checked={emp.transfer_allowed_safe !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_safe', emp.transfer_allowed_safe !== false)} />}
+                              label={<Typography variant="caption">Safe</Typography>}
+                              sx={{ m: 0 }}
+                            />
+                            <FormControlLabel
+                              control={<Checkbox size="small" checked={emp.transfer_allowed_bank !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_bank', emp.transfer_allowed_bank !== false)} />}
+                              label={<Typography variant="caption">Bank</Typography>}
+                              sx={{ m: 0 }}
+                            />
+                            <FormControlLabel
+                              control={<Checkbox size="small" checked={emp.transfer_allowed_store !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_store', emp.transfer_allowed_store !== false)} />}
+                              label={<Typography variant="caption">Store</Typography>}
+                              sx={{ m: 0 }}
+                            />
+                          </Box>
+                        </TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={emp.transfer_limit != null ? emp.transfer_limit : ''}
+                            onChange={(e) => setEmployeePermissions(prev =>
+                              prev.map(p => p.employee_id === emp.employee_id ? { ...p, transfer_limit: e.target.value === '' ? null : e.target.value } : p)
+                            )}
+                            onBlur={(e) => handlePermissionValueChange(emp.employee_id, 'transfer_limit', e.target.value)}
+                            placeholder="Unlimited"
+                            inputProps={{ min: 0, step: '0.01' }}
+                            sx={{ width: 110 }}
+                            InputProps={{ startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography> }}
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
+                          <Checkbox
+                            checked={emp.can_petty_cash !== false}
+                            onChange={() => handlePermissionToggle(emp.employee_id, 'can_petty_cash', emp.can_petty_cash !== false)}
+                            color="primary"
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={emp.petty_cash_limit != null ? emp.petty_cash_limit : ''}
+                            onChange={(e) => setEmployeePermissions(prev =>
+                              prev.map(p => p.employee_id === emp.employee_id ? { ...p, petty_cash_limit: e.target.value === '' ? null : e.target.value } : p)
+                            )}
+                            onBlur={(e) => handlePermissionValueChange(emp.employee_id, 'petty_cash_limit', e.target.value)}
+                            placeholder="Unlimited"
+                            inputProps={{ min: 0, step: '0.01' }}
+                            sx={{ width: 110 }}
+                            disabled={emp.can_petty_cash === false}
+                            InputProps={{ startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography> }}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </ConfigSection>
+        </StyledPaper>
+      </TabPanel>
+
+      {/* Add/Edit Tender Type Dialog */}
+      <Dialog
+        open={tenderTypeDialogOpen}
+        onClose={() => setTenderTypeDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          {editingTenderType ? 'Edit Tender Type' : 'Add Tender Type'}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {editingTenderType?.is_default_cash && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                This is the default cash payment method. It tracks denominations and cannot be deleted. Only the method name can be edited.
+              </Alert>
+            )}
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Name"
+                  value={tenderTypeForm.method_name}
+                  onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, method_name: e.target.value })}
+                  placeholder="e.g., Cash, Credit Card, Check, US Cash"
+                  required
+                  helperText="Must be unique (e.g., can't create a second 'Cash', but can create 'US Cash')"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Method Value"
+                  value={tenderTypeForm.method_value}
+                  onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, method_value: e.target.value })}
+                  placeholder="e.g., cash, credit_card, check, us_cash"
+                  helperText="Lowercase with underscores (e.g., credit_card)"
+                  required
+                  disabled={editingTenderType?.is_default_cash}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Currency</InputLabel>
+                  <Select
+                    value={tenderTypeForm.currency || ''}
+                    onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, currency: e.target.value })}
+                    label="Currency"
+                    disabled={currencyTypes.filter(c => !c._delete).length === 0}
+                  >
+                    {currencyTypes.filter(c => !c._delete).map((currency) => (
+                      <MenuItem key={currency.code} value={currency.code}>
+                        {currency.code} - {currency.description}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                  {currencyTypes.filter(c => !c._delete).length === 1 && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Defaulted to the only configured currency
+                    </Typography>
+                  )}
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Accounting Code"
+                  value={tenderTypeForm.accounting_code}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '').slice(0, 8);
+                    setTenderTypeForm({ ...tenderTypeForm, accounting_code: value });
+                  }}
+                  placeholder="e.g., 5001"
+                  helperText="Up to 8 digits (will be appended with store code if store designator is enabled)"
+                  inputProps={{ maxLength: 8 }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={tenderTypeForm.store_designator}
+                      onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, store_designator: e.target.checked })}
+                    />
+                  }
+                  label="Store Designator"
+                />
+                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Append store number to accounting code (e.g., 5001-0001)
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Physical or Electronic</InputLabel>
+                  <Select
+                    value={tenderTypeForm.is_physical ? 'Physical' : 'Electronic'}
+                    onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, is_physical: e.target.value === 'Physical' })}
+                    label="Physical or Electronic"
+                    disabled={editingTenderType?.is_default_cash}
+                  >
+                    <MenuItem value="Physical">Physical</MenuItem>
+                    <MenuItem value="Electronic">Electronic</MenuItem>
+                  </Select>
+                  <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                    Electronic tenders auto-transfer to master safe at drawer close and to bank at store close. Physical tenders must be manually transferred.
+                  </Typography>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Post Type</InputLabel>
+                  <Select
+                    value={tenderTypeForm.post_type}
+                    onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, post_type: e.target.value })}
+                    label="Post Type"
+                  >
+                    <MenuItem value="SUM">SUM</MenuItem>
+                    <MenuItem value="COUNT">COUNT</MenuItem>
+                  </Select>
+                  <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                    SUM: Total posted at EOD. COUNT: Each transaction posted individually (e.g., e-transfers).
+                  </Typography>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Usage</InputLabel>
+                  <Select
+                    value={tenderTypeForm.usage}
+                    onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, usage: e.target.value })}
+                    label="Usage"
+                  >
+                    <MenuItem value="Payments">Payments</MenuItem>
+                    <MenuItem value="Pay-outs">Pay-outs</MenuItem>
+                    <MenuItem value="Both">Both</MenuItem>
+                  </Select>
+                  <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                    Payments: Customer pays store. Pay-outs: Store pays customer. Both: Can be used for either.
+                  </Typography>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={tenderTypeForm.accepted_for_pawn_payments}
+                      onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, accepted_for_pawn_payments: e.target.checked })}
+                    />
+                  }
+                  label="Accepted for Pawn Payments"
+                />
+                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Applies to extensions or renewals
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={tenderTypeForm.accepted_for_pawn_redeems}
+                      onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, accepted_for_pawn_redeems: e.target.checked })}
+                    />
+                  }
+                  label="Accepted for Pawn Redeems"
+                />
+                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Most credit cards don't allow paying off debts/loans
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={tenderTypeForm.is_active}
+                      onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, is_active: e.target.checked })}
+                    />
+                  }
+                  label="Active"
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTenderTypeDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSaveTenderType} variant="contained" color="primary">
+            {editingTenderType ? 'Update' : 'Add'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add/Edit Trusted PC Dialog */}
+      <Dialog
+        open={trustedPCDialogOpen}
+        onClose={() => setTrustedPCDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {editingTrustedPC ? 'Edit Trusted PC' : 'Add Trusted PC'}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="PC Name"
+                  value={trustedPCForm.name}
+                  onChange={(e) => setTrustedPCForm({ ...trustedPCForm, name: e.target.value })}
+                  placeholder="e.g., Office PC, Laptop-01"
+                  required
+                  helperText="A descriptive name for this PC"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="MAC Address"
+                  value={trustedPCForm.macAddress}
+                  onChange={(e) => setTrustedPCForm({ ...trustedPCForm, macAddress: e.target.value })}
+                  placeholder="XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX"
+                  required
+                  helperText="Format: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX (e.g., 00:1B:44:11:3A:B7)"
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTrustedPCDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSaveTrustedPC} variant="contained" color="primary">
+            {editingTrustedPC ? 'Update' : 'Add'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={snackbar.open}

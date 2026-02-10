@@ -86,6 +86,9 @@ function CashDrawer() {
   const [history, setHistory] = useState([]);
   const [sessionDetails, setSessionDetails] = useState(null);
   const [overviewData, setOverviewData] = useState({ safes: [], drawers: [] });
+  const currentEmployee = employees.find(e => e.employee_id === currentUser?.id);
+  const canViewDrawer = !currentEmployee || currentEmployee.can_view_drawer !== false;
+  const canViewSafe = !currentEmployee || currentEmployee.can_view_safe !== false;
 
   // Store status states
   const [storeStatus, setStoreStatus] = useState({ status: 'closed', session: null, lastClosed: null });
@@ -886,7 +889,7 @@ function CashDrawer() {
 
   const fetchStoreStatus = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/store-sessions/status`);
+      const response = await axios.get(`${API_BASE_URL}/store-status`);
       setStoreStatus(response.data);
     } catch (error) {
       console.error('Error fetching store status:', error);
@@ -894,6 +897,19 @@ function CashDrawer() {
   };
 
   const handleOpenStore = async () => {
+    // Check permission
+    try {
+      const empResp = await axios.get(`${API_BASE_URL}/employees`);
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const currentEmp = empResp.data.find(e => e.employee_id === user.id);
+      if (currentEmp && currentEmp.can_open_store === false) {
+        showSnackbar('You do not have permission to open the store', 'error');
+        return;
+      }
+    } catch (err) {
+      console.error('Error checking store permission:', err);
+    }
+
     setStoreStatusLoading(true);
     try {
       const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -913,6 +929,19 @@ function CashDrawer() {
   };
 
   const handleCloseStoreClick = async () => {
+    // Check permission
+    try {
+      const empResp = await axios.get(`${API_BASE_URL}/employees`);
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const currentEmp = empResp.data.find(e => e.employee_id === user.id);
+      if (currentEmp && currentEmp.can_open_store === false) {
+        showSnackbar('You do not have permission to close the store', 'error');
+        return;
+      }
+    } catch (err) {
+      console.error('Error checking store permission:', err);
+    }
+
     setStoreStatusLoading(true);
     try {
       // First check for open drawers/safes
@@ -1319,7 +1348,7 @@ function CashDrawer() {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = selectedEmployee || currentUser.id;
 
-    // Check if employee has track_hours enabled and is not clocked in
+    // Check employee permissions and clock-in status
     try {
       const [empResponse, clockResponse] = await Promise.all([
         fetch(`${config.apiUrl}/employees`),
@@ -1328,6 +1357,14 @@ function CashDrawer() {
       if (empResponse.ok && clockResponse.ok) {
         const employees = await empResponse.json();
         const currentEmployee = employees.find(e => e.employee_id === currentUser.id);
+
+        // Check if employee has permission to open drawers
+        if (currentEmployee && currentEmployee.can_open_drawer === false) {
+          showSnackbar('You do not have permission to open a drawer', 'error');
+          return;
+        }
+
+        // Check if employee has track_hours enabled and is not clocked in
         if (currentEmployee && currentEmployee.track_hours !== false) {
           const clockedInList = await clockResponse.json();
           const isClockedIn = clockedInList.some(emp => emp.employee_id === currentUser.id);
@@ -1338,7 +1375,7 @@ function CashDrawer() {
         }
       }
     } catch (err) {
-      console.error('Error checking clock-in status:', err);
+      console.error('Error checking employee permissions:', err);
     }
 
     // Calculate balance based on opening mode (individual denominations vs drawer total)
@@ -2054,6 +2091,16 @@ function CashDrawer() {
       return;
     }
 
+    // Check bank transfer permission
+    if (currentEmployee && currentEmployee.transfer_allowed_bank === false) {
+      showSnackbar('You do not have permission to make bank transfers', 'error');
+      return;
+    }
+    if (currentEmployee && currentEmployee.transfer_limit != null && depositTotal > parseFloat(currentEmployee.transfer_limit)) {
+      showSnackbar(`Transfer amount exceeds your limit of $${parseFloat(currentEmployee.transfer_limit).toFixed(2)}. Manager override required.`, 'error');
+      return;
+    }
+
     // Verify we're on master safe
     if (activeSession?.drawer_type !== 'master_safe') {
       showSnackbar('Bank deposits can only be made from the Master Safe', 'error');
@@ -2118,6 +2165,16 @@ function CashDrawer() {
 
     if (withdrawalTotal <= 0) {
       showSnackbar('Please enter a valid withdrawal amount', 'error');
+      return;
+    }
+
+    // Check bank transfer permission
+    if (currentEmployee && currentEmployee.transfer_allowed_bank === false) {
+      showSnackbar('You do not have permission to make bank transfers', 'error');
+      return;
+    }
+    if (currentEmployee && currentEmployee.transfer_limit != null && withdrawalTotal > parseFloat(currentEmployee.transfer_limit)) {
+      showSnackbar(`Transfer amount exceeds your limit of $${parseFloat(currentEmployee.transfer_limit).toFixed(2)}. Manager override required.`, 'error');
       return;
     }
 
@@ -2215,6 +2272,16 @@ function CashDrawer() {
       return;
     }
 
+    // Check petty cash permission and limit
+    if (currentEmployee && currentEmployee.can_petty_cash === false) {
+      showSnackbar('You do not have permission to make petty cash payouts', 'error');
+      return;
+    }
+    if (currentEmployee && currentEmployee.petty_cash_limit != null && payoutTotal > parseFloat(currentEmployee.petty_cash_limit)) {
+      showSnackbar(`Petty cash payout exceeds your limit of $${parseFloat(currentEmployee.petty_cash_limit).toFixed(2)}. Manager override required.`, 'error');
+      return;
+    }
+
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
     try {
@@ -2253,6 +2320,20 @@ function CashDrawer() {
       return;
     }
 
+    // Check employee transfer permissions
+    if (currentEmployee) {
+      const srcType = transferSource.drawer_type;
+      const destType = transferDestination.drawer_type;
+      if ((srcType === 'physical' || destType === 'physical') && currentEmployee.transfer_allowed_drawer === false) {
+        showSnackbar('You do not have permission to transfer to/from drawers', 'error');
+        return;
+      }
+      if (((srcType === 'safe' || srcType === 'master_safe') || (destType === 'safe' || destType === 'master_safe')) && currentEmployee.transfer_allowed_safe === false) {
+        showSnackbar('You do not have permission to transfer to/from safes', 'error');
+        return;
+      }
+    }
+
     // Calculate total cash from denominations
     const cashTotal = calculateDenominationTotal(transferDenominations);
 
@@ -2264,6 +2345,12 @@ function CashDrawer() {
 
     if (totalTransfer <= 0) {
       showSnackbar('Please enter amounts to transfer', 'error');
+      return;
+    }
+
+    // Check transfer limit
+    if (currentEmployee && currentEmployee.transfer_limit != null && totalTransfer > parseFloat(currentEmployee.transfer_limit)) {
+      showSnackbar(`Transfer amount exceeds your limit of $${parseFloat(currentEmployee.transfer_limit).toFixed(2)}. Manager override required.`, 'error');
       return;
     }
 
@@ -2359,6 +2446,16 @@ function CashDrawer() {
 
     if (transferAmount <= 0) {
       showSnackbar('Please enter an amount to transfer', 'error');
+      return;
+    }
+
+    // Check inter-store transfer permission
+    if (currentEmployee && currentEmployee.transfer_allowed_store === false) {
+      showSnackbar('You do not have permission to make inter-store transfers', 'error');
+      return;
+    }
+    if (currentEmployee && currentEmployee.transfer_limit != null && transferAmount > parseFloat(currentEmployee.transfer_limit)) {
+      showSnackbar(`Transfer amount exceeds your limit of $${parseFloat(currentEmployee.transfer_limit).toFixed(2)}. Manager override required.`, 'error');
       return;
     }
 
@@ -2691,9 +2788,11 @@ function CashDrawer() {
                       <TableCell>{safe.drawer_name}</TableCell>
                       <TableCell>{safe.status}</TableCell>
                       <TableCell>
-                        {safe.status === 'OPEN' && safe.balance !== null
-                          ? `$${parseFloat(safe.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : '—'}
+                        {canViewSafe
+                          ? (safe.status === 'OPEN' && safe.balance !== null
+                            ? `$${parseFloat(safe.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : '—')
+                          : '***'}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -2729,9 +2828,11 @@ function CashDrawer() {
                       <TableCell>{drawer.status}</TableCell>
                       <TableCell>{drawer.type}</TableCell>
                       <TableCell>
-                        {drawer.status === 'OPEN' && drawer.balance !== null
-                          ? `$${parseFloat(drawer.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : '—'}
+                        {canViewDrawer
+                          ? (drawer.status === 'OPEN' && drawer.balance !== null
+                            ? `$${parseFloat(drawer.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : '—')
+                          : '***'}
                       </TableCell>
                       <TableCell>{drawer.connected_employees || '—'}</TableCell>
                     </TableRow>
@@ -2756,9 +2857,13 @@ function CashDrawer() {
           {/* Cash balance warnings (min/max) - only for employee's connected drawers */}
           {(() => {
             const myDrawerIds = activeSessions.map(s => s.drawer_id);
+            const safeIds = (overviewData.safes || []).map(s => s.drawer_id);
             const allOverviewDrawers = [...(overviewData.safes || []), ...(overviewData.drawers || [])];
             const balanceWarnings = allOverviewDrawers.filter(d => {
               if (d.status !== 'OPEN' || !myDrawerIds.includes(d.drawer_id)) return false;
+              const isSafeType = safeIds.includes(d.drawer_id);
+              if (isSafeType && !canViewSafe) return false;
+              if (!isSafeType && !canViewDrawer) return false;
               const balance = parseFloat(d.balance);
               const minClose = parseFloat(d.min_close || 0);
               const maxClose = parseFloat(d.max_close || 0);
@@ -2901,12 +3006,20 @@ function CashDrawer() {
                       </Grid>
                       <Grid item xs={12} md={4}>
                         <Typography variant="body2" color="text.secondary">Opening Balance</Typography>
-                        <Typography variant="h6">{formatCurrency(activeSession.opening_balance)}</Typography>
+                        <Typography variant="h6">
+                          {((activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                            ? formatCurrency(activeSession.opening_balance)
+                            : '***'}
+                        </Typography>
                       </Grid>
                       {!isBlindCount && (
                         <Grid item xs={12} md={4}>
                           <Typography variant="body2" color="text.secondary">Current Expected Balance</Typography>
-                          <Typography variant="h6">{formatCurrency(activeSession.current_expected_balance)}</Typography>
+                          <Typography variant="h6">
+                            {((activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                              ? formatCurrency(activeSession.current_expected_balance)
+                              : '***'}
+                          </Typography>
                         </Grid>
                       )}
                       <Grid item xs={12} md={6}>
@@ -3032,8 +3145,14 @@ function CashDrawer() {
                       <Button
                         variant="outlined"
                         startIcon={<MoneyIcon />}
-                        disabled={isStoreClosed}
-                        onClick={openPettyCashDialog}
+                        disabled={isStoreClosed || (currentEmployee && currentEmployee.can_petty_cash === false)}
+                        onClick={() => {
+                          if (currentEmployee && currentEmployee.can_petty_cash === false) {
+                            showSnackbar('You do not have permission to make petty cash payouts', 'error');
+                            return;
+                          }
+                          openPettyCashDialog();
+                        }}
                       >
                         Petty Cash
                       </Button>
@@ -3176,10 +3295,22 @@ function CashDrawer() {
                   <TableCell>{session.employee_name}</TableCell>
                   <TableCell>{formatDateTime(session.opened_at)}</TableCell>
                   <TableCell>{formatDateTime(session.closed_at)}</TableCell>
-                  <TableCell align="right">{formatCurrency(session.opening_balance)}</TableCell>
-                  <TableCell align="right">{formatCurrency(session.expected_balance)}</TableCell>
-                  <TableCell align="right">{formatCurrency(session.actual_balance)}</TableCell>
-                  <TableCell>{getDiscrepancyChip(session.discrepancy)}</TableCell>
+                  <TableCell align="right">
+                    {((session.drawer_type === 'safe' || session.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                      ? formatCurrency(session.opening_balance) : '***'}
+                  </TableCell>
+                  <TableCell align="right">
+                    {((session.drawer_type === 'safe' || session.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                      ? formatCurrency(session.expected_balance) : '***'}
+                  </TableCell>
+                  <TableCell align="right">
+                    {((session.drawer_type === 'safe' || session.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                      ? formatCurrency(session.actual_balance) : '***'}
+                  </TableCell>
+                  <TableCell>
+                    {((session.drawer_type === 'safe' || session.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
+                      ? getDiscrepancyChip(session.discrepancy) : '***'}
+                  </TableCell>
                   <TableCell>{getStatusChip(session.status)}</TableCell>
                   <TableCell>
                     <Button
@@ -5847,7 +5978,7 @@ function CashDrawer() {
               >
                 {banks.map((bank) => (
                   <MenuItem key={bank.bank_id} value={bank.bank_id}>
-                    {bank.bank_name} {bank.is_default && '(Default)'}
+                    {bank.pos_name || bank.bank_name} {bank.is_default && '(Default)'}
                   </MenuItem>
                 ))}
               </Select>
@@ -5931,7 +6062,7 @@ function CashDrawer() {
               >
                 {banks.map((bank) => (
                   <MenuItem key={bank.bank_id} value={bank.bank_id}>
-                    {bank.bank_name} {bank.is_default && '(Default)'}
+                    {bank.pos_name || bank.bank_name} {bank.is_default && '(Default)'}
                   </MenuItem>
                 ))}
               </Select>
