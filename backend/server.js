@@ -9985,14 +9985,179 @@ app.get('/api/transaction-types', async (req, res) => {
   }
 });
 
-// Get all payment methods
+// Get all payment methods (with optional includeInactive parameter for admin config)
 app.get('/api/payment-methods', async (req, res) => {
   try {
-    const query = 'SELECT * FROM payment_methods WHERE is_active = true ORDER BY id';
+    const includeInactive = req.query.includeInactive === 'true';
+    let query = 'SELECT * FROM payment_methods';
+    if (!includeInactive) {
+      query += ' WHERE is_active = true';
+    }
+    query += ' ORDER BY id';
     const result = await pool.query(query);
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching payment methods:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create a new payment method
+app.post('/api/payment-methods', async (req, res) => {
+  try {
+    const { method_name, method_value, is_active, is_physical } = req.body;
+
+    if (!method_name || !method_value) {
+      return res.status(400).json({ error: 'Method name and method value are required' });
+    }
+
+    // Validate method_value format (should be lowercase with underscores)
+    const validMethodValue = method_value.toLowerCase().replace(/\s+/g, '_');
+
+    // Only the method_value 'cash' can be the default cash
+    // Check if there's already a default cash and if this new one is trying to be default
+    const existingDefaultCash = await pool.query(
+      'SELECT id FROM payment_methods WHERE is_default_cash = true'
+    );
+
+    // If this is 'cash' and there's no default cash yet, make it default
+    // Otherwise, if it's 'cash' but there's already a default, don't make it default
+    // If it's not 'cash', never make it default
+    const isDefaultCash = validMethodValue === 'cash' && existingDefaultCash.rows.length === 0;
+
+    const query = `
+      INSERT INTO payment_methods (method_name, method_value, is_active, is_physical, is_default_cash)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `;
+    const result = await pool.query(query, [
+      method_name,
+      validMethodValue,
+      is_active !== undefined ? is_active : true,
+      is_physical !== undefined ? is_physical : false,
+      isDefaultCash
+    ]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A payment method with this name or value already exists' });
+    }
+    console.error('Error creating payment method:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update a payment method
+app.put('/api/payment-methods/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { method_name, method_value, is_active, is_physical } = req.body;
+
+    if (!method_name || !method_value) {
+      return res.status(400).json({ error: 'Method name and method value are required' });
+    }
+
+    // Check if this is the default cash - prevent changing method_value
+    const currentMethod = await pool.query(
+      'SELECT is_default_cash, method_value FROM payment_methods WHERE id = $1',
+      [id]
+    );
+
+    if (currentMethod.rows.length === 0) {
+      return res.status(404).json({ error: 'Payment method not found' });
+    }
+
+    // If it's the default cash, don't allow changing the method_value
+    const validMethodValue = currentMethod.rows[0].is_default_cash 
+      ? currentMethod.rows[0].method_value 
+      : method_value.toLowerCase().replace(/\s+/g, '_');
+
+    // If it's the default cash, ensure is_physical is always true
+    const finalIsPhysical = currentMethod.rows[0].is_default_cash 
+      ? true 
+      : (is_physical !== undefined ? is_physical : false);
+
+    const query = `
+      UPDATE payment_methods
+      SET method_name = $1,
+          method_value = $2,
+          is_active = $3,
+          is_physical = $4,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $5
+      RETURNING *
+    `;
+    const result = await pool.query(query, [
+      method_name,
+      validMethodValue,
+      is_active !== undefined ? is_active : true,
+      finalIsPhysical,
+      id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Payment method not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A payment method with this name or value already exists' });
+    }
+    console.error('Error updating payment method:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Delete (deactivate) a payment method
+app.delete('/api/payment-methods/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if this is the default cash - it cannot be deleted
+    const defaultCashCheck = await pool.query(
+      'SELECT is_default_cash FROM payment_methods WHERE id = $1',
+      [id]
+    );
+
+    if (defaultCashCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Payment method not found' });
+    }
+
+    if (defaultCashCheck.rows[0].is_default_cash) {
+      return res.status(400).json({ error: 'The default cash payment method cannot be deleted. It is required for denomination tracking.' });
+    }
+
+    // Check if payment method is being used in any transactions
+    const usageCheck = await pool.query(
+      'SELECT COUNT(*) as count FROM payments WHERE payment_method = (SELECT method_value FROM payment_methods WHERE id = $1)',
+      [id]
+    );
+
+    if (parseInt(usageCheck.rows[0].count) > 0) {
+      // Instead of deleting, deactivate it
+      const query = `
+        UPDATE payment_methods
+        SET is_active = false, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        RETURNING *
+      `;
+      const result = await pool.query(query, [id]);
+
+      return res.json({ 
+        message: 'Payment method deactivated (it is being used in transactions)',
+        payment_method: result.rows[0]
+      });
+    }
+
+    // If not in use, we can actually delete it
+    const query = 'DELETE FROM payment_methods WHERE id = $1 RETURNING *';
+    const result = await pool.query(query, [id]);
+
+    res.json({ message: 'Payment method deleted successfully', payment_method: result.rows[0] });
+  } catch (error) {
+    console.error('Error deleting payment method:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

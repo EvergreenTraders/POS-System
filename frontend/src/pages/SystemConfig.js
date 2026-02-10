@@ -243,6 +243,18 @@ function SystemConfig() {
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [customerColumnPreferences, setCustomerColumnPreferences] = useState({});
 
+  // Tender Type Setup state
+  const [tenderTypes, setTenderTypes] = useState([]);
+  const [tenderTypesLoading, setTenderTypesLoading] = useState(false);
+  const [tenderTypeDialogOpen, setTenderTypeDialogOpen] = useState(false);
+  const [editingTenderType, setEditingTenderType] = useState(null);
+  const [tenderTypeForm, setTenderTypeForm] = useState({
+    method_name: '',
+    method_value: '',
+    is_active: true,
+    is_physical: false
+  });
+
   const fetchDrawerConfig = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/drawer-config`);
@@ -2174,6 +2186,7 @@ function SystemConfig() {
   useEffect(() => {
     loadBusinessInfo();
     loadAttributeConfig();
+    loadTenderTypes();
   }, []);
 
   // Auto-save business info when generalSettings change (debounced)
@@ -2225,6 +2238,113 @@ function SystemConfig() {
       setItemAttributes(response.data);
     } catch (error) {
       console.error('Error loading attribute config:', error);
+    }
+  };
+
+  // Load tender types
+  const loadTenderTypes = async () => {
+    try {
+      setTenderTypesLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/payment-methods?includeInactive=true`);
+      setTenderTypes(response.data || []);
+    } catch (error) {
+      console.error('Error loading tender types:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to load tender types',
+        severity: 'error'
+      });
+    } finally {
+      setTenderTypesLoading(false);
+    }
+  };
+
+  // Handle add tender type
+  const handleAddTenderType = () => {
+    setEditingTenderType(null);
+    setTenderTypeForm({
+      method_name: '',
+      method_value: '',
+      is_active: true,
+      is_physical: false
+    });
+    setTenderTypeDialogOpen(true);
+  };
+
+  // Handle edit tender type
+  const handleEditTenderType = (tenderType) => {
+    setEditingTenderType(tenderType);
+    setTenderTypeForm({
+      method_name: tenderType.method_name,
+      method_value: tenderType.method_value,
+      is_active: tenderType.is_active,
+      is_physical: tenderType.is_physical
+    });
+    setTenderTypeDialogOpen(true);
+  };
+
+  // Handle save tender type (add or update)
+  const handleSaveTenderType = async () => {
+    if (!tenderTypeForm.method_name.trim() || !tenderTypeForm.method_value.trim()) {
+      setSnackbar({
+        open: true,
+        message: 'Method name and value are required',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      if (editingTenderType) {
+        // Update existing
+        await axios.put(`${API_BASE_URL}/payment-methods/${editingTenderType.id}`, tenderTypeForm);
+        setSnackbar({
+          open: true,
+          message: 'Tender type updated successfully',
+          severity: 'success'
+        });
+      } else {
+        // Create new
+        await axios.post(`${API_BASE_URL}/payment-methods`, tenderTypeForm);
+        setSnackbar({
+          open: true,
+          message: 'Tender type added successfully',
+          severity: 'success'
+        });
+      }
+      setTenderTypeDialogOpen(false);
+      await loadTenderTypes();
+    } catch (error) {
+      console.error('Error saving tender type:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to save tender type',
+        severity: 'error'
+      });
+    }
+  };
+
+  // Handle delete tender type
+  const handleDeleteTenderType = async (tenderType) => {
+    if (!window.confirm(`Are you sure you want to delete "${tenderType.method_name}"?`)) {
+      return;
+    }
+
+    try {
+      await axios.delete(`${API_BASE_URL}/payment-methods/${tenderType.id}`);
+      setSnackbar({
+        open: true,
+        message: 'Tender type deleted successfully',
+        severity: 'success'
+      });
+      await loadTenderTypes();
+    } catch (error) {
+      console.error('Error deleting tender type:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to delete tender type',
+        severity: 'error'
+      });
     }
   };
 
@@ -2843,6 +2963,127 @@ function SystemConfig() {
                 </TableBody>
               </Table>
             </TableContainer>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography variant="h6" gutterBottom>
+                Tender Type Setup
+              </Typography>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<AddIcon />}
+                onClick={handleAddTenderType}
+              >
+                Add Tender Type
+              </Button>
+            </Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Configure payment methods (tender types) available in the system. Tender types can be physical (cash, checks) or electronic (credit cards, debit cards).
+            </Typography>
+            {tenderTypesLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <TableContainer>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Method Name</TableCell>
+                      <TableCell>Method Value</TableCell>
+                      <TableCell align="center">Active</TableCell>
+                      <TableCell align="center">Physical Tender</TableCell>
+                      <TableCell align="center">Denominations</TableCell>
+                      <TableCell align="center">Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {tenderTypes.map((tenderType) => {
+                      const isDefaultCash = tenderType.is_default_cash;
+                      return (
+                        <TableRow key={tenderType.id}>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography variant="body2" fontWeight={500}>
+                                {tenderType.method_name}
+                              </Typography>
+                              {isDefaultCash && (
+                                <Chip
+                                  label="Default"
+                                  color="primary"
+                                  size="small"
+                                  sx={{ height: 20, fontSize: '0.65rem' }}
+                                />
+                              )}
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" color="text.secondary">
+                              {tenderType.method_value}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="center">
+                            <Chip
+                              label={tenderType.is_active ? 'Active' : 'Inactive'}
+                              color={tenderType.is_active ? 'success' : 'default'}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Chip
+                              label={tenderType.is_physical ? 'Physical' : 'Electronic'}
+                              color={tenderType.is_physical ? 'primary' : 'secondary'}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            {isDefaultCash ? (
+                              <Chip
+                                label="Tracks Denominations"
+                                color="info"
+                                size="small"
+                              />
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">
+                                Total Only
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="center">
+                            <IconButton
+                              onClick={() => handleEditTenderType(tenderType)}
+                              size="small"
+                              color="primary"
+                              title="Edit"
+                            >
+                              <EditIcon />
+                            </IconButton>
+                            <IconButton
+                              onClick={() => handleDeleteTenderType(tenderType)}
+                              size="small"
+                              color="error"
+                              title={isDefaultCash ? "Default cash cannot be deleted" : "Delete"}
+                              disabled={isDefaultCash}
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {tenderTypes.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} align="center">
+                          No tender types found. Click "Add Tender Type" to create one.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
           </ConfigSection>
 
           <ConfigSection>
@@ -4356,6 +4597,86 @@ function SystemConfig() {
           </ConfigSection>
         </StyledPaper>
       </TabPanel>
+
+      {/* Add/Edit Tender Type Dialog */}
+      <Dialog
+        open={tenderTypeDialogOpen}
+        onClose={() => setTenderTypeDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {editingTenderType ? 'Edit Tender Type' : 'Add Tender Type'}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            {editingTenderType?.is_default_cash && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                This is the default cash payment method. It tracks denominations and cannot be deleted. Only the method name can be edited.
+              </Alert>
+            )}
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Method Name"
+                  value={tenderTypeForm.method_name}
+                  onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, method_name: e.target.value })}
+                  placeholder="e.g., Cash, Credit Card, Check"
+                  required
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Method Value"
+                  value={tenderTypeForm.method_value}
+                  onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, method_value: e.target.value })}
+                  placeholder="e.g., cash, credit_card, check"
+                  helperText="Lowercase with underscores (e.g., credit_card)"
+                  required
+                  disabled={editingTenderType?.is_default_cash}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={tenderTypeForm.is_active}
+                      onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, is_active: e.target.checked })}
+                    />
+                  }
+                  label="Active"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={tenderTypeForm.is_physical}
+                      onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, is_physical: e.target.checked })}
+                      disabled={editingTenderType?.is_default_cash}
+                    />
+                  }
+                  label="Physical Tender"
+                />
+                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Physical tenders are kept in the drawer (cash, checks, gift cards). Electronic tenders are credit/debit cards, store credit, etc.
+                  {editingTenderType?.is_default_cash && ' The default cash is always physical.'}
+                </Typography>
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTenderTypeDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSaveTenderType} variant="contained" color="primary">
+            {editingTenderType ? 'Update' : 'Add'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={snackbar.open}

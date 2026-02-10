@@ -53,6 +53,22 @@ UPDATE payment_methods SET is_physical = false WHERE method_value IN ('credit_ca
 
 COMMENT ON COLUMN payment_methods.is_physical IS 'Whether this payment method results in physical tender in the drawer (cash, checks, gift cards) vs electronic (credit cards, debit cards)';
 
+-- Add is_default_cash column to mark the default cash that tracks denominations
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'payment_methods' AND column_name = 'is_default_cash'
+    ) THEN
+        ALTER TABLE payment_methods ADD COLUMN is_default_cash BOOLEAN NOT NULL DEFAULT false;
+    END IF;
+END $$;
+
+-- Set the default cash (method_value = 'cash') as the default cash that tracks denominations
+UPDATE payment_methods SET is_default_cash = true WHERE method_value = 'cash';
+
+COMMENT ON COLUMN payment_methods.is_default_cash IS 'Whether this is the default cash payment method that tracks denominations. Only one payment method can be the default cash.';
+
 -- Create transaction_type table
 CREATE TABLE IF NOT EXISTS transaction_type (
     id SERIAL PRIMARY KEY,
