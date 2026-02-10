@@ -262,6 +262,26 @@ function SystemConfig() {
     accepted_for_pawn_redeems: false
   });
 
+  // Backup Options state
+  const [backupSettings, setBackupSettings] = useState({
+    enableLocalBackup: false,
+    designatedPCsOnly: false,
+    monthlyBackup: false,
+    monthlyBackupCount: 12,
+    weeklyBackup: false,
+    weeklyBackupCount: 4,
+    dailyBackup: false,
+    dailyBackupCount: 7,
+    backupFilePath: ''
+  });
+  const [trustedPCs, setTrustedPCs] = useState([]);
+  const [trustedPCDialogOpen, setTrustedPCDialogOpen] = useState(false);
+  const [editingTrustedPC, setEditingTrustedPC] = useState(null);
+  const [trustedPCForm, setTrustedPCForm] = useState({
+    name: '',
+    macAddress: ''
+  });
+
   const fetchDrawerConfig = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/drawer-config`);
@@ -977,6 +997,11 @@ function SystemConfig() {
     // Fetch employee permissions when switching to that tab (index 6)
     if (newValue === 6) {
       fetchEmployeePermissions();
+    }
+    // Fetch backup settings when switching to General tab (index 0)
+    if (newValue === 0) {
+      fetchBackupSettings();
+      fetchTrustedPCs();
     }
   };
 
@@ -2194,6 +2219,8 @@ function SystemConfig() {
     loadBusinessInfo();
     loadAttributeConfig();
     loadTenderTypes();
+    fetchBackupSettings();
+    fetchTrustedPCs();
   }, []);
 
   // Auto-save business info when generalSettings change (debounced)
@@ -2368,6 +2395,169 @@ function SystemConfig() {
       setSnackbar({
         open: true,
         message: error.response?.data?.error || 'Failed to delete tender type',
+        severity: 'error'
+      });
+    }
+  };
+
+  // Backup Options handlers
+  const fetchBackupSettings = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/backup-settings`);
+      if (response.data) {
+        setBackupSettings({
+          enableLocalBackup: response.data.enable_local_backup || false,
+          designatedPCsOnly: response.data.designated_pcs_only || false,
+          monthlyBackup: response.data.monthly_backup || false,
+          monthlyBackupCount: response.data.monthly_backup_count || 12,
+          weeklyBackup: response.data.weekly_backup || false,
+          weeklyBackupCount: response.data.weekly_backup_count || 4,
+          dailyBackup: response.data.daily_backup || false,
+          dailyBackupCount: response.data.daily_backup_count || 7,
+          backupFilePath: response.data.backup_file_path || ''
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching backup settings:', error);
+      // If endpoint doesn't exist yet, use defaults
+    }
+  };
+
+  const fetchTrustedPCs = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/trusted-pcs`);
+      if (response.data) {
+        setTrustedPCs(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching trusted PCs:', error);
+      setTrustedPCs([]);
+    }
+  };
+
+  const handleBackupSettingsChange = (field, value) => {
+    setBackupSettings(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleSaveBackupSettings = async () => {
+    try {
+      await axios.put(`${API_BASE_URL}/backup-settings`, {
+        enable_local_backup: backupSettings.enableLocalBackup,
+        designated_pcs_only: backupSettings.designatedPCsOnly,
+        monthly_backup: backupSettings.monthlyBackup,
+        monthly_backup_count: backupSettings.monthlyBackupCount,
+        weekly_backup: backupSettings.weeklyBackup,
+        weekly_backup_count: backupSettings.weeklyBackupCount,
+        daily_backup: backupSettings.dailyBackup,
+        daily_backup_count: backupSettings.dailyBackupCount,
+        backup_file_path: backupSettings.backupFilePath
+      });
+      setSnackbar({
+        open: true,
+        message: 'Backup settings saved successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving backup settings:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to save backup settings',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleAddTrustedPC = () => {
+    setEditingTrustedPC(null);
+    setTrustedPCForm({ name: '', macAddress: '' });
+    setTrustedPCDialogOpen(true);
+  };
+
+  const handleEditTrustedPC = (pc) => {
+    setEditingTrustedPC(pc);
+    setTrustedPCForm({
+      name: pc.name || '',
+      macAddress: pc.mac_address || ''
+    });
+    setTrustedPCDialogOpen(true);
+  };
+
+  const handleSaveTrustedPC = async () => {
+    if (!trustedPCForm.name.trim() || !trustedPCForm.macAddress.trim()) {
+      setSnackbar({
+        open: true,
+        message: 'Name and MAC address are required',
+        severity: 'error'
+      });
+      return;
+    }
+
+    // Validate MAC address format (basic validation)
+    const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+    if (!macRegex.test(trustedPCForm.macAddress)) {
+      setSnackbar({
+        open: true,
+        message: 'Invalid MAC address format. Use format: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX',
+        severity: 'error'
+      });
+      return;
+    }
+
+    try {
+      if (editingTrustedPC) {
+        await axios.put(`${API_BASE_URL}/trusted-pcs/${editingTrustedPC.id}`, {
+          name: trustedPCForm.name,
+          mac_address: trustedPCForm.macAddress
+        });
+        setSnackbar({
+          open: true,
+          message: 'Trusted PC updated successfully',
+          severity: 'success'
+        });
+      } else {
+        await axios.post(`${API_BASE_URL}/trusted-pcs`, {
+          name: trustedPCForm.name,
+          mac_address: trustedPCForm.macAddress
+        });
+        setSnackbar({
+          open: true,
+          message: 'Trusted PC added successfully',
+          severity: 'success'
+        });
+      }
+      setTrustedPCDialogOpen(false);
+      await fetchTrustedPCs();
+    } catch (error) {
+      console.error('Error saving trusted PC:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to save trusted PC',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleDeleteTrustedPC = async (pc) => {
+    if (!window.confirm(`Are you sure you want to delete "${pc.name}"?`)) {
+      return;
+    }
+
+    try {
+      await axios.delete(`${API_BASE_URL}/trusted-pcs/${pc.id}`);
+      setSnackbar({
+        open: true,
+        message: 'Trusted PC deleted successfully',
+        severity: 'success'
+      });
+      await fetchTrustedPCs();
+    } catch (error) {
+      console.error('Error deleting trusted PC:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.error || 'Failed to delete trusted PC',
         severity: 'error'
       });
     }
@@ -2988,6 +3178,223 @@ function SystemConfig() {
                 </TableBody>
               </Table>
             </TableContainer>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Backup Options
+            </Typography>
+            <Grid container spacing={3}>
+              {/* Left Column - Main Settings */}
+              <Grid item xs={12} md={6}>
+                {/* Enable Local Backup */}
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={backupSettings.enableLocalBackup}
+                      onChange={(e) => handleBackupSettingsChange('enableLocalBackup', e.target.checked)}
+                      color="primary"
+                    />
+                  }
+                  label="Enable Local Backup"
+                />
+                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>
+                  Enable automatic local backups of the system data
+                </Typography>
+
+                {/* Designated PCs Only */}
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={backupSettings.designatedPCsOnly}
+                      onChange={(e) => handleBackupSettingsChange('designatedPCsOnly', e.target.checked)}
+                      color="primary"
+                      disabled={!backupSettings.enableLocalBackup}
+                    />
+                  }
+                  label="Designated PCs Only"
+                />
+                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>
+                  Restrict backups to trusted PCs only to prevent off-site backups
+                </Typography>
+
+                {/* Trusted PCs List - shown when Designated PCs Only is enabled */}
+                {backupSettings.designatedPCsOnly && backupSettings.enableLocalBackup && (
+                  <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="subtitle1">Trusted PCs</Typography>
+                      <Button
+                        variant="contained"
+                        size="small"
+                        startIcon={<AddIcon />}
+                        onClick={handleAddTrustedPC}
+                      >
+                        Add PC
+                      </Button>
+                    </Box>
+                    {trustedPCs.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        No trusted PCs configured. Click "Add PC" to add one.
+                      </Typography>
+                    ) : (
+                      <TableContainer>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Name</TableCell>
+                              <TableCell>MAC Address</TableCell>
+                              <TableCell align="right">Actions</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {trustedPCs.map((pc) => (
+                              <TableRow key={pc.id}>
+                                <TableCell>{pc.name}</TableCell>
+                                <TableCell>{pc.mac_address}</TableCell>
+                                <TableCell align="right">
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleEditTrustedPC(pc)}
+                                    color="primary"
+                                  >
+                                    <EditIcon fontSize="small" />
+                                  </IconButton>
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleDeleteTrustedPC(pc)}
+                                    color="error"
+                                  >
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
+                  </Box>
+                )}
+
+                {/* File Path to Backups */}
+                <Box sx={{ mt: 3 }}>
+                  <TextField
+                    fullWidth
+                    label="File Path to Backups"
+                    value={backupSettings.backupFilePath}
+                    onChange={(e) => handleBackupSettingsChange('backupFilePath', e.target.value)}
+                    placeholder="e.g., C:\Backups or /var/backups"
+                    disabled={!backupSettings.enableLocalBackup}
+                    helperText="Enter the directory path where backups should be stored"
+                  />
+                </Box>
+              </Grid>
+
+              {/* Right Column - Backup Frequency Options */}
+              <Grid item xs={12} md={6}>
+                <Typography variant="subtitle1" gutterBottom>
+                  Backup Frequency
+                </Typography>
+
+                {/* Monthly Backup */}
+                <Box sx={{ mb: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={backupSettings.monthlyBackup}
+                        onChange={(e) => handleBackupSettingsChange('monthlyBackup', e.target.checked)}
+                        color="primary"
+                        disabled={!backupSettings.enableLocalBackup}
+                      />
+                    }
+                    label="Monthly Backup"
+                  />
+                  {backupSettings.monthlyBackup && backupSettings.enableLocalBackup && (
+                    <Box sx={{ mt: 1 }}>
+                      <TextField
+                        label="Number of Monthly Backups to Keep"
+                        type="number"
+                        value={backupSettings.monthlyBackupCount}
+                        onChange={(e) => handleBackupSettingsChange('monthlyBackupCount', parseInt(e.target.value) || 12)}
+                        inputProps={{ min: 1 }}
+                        size="small"
+                        fullWidth
+                      />
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Weekly Backup */}
+                <Box sx={{ mb: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={backupSettings.weeklyBackup}
+                        onChange={(e) => handleBackupSettingsChange('weeklyBackup', e.target.checked)}
+                        color="primary"
+                        disabled={!backupSettings.enableLocalBackup}
+                      />
+                    }
+                    label="Weekly Backup"
+                  />
+                  {backupSettings.weeklyBackup && backupSettings.enableLocalBackup && (
+                    <Box sx={{ mt: 1 }}>
+                      <TextField
+                        label="Number of Weekly Backups to Keep"
+                        type="number"
+                        value={backupSettings.weeklyBackupCount}
+                        onChange={(e) => handleBackupSettingsChange('weeklyBackupCount', parseInt(e.target.value) || 4)}
+                        inputProps={{ min: 1 }}
+                        size="small"
+                        fullWidth
+                      />
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Daily Backup */}
+                <Box sx={{ mb: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={backupSettings.dailyBackup}
+                        onChange={(e) => handleBackupSettingsChange('dailyBackup', e.target.checked)}
+                        color="primary"
+                        disabled={!backupSettings.enableLocalBackup}
+                      />
+                    }
+                    label="Daily Backup"
+                  />
+                  {backupSettings.dailyBackup && backupSettings.enableLocalBackup && (
+                    <Box sx={{ mt: 1 }}>
+                      <TextField
+                        label="Number of Daily Backups to Keep"
+                        type="number"
+                        value={backupSettings.dailyBackupCount}
+                        onChange={(e) => handleBackupSettingsChange('dailyBackupCount', parseInt(e.target.value) || 7)}
+                        inputProps={{ min: 1 }}
+                        size="small"
+                        fullWidth
+                      />
+                    </Box>
+                  )}
+                </Box>
+
+                {/* Save Button */}
+                <Box sx={{ mt: 3 }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleSaveBackupSettings}
+                    disabled={!backupSettings.enableLocalBackup}
+                    startIcon={<SaveIcon />}
+                    fullWidth
+                  >
+                    Save Backup Settings
+                  </Button>
+                </Box>
+              </Grid>
+            </Grid>
           </ConfigSection>
 
           <ConfigSection>
@@ -4842,6 +5249,54 @@ function SystemConfig() {
           </Button>
           <Button onClick={handleSaveTenderType} variant="contained" color="primary">
             {editingTenderType ? 'Update' : 'Add'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add/Edit Trusted PC Dialog */}
+      <Dialog
+        open={trustedPCDialogOpen}
+        onClose={() => setTrustedPCDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {editingTrustedPC ? 'Edit Trusted PC' : 'Add Trusted PC'}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="PC Name"
+                  value={trustedPCForm.name}
+                  onChange={(e) => setTrustedPCForm({ ...trustedPCForm, name: e.target.value })}
+                  placeholder="e.g., Office PC, Laptop-01"
+                  required
+                  helperText="A descriptive name for this PC"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="MAC Address"
+                  value={trustedPCForm.macAddress}
+                  onChange={(e) => setTrustedPCForm({ ...trustedPCForm, macAddress: e.target.value })}
+                  placeholder="XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX"
+                  required
+                  helperText="Format: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX (e.g., 00:1B:44:11:3A:B7)"
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTrustedPCDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSaveTrustedPC} variant="contained" color="primary">
+            {editingTrustedPC ? 'Update' : 'Add'}
           </Button>
         </DialogActions>
       </Dialog>

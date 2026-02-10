@@ -2429,6 +2429,229 @@ app.delete('/api/petty-cash-expenses/:id', async (req, res) => {
   }
 });
 
+// ==================== Backup Settings API ====================
+
+// GET /api/backup-settings - Get backup settings
+app.get('/api/backup-settings', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM backup_settings WHERE id = 1
+    `);
+    
+    if (result.rows.length === 0) {
+      // Create default settings if they don't exist
+      const insertResult = await pool.query(`
+        INSERT INTO backup_settings (id, enable_local_backup, designated_pcs_only, monthly_backup, monthly_backup_count, weekly_backup, weekly_backup_count, daily_backup, daily_backup_count, backup_file_path)
+        VALUES (1, FALSE, FALSE, FALSE, 12, FALSE, 4, FALSE, 7, NULL)
+        RETURNING *
+      `);
+      return res.json(insertResult.rows[0]);
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching backup settings:', error);
+    res.status(500).json({ error: 'Failed to fetch backup settings' });
+  }
+});
+
+// PUT /api/backup-settings - Update backup settings
+app.put('/api/backup-settings', async (req, res) => {
+  const {
+    enable_local_backup,
+    designated_pcs_only,
+    monthly_backup,
+    monthly_backup_count,
+    weekly_backup,
+    weekly_backup_count,
+    daily_backup,
+    daily_backup_count,
+    backup_file_path
+  } = req.body;
+
+  try {
+    // Validate backup counts
+    if (monthly_backup_count !== undefined && (monthly_backup_count < 1 || !Number.isInteger(monthly_backup_count))) {
+      return res.status(400).json({ error: 'monthly_backup_count must be a positive integer' });
+    }
+    if (weekly_backup_count !== undefined && (weekly_backup_count < 1 || !Number.isInteger(weekly_backup_count))) {
+      return res.status(400).json({ error: 'weekly_backup_count must be a positive integer' });
+    }
+    if (daily_backup_count !== undefined && (daily_backup_count < 1 || !Number.isInteger(daily_backup_count))) {
+      return res.status(400).json({ error: 'daily_backup_count must be a positive integer' });
+    }
+
+    const result = await pool.query(`
+      UPDATE backup_settings SET
+        enable_local_backup = COALESCE($1, enable_local_backup),
+        designated_pcs_only = COALESCE($2, designated_pcs_only),
+        monthly_backup = COALESCE($3, monthly_backup),
+        monthly_backup_count = COALESCE($4, monthly_backup_count),
+        weekly_backup = COALESCE($5, weekly_backup),
+        weekly_backup_count = COALESCE($6, weekly_backup_count),
+        daily_backup = COALESCE($7, daily_backup),
+        daily_backup_count = COALESCE($8, daily_backup_count),
+        backup_file_path = COALESCE($9, backup_file_path),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = 1
+      RETURNING *
+    `, [
+      enable_local_backup !== undefined ? enable_local_backup : null,
+      designated_pcs_only !== undefined ? designated_pcs_only : null,
+      monthly_backup !== undefined ? monthly_backup : null,
+      monthly_backup_count !== undefined ? monthly_backup_count : null,
+      weekly_backup !== undefined ? weekly_backup : null,
+      weekly_backup_count !== undefined ? weekly_backup_count : null,
+      daily_backup !== undefined ? daily_backup : null,
+      daily_backup_count !== undefined ? daily_backup_count : null,
+      backup_file_path !== undefined ? backup_file_path : null
+    ]);
+
+    if (result.rows.length === 0) {
+      // Create if doesn't exist
+      const insertResult = await pool.query(`
+        INSERT INTO backup_settings (id, enable_local_backup, designated_pcs_only, monthly_backup, monthly_backup_count, weekly_backup, weekly_backup_count, daily_backup, daily_backup_count, backup_file_path)
+        VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `, [
+        enable_local_backup || false,
+        designated_pcs_only || false,
+        monthly_backup || false,
+        monthly_backup_count || 12,
+        weekly_backup || false,
+        weekly_backup_count || 4,
+        daily_backup || false,
+        daily_backup_count || 7,
+        backup_file_path || null
+      ]);
+      return res.json(insertResult.rows[0]);
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating backup settings:', error);
+    res.status(500).json({ error: 'Failed to update backup settings' });
+  }
+});
+
+// ==================== Trusted PCs API ====================
+
+// GET /api/trusted-pcs - Get all trusted PCs
+app.get('/api/trusted-pcs', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, mac_address, created_at, updated_at
+      FROM trusted_pcs
+      ORDER BY name ASC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching trusted PCs:', error);
+    res.status(500).json({ error: 'Failed to fetch trusted PCs' });
+  }
+});
+
+// POST /api/trusted-pcs - Create a new trusted PC
+app.post('/api/trusted-pcs', async (req, res) => {
+  const { name, mac_address } = req.body;
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'name is required' });
+  }
+
+  if (!mac_address || !mac_address.trim()) {
+    return res.status(400).json({ error: 'mac_address is required' });
+  }
+
+  // Validate MAC address format (XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX)
+  const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+  if (!macRegex.test(mac_address.trim())) {
+    return res.status(400).json({ error: 'Invalid MAC address format. Use format: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX' });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO trusted_pcs (name, mac_address)
+      VALUES ($1, $2)
+      RETURNING id, name, mac_address, created_at, updated_at
+    `, [name.trim(), mac_address.trim().toUpperCase()]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A trusted PC with this MAC address already exists' });
+    }
+    console.error('Error creating trusted PC:', error);
+    res.status(500).json({ error: 'Failed to create trusted PC' });
+  }
+});
+
+// PUT /api/trusted-pcs/:id - Update a trusted PC
+app.put('/api/trusted-pcs/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, mac_address } = req.body;
+
+  if (name !== undefined && (!name || !name.trim())) {
+    return res.status(400).json({ error: 'name cannot be empty' });
+  }
+
+  if (mac_address !== undefined) {
+    if (!mac_address || !mac_address.trim()) {
+      return res.status(400).json({ error: 'mac_address cannot be empty' });
+    }
+    // Validate MAC address format
+    const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+    if (!macRegex.test(mac_address.trim())) {
+      return res.status(400).json({ error: 'Invalid MAC address format. Use format: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX' });
+    }
+  }
+
+  try {
+    const result = await pool.query(`
+      UPDATE trusted_pcs SET
+        name = COALESCE($1, name),
+        mac_address = COALESCE($2, mac_address),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING id, name, mac_address, created_at, updated_at
+    `, [
+      name ? name.trim() : null,
+      mac_address ? mac_address.trim().toUpperCase() : null,
+      id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Trusted PC not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'A trusted PC with this MAC address already exists' });
+    }
+    console.error('Error updating trusted PC:', error);
+    res.status(500).json({ error: 'Failed to update trusted PC' });
+  }
+});
+
+// DELETE /api/trusted-pcs/:id - Delete a trusted PC
+app.delete('/api/trusted-pcs/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'DELETE FROM trusted_pcs WHERE id = $1 RETURNING *',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Trusted PC not found' });
+    }
+    res.json({ message: 'Trusted PC deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting trusted PC:', error);
+    res.status(500).json({ error: 'Failed to delete trusted PC' });
+  }
+});
+
 // POST /api/cash-drawer/:sessionId/bank-deposit - Make a bank deposit from master safe
 app.post('/api/cash-drawer/:sessionId/bank-deposit', async (req, res) => {
   const { sessionId } = req.params;
