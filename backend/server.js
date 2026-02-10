@@ -11174,6 +11174,103 @@ app.delete('/api/business-info/logo', async (req, res) => {
   }
 });
 
+// ==================== CURRENCY TYPES ENDPOINTS ====================
+
+// GET all currency types
+app.get('/api/currency-types', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, code, description, is_default, created_at, updated_at FROM currency_types ORDER BY is_default DESC, code ASC'
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching currency types:', error);
+    res.status(500).json({ error: 'Failed to fetch currency types' });
+  }
+});
+
+// PUT currency types (handles add, update, delete)
+app.put('/api/currency-types', async (req, res) => {
+  const { currencies } = req.body; // Array of currency objects: { id?, code, description, is_default, _delete? }
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Handle deletions first
+    const deleteIds = currencies.filter(c => c._delete && c.id).map(c => c.id);
+    if (deleteIds.length > 0) {
+      await client.query('DELETE FROM currency_types WHERE id = ANY($1)', [deleteIds]);
+    }
+
+    // Handle updates and inserts
+    for (const currency of currencies) {
+      if (currency._delete) continue; // Skip deleted items
+
+      const { id, code, description, is_default } = currency;
+
+      // Validate required fields
+      if (!code || !description) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Code and description are required' });
+      }
+
+      // If setting this as default, unset all other defaults first
+      if (is_default) {
+        await client.query('UPDATE currency_types SET is_default = FALSE WHERE is_default = TRUE');
+      }
+
+      if (id) {
+        // Update existing currency
+        // Check if code is being changed to one that already exists
+        const codeCheckResult = await client.query(
+          'SELECT id FROM currency_types WHERE code = $1 AND id != $2',
+          [code, id]
+        );
+        if (codeCheckResult.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: `Currency code "${code}" already exists` });
+        }
+
+        await client.query(
+          'UPDATE currency_types SET code = $1, description = $2, is_default = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4',
+          [code, description, is_default || false, id]
+        );
+      } else {
+        // Insert new currency
+        // Check if code already exists
+        const codeCheckResult = await client.query(
+          'SELECT id FROM currency_types WHERE code = $1',
+          [code]
+        );
+        if (codeCheckResult.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: `Currency code "${code}" already exists` });
+        }
+
+        await client.query(
+          'INSERT INTO currency_types (code, description, is_default) VALUES ($1, $2, $3)',
+          [code, description, is_default || false]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    // Return updated list
+    const result = await client.query(
+      'SELECT id, code, description, is_default, created_at, updated_at FROM currency_types ORDER BY is_default DESC, code ASC'
+    );
+    res.json(result.rows);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating currency types:', error);
+    res.status(500).json({ error: 'Failed to update currency types' });
+  } finally {
+    client.release();
+  }
+});
+
 // ==================== LAYAWAY ENDPOINTS ====================
 
 // GET layaways by view

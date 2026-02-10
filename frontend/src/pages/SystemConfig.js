@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Container,
   Typography,
@@ -145,8 +145,18 @@ function SystemConfig() {
     logoMimetype: null
   });
 
+  // Currency types configuration (frontend-managed list)
+  const [currencyTypes, setCurrencyTypes] = useState([
+    { code: 'CAD', description: 'Canadian Dollar', isDefault: true }
+  ]);
+  const [newCurrency, setNewCurrency] = useState({ code: '', description: '' });
+
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const isInitialLoad = useRef(true);
+  const saveTimeoutRef = useRef(null);
+  const currencySaveTimeoutRef = useRef(null);
 
   const [securitySettings, setSecuritySettings] = useState({
     requirePasswordChange: true,
@@ -821,6 +831,11 @@ function SystemConfig() {
         setLogoPreview(reader.result);
       };
       reader.readAsDataURL(file);
+
+      // Auto-save when logo is uploaded
+      setTimeout(() => {
+        autoSaveBusinessInfo(false);
+      }, 500);
     }
   };
 
@@ -855,16 +870,27 @@ function SystemConfig() {
     }
   };
 
-  const handleSaveBusinessInfo = async () => {
+  const autoSaveBusinessInfo = async (showError = true) => {
+    // Skip auto-save on initial load
+    if (isInitialLoad.current) {
+      return;
+    }
+
     try {
+      setIsSaving(true);
       const token = localStorage.getItem('token');
       const formData = new FormData();
+
+      // Determine default currency from currencyTypes (excluding deleted)
+      const activeCurrencies = currencyTypes.filter(c => !c._delete);
+      const defaultCurrency =
+        activeCurrencies.find(c => c.isDefault) || activeCurrencies[0] || { code: generalSettings.currency || 'CAD' };
 
       formData.append('business_name', generalSettings.businessName);
       formData.append('email', generalSettings.email);
       formData.append('phone', generalSettings.phone);
       formData.append('address', generalSettings.address);
-      formData.append('currency', generalSettings.currency);
+      formData.append('currency', defaultCurrency.code);
       formData.append('timezone', generalSettings.timezone);
 
       if (logoFile) {
@@ -878,11 +904,32 @@ function SystemConfig() {
         }
       });
 
-      setSnackbar({
-        open: true,
-        message: 'Business information saved successfully',
-        severity: 'success'
-      });
+      // Save currency types to database
+      try {
+        const currenciesPayload = currencyTypes.map(ct => ({
+          id: ct.id || undefined,
+          code: ct.code,
+          description: ct.description,
+          is_default: ct.isDefault || false,
+          _delete: ct._delete || false
+        }));
+
+        await axios.put(`${API_BASE_URL}/currency-types`, 
+          { currencies: currenciesPayload },
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        // Reload currency types to get updated IDs and remove deleted items
+        await loadCurrencyTypes();
+      } catch (currencyError) {
+        console.error('Error saving currency types:', currencyError);
+        // Don't fail the entire save if currency types fail
+      }
 
       // Dispatch event to notify Navbar of business settings change
       window.dispatchEvent(new CustomEvent('businessSettingsUpdated', {
@@ -890,14 +937,41 @@ function SystemConfig() {
       }));
 
       // Clear logo file after successful save
-      setLogoFile(null);
+      if (logoFile) {
+        setLogoFile(null);
+      }
     } catch (error) {
       console.error('Error saving business info:', error);
-      setSnackbar({
-        open: true,
-        message: 'Failed to save business information',
-        severity: 'error'
+      if (showError) {
+        setSnackbar({
+          open: true,
+          message: 'Failed to save business information',
+          severity: 'error'
+        });
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const loadCurrencyTypes = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/currency-types`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
+
+      if (response.data && response.data.length > 0) {
+        setCurrencyTypes(response.data.map(ct => ({
+          id: ct.id,
+          code: ct.code,
+          description: ct.description,
+          isDefault: ct.is_default
+        })));
+      }
+    } catch (error) {
+      console.error('Error loading currency types:', error);
+      // If error, keep default currency types
     }
   };
 
@@ -921,12 +995,29 @@ function SystemConfig() {
         logoMimetype: data.logo_mimetype
       });
 
+      // Load currency types from database
+      await loadCurrencyTypes();
+
+      // If no currency types loaded, initialize based on stored currency
+      setCurrencyTypes(prev => {
+        if (prev && prev.length > 0 && prev.some(ct => ct.id)) return prev;
+        const code = (data.currency || 'CAD').toUpperCase();
+        let description = code;
+        if (code === 'CAD') description = 'Canadian Dollar';
+        if (code === 'USD') description = 'US Dollar';
+        return [{ code, description, isDefault: true }];
+      });
+
       // Set logo preview if exists
       if (data.logo && data.logo_mimetype) {
         setLogoPreview(`data:${data.logo_mimetype};base64,${data.logo}`);
       }
+
+      // Mark initial load as complete
+      isInitialLoad.current = false;
     } catch (error) {
       console.error('Error loading business info:', error);
+      isInitialLoad.current = false;
     }
   };
 
@@ -1916,6 +2007,49 @@ function SystemConfig() {
     loadAttributeConfig();
   }, []);
 
+  // Auto-save business info when generalSettings change (debounced)
+  useEffect(() => {
+    if (isInitialLoad.current) return;
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set new timeout for debounced save
+    saveTimeoutRef.current = setTimeout(() => {
+      autoSaveBusinessInfo(false);
+    }, 1000); // 1 second debounce
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [generalSettings.businessName, generalSettings.email, generalSettings.phone, generalSettings.address, generalSettings.timezone]);
+
+  // Auto-save currency types when they change (debounced)
+  useEffect(() => {
+    if (isInitialLoad.current) return;
+
+    // Clear existing timeout
+    if (currencySaveTimeoutRef.current) {
+      clearTimeout(currencySaveTimeoutRef.current);
+    }
+
+    // Set new timeout for debounced save
+    currencySaveTimeoutRef.current = setTimeout(() => {
+      autoSaveBusinessInfo(false);
+    }, 1000); // 1 second debounce
+
+    return () => {
+      if (currencySaveTimeoutRef.current) {
+        clearTimeout(currencySaveTimeoutRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(currencyTypes.map(ct => ({ code: ct.code, description: ct.description, isDefault: ct.isDefault, _delete: ct._delete })))]);
+
   const loadAttributeConfig = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/attribute-config`);
@@ -1946,28 +2080,9 @@ function SystemConfig() {
               Business Information
             </Typography>
             <Grid container spacing={1}>
-              {/* Row 1: Business Name, Email, Logo */}
-              <Grid item xs={12} sm={3}>
-                <TextField
-                  fullWidth
-                  label="Business Name"
-                  name="businessName"
-                  value={generalSettings.businessName}
-                  onChange={handleGeneralSettingsChange}
-                />
-              </Grid>
-              <Grid item xs={12} sm={3}>
-                <TextField
-                  fullWidth
-                  label="Email"
-                  name="email"
-                  type="email"
-                  value={generalSettings.email}
-                  onChange={handleGeneralSettingsChange}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6} sx={{ display: 'flex', alignItems: 'flex-start', rowSpan: 2 }}>
-                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, width: '100%' }}>
+              {/* Row 2: Logo, All Business Fields, Currency Types - 3 columns (25%, 50%, 75% ratio) */}
+              <Grid item xs={12} sm={2}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1.5, width: '100%' }}>
                   {logoPreview && (
                     <Avatar
                       src={logoPreview}
@@ -1976,7 +2091,7 @@ function SystemConfig() {
                       sx={{ width: 100, height: 100, objectFit: 'contain' }}
                     />
                   )}
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: '100%' }}>
                     <Button
                       variant="contained"
                       component="label"
@@ -2006,28 +2121,23 @@ function SystemConfig() {
                   </Box>
                 </Box>
               </Grid>
-
-              {/* Row 2: Phone, Currency, Timezone */}
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  fullWidth
+                  label="Business Name"
+                  name="businessName"
+                  value={generalSettings.businessName}
+                  onChange={handleGeneralSettingsChange}
+                />
                 <TextField
                   fullWidth
                   label="Phone"
                   name="phone"
                   value={generalSettings.phone}
                   onChange={handleGeneralSettingsChange}
+                  sx={{ mt: 1 }}
                 />
-              </Grid>
-              <Grid item xs={12} sm={3}>
-                <TextField
-                  fullWidth
-                  label="Currency"
-                  name="currency"
-                  value={generalSettings.currency}
-                  onChange={handleGeneralSettingsChange}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth>
+                <FormControl fullWidth sx={{ mt: 1 }}>
                   <InputLabel>Timezone</InputLabel>
                   <Select
                     name="timezone"
@@ -2042,10 +2152,15 @@ function SystemConfig() {
                     ))}
                   </Select>
                 </FormControl>
-              </Grid>
-
-              {/* Row 3: Address (spans full width) */}
-              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Email"
+                  name="email"
+                  type="email"
+                  value={generalSettings.email}
+                  onChange={handleGeneralSettingsChange}
+                  sx={{ mt: 1 }}
+                />
                 <TextField
                   fullWidth
                   label="Address"
@@ -2054,18 +2169,171 @@ function SystemConfig() {
                   rows={2}
                   value={generalSettings.address}
                   onChange={handleGeneralSettingsChange}
+                  sx={{ mt: 1 }}
                 />
               </Grid>
+              <Grid item xs={12} sm={6}>
+                <Paper
+                  variant="outlined"
+                  sx={{ p: 1.5, borderRadius: 1, height: '100%' }}
+                >
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Currency Types
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Manage supported currencies. The default will be used as the store currency.
+                  </Typography>
+                  <TableContainer>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ width: 80 }}>Code</TableCell>
+                          <TableCell>Description</TableCell>
+                          <TableCell align="center" sx={{ width: 80 }}>Default</TableCell>
+                          <TableCell align="center" sx={{ width: 80 }}>Actions</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {currencyTypes.filter(c => !c._delete).map((cur, index) => {
+                          const actualIndex = currencyTypes.findIndex(ct => ct === cur);
+                          return (
+                            <TableRow key={cur.code || actualIndex}>
+                              <TableCell>
+                                <TextField
+                                  value={cur.code}
+                                  onChange={(e) => {
+                                    const value = e.target.value.toUpperCase();
+                                    setCurrencyTypes(prev =>
+                                      prev.map((c, i) => i === actualIndex ? { ...c, code: value } : c)
+                                    );
+                                  }}
+                                  size="small"
+                                  placeholder="CAD"
+                                  inputProps={{ maxLength: 3, style: { textTransform: 'uppercase' } }}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <TextField
+                                  value={cur.description}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setCurrencyTypes(prev =>
+                                      prev.map((c, i) => i === actualIndex ? { ...c, description: value } : c)
+                                    );
+                                  }}
+                                  size="small"
+                                  placeholder="Canadian Dollar"
+                                />
+                              </TableCell>
+                              <TableCell align="center">
+                                <Checkbox
+                                  checked={cur.isDefault === true}
+                                  onChange={() => {
+                                    setCurrencyTypes(prev =>
+                                      prev.map((c, i) => ({ ...c, isDefault: i === actualIndex }))
+                                    );
+                                  }}
+                                  color="primary"
+                                  size="small"
+                                />
+                              </TableCell>
+                              <TableCell align="center">
+                                <Button
+                                  size="small"
+                                  color="error"
+                                  disabled={currencyTypes.filter(c => !c._delete).length === 1}
+                                  onClick={() => {
+                                    setCurrencyTypes(prev => {
+                                      const updated = prev.map((c, i) => 
+                                        i === actualIndex ? { ...c, _delete: true } : c
+                                      );
+                                      // If deleting the default, set first non-deleted as default
+                                      if (cur.isDefault) {
+                                        const firstNonDeleted = updated.find(c => !c._delete);
+                                        if (firstNonDeleted) {
+                                          const firstIndex = updated.findIndex(c => c === firstNonDeleted);
+                                          updated[firstIndex] = { ...updated[firstIndex], isDefault: true };
+                                        }
+                                      }
+                                      return updated;
+                                    });
+                                  }}
+                                >
+                                  Delete
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                        <TableRow>
+                          <TableCell>
+                            <TextField
+                              value={newCurrency.code}
+                              onChange={(e) => setNewCurrency(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
+                              size="small"
+                              placeholder="Code"
+                              inputProps={{ maxLength: 3, style: { textTransform: 'uppercase' } }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              value={newCurrency.description}
+                              onChange={(e) => setNewCurrency(prev => ({ ...prev, description: e.target.value }))}
+                              size="small"
+                              placeholder="Description"
+                            />
+                          </TableCell>
+                          <TableCell />
+                          <TableCell align="center">
+                            <Button
+                              size="small"
+                              onClick={() => {
+                                const code = (newCurrency.code || '').trim().toUpperCase();
+                                const description = (newCurrency.description || '').trim();
+                                if (!code) {
+                                  setSnackbar({
+                                    open: true,
+                                    message: 'Currency code is required',
+                                    severity: 'error'
+                                  });
+                                  return;
+                                }
+                                if (currencyTypes.some(c => !c._delete && c.code === code)) {
+                                  setSnackbar({
+                                    open: true,
+                                    message: 'Currency code already exists',
+                                    severity: 'error'
+                                  });
+                                  return;
+                                }
+                                setCurrencyTypes(prev => {
+                                  const activeCurrencies = prev.filter(c => !c._delete);
+                                  return [
+                                    ...prev,
+                                    { code, description: description || code, isDefault: activeCurrencies.length === 0 }
+                                  ];
+                                });
+                                setNewCurrency({ code: '', description: '' });
+                              }}
+                            >
+                              Add
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Paper>
+              </Grid>
             </Grid>
-            <Box sx={{ mt: 3 }}>
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={handleSaveBusinessInfo}
-              >
-                Save Business Information
-              </Button>
-            </Box>
+            {isSaving && (
+              <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CircularProgress size={16} />
+                <Typography variant="body2" color="text.secondary">
+                  Saving...
+                </Typography>
+              </Box>
+            )}
           </ConfigSection>
 
           <ConfigSection>
@@ -3426,7 +3694,7 @@ function SystemConfig() {
                 <CircularProgress />
               </Box>
             ) : (
-              <TableContainer sx={{ overflowX: 'auto' }}>
+              <TableContainer>
                 <Table size="small" stickyHeader sx={{ minWidth: 1200 }}>
                   <TableHead>
                     <TableRow>
