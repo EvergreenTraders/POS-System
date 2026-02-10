@@ -681,6 +681,92 @@ app.get('/api/employee-sessions/closing-notification', async (req, res) => {
   }
 });
 
+// GET /api/employee-sessions/report - Get time clock report for date range
+app.get('/api/employee-sessions/report', async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+
+    if (!start_date || !end_date) {
+      return res.status(400).json({ error: 'start_date and end_date are required' });
+    }
+
+    // Get current store
+    const storeResult = await pool.query(
+      'SELECT store_id, store_name, store_code FROM stores WHERE is_current_store = TRUE LIMIT 1'
+    );
+    const currentStore = storeResult.rows[0] || { store_id: null, store_name: 'Unknown', store_code: 'N/A' };
+
+    // Get all employees for the current store (or all if no store)
+    const employeesResult = await pool.query(`
+      SELECT employee_id, first_name, last_name, username, status
+      FROM employees
+      WHERE status = 'Active'
+      ORDER BY first_name ASC
+    `);
+
+    // Get sessions within date range
+    const sessionsResult = await pool.query(`
+      SELECT
+        es.session_id,
+        es.employee_id,
+        es.clock_in_time,
+        es.clock_out_time,
+        es.clock_in_notes,
+        es.clock_out_notes,
+        es.status
+      FROM employee_sessions es
+      WHERE es.clock_in_time >= $1::date
+        AND es.clock_in_time < ($2::date + INTERVAL '1 day')
+      ORDER BY es.clock_in_time ASC
+    `, [start_date, end_date]);
+
+    // Build report: group sessions by employee
+    const report = employeesResult.rows.map(emp => {
+      const empSessions = sessionsResult.rows.filter(s => s.employee_id === emp.employee_id);
+      return {
+        employee_id: emp.employee_id,
+        employee_name: `${emp.first_name} ${emp.last_name}`,
+        store_code: currentStore.store_code,
+        store_name: currentStore.store_name,
+        sessions: empSessions
+      };
+    });
+
+    res.json({
+      store: currentStore,
+      report
+    });
+  } catch (error) {
+    console.error('Error generating time clock report:', error);
+    res.status(500).json({ error: 'Failed to generate time clock report' });
+  }
+});
+
+// PUT /api/employee-sessions/:id - Update a session (manager edit)
+app.put('/api/employee-sessions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { clock_in_time, clock_out_time } = req.body;
+
+    const result = await pool.query(`
+      UPDATE employee_sessions
+      SET clock_in_time = COALESCE($1, clock_in_time),
+          clock_out_time = COALESCE($2, clock_out_time)
+      WHERE session_id = $3
+      RETURNING *
+    `, [clock_in_time || null, clock_out_time || null, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating employee session:', error);
+    res.status(500).json({ error: 'Failed to update session' });
+  }
+});
+
 // ============================================================================
 // Cash Drawer API Routes
 // ============================================================================
