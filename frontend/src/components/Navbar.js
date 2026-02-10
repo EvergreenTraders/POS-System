@@ -561,7 +561,13 @@ function Navbar() {
                   color="inherit"
                 >
                   <Avatar
-                    sx={{ width: 40, height: 40, bgcolor: 'secondary.main' }}
+                    sx={{
+                      width: 40,
+                      height: 40,
+                      bgcolor: 'secondary.main',
+                      border: 3,
+                      borderColor: clockedIn ? '#4caf50' : '#f44336',
+                    }}
                     src={user.image ? `data:image/jpeg;base64,${user.image}` : undefined}
                   >
                     {!user.image && (user.username ? user.username[0].toUpperCase() : <AccountIcon />)}
