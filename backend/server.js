@@ -2322,6 +2322,110 @@ app.delete('/api/banks/:bankId', async (req, res) => {
   }
 });
 
+// GET /api/petty-cash-expenses - Get all petty cash expenses
+app.get('/api/petty-cash-expenses', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM petty_cash_expenses
+      ORDER BY name ASC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching petty cash expenses:', error);
+    res.status(500).json({ error: 'Failed to fetch petty cash expenses' });
+  }
+});
+
+// POST /api/petty-cash-expenses - Create a new petty cash expense
+app.post('/api/petty-cash-expenses', async (req, res) => {
+  const { name, accounting_code, includes_sales_tax } = req.body;
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'name is required' });
+  }
+
+  if (!accounting_code || !accounting_code.trim()) {
+    return res.status(400).json({ error: 'accounting_code is required' });
+  }
+
+  try {
+    const result = await pool.query(`
+      INSERT INTO petty_cash_expenses (name, accounting_code, includes_sales_tax)
+      VALUES ($1, $2, $3)
+      RETURNING *
+    `, [name.trim(), accounting_code.trim(), includes_sales_tax || false]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'An expense with this name already exists' });
+    }
+    console.error('Error creating petty cash expense:', error);
+    res.status(500).json({ error: 'Failed to create petty cash expense' });
+  }
+});
+
+// PUT /api/petty-cash-expenses/:id - Update a petty cash expense
+app.put('/api/petty-cash-expenses/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, accounting_code, includes_sales_tax } = req.body;
+
+  if (name !== undefined && (!name || !name.trim())) {
+    return res.status(400).json({ error: 'name cannot be empty' });
+  }
+
+  if (accounting_code !== undefined && (!accounting_code || !accounting_code.trim())) {
+    return res.status(400).json({ error: 'accounting_code cannot be empty' });
+  }
+
+  try {
+    const result = await pool.query(`
+      UPDATE petty_cash_expenses SET
+        name = COALESCE($1, name),
+        accounting_code = COALESCE($2, accounting_code),
+        includes_sales_tax = COALESCE($3, includes_sales_tax),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE expense_id = $4
+      RETURNING *
+    `, [
+      name ? name.trim() : null,
+      accounting_code ? accounting_code.trim() : null,
+      includes_sales_tax !== undefined ? includes_sales_tax : null,
+      id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Petty cash expense not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation
+      return res.status(400).json({ error: 'An expense with this name already exists' });
+    }
+    console.error('Error updating petty cash expense:', error);
+    res.status(500).json({ error: 'Failed to update petty cash expense' });
+  }
+});
+
+// DELETE /api/petty-cash-expenses/:id - Delete a petty cash expense
+app.delete('/api/petty-cash-expenses/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'DELETE FROM petty_cash_expenses WHERE expense_id = $1 RETURNING *',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Petty cash expense not found' });
+    }
+    res.json({ message: 'Petty cash expense deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting petty cash expense:', error);
+    res.status(500).json({ error: 'Failed to delete petty cash expense' });
+  }
+});
+
 // POST /api/cash-drawer/:sessionId/bank-deposit - Make a bank deposit from master safe
 app.post('/api/cash-drawer/:sessionId/bank-deposit', async (req, res) => {
   const { sessionId } = req.params;

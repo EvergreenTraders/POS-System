@@ -159,6 +159,12 @@ function SystemConfig() {
   const [currentStoreId, setCurrentStoreId] = useState(null);
   const [allStoreDesignatorsChecked, setAllStoreDesignatorsChecked] = useState(false);
 
+  // Petty cash expenses
+  const [pettyCashExpenses, setPettyCashExpenses] = useState([]);
+  const [pettyCashEditId, setPettyCashEditId] = useState(null);
+  const [pettyCashEditData, setPettyCashEditData] = useState({});
+  const [newPettyCashExpense, setNewPettyCashExpense] = useState({ name: '', accounting_code: '', includes_sales_tax: false });
+
   const formatAccountingNumber = (acctNum, storeDesignator, storeNumber) => {
     if (!acctNum) return '—';
     if (storeDesignator && storeNumber) {
@@ -711,6 +717,7 @@ function SystemConfig() {
     fetchTaxConfig();
     fetchAuthorizationTemplate();
     fetchReceiptConfig();
+    fetchPettyCashExpenses();
     fetchPawnConfig();
     fetchBankAccounts();
     axios.get(`${API_BASE_URL}/stores/current`).then(res => setCurrentStoreId(res.data.store_id)).catch(() => {});
@@ -798,6 +805,65 @@ function SystemConfig() {
       setSnackbar({ open: true, message: 'Bank deleted', severity: 'success' });
     } catch (err) {
       setSnackbar({ open: true, message: 'Failed to delete bank', severity: 'error' });
+    }
+  };
+
+  // Petty Cash Expenses functions
+  const fetchPettyCashExpenses = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/petty-cash-expenses`);
+      setPettyCashExpenses(response.data);
+    } catch (err) {
+      console.error('Error fetching petty cash expenses:', err);
+      setSnackbar({ open: true, message: 'Failed to fetch petty cash expenses', severity: 'error' });
+    }
+  };
+
+  const handleAddPettyCashExpense = async () => {
+    if (!newPettyCashExpense.name.trim()) {
+      setSnackbar({ open: true, message: 'Name is required', severity: 'error' });
+      return;
+    }
+    if (!newPettyCashExpense.accounting_code.trim()) {
+      setSnackbar({ open: true, message: 'Accounting code is required', severity: 'error' });
+      return;
+    }
+    try {
+      await axios.post(`${API_BASE_URL}/petty-cash-expenses`, newPettyCashExpense);
+      setNewPettyCashExpense({ name: '', accounting_code: '', includes_sales_tax: false });
+      fetchPettyCashExpenses();
+      setSnackbar({ open: true, message: 'Petty cash expense added', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to add petty cash expense', severity: 'error' });
+    }
+  };
+
+  const handleSavePettyCashExpense = async (expenseId) => {
+    if (!pettyCashEditData.name?.trim()) {
+      setSnackbar({ open: true, message: 'Name is required', severity: 'error' });
+      return;
+    }
+    if (!pettyCashEditData.accounting_code?.trim()) {
+      setSnackbar({ open: true, message: 'Accounting code is required', severity: 'error' });
+      return;
+    }
+    try {
+      await axios.put(`${API_BASE_URL}/petty-cash-expenses/${expenseId}`, pettyCashEditData);
+      setPettyCashEditId(null);
+      fetchPettyCashExpenses();
+      setSnackbar({ open: true, message: 'Petty cash expense updated', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to update petty cash expense', severity: 'error' });
+    }
+  };
+
+  const handleDeletePettyCashExpense = async (expenseId) => {
+    try {
+      await axios.delete(`${API_BASE_URL}/petty-cash-expenses/${expenseId}`);
+      fetchPettyCashExpenses();
+      setSnackbar({ open: true, message: 'Petty cash expense deleted', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to delete petty cash expense', severity: 'error' });
     }
   };
 
@@ -2625,6 +2691,138 @@ function SystemConfig() {
                     <TableCell align="center"><Checkbox size="small" checked={newBank.is_default} onChange={(e) => setNewBank(prev => ({ ...prev, is_default: e.target.checked }))} /></TableCell>
                     <TableCell align="center">
                       <IconButton size="small" color="primary" onClick={handleAddBank}><AddIcon fontSize="small" /></IconButton>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Petty Cash Expenses
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Manage petty cash expense categories. If "Includes Sales Tax" is enabled, payouts will be split between expense and tax based on the configured tax rate.
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Name</TableCell>
+                    <TableCell>Accounting Code</TableCell>
+                    <TableCell align="center">Includes Sales Tax</TableCell>
+                    <TableCell align="center">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {pettyCashExpenses.map((expense) => (
+                    <TableRow key={expense.expense_id}>
+                      {pettyCashEditId === expense.expense_id ? (
+                        <>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              value={pettyCashEditData.name || ''}
+                              onChange={(e) => setPettyCashEditData(prev => ({ ...prev, name: e.target.value }))}
+                              placeholder="e.g. Staff Rewards"
+                              fullWidth
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              value={pettyCashEditData.accounting_code || ''}
+                              onChange={(e) => setPettyCashEditData(prev => ({ ...prev, accounting_code: e.target.value }))}
+                              placeholder="e.g. 5001"
+                              fullWidth
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Checkbox
+                              size="small"
+                              checked={pettyCashEditData.includes_sales_tax || false}
+                              onChange={(e) => setPettyCashEditData(prev => ({ ...prev, includes_sales_tax: e.target.checked }))}
+                              color="primary"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                              <IconButton size="small" color="primary" onClick={() => handleSavePettyCashExpense(expense.expense_id)}>
+                                <SaveIcon fontSize="small" />
+                              </IconButton>
+                              <IconButton size="small" onClick={() => setPettyCashEditId(null)}>
+                                <CancelIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                          </TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell>{expense.name}</TableCell>
+                          <TableCell>{expense.accounting_code}</TableCell>
+                          <TableCell align="center">
+                            {expense.includes_sales_tax ? 'Yes' : 'No'}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  setPettyCashEditId(expense.expense_id);
+                                  setPettyCashEditData({
+                                    name: expense.name || '',
+                                    accounting_code: expense.accounting_code || '',
+                                    includes_sales_tax: expense.includes_sales_tax || false
+                                  });
+                                }}
+                              >
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleDeletePettyCashExpense(expense.expense_id)}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                          </TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  ))}
+                  <TableRow>
+                    <TableCell>
+                      <TextField
+                        size="small"
+                        value={newPettyCashExpense.name}
+                        onChange={(e) => setNewPettyCashExpense(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="e.g. Staff Rewards"
+                        fullWidth
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <TextField
+                        size="small"
+                        value={newPettyCashExpense.accounting_code}
+                        onChange={(e) => setNewPettyCashExpense(prev => ({ ...prev, accounting_code: e.target.value }))}
+                        placeholder="e.g. 5001"
+                        fullWidth
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <Checkbox
+                        size="small"
+                        checked={newPettyCashExpense.includes_sales_tax}
+                        onChange={(e) => setNewPettyCashExpense(prev => ({ ...prev, includes_sales_tax: e.target.checked }))}
+                        color="primary"
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <IconButton size="small" color="primary" onClick={handleAddPettyCashExpense}>
+                        <AddIcon fontSize="small" />
+                      </IconButton>
                     </TableCell>
                   </TableRow>
                 </TableBody>
