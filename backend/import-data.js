@@ -19,6 +19,20 @@ const awsPool = new Pool({
 
 async function clearTable(tableName) {
   try {
+    // Check if table exists first
+    const tableExists = await awsPool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = $1
+      )
+    `, [tableName]);
+    
+    if (!tableExists.rows[0].exists) {
+      console.log(`  ⚠ Table ${tableName} does not exist, skipping clear`);
+      return;
+    }
+    
     console.log(`  Clearing ${tableName}...`);
     await awsPool.query(`TRUNCATE TABLE ${tableName} CASCADE`);
     console.log(`  ✓ Cleared ${tableName}`);
@@ -37,6 +51,21 @@ async function importTableData(tableData) {
   }
 
   try {
+    // Check if table exists first
+    const tableExists = await awsPool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = $1
+      )
+    `, [table]);
+    
+    if (!tableExists.rows[0].exists) {
+      console.log(`  ⚠ Table ${table} does not exist in RDS, skipping import`);
+      console.log(`     (Table may need to be created via schema migration first)`);
+      return;
+    }
+    
     console.log(`Importing ${rows.length} rows into ${table}...`);
 
     // Get generated columns to exclude from insert
@@ -201,7 +230,10 @@ async function importAllData(exportFilePath) {
 
   // Import tables in order
   let successCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
   let totalRows = 0;
+  const errors = [];
 
   for (const tableData of exportData.tables) {
     try {
@@ -210,9 +242,9 @@ async function importAllData(exportFilePath) {
       totalRows += tableData.rowCount;
     } catch (error) {
       console.error(`\n✗ Failed to import ${tableData.table}:`, error.message);
-      // Re-enable foreign key checks before throwing
-      await awsPool.query('SET session_replication_role = DEFAULT;');
-      throw error;
+      errorCount++;
+      errors.push({ table: tableData.table, error: error.message });
+      // Continue with next table instead of throwing
     }
   }
 
@@ -223,8 +255,21 @@ async function importAllData(exportFilePath) {
   console.log('Import Summary:');
   console.log('='.repeat(60));
   console.log(`Successfully imported: ${successCount}/${exportData.tables.length} tables`);
+  if (skippedCount > 0) {
+    console.log(`Skipped (table not in RDS): ${skippedCount} tables`);
+  }
+  if (errorCount > 0) {
+    console.log(`Failed: ${errorCount} tables`);
+    console.log('\nFailed tables:');
+    errors.forEach(e => console.log(`  - ${e.table}: ${e.error}`));
+  }
   console.log(`Total rows imported: ${totalRows}`);
   console.log('='.repeat(60));
+  
+  if (errorCount > 0) {
+    console.log('\n⚠ Some tables failed to import. Check errors above.');
+    console.log('You may need to run schema migrations first for missing tables.');
+  }
 }
 
 // Run import

@@ -12,7 +12,9 @@
     "migrate-aws": "node migrate-with-data.js",
     "export-data": "node export-data.js",
     "import-data": "node import-data.js",
-    "import-to-aws": "node import-to-aws.js"
+    "import-to-aws": "node import-to-aws.js",
+    "migrate-to-rds": "node migrate-to-rds.js",
+    "test-rds": "node check-rds-connection.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

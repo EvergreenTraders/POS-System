@@ -17,9 +17,10 @@ const localPool = new Pool({
 
 // Tables to export in dependency order
 const TABLES = [
-  'employees',
-  'customers',
+  // Core configuration tables (no dependencies)
+  'stores',
   'business_info',
+  'backup_settings',
   'system_config',
   'user_preferences',
   'pawn_config',
@@ -27,6 +28,49 @@ const TABLES = [
   'cases_config',
   'receipt_config',
   'inventory_status',
+  'inventory_hold_period',
+  'quote_expiration',
+  
+  // Reference/lookup tables
+  'currency_types',
+  'metal_category',
+  'metal_color',
+  'metal_purity',
+  'metal_style',
+  'metal_style_category',
+  'metal_style_subcategory',
+  'precious_metal_type',
+  'non_precious_metal_type',
+  'stone_types',
+  'stone_color',
+  'stone_shape',
+  'diamond_clarity',
+  'diamond_color',
+  'diamond_cut',
+  'diamond_shape',
+  'diamond_size_weight',
+  'carat_to_gram_conversion',
+  'spot_prices',
+  'live_spot_prices',
+  'live_pricing',
+  'price_estimates',
+  'diamond_estimates',
+  'transaction_type',
+  
+  // Employee and store related
+  'employees',
+  'employee_sessions',
+  'store_sessions',
+  'trusted_pcs',
+  
+  // Customer tables
+  'customers',
+  'customer_account_links',
+  'customer_headers_preferences',
+  'linked_account_authorization_template',
+  'linked_account_authorizations',
+  
+  // Drawer and cash management
   'drawers',
   'drawer_config',
   'discrepancy_threshold',
@@ -34,14 +78,32 @@ const TABLES = [
   'cash_drawer_transactions',
   'cash_drawer_adjustments',
   'cash_denominations',
+  'adjustment_denominations',
+  'drawer_session_connections',
+  'drawer_tender_balances',
+  'banks',
+  'bank_deposits',
+  'petty_cash_accounts',
+  'petty_cash_expenses',
+  'petty_cash_payouts',
+  
+  // Inventory
   'storage_location',
-  'metal_estimator',
-  'gem_estimator',
   'jewelry',
   'jewelry_secondary_gems',
+  'jewelry_item_history',
+  'hardgoods_category',
+  'hardgoods_subcategory',
+  'hardgoods',
+  'hardgoods_sku',
+  'hardgoods_bucket',
+  'hardgoods_item_history',
+  'item_attributes',
+  'attribute_config',
+  
+  // Transactions
   'transactions',
   'transaction_items',
-  'transaction_types',
   'payment_methods',
   'payments',
   'pawn_ticket',
@@ -50,16 +112,16 @@ const TABLES = [
   'sale_ticket',
   'layaway',
   'layaway_payments',
-  'scrap',
-  'scrap_bucket_history',
+  'layaway_history',
   'quotes',
   'quote_items',
-  'jewelry_item_history',
-  'linked_account_authorization',
-  'customer_account_links',
-  'customer_headers_preferences',
-  'attribute_config',
-  'item_attributes'
+  'scrap',
+  'scrap_bucket_history',
+  'inter_store_transfers',
+  
+  // Other
+  'products',
+  'orders'
 ];
 
 async function exportTableData(tableName) {

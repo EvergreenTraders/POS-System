@@ -29,11 +29,17 @@ const pool = new Pool({
 
 // Migration files in order
 const MIGRATION_FILES = [
+  // Core tables first (no dependencies)
+  'business_info.sql',  // Creates currency_types
+  'backup_settings.sql',
+  'inter_store_transfers.sql',  // Creates stores table (needed by employees)
   'employees.sql',
+  'employee_sessions.sql',
+  'store_sessions.sql',
+  'trusted_pcs.sql',
   'customers.sql',
-  'business_info.sql',
   'inventory.sql',
-  'metal_estimator.sql',
+  'metal_estimator.sql',  // Creates metal_style_category, metal_style_subcategory
   'gem_estimator.sql',
   'system_config.sql',
   'linked_account_authorization.sql',
@@ -47,7 +53,7 @@ const MIGRATION_FILES = [
   'scrap_history.sql',
   'quotes.sql',
   'tax_config.sql',
-  'cash_drawer.sql',
+  'cash_drawer.sql',  // Creates adjustment_denominations, drawer_session_connections, banks, bank_deposits, petty_cash_accounts, petty_cash_payouts
   'petty_cash_expenses.sql',
   'add_performance_indexes.sql',
   'customer_headers_preferences.sql',
@@ -81,6 +87,15 @@ async function runMigrations() {
       console.error(`✗ ${sqlFile} failed:`, error.message);
       results.push({ file: sqlFile, status: 'error', message: error.message });
 
+      // For some errors, we can continue (like table already exists, column already exists)
+      if (error.message.includes('already exists') || 
+          error.message.includes('duplicate key') ||
+          error.message.includes('does not exist') && error.message.includes('column')) {
+        console.log(`  ⚠ Warning: ${error.message} - continuing...`);
+        results.push({ file: sqlFile, status: 'warning', message: error.message });
+        continue;
+      }
+      
       // Stop on first error
       throw new Error(`Migration failed at ${sqlFile}: ${error.message}`);
     }

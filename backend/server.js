@@ -4132,10 +4132,33 @@ app.get('/api/drawer-config', async (req, res) => {
     const currentStoreId = currentStoreResult.rows.length > 0 ? currentStoreResult.rows[0].store_id : null;
 
     // Count physical drawers for current store
-    const drawerCount = await pool.query(
-      "SELECT COUNT(*) as count FROM drawers WHERE drawer_type = 'physical' AND store_id = $1",
-      [currentStoreId]
-    );
+    // Handle case where store_id column might not exist or store_id is null
+    let drawerCount;
+    if (currentStoreId !== null) {
+      try {
+        const result = await pool.query(
+          "SELECT COUNT(*) as count FROM drawers WHERE drawer_type = 'physical' AND store_id = $1",
+          [currentStoreId]
+        );
+        drawerCount = parseInt(result.rows[0].count);
+      } catch (error) {
+        // If store_id column doesn't exist, count all physical drawers
+        if (error.message.includes('column "store_id" does not exist')) {
+          const result = await pool.query(
+            "SELECT COUNT(*) as count FROM drawers WHERE drawer_type = 'physical'"
+          );
+          drawerCount = parseInt(result.rows[0].count);
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      // No current store, count all physical drawers
+      const result = await pool.query(
+        "SELECT COUNT(*) as count FROM drawers WHERE drawer_type = 'physical'"
+      );
+      drawerCount = parseInt(result.rows[0].count);
+    }
 
     // Ensure drawer_config row exists (for global settings like blind_count etc.)
     const configResult = await pool.query('SELECT * FROM drawer_config LIMIT 1');
@@ -4150,7 +4173,7 @@ app.get('/api/drawer-config', async (req, res) => {
     }
 
     // Override number_of_drawers with actual per-store count
-    config.number_of_drawers = parseInt(drawerCount.rows[0].count);
+    config.number_of_drawers = drawerCount;
     res.json(config);
   } catch (error) {
     console.error('Error fetching drawer config:', error);
