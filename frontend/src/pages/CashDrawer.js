@@ -36,7 +36,9 @@ import {
   IconButton,
   InputAdornment,
   Popover,
+  Menu,
   MenuList,
+  ListItemIcon,
   ListItemText,
   TextField as MuiTextField,
   Tooltip,
@@ -62,6 +64,7 @@ import {
   Edit as EditIcon,
   ContentCopy as CopyIcon,
   Delete as DeleteIcon,
+  ArrowDropDown as ArrowDropDownIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -201,6 +204,9 @@ function CashDrawer() {
   const [adjustmentType, setAdjustmentType] = useState('bank_deposit');
   const [adjustmentReason, setAdjustmentReason] = useState('');
   const [transferSourceSession, setTransferSourceSession] = useState('');
+
+  // Transfer menu anchor
+  const [transferMenuAnchor, setTransferMenuAnchor] = useState(null);
 
   // Enhanced transfer dialog states
   const [transferDialog, setTransferDialog] = useState(false);
@@ -3099,28 +3105,60 @@ function CashDrawer() {
                       <Button
                         variant="outlined"
                         startIcon={<SwapHorizIcon />}
+                        endIcon={<ArrowDropDownIcon />}
                         disabled={isStoreClosed}
-                        onClick={() => openTransferDialog(activeSession, null)}
+                        onClick={(e) => setTransferMenuAnchor(e.currentTarget)}
                       >
                         Transfer
+                        {pendingInterStoreTransfers.length > 0 && (
+                          <Chip
+                            label={pendingInterStoreTransfers.length}
+                            size="small"
+                            color="error"
+                            sx={{ ml: 1, height: 20, minWidth: 20, '& .MuiChip-label': { px: 0.5, fontSize: '0.7rem' } }}
+                          />
+                        )}
                       </Button>
-                      {/* Inter-store transfer buttons */}
-                      <Button
-                        variant="outlined"
-                        startIcon={<StoreIcon />}
-                        disabled={isStoreClosed || stores.filter(s => !s.is_current_store && s.is_active).length === 0}
-                        onClick={() => openInterStoreTransferDialog(activeSession)}
+                      <Menu
+                        anchorEl={transferMenuAnchor}
+                        open={Boolean(transferMenuAnchor)}
+                        onClose={() => setTransferMenuAnchor(null)}
                       >
-                        Send Inter-store
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        startIcon={<StoreIcon />}
-                        disabled={isStoreClosed || pendingInterStoreTransfers.length === 0}
-                        onClick={openReceiveInterStoreDialog}
-                      >
-                        Receive Inter-store {pendingInterStoreTransfers.length > 0 && `(${pendingInterStoreTransfers.length})`}
-                      </Button>
+                        <MenuItem onClick={() => { setTransferMenuAnchor(null); openTransferDialog(activeSession, null); }}>
+                          <ListItemIcon><SwapHorizIcon fontSize="small" /></ListItemIcon>
+                          <ListItemText>Transfer Between Drawers/Safes</ListItemText>
+                        </MenuItem>
+                        <MenuItem
+                          disabled={stores.filter(s => !s.is_current_store && s.is_active).length === 0}
+                          onClick={() => { setTransferMenuAnchor(null); openInterStoreTransferDialog(activeSession); }}
+                        >
+                          <ListItemIcon><StoreIcon fontSize="small" /></ListItemIcon>
+                          <ListItemText>Send Inter-store</ListItemText>
+                        </MenuItem>
+                        <MenuItem
+                          disabled={pendingInterStoreTransfers.length === 0}
+                          onClick={() => { setTransferMenuAnchor(null); openReceiveInterStoreDialog(); }}
+                        >
+                          <ListItemIcon><StoreIcon fontSize="small" /></ListItemIcon>
+                          <ListItemText>
+                            Receive Inter-store {pendingInterStoreTransfers.length > 0 && `(${pendingInterStoreTransfers.length})`}
+                          </ListItemText>
+                        </MenuItem>
+                        <MenuItem
+                          disabled={currentEmployee && currentEmployee.can_petty_cash === false}
+                          onClick={() => {
+                            setTransferMenuAnchor(null);
+                            if (currentEmployee && currentEmployee.can_petty_cash === false) {
+                              showSnackbar('You do not have permission to make petty cash payouts', 'error');
+                              return;
+                            }
+                            openPettyCashDialog();
+                          }}
+                        >
+                          <ListItemIcon><MoneyIcon fontSize="small" /></ListItemIcon>
+                          <ListItemText>Petty Cash Payout</ListItemText>
+                        </MenuItem>
+                      </Menu>
                       {/* Show Bank Deposit and Withdrawal buttons only for Master Safe */}
                       {activeSession.drawer_type === 'master_safe' && (
                         <>
@@ -3148,20 +3186,6 @@ function CashDrawer() {
                         onClick={openQuickReport}
                       >
                         Quick Report
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        startIcon={<MoneyIcon />}
-                        disabled={isStoreClosed || (currentEmployee && currentEmployee.can_petty_cash === false)}
-                        onClick={() => {
-                          if (currentEmployee && currentEmployee.can_petty_cash === false) {
-                            showSnackbar('You do not have permission to make petty cash payouts', 'error');
-                            return;
-                          }
-                          openPettyCashDialog();
-                        }}
-                      >
-                        Petty Cash
                       </Button>
                       {/* Show Open Cash Drawer button if no physical session exists */}
                       {!activeSessions.some(s => s.drawer_type === 'physical') && allDrawers.some(d => d.drawer_type === 'physical' && d.is_active) && (
