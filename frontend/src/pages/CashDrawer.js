@@ -2698,72 +2698,79 @@ function CashDrawer() {
   }
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" mb={2}>
-        Cash Drawer Management
-      </Typography>
+    <Box sx={{ width: '100%', height: '100%' }}>
+      {/* Top Bar with Store Status on Right */}
+      <Box sx={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        p: 2,
+        bgcolor: 'background.paper',
+        borderBottom: '1px solid',
+        borderColor: 'divider'
+      }}>
+        <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+          Cash Drawer Management
+        </Typography>
 
-      {/* Overview Section */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-
-        {/* Store Status Section */}
-        <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-            <StoreIcon sx={{ color: 'text.secondary' }} />
-            <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-              Store Status
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 2 }}>
-            <Typography variant="body2">
-              Current Status:
-            </Typography>
-            <Chip
-              label={storeStatus.status === 'open' ? 'OPEN' : 'CLOSED'}
-              color={storeStatus.status === 'open' ? 'success' : 'error'}
-              variant="filled"
-              sx={{ fontWeight: 'bold' }}
-            />
-            {storeStatus.status === 'open' && storeStatus.session && (
+        {/* Store Status - Right Side */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <StoreIcon sx={{ color: 'text.secondary' }} />
+          <Chip
+            label={storeStatus.status === 'open' ? 'OPEN' : 'CLOSED'}
+            color={storeStatus.status === 'open' ? 'success' : 'error'}
+            variant="filled"
+            sx={{ fontWeight: 'bold' }}
+          />
+          {storeStatus.status === 'open' && storeStatus.session && (
+            <Box sx={{ maxWidth: 300 }}>
               <Typography variant="body2" color="text.secondary">
-                Opened by {storeStatus.session.opened_by_name} at {new Date(storeStatus.session.opened_at).toLocaleString()}
+                Opened by {storeStatus.session.opened_by_name}
               </Typography>
-            )}
-            {storeStatus.status === 'closed' && storeStatus.lastClosed && (
+              <Typography variant="caption" color="text.secondary">
+                {new Date(storeStatus.session.opened_at).toLocaleTimeString()}
+              </Typography>
+            </Box>
+          )}
+          {storeStatus.status === 'closed' && storeStatus.lastClosed && (
+            <Box sx={{ maxWidth: 300 }}>
               <Typography variant="body2" color="text.secondary">
-                Last closed by {storeStatus.lastClosed.closed_by_name} at {new Date(storeStatus.lastClosed.closed_at).toLocaleString()}
+                Last closed by {storeStatus.lastClosed.closed_by_name}
               </Typography>
-            )}
-          </Box>
-          <Box>
-            {storeStatus.status === 'closed' ? (
-              <Button
-                variant="contained"
-                color="success"
-                onClick={handleOpenStore}
-                disabled={storeStatusLoading}
-                startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
-              >
-                Open Store
-              </Button>
-            ) : (
-              <Button
-                variant="contained"
-                color="error"
-                onClick={handleCloseStoreClick}
-                disabled={storeStatusLoading}
-                startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
-              >
-                Close Store
-              </Button>
-            )}
-          </Box>
+              <Typography variant="caption" color="text.secondary">
+                {new Date(storeStatus.lastClosed.closed_at).toLocaleTimeString()}
+              </Typography>
+            </Box>
+          )}
+          {storeStatus.status === 'closed' ? (
+            <Button
+              variant="contained"
+              size="small"
+              color="success"
+              onClick={handleOpenStore}
+              disabled={storeStatusLoading}
+              startIcon={storeStatusLoading ? <CircularProgress size={16} /> : null}
+            >
+              Open Store
+            </Button>
+          ) : (
+            <Button
+              variant="contained"
+              size="small"
+              color="error"
+              onClick={handleCloseStoreClick}
+              disabled={storeStatusLoading}
+              startIcon={storeStatusLoading ? <CircularProgress size={16} /> : null}
+            >
+              Close Store
+            </Button>
+          )}
         </Box>
+      </Box>
 
-        <Divider sx={{ mb: 3 }} />
-
-        {/* SAFE and DRAWER Sections - Side by Side */}
-        <Grid container spacing={3} sx={{ mb: 3 }}>
+      {/* SAFE and DRAWER Sections - Top Section */}
+      <Box sx={{ p: 2 }}>
+        <Grid container spacing={2} sx={{ mb: 2 }}>
           {/* SAFE Section */}
           <Grid item xs={12} md={6}>
             <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>SAFE</Typography>
@@ -2842,9 +2849,9 @@ function CashDrawer() {
             </TableContainer>
           </Grid>
         </Grid>
-      </Paper>
+      </Box>
 
-      <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ mb: 3 }}>
+      <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ borderBottom: 1, borderColor: 'divider', px: 2 }}>
         <Tab label="Active Session" />
         <Tab label="History" />
         <Tab label="Transaction Journal" />
@@ -2853,7 +2860,7 @@ function CashDrawer() {
 
       {/* Active Session Tab */}
       {tabValue === 0 && (
-        <>
+        <Box sx={{ p: 2 }}>
           {/* Cash balance warnings (min/max) - only for employee's connected drawers */}
           {(() => {
             const myDrawerIds = activeSessions.map(s => s.drawer_id);
@@ -3267,11 +3274,12 @@ function CashDrawer() {
               </Box>
             </Paper>
           )}
-        </>
+        </Box>
       )}
 
       {/* History Tab */}
       {tabValue === 1 && (
+        <Box sx={{ p: 2 }}>
         <TableContainer component={Paper}>
           <Table>
             <TableHead>
@@ -3325,11 +3333,12 @@ function CashDrawer() {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
       )}
 
       {/* Transaction Journal Tab */}
       {tabValue === 2 && (
-        <Box>
+        <Box sx={{ p: 2 }}>
           {/* Search Bar */}
           <Paper sx={{ p: 2, mb: 2 }}>
             <TextField
@@ -4087,7 +4096,7 @@ function CashDrawer() {
 
       {/* Configure Safe / Drawer Tab */}
       {tabValue === 3 && (
-        <Box>
+        <Box sx={{ p: 2 }}>
           <Paper sx={{ p: 3 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
               <Typography variant="h6">Configure Safe / Drawer</Typography>
@@ -7099,7 +7108,7 @@ function CashDrawer() {
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </Container>
+    </Box>
   );
 }
 
