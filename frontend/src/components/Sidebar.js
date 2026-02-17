@@ -27,7 +27,7 @@ import {
   Description as QuoteIcon,
   People as PeopleIcon,
   Assessment as AssessmentIcon,
-  Schedule as LayawayIcon,
+  Inventory as LayawayIcon,
   PointOfSale as TransactionsIcon,
   AccountBalance as CashDrawerIcon,
   AccessTime as TimeClockIcon,
