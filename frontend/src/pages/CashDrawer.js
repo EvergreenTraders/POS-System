@@ -2910,7 +2910,7 @@ function CashDrawer() {
             ) : null;
           })()}
           {activeSessions.length > 0 ? (
-            <Grid container spacing={3}>
+            <Grid container spacing={1}>
               {/* Session Type Selector - Show if multiple types exist */}
               {(() => {
                 const hasPhysical = activeSessions.some(s => s.drawer_type === 'physical');
@@ -2920,7 +2920,7 @@ function CashDrawer() {
                 
                 return sessionTypeCount > 1 ? (
                   <Grid item xs={12}>
-                    <Box sx={{ mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                    <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                       {hasPhysical && (
                         <Button
                           variant={selectedSessionType === 'physical' ? 'contained' : 'outlined'}
@@ -2983,8 +2983,7 @@ function CashDrawer() {
                     <CardContent>
                       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                         <Typography variant="h6">
-                          Active {activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe' ? 'Safe' : 'Drawer'} Session
-                          {activeSession.drawer_name && ` - ${activeSession.drawer_name}`}
+                           {activeSession.drawer_name}
                         </Typography>
                         <Box display="flex" gap={1} alignItems="center">
                         {getStatusChip(activeSession.status)}
@@ -3005,37 +3004,37 @@ function CashDrawer() {
                       </Box>
 
                     <Grid container spacing={2}>
-                      <Grid item xs={12} md={6}>
+                      <Grid item xs={6} md>
                         <Typography variant="body2" color="text.secondary">Drawer Type</Typography>
                         <Typography variant="body1">
-                          {activeSession.drawer_type === 'safe' ? 'Safe/Vault' : 
-                           activeSession.drawer_type === 'master_safe' ? 'Master Safe' : 
+                          {activeSession.drawer_type === 'safe' ? 'Safe/Vault' :
+                           activeSession.drawer_type === 'master_safe' ? 'Master Safe' :
                            'Physical Drawer'}
                         </Typography>
                       </Grid>
-                      <Grid item xs={12} md={6}>
+                      <Grid item xs={6} md>
                         <Typography variant="body2" color="text.secondary">Opened At</Typography>
                         <Typography variant="body1">{formatDateTime(activeSession.opened_at)}</Typography>
                       </Grid>
-                      <Grid item xs={12} md={4}>
+                      <Grid item xs={6} md>
                         <Typography variant="body2" color="text.secondary">Opening Balance</Typography>
-                        <Typography variant="h6">
+                        <Typography variant="body1">
                           {((activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
                             ? formatCurrency(activeSession.opening_balance)
                             : '***'}
                         </Typography>
                       </Grid>
                       {!isBlindCount && (
-                        <Grid item xs={12} md={4}>
+                        <Grid item xs={6} md>
                           <Typography variant="body2" color="text.secondary">Current Expected Balance</Typography>
-                          <Typography variant="h6">
+                          <Typography variant="body1">
                             {((activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
                               ? formatCurrency(activeSession.current_expected_balance)
                               : '***'}
                           </Typography>
                         </Grid>
                       )}
-                      <Grid item xs={12} md={6}>
+                      <Grid item xs={6} md>
                         <Typography variant="body2" color="text.secondary">Transaction Count</Typography>
                         <Typography variant="body1">{activeSession.transaction_count || 0}</Typography>
                       </Grid>
@@ -4122,10 +4121,12 @@ function CashDrawer() {
       {tabValue === 3 && (
         <Box sx={{ p: 2 }}>
           <Paper sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Typography variant="h6">Configure Safe / Drawer</Typography>
+            {/* SAFE Section */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>SAFE</Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <Button
+                  size="small"
                   variant="contained"
                   startIcon={<AddIcon />}
                   onClick={() => {
@@ -4143,6 +4144,7 @@ function CashDrawer() {
                   Add
                 </Button>
                 <Button
+                  size="small"
                   variant="outlined"
                   startIcon={<CopyIcon />}
                   disabled={!selectedConfigDrawer || selectedConfigDrawer.drawer_name === 'Master'}
@@ -4151,6 +4153,7 @@ function CashDrawer() {
                   Copy
                 </Button>
                 <Button
+                  size="small"
                   variant="outlined"
                   startIcon={<EditIcon />}
                   disabled={!selectedConfigDrawer}
@@ -4159,6 +4162,7 @@ function CashDrawer() {
                   Edit
                 </Button>
                 <Button
+                  size="small"
                   variant="outlined"
                   color="error"
                   startIcon={<DeleteIcon />}
@@ -4169,9 +4173,6 @@ function CashDrawer() {
                 </Button>
               </Box>
             </Box>
-
-            {/* SAFE Section */}
-            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, mt: 2 }}>SAFE</Typography>
             <TableContainer sx={{ mb: 3 }}>
               <Table size="small">
                 <TableHead>
