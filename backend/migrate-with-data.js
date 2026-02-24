@@ -42,9 +42,15 @@ const pool = new Pool({
 
 // Migration files in order
 const MIGRATION_FILES = [
-  'employees.sql',
-  'customers.sql',
+  // Core tables first (no dependencies)
   'business_info.sql',
+  'backup_settings.sql',
+  'inter_store_transfers.sql',
+  'employees.sql',
+  'employee_sessions.sql',
+  'store_sessions.sql',
+  'trusted_pcs.sql',
+  'customers.sql',
   'inventory.sql',
   'metal_estimator.sql',
   'gem_estimator.sql',
@@ -64,7 +70,8 @@ const MIGRATION_FILES = [
   'petty_cash_expenses.sql',
   'add_performance_indexes.sql',
   'customer_headers_preferences.sql',
-  'pawn.sql'
+  'pawn.sql',
+  'reset_sequences.sql'
 ];
 
 async function runMigrations() {

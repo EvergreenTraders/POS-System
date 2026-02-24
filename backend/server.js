@@ -242,6 +242,7 @@ const storeClosedMiddleware = async (req, res, next) => {
   // Paths always allowed regardless of store status
   const alwaysAllowedPaths = [
     '/api/auth/',
+    '/api/employee-sessions/',
     '/api/store-sessions/',
     '/api/store-status',
     '/api/employees',
