@@ -36,7 +36,9 @@ import {
   IconButton,
   InputAdornment,
   Popover,
+  Menu,
   MenuList,
+  ListItemIcon,
   ListItemText,
   TextField as MuiTextField,
   Tooltip,
@@ -62,6 +64,7 @@ import {
   Edit as EditIcon,
   ContentCopy as CopyIcon,
   Delete as DeleteIcon,
+  ArrowDropDown as ArrowDropDownIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -201,6 +204,9 @@ function CashDrawer() {
   const [adjustmentType, setAdjustmentType] = useState('bank_deposit');
   const [adjustmentReason, setAdjustmentReason] = useState('');
   const [transferSourceSession, setTransferSourceSession] = useState('');
+
+  // Transfer menu anchor
+  const [transferMenuAnchor, setTransferMenuAnchor] = useState(null);
 
   // Enhanced transfer dialog states
   const [transferDialog, setTransferDialog] = useState(false);
@@ -2698,75 +2704,81 @@ function CashDrawer() {
   }
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" mb={2}>
-        Cash Drawer Management
-      </Typography>
+    <Box sx={{ width: '100%', height: '100%' }}>
+      {/* Top Bar with Store Status on Right */}
+      <Box sx={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        p: 2,
+        bgcolor: 'background.paper',
+        borderBottom: '1px solid',
+        borderColor: 'divider'
+      }}>
+        <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+          Cash Drawer Management
+        </Typography>
 
-      {/* Overview Section */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-
-        {/* Store Status Section */}
-        <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-            <StoreIcon sx={{ color: 'text.secondary' }} />
-            <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-              Store Status
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 2 }}>
-            <Typography variant="body2">
-              Current Status:
-            </Typography>
-            <Chip
-              label={storeStatus.status === 'open' ? 'OPEN' : 'CLOSED'}
-              color={storeStatus.status === 'open' ? 'success' : 'error'}
-              variant="filled"
-              sx={{ fontWeight: 'bold' }}
-            />
-            {storeStatus.status === 'open' && storeStatus.session && (
+        {/* Store Status - Right Side */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <StoreIcon sx={{ color: 'text.secondary' }} />
+          <Chip
+            label={storeStatus.status === 'open' ? 'OPEN' : 'CLOSED'}
+            color={storeStatus.status === 'open' ? 'success' : 'error'}
+            variant="filled"
+            sx={{ fontWeight: 'bold' }}
+          />
+          {storeStatus.status === 'open' && storeStatus.session && (
+            <Box sx={{ maxWidth: 300 }}>
               <Typography variant="body2" color="text.secondary">
-                Opened by {storeStatus.session.opened_by_name} at {new Date(storeStatus.session.opened_at).toLocaleString()}
+                Opened by {storeStatus.session.opened_by_name}
               </Typography>
-            )}
-            {storeStatus.status === 'closed' && storeStatus.lastClosed && (
+              <Typography variant="caption" color="text.secondary">
+                {new Date(storeStatus.session.opened_at).toLocaleTimeString()}
+              </Typography>
+            </Box>
+          )}
+          {storeStatus.status === 'closed' && storeStatus.lastClosed && (
+            <Box sx={{ maxWidth: 300 }}>
               <Typography variant="body2" color="text.secondary">
-                Last closed by {storeStatus.lastClosed.closed_by_name} at {new Date(storeStatus.lastClosed.closed_at).toLocaleString()}
+                Last closed by {storeStatus.lastClosed.closed_by_name}
               </Typography>
-            )}
-          </Box>
-          <Box>
-            {storeStatus.status === 'closed' ? (
-              <Button
-                variant="contained"
-                color="success"
-                onClick={handleOpenStore}
-                disabled={storeStatusLoading}
-                startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
-              >
-                Open Store
-              </Button>
-            ) : (
-              <Button
-                variant="contained"
-                color="error"
-                onClick={handleCloseStoreClick}
-                disabled={storeStatusLoading}
-                startIcon={storeStatusLoading ? <CircularProgress size={20} /> : null}
-              >
-                Close Store
-              </Button>
-            )}
-          </Box>
+              <Typography variant="caption" color="text.secondary">
+                {new Date(storeStatus.lastClosed.closed_at).toLocaleTimeString()}
+              </Typography>
+            </Box>
+          )}
+          {storeStatus.status === 'closed' ? (
+            <Button
+              variant="contained"
+              size="small"
+              color="success"
+              onClick={handleOpenStore}
+              disabled={storeStatusLoading}
+              startIcon={storeStatusLoading ? <CircularProgress size={16} /> : null}
+            >
+              Open Store
+            </Button>
+          ) : (
+            <Button
+              variant="contained"
+              size="small"
+              color="error"
+              onClick={handleCloseStoreClick}
+              disabled={storeStatusLoading}
+              startIcon={storeStatusLoading ? <CircularProgress size={16} /> : null}
+            >
+              Close Store
+            </Button>
+          )}
         </Box>
+      </Box>
 
-        <Divider sx={{ mb: 3 }} />
-
-        {/* SAFE and DRAWER Sections - Side by Side */}
-        <Grid container spacing={3} sx={{ mb: 3 }}>
-          {/* SAFE Section */}
-          <Grid item xs={12} md={6}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>SAFE</Typography>
+      {/* SAFE and DRAWER Sections - Top Section */}
+      <Box sx={{ p: 2 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2, mb: 2 }}>
+          {/* SAFE Section - defines the row height */}
+          <Box>
             <TableContainer>
               <Table size="small">
                 <TableHead>
@@ -2799,20 +2811,19 @@ function CashDrawer() {
                 </TableBody>
               </Table>
             </TableContainer>
-          </Grid>
+          </Box>
 
-          {/* DRAWER Section */}
-          <Grid item xs={12} md={6}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>DRAWER</Typography>
-            <TableContainer>
-              <Table size="small">
+          {/* DRAWER Section - matches SAFE height, scrolls when exceeding */}
+          <Box sx={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <TableContainer sx={{ flex: 1, overflow: 'auto' }}>
+              <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow sx={{ bgcolor: '#1976d2' }}>
-                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>DRAWER</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Connected Employees</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>DRAWER</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Status</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Type</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Balance</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Connected Employees</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -2840,11 +2851,11 @@ function CashDrawer() {
                 </TableBody>
               </Table>
             </TableContainer>
-          </Grid>
-        </Grid>
-      </Paper>
+          </Box>
+        </Box>
+      </Box>
 
-      <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ mb: 3 }}>
+      <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ borderBottom: 1, borderColor: 'divider', px: 2 }}>
         <Tab label="Active Session" />
         <Tab label="History" />
         <Tab label="Transaction Journal" />
@@ -2853,7 +2864,7 @@ function CashDrawer() {
 
       {/* Active Session Tab */}
       {tabValue === 0 && (
-        <>
+        <Box sx={{ p: 2 }}>
           {/* Cash balance warnings (min/max) - only for employee's connected drawers */}
           {(() => {
             const myDrawerIds = activeSessions.map(s => s.drawer_id);
@@ -2897,7 +2908,7 @@ function CashDrawer() {
             ) : null;
           })()}
           {activeSessions.length > 0 ? (
-            <Grid container spacing={3}>
+            <Grid container spacing={1}>
               {/* Session Type Selector - Show if multiple types exist */}
               {(() => {
                 const hasPhysical = activeSessions.some(s => s.drawer_type === 'physical');
@@ -2907,7 +2918,7 @@ function CashDrawer() {
                 
                 return sessionTypeCount > 1 ? (
                   <Grid item xs={12}>
-                    <Box sx={{ mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                    <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                       {hasPhysical && (
                         <Button
                           variant={selectedSessionType === 'physical' ? 'contained' : 'outlined'}
@@ -2970,8 +2981,7 @@ function CashDrawer() {
                     <CardContent>
                       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                         <Typography variant="h6">
-                          Active {activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe' ? 'Safe' : 'Drawer'} Session
-                          {activeSession.drawer_name && ` - ${activeSession.drawer_name}`}
+                           {activeSession.drawer_name}
                         </Typography>
                         <Box display="flex" gap={1} alignItems="center">
                         {getStatusChip(activeSession.status)}
@@ -2992,37 +3002,37 @@ function CashDrawer() {
                       </Box>
 
                     <Grid container spacing={2}>
-                      <Grid item xs={12} md={6}>
+                      <Grid item xs={6} md>
                         <Typography variant="body2" color="text.secondary">Drawer Type</Typography>
                         <Typography variant="body1">
-                          {activeSession.drawer_type === 'safe' ? 'Safe/Vault' : 
-                           activeSession.drawer_type === 'master_safe' ? 'Master Safe' : 
+                          {activeSession.drawer_type === 'safe' ? 'Safe/Vault' :
+                           activeSession.drawer_type === 'master_safe' ? 'Master Safe' :
                            'Physical Drawer'}
                         </Typography>
                       </Grid>
-                      <Grid item xs={12} md={6}>
+                      <Grid item xs={6} md>
                         <Typography variant="body2" color="text.secondary">Opened At</Typography>
                         <Typography variant="body1">{formatDateTime(activeSession.opened_at)}</Typography>
                       </Grid>
-                      <Grid item xs={12} md={4}>
+                      <Grid item xs={6} md>
                         <Typography variant="body2" color="text.secondary">Opening Balance</Typography>
-                        <Typography variant="h6">
+                        <Typography variant="body1">
                           {((activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
                             ? formatCurrency(activeSession.opening_balance)
                             : '***'}
                         </Typography>
                       </Grid>
                       {!isBlindCount && (
-                        <Grid item xs={12} md={4}>
+                        <Grid item xs={6} md>
                           <Typography variant="body2" color="text.secondary">Current Expected Balance</Typography>
-                          <Typography variant="h6">
+                          <Typography variant="body1">
                             {((activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe') ? canViewSafe : canViewDrawer)
                               ? formatCurrency(activeSession.current_expected_balance)
                               : '***'}
                           </Typography>
                         </Grid>
                       )}
-                      <Grid item xs={12} md={6}>
+                      <Grid item xs={6} md>
                         <Typography variant="body2" color="text.secondary">Transaction Count</Typography>
                         <Typography variant="body1">{activeSession.transaction_count || 0}</Typography>
                       </Grid>
@@ -3092,28 +3102,60 @@ function CashDrawer() {
                       <Button
                         variant="outlined"
                         startIcon={<SwapHorizIcon />}
+                        endIcon={<ArrowDropDownIcon />}
                         disabled={isStoreClosed}
-                        onClick={() => openTransferDialog(activeSession, null)}
+                        onClick={(e) => setTransferMenuAnchor(e.currentTarget)}
                       >
                         Transfer
+                        {pendingInterStoreTransfers.length > 0 && (
+                          <Chip
+                            label={pendingInterStoreTransfers.length}
+                            size="small"
+                            color="error"
+                            sx={{ ml: 1, height: 20, minWidth: 20, '& .MuiChip-label': { px: 0.5, fontSize: '0.7rem' } }}
+                          />
+                        )}
                       </Button>
-                      {/* Inter-store transfer buttons */}
-                      <Button
-                        variant="outlined"
-                        startIcon={<StoreIcon />}
-                        disabled={isStoreClosed || stores.filter(s => !s.is_current_store && s.is_active).length === 0}
-                        onClick={() => openInterStoreTransferDialog(activeSession)}
+                      <Menu
+                        anchorEl={transferMenuAnchor}
+                        open={Boolean(transferMenuAnchor)}
+                        onClose={() => setTransferMenuAnchor(null)}
                       >
-                        Send Inter-store
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        startIcon={<StoreIcon />}
-                        disabled={isStoreClosed || pendingInterStoreTransfers.length === 0}
-                        onClick={openReceiveInterStoreDialog}
-                      >
-                        Receive Inter-store {pendingInterStoreTransfers.length > 0 && `(${pendingInterStoreTransfers.length})`}
-                      </Button>
+                        <MenuItem onClick={() => { setTransferMenuAnchor(null); openTransferDialog(activeSession, null); }}>
+                          <ListItemIcon><SwapHorizIcon fontSize="small" /></ListItemIcon>
+                          <ListItemText>Transfer Between Drawers/Safes</ListItemText>
+                        </MenuItem>
+                        <MenuItem
+                          disabled={stores.filter(s => !s.is_current_store && s.is_active).length === 0}
+                          onClick={() => { setTransferMenuAnchor(null); openInterStoreTransferDialog(activeSession); }}
+                        >
+                          <ListItemIcon><StoreIcon fontSize="small" /></ListItemIcon>
+                          <ListItemText>Send Inter-store</ListItemText>
+                        </MenuItem>
+                        <MenuItem
+                          disabled={pendingInterStoreTransfers.length === 0}
+                          onClick={() => { setTransferMenuAnchor(null); openReceiveInterStoreDialog(); }}
+                        >
+                          <ListItemIcon><StoreIcon fontSize="small" /></ListItemIcon>
+                          <ListItemText>
+                            Receive Inter-store {pendingInterStoreTransfers.length > 0 && `(${pendingInterStoreTransfers.length})`}
+                          </ListItemText>
+                        </MenuItem>
+                        <MenuItem
+                          disabled={currentEmployee && currentEmployee.can_petty_cash === false}
+                          onClick={() => {
+                            setTransferMenuAnchor(null);
+                            if (currentEmployee && currentEmployee.can_petty_cash === false) {
+                              showSnackbar('You do not have permission to make petty cash payouts', 'error');
+                              return;
+                            }
+                            openPettyCashDialog();
+                          }}
+                        >
+                          <ListItemIcon><MoneyIcon fontSize="small" /></ListItemIcon>
+                          <ListItemText>Petty Cash Payout</ListItemText>
+                        </MenuItem>
+                      </Menu>
                       {/* Show Bank Deposit and Withdrawal buttons only for Master Safe */}
                       {activeSession.drawer_type === 'master_safe' && (
                         <>
@@ -3141,20 +3183,6 @@ function CashDrawer() {
                         onClick={openQuickReport}
                       >
                         Quick Report
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        startIcon={<MoneyIcon />}
-                        disabled={isStoreClosed || (currentEmployee && currentEmployee.can_petty_cash === false)}
-                        onClick={() => {
-                          if (currentEmployee && currentEmployee.can_petty_cash === false) {
-                            showSnackbar('You do not have permission to make petty cash payouts', 'error');
-                            return;
-                          }
-                          openPettyCashDialog();
-                        }}
-                      >
-                        Petty Cash
                       </Button>
                       {/* Show Open Cash Drawer button if no physical session exists */}
                       {!activeSessions.some(s => s.drawer_type === 'physical') && allDrawers.some(d => d.drawer_type === 'physical' && d.is_active) && (
@@ -3267,11 +3295,12 @@ function CashDrawer() {
               </Box>
             </Paper>
           )}
-        </>
+        </Box>
       )}
 
       {/* History Tab */}
       {tabValue === 1 && (
+        <Box sx={{ p: 2 }}>
         <TableContainer component={Paper}>
           <Table>
             <TableHead>
@@ -3325,11 +3354,12 @@ function CashDrawer() {
             </TableBody>
           </Table>
         </TableContainer>
+        </Box>
       )}
 
       {/* Transaction Journal Tab */}
       {tabValue === 2 && (
-        <Box>
+        <Box sx={{ p: 2 }}>
           {/* Search Bar */}
           <Paper sx={{ p: 2, mb: 2 }}>
             <TextField
@@ -4087,12 +4117,14 @@ function CashDrawer() {
 
       {/* Configure Safe / Drawer Tab */}
       {tabValue === 3 && (
-        <Box>
+        <Box sx={{ p: 2 }}>
           <Paper sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Typography variant="h6">Configure Safe / Drawer</Typography>
+            {/* SAFE Section */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>SAFE</Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <Button
+                  size="small"
                   variant="contained"
                   startIcon={<AddIcon />}
                   onClick={() => {
@@ -4110,6 +4142,7 @@ function CashDrawer() {
                   Add
                 </Button>
                 <Button
+                  size="small"
                   variant="outlined"
                   startIcon={<CopyIcon />}
                   disabled={!selectedConfigDrawer || selectedConfigDrawer.drawer_name === 'Master'}
@@ -4118,6 +4151,7 @@ function CashDrawer() {
                   Copy
                 </Button>
                 <Button
+                  size="small"
                   variant="outlined"
                   startIcon={<EditIcon />}
                   disabled={!selectedConfigDrawer}
@@ -4126,6 +4160,7 @@ function CashDrawer() {
                   Edit
                 </Button>
                 <Button
+                  size="small"
                   variant="outlined"
                   color="error"
                   startIcon={<DeleteIcon />}
@@ -4136,9 +4171,6 @@ function CashDrawer() {
                 </Button>
               </Box>
             </Box>
-
-            {/* SAFE Section */}
-            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, mt: 2 }}>SAFE</Typography>
             <TableContainer sx={{ mb: 3 }}>
               <Table size="small">
                 <TableHead>
@@ -7099,7 +7131,7 @@ function CashDrawer() {
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </Container>
+    </Box>
   );
 }
 

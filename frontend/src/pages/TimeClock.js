@@ -389,66 +389,10 @@ function TimeClock() {
   }, 0);
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" sx={{ mb: 3, fontWeight: 600 }}>
-        Time Clock
-      </Typography>
-
-      {/* Clock In/Out Action */}
-      <Paper sx={{ p: 4, mb: 3, textAlign: 'center' }}>
-        <Typography variant="h6" sx={{ mb: 1 }}>
-          {user?.firstName} {user?.lastName}
-        </Typography>
-
-        {clockedIn && clockInTime && (
-          <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-            Clocked in at{' '}
-            {clockInTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
-            {' '}&mdash; Elapsed: {getElapsedTime()}
-          </Typography>
-        )}
-
-        {!clockedIn && (
-          <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-            You are currently clocked out.
-          </Typography>
-        )}
-
-        <Button
-          variant="contained"
-          size="large"
-          startIcon={
-            loading ? (
-              <CircularProgress size={20} color="inherit" />
-            ) : clockedIn ? (
-              <ClockOutIcon />
-            ) : (
-              <ClockInIcon />
-            )
-          }
-          onClick={clockedIn ? handleClockOut : handleClockIn}
-          disabled={loading}
-          sx={{
-            px: 6,
-            py: 2,
-            fontSize: '1.1rem',
-            bgcolor: clockedIn ? 'error.main' : 'success.main',
-            '&:hover': {
-              bgcolor: clockedIn ? 'error.dark' : 'success.dark',
-            },
-          }}
-        >
-          {clockedIn ? 'Clock OUT' : 'Clock IN'}
-        </Button>
-      </Paper>
-
-      <Divider sx={{ my: 3 }} />
+    <Box>
 
       {/* Reporting Section */}
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h5" sx={{ mb: 2, fontWeight: 600 }}>
-          Reporting
-        </Typography>
 
         {/* Filters */}
         <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
