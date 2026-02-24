@@ -2776,10 +2776,9 @@ function CashDrawer() {
 
       {/* SAFE and DRAWER Sections - Top Section */}
       <Box sx={{ p: 2 }}>
-        <Grid container spacing={2} sx={{ mb: 2 }}>
-          {/* SAFE Section */}
-          <Grid item xs={12} md={6}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>SAFE</Typography>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2, mb: 2 }}>
+          {/* SAFE Section - defines the row height */}
+          <Box>
             <TableContainer>
               <Table size="small">
                 <TableHead>
@@ -2812,20 +2811,19 @@ function CashDrawer() {
                 </TableBody>
               </Table>
             </TableContainer>
-          </Grid>
+          </Box>
 
-          {/* DRAWER Section */}
-          <Grid item xs={12} md={6}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>DRAWER</Typography>
-            <TableContainer>
-              <Table size="small">
+          {/* DRAWER Section - matches SAFE height, scrolls when exceeding */}
+          <Box sx={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <TableContainer sx={{ flex: 1, overflow: 'auto' }}>
+              <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow sx={{ bgcolor: '#1976d2' }}>
-                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>DRAWER</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Type</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Connected Employees</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>DRAWER</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Status</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Type</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Balance</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Connected Employees</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -2853,8 +2851,8 @@ function CashDrawer() {
                 </TableBody>
               </Table>
             </TableContainer>
-          </Grid>
-        </Grid>
+          </Box>
+        </Box>
       </Box>
 
       <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)} sx={{ borderBottom: 1, borderColor: 'divider', px: 2 }}>
