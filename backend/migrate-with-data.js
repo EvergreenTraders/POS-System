@@ -258,6 +258,18 @@ async function importData() {
           continue;
         }
 
+        // Check if the table actually exists in the database before attempting import
+        const tableExists = await client.query(
+          `SELECT FROM pg_catalog.pg_tables WHERE schemaname = 'public' AND tablename = $1`,
+          [tableName]
+        );
+        if (tableExists.rows.length === 0) {
+          console.log(`  ⊘ ${tableName}: Table does not exist, skipping`);
+          tableResults.push({ table: tableName, status: 'skipped', reason: 'table does not exist' });
+          skippedCount++;
+          continue;
+        }
+
         const tableData = tableExport.rows;
 
         console.log(`  Importing ${tableName} (${tableData.length} rows)...`);
@@ -293,6 +305,11 @@ async function importData() {
 
         // Columns that are JSON/JSONB type (not PostgreSQL arrays)
         const jsonColumns = ['images', 'changed_fields', 'old_value', 'new_value', 'metadata'];
+        // Table-specific JSONB columns (column name conflicts with non-JSON columns in other tables)
+        const tableJsonColumns = {
+          'scrap': ['item_id']
+        };
+        const extraJsonCols = tableJsonColumns[tableName] || [];
         // Columns that are PostgreSQL array type
         const pgArrayColumns = ['attribute_options'];
 
@@ -315,7 +332,7 @@ async function importData() {
           const values = columns.map(col => {
             const value = row[col];
             // Handle JSON/JSONB columns - convert to JSON string
-            if (jsonColumns.includes(col) && value !== null) {
+            if ((jsonColumns.includes(col) || extraJsonCols.includes(col)) && value !== null) {
               return JSON.stringify(value);
             }
             // Handle PostgreSQL array columns

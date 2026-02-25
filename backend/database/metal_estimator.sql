@@ -156,14 +156,23 @@ BEGIN
         (4, NULL, 0.500);
     END IF;
 
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_style') THEN
+        CREATE TABLE metal_style (
+            id SERIAL PRIMARY KEY,
+            style VARCHAR(255) NOT NULL
+        );
+    END IF;
+
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_style_category') THEN
         CREATE TABLE metal_style_category (
             id SERIAL PRIMARY KEY,
             metal_type_id INT NOT NULL,
             metal_category_id INT NOT NULL,
+            metal_style_id INT,
             category VARCHAR(255) NOT NULL,
             FOREIGN KEY (metal_type_id) REFERENCES metal_type(id),
-            FOREIGN KEY (metal_category_id) REFERENCES metal_category(id)
+            FOREIGN KEY (metal_category_id) REFERENCES metal_category(id),
+            FOREIGN KEY (metal_style_id) REFERENCES metal_style(id)
         );
         INSERT INTO metal_style_category (metal_type_id, metal_category_id, category) VALUES
         (1, 1, 'Gold-Diamond Rings'),
@@ -224,6 +233,16 @@ BEGIN
         (1, 12, 'Diamonds'),
         (1, 12, 'Diamond Melee'),
         (1, 12, 'Diamond & Colored Melee');
+    END IF;
+
+    -- Add metal_style_id column to metal_style_category if it doesn't exist
+    IF NOT EXISTS (
+        SELECT FROM information_schema.columns
+        WHERE table_name = 'metal_style_category' AND column_name = 'metal_style_id'
+    ) THEN
+        ALTER TABLE metal_style_category ADD COLUMN metal_style_id INT;
+        ALTER TABLE metal_style_category ADD CONSTRAINT fk_metal_style_category_style
+            FOREIGN KEY (metal_style_id) REFERENCES metal_style(id);
     END IF;
 
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'metal_style_subcategory') THEN

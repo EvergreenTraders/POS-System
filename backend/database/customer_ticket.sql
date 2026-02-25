@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS pawn_ticket (
   pawn_ticket_id VARCHAR(50),
   transaction_id VARCHAR(50),
   item_id VARCHAR(50),
+  inventory_type VARCHAR(50),
   status VARCHAR(20) DEFAULT 'PAWN',
   term_days INTEGER DEFAULT 90,
   interest_rate DECIMAL(5,2) DEFAULT 2.9,
@@ -26,6 +27,13 @@ COMMENT ON COLUMN pawn_ticket.due_date IS 'Due date for this pawn ticket';
 -- Add missing columns to existing pawn_ticket table if they don't exist
 DO $$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'inventory_type'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN inventory_type VARCHAR(50);
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_name = 'pawn_ticket' AND column_name = 'term_days'

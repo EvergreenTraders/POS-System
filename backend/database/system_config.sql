@@ -127,11 +127,20 @@ BEGIN
 
     -- Create inventory_hold_period table for storing hold duration configuration
     CREATE TABLE IF NOT EXISTS inventory_hold_period (
+        id SERIAL PRIMARY KEY,
         days INTEGER NOT NULL DEFAULT 7,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP,
         CONSTRAINT valid_hold_days CHECK (days > 0)
     );
+
+    -- Add id column if table already exists without it
+    IF NOT EXISTS (
+        SELECT FROM information_schema.columns
+        WHERE table_name = 'inventory_hold_period' AND column_name = 'id'
+    ) THEN
+        ALTER TABLE inventory_hold_period ADD COLUMN id SERIAL PRIMARY KEY;
+    END IF;
 
     -- Add comments
     COMMENT ON TABLE inventory_hold_period IS 'Stores configuration for inventory hold duration';
