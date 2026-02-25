@@ -55,15 +55,7 @@ COMMENT ON COLUMN drawers.drawer_type IS 'Type of drawer: safe (vault/safe - mul
 COMMENT ON COLUMN drawers.is_active IS 'Whether this drawer is currently active and usable';
 COMMENT ON COLUMN drawers.display_order IS 'Order in which drawers should be displayed in the UI';
 
--- Insert default safe drawer for store 1
-INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id)
-VALUES ('Safe', 'safe', TRUE, 0, 1)
-ON CONFLICT (drawer_name, store_id) DO NOTHING;
-
--- Insert default master safe drawer for store 1
-INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id)
-VALUES ('Master Safe', 'master_safe', TRUE, 0, 1)
-ON CONFLICT (drawer_name, store_id) DO NOTHING;
+-- Default safe/master_safe drawers are inserted after store_id column and unique constraint are added (see below)
 
 -- Create cash_drawer_sessions table
 CREATE TABLE IF NOT EXISTS cash_drawer_sessions (
@@ -732,6 +724,15 @@ DO $$ BEGIN
     ALTER TABLE drawers ADD CONSTRAINT drawers_drawer_name_store_unique UNIQUE (drawer_name, store_id);
   END IF;
 END $$;
+
+-- Insert default safe and master safe drawers (after store_id column and unique constraint exist)
+INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id)
+VALUES ('Safe', 'safe', TRUE, 0, 1)
+ON CONFLICT (drawer_name, store_id) DO NOTHING;
+
+INSERT INTO drawers (drawer_name, drawer_type, is_active, display_order, store_id)
+VALUES ('Master Safe', 'master_safe', TRUE, 0, 1)
+ON CONFLICT (drawer_name, store_id) DO NOTHING;
 
 -- Add has_location column to drawers table for safes (repository vs repository/location)
 DO $$
