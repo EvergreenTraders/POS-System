@@ -835,11 +835,16 @@ app.get('/api/employee-sessions/closing-notification', async (req, res) => {
 // GET /api/employee-sessions/report - Get time clock report for date range
 app.get('/api/employee-sessions/report', async (req, res) => {
   try {
-    const { start_date, end_date, employee_id } = req.query;
+    const { start_date, end_date, employee_ids } = req.query;
 
     if (!start_date || !end_date) {
       return res.status(400).json({ error: 'start_date and end_date are required' });
     }
+
+    // Parse optional employee_ids filter (comma-separated)
+    const empIdFilter = employee_ids
+      ? employee_ids.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id))
+      : null;
 
     // Get current store
     const storeResult = await pool.query(
@@ -847,17 +852,29 @@ app.get('/api/employee-sessions/report', async (req, res) => {
     );
     const currentStore = storeResult.rows[0] || { store_id: null, store_name: 'Unknown', store_code: 'N/A' };
 
-    // Get employees for the current store only (optionally filtered to a single employee)
+    // Get employees for the current store only (optionally filtered to specific employees)
+    const empParams = [currentStore.store_id];
+    let empFilter = '';
+    if (empIdFilter && empIdFilter.length > 0) {
+      empFilter = `AND employee_id = ANY($2::int[])`;
+      empParams.push(empIdFilter);
+    }
     const employeesResult = await pool.query(`
       SELECT employee_id, first_name, last_name, username, status
       FROM employees
       WHERE status = 'Active'
         AND ($1::int IS NULL OR store_id = $1)
-        ${employee_id ? 'AND employee_id = $2' : ''}
+        ${empFilter}
       ORDER BY first_name ASC
-    `, employee_id ? [currentStore.store_id, employee_id] : [currentStore.store_id]);
+    `, empParams);
 
     // Get sessions within date range
+    const sessParams = [start_date, end_date];
+    let sessFilter = '';
+    if (empIdFilter && empIdFilter.length > 0) {
+      sessFilter = `AND es.employee_id = ANY($3::int[])`;
+      sessParams.push(empIdFilter);
+    }
     const sessionsResult = await pool.query(`
       SELECT
         es.session_id,
@@ -870,9 +887,9 @@ app.get('/api/employee-sessions/report', async (req, res) => {
       FROM employee_sessions es
       WHERE es.clock_in_time >= $1::date
         AND es.clock_in_time < ($2::date + INTERVAL '1 day')
-        ${employee_id ? 'AND es.employee_id = $3' : ''}
+        ${sessFilter}
       ORDER BY es.clock_in_time ASC
-    `, employee_id ? [start_date, end_date, employee_id] : [start_date, end_date]);
+    `, sessParams);
 
     // Build report: group sessions by employee
     const report = employeesResult.rows.map(emp => {

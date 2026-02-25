@@ -20,6 +20,13 @@ import {
   Snackbar,
   Alert,
   Divider,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Checkbox,
+  ListItemText,
+  OutlinedInput,
 } from '@mui/material';
 import {
   Login as ClockInIcon,
@@ -47,6 +54,10 @@ function TimeClock() {
   const [report, setReport] = useState([]);
   const [storeName, setStoreName] = useState('');
   const [reportLoading, setReportLoading] = useState(true);
+
+  // Employee filter state (managers only)
+  const [allEmployees, setAllEmployees] = useState([]);
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState([]); // empty = all
 
   // Edit state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -97,12 +108,30 @@ function TimeClock() {
     }
   }, [user]);
 
+  // Fetch employee list for the filter dropdown (managers only)
+  const fetchEmployees = useCallback(async () => {
+    if (!isManager) return;
+    try {
+      const response = await fetch(`${config.apiUrl}/employees`);
+      if (response.ok) {
+        const data = await response.json();
+        const active = data.filter(e => e.status === 'Active');
+        setAllEmployees(active);
+      }
+    } catch (error) {
+      console.error('Failed to fetch employees:', error);
+    }
+  }, [isManager]);
+
   const fetchReport = useCallback(async () => {
     setReportLoading(true);
     try {
       let url = `${config.apiUrl}/employee-sessions/report?start_date=${startDate}&end_date=${endDate}`;
       if (!isManager && user?.id) {
-        url += `&employee_id=${user.id}`;
+        // Non-managers can only see their own
+        url += `&employee_ids=${user.id}`;
+      } else if (isManager && selectedEmployeeIds.length > 0) {
+        url += `&employee_ids=${selectedEmployeeIds.join(',')}`;
       }
       const response = await fetch(url);
       if (response.ok) {
@@ -115,11 +144,12 @@ function TimeClock() {
     } finally {
       setReportLoading(false);
     }
-  }, [startDate, endDate, isManager, user?.id]);
+  }, [startDate, endDate, isManager, user?.id, selectedEmployeeIds]);
 
   useEffect(() => {
     fetchClockStatus();
-  }, [fetchClockStatus]);
+    fetchEmployees();
+  }, [fetchClockStatus, fetchEmployees]);
 
   useEffect(() => {
     fetchReport();
@@ -408,71 +438,107 @@ function TimeClock() {
       <Paper sx={{ p: 3 }}>
 
         {/* Filters */}
-        <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Box>
-            <Typography variant="caption" color="text.secondary">
-              Date Range
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              <TextField
-                type="date"
-                size="small"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                sx={{ width: 160 }}
-              />
-              <Typography variant="body2">to</Typography>
-              <TextField
-                type="date"
-                size="small"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                sx={{ width: 160 }}
-              />
-            </Box>
-          </Box>
+        <Box sx={{ display: 'flex', gap: 1.5, mb: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+          <TextField
+            type="date"
+            size="small"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            sx={{ width: 150 }}
+          />
+          <Typography variant="body2">to</Typography>
+          <TextField
+            type="date"
+            size="small"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            sx={{ width: 150 }}
+          />
 
-          <Box>
-            <Typography variant="caption" color="text.secondary">
-              Lunch Break
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              <Typography variant="body2">Deduct</Typography>
-              <TextField
-                type="number"
-                size="small"
-                value={lunchDeduct}
-                onChange={(e) => setLunchDeduct(parseFloat(e.target.value) || 0)}
-                inputProps={{ step: 0.25, min: 0 }}
-                sx={{ width: 80 }}
-              />
-              <Typography variant="body2">after every</Typography>
-              <TextField
-                type="number"
-                size="small"
-                value={lunchAfterHours}
-                onChange={(e) => setLunchAfterHours(parseFloat(e.target.value) || 0)}
-                inputProps={{ step: 0.5, min: 0 }}
-                sx={{ width: 80 }}
-              />
-              <Typography variant="body2">hrs worked</Typography>
-            </Box>
-          </Box>
+          <Divider orientation="vertical" flexItem />
+
+          <Typography variant="body2">Lunch:</Typography>
+          <TextField
+            type="number"
+            size="small"
+            value={lunchDeduct}
+            onChange={(e) => setLunchDeduct(parseFloat(e.target.value) || 0)}
+            inputProps={{ step: 0.25, min: 0 }}
+            sx={{ width: 65 }}
+          />
+          <Typography variant="body2">after</Typography>
+          <TextField
+            type="number"
+            size="small"
+            value={lunchAfterHours}
+            onChange={(e) => setLunchAfterHours(parseFloat(e.target.value) || 0)}
+            inputProps={{ step: 0.5, min: 0 }}
+            sx={{ width: 65 }}
+          />
+          <Typography variant="body2">hrs</Typography>
+
+          {isManager && allEmployees.length > 0 && (
+            <>
+              <Divider orientation="vertical" flexItem />
+              <FormControl size="small" sx={{ minWidth: 200 }}>
+                <Select
+                  multiple
+                  displayEmpty
+                  value={selectedEmployeeIds}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.includes('__all__')) {
+                      if (selectedEmployeeIds.length === allEmployees.length) {
+                        setSelectedEmployeeIds([]);
+                      } else {
+                        setSelectedEmployeeIds(allEmployees.map(emp => emp.employee_id));
+                      }
+                    } else {
+                      setSelectedEmployeeIds(val);
+                    }
+                  }}
+                  input={<OutlinedInput />}
+                  renderValue={(selected) => {
+                    if (selected.length === 0) return 'All Employees';
+                    if (selected.length === allEmployees.length) return 'All Employees';
+                    return allEmployees
+                      .filter(emp => selected.includes(emp.employee_id))
+                      .map(emp => `${emp.first_name} ${emp.last_name}`)
+                      .join(', ');
+                  }}
+                >
+                  <MenuItem value="__all__">
+                    <Checkbox checked={selectedEmployeeIds.length === 0 || selectedEmployeeIds.length === allEmployees.length} />
+                    <ListItemText primary="All Employees" />
+                  </MenuItem>
+                  {allEmployees.map((emp) => (
+                    <MenuItem key={emp.employee_id} value={emp.employee_id}>
+                      <Checkbox checked={selectedEmployeeIds.includes(emp.employee_id)} />
+                      <ListItemText primary={`${emp.first_name} ${emp.last_name}`} />
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </>
+          )}
 
           {isManager && (
-            <Box sx={{ ml: 'auto' }}>
+            <>
+              <Divider orientation="vertical" flexItem />
               {!isAuthorized ? (
                 <Button
+                  size="small"
                   variant="outlined"
                   startIcon={<EditIcon />}
                   onClick={handleEditClick}
+                  sx={{ textTransform: 'none' }}
                 >
                   Edit
                 </Button>
               ) : (
-                <Chip label="Edit Mode Active" color="warning" onDelete={() => setIsAuthorized(false)} />
+                <Chip label="Edit Mode" color="warning" size="small" onDelete={() => setIsAuthorized(false)} />
               )}
-            </Box>
+            </>
           )}
         </Box>
 
@@ -483,7 +549,7 @@ function TimeClock() {
           </Box>
         ) : (
           <TableContainer>
-            <Table size="small">
+            <Table size="small" sx={{ tableLayout: 'auto', width: 'auto', '& td, & th': { py: 0.3, px: 1.5 } }}>
               <TableHead>
                 <TableRow sx={{ bgcolor: '#e3f2fd' }}>
                   <TableCell sx={{ fontWeight: 700 }}>Employee</TableCell>
@@ -491,7 +557,7 @@ function TimeClock() {
                   <TableCell sx={{ fontWeight: 700 }}>Store</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Time IN</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Time OUT</TableCell>
-                  <TableCell sx={{ fontWeight: 700, textAlign: 'right' }}>Hours</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Hours</TableCell>
                   {isAuthorized && <TableCell sx={{ fontWeight: 700 }} />}
                 </TableRow>
               </TableHead>
@@ -508,8 +574,8 @@ function TimeClock() {
                       const days = buildEmployeeDays(emp.sessions);
                       const empTotal = calculateEmployeeTotal(emp.sessions);
                       const empBg = empIdx % 2 === 0 ? '#f5f5f5' : 'white';
+                      const colCount = isAuthorized ? 7 : 6;
 
-                      // Build rows: one per session (or one per empty day)
                       const rows = [];
                       let isFirstRow = true;
 
@@ -519,7 +585,6 @@ function TimeClock() {
                         });
 
                         if (day.sessions.length === 0) {
-                          // Day with no sessions — show dash row
                           rows.push(
                             <TableRow key={`${emp.employee_id}-${day.date}`} sx={{ bgcolor: empBg }}>
                               <TableCell>{isFirstRow ? emp.employee_name : ''}</TableCell>
@@ -527,13 +592,12 @@ function TimeClock() {
                               <TableCell>{emp.store_code}</TableCell>
                               <TableCell>{'\u2014'}</TableCell>
                               <TableCell>{'\u2014'}</TableCell>
-                              <TableCell sx={{ textAlign: 'right' }}>{'\u2014'}</TableCell>
+                              <TableCell>{'\u2014'}</TableCell>
                               {isAuthorized && <TableCell />}
                             </TableRow>
                           );
                           isFirstRow = false;
                         } else {
-                          // Show each session individually
                           const dayHours = calculateDayHours(day.sessions);
                           day.sessions.forEach((session, sIdx) => {
                             const clockIn = session.clock_in_time ? new Date(session.clock_in_time) : null;
@@ -547,7 +611,7 @@ function TimeClock() {
                                 <TableCell>{emp.store_code}</TableCell>
                                 <TableCell>{formatTime(clockIn)}</TableCell>
                                 <TableCell>{formatTime(clockOut)}</TableCell>
-                                <TableCell sx={{ textAlign: 'right' }}>
+                                <TableCell>
                                   {isLastSessionOfDay
                                     ? (dayHours
                                         ? dayHours.net.toFixed(2) + (dayHours.hasIncomplete ? '*' : '')
@@ -555,13 +619,13 @@ function TimeClock() {
                                     : ''}
                                 </TableCell>
                                 {isAuthorized && (
-                                  <TableCell>
+                                  <TableCell sx={{ py: 0 }}>
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                       <Button
                                         size="small"
                                         startIcon={<EditIcon />}
                                         onClick={() => openEditDialog(emp.employee_name, session)}
-                                        sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+                                        sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
                                       >
                                         Edit
                                       </Button>
@@ -573,7 +637,7 @@ function TimeClock() {
                                             color="error"
                                             startIcon={<ForceIcon />}
                                             onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'out')}
-                                            sx={{ ml: 0.5, textTransform: 'none', fontSize: '0.75rem' }}
+                                            sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
                                           >
                                             Force OUT
                                           </Button>
@@ -584,7 +648,7 @@ function TimeClock() {
                                             color="success"
                                             startIcon={<ForceIcon />}
                                             onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'in')}
-                                            sx={{ ml: 0.5, textTransform: 'none', fontSize: '0.75rem' }}
+                                            sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
                                           >
                                             Force IN
                                           </Button>
@@ -600,15 +664,12 @@ function TimeClock() {
                         }
                       });
 
-                      // Employee subtotal row
+                      // Employee subtotal row — TOTAL: under Time OUT, value under Hours
                       rows.push(
                         <TableRow key={`${emp.employee_id}-total`} sx={{ bgcolor: empBg }}>
-                          <TableCell />
-                          <TableCell />
-                          <TableCell />
-                          <TableCell />
-                          <TableCell sx={{ fontWeight: 700, textAlign: 'right' }}>TOTAL:</TableCell>
-                          <TableCell sx={{ fontWeight: 700, textAlign: 'right' }}>
+                          <TableCell colSpan={4} sx={{ borderBottom: 'none' }} />
+                          <TableCell sx={{ fontWeight: 700 }}>TOTAL:</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>
                             {empTotal.toFixed(2)}
                           </TableCell>
                           {isAuthorized && <TableCell />}
@@ -619,7 +680,7 @@ function TimeClock() {
                       if (empIdx < report.length - 1) {
                         rows.push(
                           <TableRow key={`${emp.employee_id}-sep`}>
-                            <TableCell colSpan={isAuthorized ? 7 : 6} sx={{ p: 0, borderBottom: '2px solid #ccc' }} />
+                            <TableCell colSpan={colCount} sx={{ p: 0, borderBottom: '2px solid #ccc' }} />
                           </TableRow>
                         );
                       }
@@ -629,12 +690,9 @@ function TimeClock() {
                     {/* Grand total row */}
                     {report.length > 1 && (
                       <TableRow sx={{ bgcolor: '#e3f2fd' }}>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell sx={{ fontWeight: 700, textAlign: 'right' }}>GRAND TOTAL:</TableCell>
-                        <TableCell sx={{ fontWeight: 700, textAlign: 'right' }}>
+                        <TableCell colSpan={4} />
+                        <TableCell sx={{ fontWeight: 700 }}>All Employees:</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>
                           {totalHours.toFixed(2)}
                         </TableCell>
                         {isAuthorized && <TableCell />}
