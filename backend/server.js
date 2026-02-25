@@ -10290,8 +10290,8 @@ app.post('/api/payment-methods', async (req, res) => {
       accepted_for_pawn_redeems
     } = req.body;
 
-    if (!method_name || !method_value) {
-      return res.status(400).json({ error: 'Method name and method value are required' });
+    if (!method_name) {
+      return res.status(400).json({ error: 'Method name is required' });
     }
 
     // Check if method_name already exists (must be unique)
@@ -10303,8 +10303,9 @@ app.post('/api/payment-methods', async (req, res) => {
       return res.status(400).json({ error: 'A payment method with this name already exists' });
     }
 
-    // Validate method_value format (should be lowercase with underscores)
-    const validMethodValue = method_value.toLowerCase().replace(/\s+/g, '_');
+    // Auto-generate method_value from method_name if not provided
+    const rawValue = method_value || method_name;
+    const validMethodValue = rawValue.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '_').replace(/^_+|_+$/g, '');
 
     // Check if method_value already exists (must be unique)
     const valueCheck = await pool.query(
@@ -12142,7 +12143,7 @@ app.post('/api/layaways/:id/payment', async (req, res) => {
     await client.query(
       `INSERT INTO layaway_payments (layaway_id, amount, payment_method, notes, received_by)
        VALUES ($1, $2, $3, $4, $5)`,
-      [id, amount, payment_method || 'CASH', notes, received_by]
+      [id, amount, payment_method || 'cash', notes, received_by]
     );
 
     // Update layaway
@@ -12966,8 +12967,9 @@ app.post('/api/payments', async (req, res) => {
 
     const { transaction_id, amount, payment_method } = req.body;
 
-    // Validate payment method
-    if (!['CASH', 'CREDIT_CARD', 'DEBIT_CARD', 'BANK_TRANSFER', 'CHECK'].includes(payment_method)) {
+    // Validate payment method exists in configured tender types
+    const pmCheck = await client.query('SELECT id FROM payment_methods WHERE method_value = $1', [payment_method]);
+    if (pmCheck.rows.length === 0) {
       throw new Error('Invalid payment method');
     }
 
@@ -13013,8 +13015,9 @@ app.post('/api/payments', async (req, res) => {
       [transaction_id, amount, payment_method]
     );
 
-    // If this is a CASH payment, link it to the employee's active cash drawer session
-    if (payment_method === 'CASH') {
+    // If this is a cash payment, link it to the employee's active cash drawer session
+    const isCashPayment = await client.query('SELECT id FROM payment_methods WHERE method_value = $1 AND is_default_cash = true', [payment_method]);
+    if (isCashPayment.rows.length > 0) {
       // Get the employee's active cash drawer session
       const sessionResult = await client.query(
         `SELECT session_id FROM cash_drawer_sessions

@@ -111,6 +111,7 @@ function Checkout() {
   const [jewelryItems, setJewelryItems] = useState([]);
 
   const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentMethods, setPaymentMethods] = useState([]);
   const [paymentDetails, setPaymentDetails] = useState({
     cashAmount: ''
   });
@@ -265,6 +266,26 @@ function Checkout() {
       }
     }
   }, [location.state, addToCart, setCustomer, clearCart, isInitialized]);
+
+  // Load active payment methods
+  useEffect(() => {
+    const fetchPaymentMethods = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/payment-methods`);
+        setPaymentMethods(response.data);
+        // Default to cash if available
+        const cashMethod = response.data.find(m => m.is_default_cash);
+        if (cashMethod) {
+          setPaymentMethod(cashMethod.method_value);
+        } else if (response.data.length > 0) {
+          setPaymentMethod(response.data[0].method_value);
+        }
+      } catch (error) {
+        console.error('Error fetching payment methods:', error);
+      }
+    };
+    fetchPaymentMethods();
+  }, []);
 
   // Check if employee has an active cash drawer session
   useEffect(() => {
@@ -725,20 +746,11 @@ function Checkout() {
       }
 
       // Add payment to list and update remaining amount
-      // Map frontend payment method values to backend expected format
-      const paymentMethodMap = {
-        'cash': 'CASH',
-        'debit': 'DEBIT_CARD',
-        'credit': 'CREDIT_CARD',
-        'check': 'CHECK',
-        'bank_transfer': 'BANK_TRANSFER'
-      };
-
       const newPayment = {
         transaction_id: transactionId,
         method: paymentMethod,
         amount: paymentAmount,
-        payment_method: paymentMethodMap[paymentMethod] || paymentMethod.toUpperCase(),
+        payment_method: paymentMethod,
         timestamp: new Date().toISOString()
       };
       const updatedPayments = [...payments, newPayment];
@@ -2380,9 +2392,11 @@ function Checkout() {
                   label="Payment Method"
                   onChange={handlePaymentMethodChange}
                 >
-                  <MenuItem value="cash">Cash</MenuItem>
-                  <MenuItem value="debit">Debit Card</MenuItem>
-                  <MenuItem value="credit">Credit Card</MenuItem>
+                  {paymentMethods.map((pm) => (
+                    <MenuItem key={pm.id} value={pm.method_value}>
+                      {pm.method_name}
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
 
@@ -2414,17 +2428,16 @@ function Checkout() {
                 <Box sx={{ mt: 4 }}>
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                     {payments.map((payment, index) => {
-                      const isCash = payment.method === 'cash';
-                      const methodLabel = payment.method === 'cash' ? 'Cash' :
-                                         payment.method === 'debit' ? 'Debit Card' :
-                                         payment.method === 'credit' ? 'Credit Card' : 'Card';
+                      const pm = paymentMethods.find(m => m.method_value === payment.method);
+                      const isCash = pm?.is_default_cash;
+                      const methodLabel = pm?.method_name || payment.method;
 
                       return (
                         <Chip
                           key={index}
                           icon={isCash ? <AttachMoneyIcon /> : <CreditCardIcon />}
                           label={`${methodLabel} $${parseFloat(payment.amount).toFixed(2)}`}
-                          color={isCash ? 'success' : payment.method === 'debit' ? 'info' : 'primary'}
+                          color={isCash ? 'success' : pm?.is_physical ? 'info' : 'primary'}
                           variant="outlined"
                           sx={{ paddingY: 2.5, paddingX: 0.5, fontSize: '0.9rem' }}
                         />
