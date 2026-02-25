@@ -92,6 +92,7 @@ function CashDrawer() {
   const currentEmployee = employees.find(e => e.employee_id === currentUser?.id);
   const canViewDrawer = !currentEmployee || currentEmployee.can_view_drawer !== false;
   const canViewSafe = !currentEmployee || currentEmployee.can_view_safe !== false;
+  const isManager = currentEmployee && (currentEmployee.role === 'Store Manager' || currentEmployee.role === 'Store Owner');
 
   // Store status states
   const [storeStatus, setStoreStatus] = useState({ status: 'closed', session: null, lastClosed: null });
@@ -205,8 +206,9 @@ function CashDrawer() {
   const [adjustmentReason, setAdjustmentReason] = useState('');
   const [transferSourceSession, setTransferSourceSession] = useState('');
 
-  // Transfer menu anchor
+  // Transfer menu anchors
   const [transferMenuAnchor, setTransferMenuAnchor] = useState(null);
+  const [managerTransferMenuAnchor, setManagerTransferMenuAnchor] = useState(null);
 
   // Enhanced transfer dialog states
   const [transferDialog, setTransferDialog] = useState(false);
@@ -2080,6 +2082,7 @@ function CashDrawer() {
 
   const openBankDepositDialog = () => {
     fetchBanks();
+    fetchAllActiveSessions();
     resetBankDepositForm();
     setBankDepositDialog(true);
   };
@@ -2107,9 +2110,13 @@ function CashDrawer() {
       return;
     }
 
-    // Verify we're on master safe
-    if (activeSession?.drawer_type !== 'master_safe') {
-      showSnackbar('Bank deposits can only be made from the Master Safe', 'error');
+    // Find master safe session - use own activeSession or find from all active sessions (for managers)
+    const masterSafeSession = activeSession?.drawer_type === 'master_safe'
+      ? activeSession
+      : allActiveSessions.find(s => s.drawer_type === 'master_safe');
+
+    if (!masterSafeSession) {
+      showSnackbar('Bank deposits can only be made from the Master Safe. No active Master Safe session found.', 'error');
       return;
     }
 
@@ -2117,7 +2124,7 @@ function CashDrawer() {
 
     try {
       await axios.post(
-        `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/bank-deposit`,
+        `${API_BASE_URL}/cash-drawer/${masterSafeSession.session_id}/bank-deposit`,
         {
           bank_id: selectedBank,
           amount: depositTotal,
@@ -2157,6 +2164,7 @@ function CashDrawer() {
 
   const openBankWithdrawalDialog = () => {
     fetchBanks();
+    fetchAllActiveSessions();
     resetBankWithdrawalForm();
     setBankWithdrawalDialog(true);
   };
@@ -2184,9 +2192,13 @@ function CashDrawer() {
       return;
     }
 
-    // Verify we're on master safe
-    if (activeSession?.drawer_type !== 'master_safe') {
-      showSnackbar('Bank withdrawals can only be made to the Master Safe', 'error');
+    // Find master safe session - use own activeSession or find from all active sessions (for managers)
+    const masterSafeSession = activeSession?.drawer_type === 'master_safe'
+      ? activeSession
+      : allActiveSessions.find(s => s.drawer_type === 'master_safe');
+
+    if (!masterSafeSession) {
+      showSnackbar('Bank withdrawals can only be made to the Master Safe. No active Master Safe session found.', 'error');
       return;
     }
 
@@ -2194,7 +2206,7 @@ function CashDrawer() {
 
     try {
       await axios.post(
-        `${API_BASE_URL}/cash-drawer/${activeSession.session_id}/bank-withdrawal`,
+        `${API_BASE_URL}/cash-drawer/${masterSafeSession.session_id}/bank-withdrawal`,
         {
           bank_id: selectedWithdrawalBank,
           amount: withdrawalTotal,
@@ -2435,6 +2447,7 @@ function CashDrawer() {
 
   // Inter-store transfer functions
   const openInterStoreTransferDialog = (sourceSession) => {
+    fetchAllActiveSessions();
     setInterStoreTransferSourceSession(sourceSession);
     setSelectedDestinationStore('');
     setInterStoreTransferAmount('');
@@ -3099,6 +3112,9 @@ function CashDrawer() {
                           ? 'Disconnect'
                           : `Close ${activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe' ? 'Safe' : 'Drawer'}`}
                       </Button>
+                      {/* Show Transfer/Bank buttons only if employee opened a drawer or is a manager */}
+                      {(isManager || activeSessions.some(s => s.is_opener)) && (
+                      <>
                       <Button
                         variant="outlined"
                         startIcon={<SwapHorizIcon />}
@@ -3156,8 +3172,10 @@ function CashDrawer() {
                           <ListItemText>Petty Cash Payout</ListItemText>
                         </MenuItem>
                       </Menu>
-                      {/* Show Bank Deposit and Withdrawal buttons only for Master Safe */}
-                      {activeSession.drawer_type === 'master_safe' && (
+                      </>
+                      )}
+                      {/* Show Bank Deposit and Withdrawal when master safe session exists */}
+                      {(activeSession.drawer_type === 'master_safe' || allActiveSessions.some(s => s.drawer_type === 'master_safe')) && (
                         <>
                           <Button
                             variant="outlined"
@@ -3293,6 +3311,79 @@ function CashDrawer() {
                   Quick Report
                 </Button>
               </Box>
+              {/* Manager actions - available even without a personal drawer session */}
+              {isManager && (
+                <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap', mt: 2 }}>
+                  <Button
+                    variant="outlined"
+                    startIcon={<SwapHorizIcon />}
+                    endIcon={<ArrowDropDownIcon />}
+                    disabled={isStoreClosed}
+                    onClick={(e) => { fetchAllActiveSessions(); setManagerTransferMenuAnchor(e.currentTarget); }}
+                  >
+                    Transfer
+                    {pendingInterStoreTransfers.length > 0 && (
+                      <Chip
+                        label={pendingInterStoreTransfers.length}
+                        size="small"
+                        color="error"
+                        sx={{ ml: 1, height: 20, minWidth: 20, '& .MuiChip-label': { px: 0.5, fontSize: '0.7rem' } }}
+                      />
+                    )}
+                  </Button>
+                  <Menu
+                    anchorEl={managerTransferMenuAnchor}
+                    open={Boolean(managerTransferMenuAnchor)}
+                    onClose={() => setManagerTransferMenuAnchor(null)}
+                  >
+                    <MenuItem onClick={() => { setManagerTransferMenuAnchor(null); openTransferDialog(null, null); }}>
+                      <ListItemIcon><SwapHorizIcon fontSize="small" /></ListItemIcon>
+                      <ListItemText>Transfer Between Drawers/Safes</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      disabled={stores.filter(s => !s.is_current_store && s.is_active).length === 0}
+                      onClick={() => { setManagerTransferMenuAnchor(null); openInterStoreTransferDialog(null); }}
+                    >
+                      <ListItemIcon><StoreIcon fontSize="small" /></ListItemIcon>
+                      <ListItemText>Send Inter-store</ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      disabled={pendingInterStoreTransfers.length === 0}
+                      onClick={() => { setManagerTransferMenuAnchor(null); openReceiveInterStoreDialog(); }}
+                    >
+                      <ListItemIcon><StoreIcon fontSize="small" /></ListItemIcon>
+                      <ListItemText>
+                        Receive Inter-store {pendingInterStoreTransfers.length > 0 && `(${pendingInterStoreTransfers.length})`}
+                      </ListItemText>
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => {
+                        setManagerTransferMenuAnchor(null);
+                        openPettyCashDialog();
+                      }}
+                    >
+                      <ListItemIcon><MoneyIcon fontSize="small" /></ListItemIcon>
+                      <ListItemText>Petty Cash Payout</ListItemText>
+                    </MenuItem>
+                  </Menu>
+                  <Button
+                    variant="outlined"
+                    startIcon={<AccountBalanceIcon />}
+                    disabled={isStoreClosed}
+                    onClick={openBankDepositDialog}
+                  >
+                    Bank Deposit
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<AccountBalanceIcon />}
+                    disabled={isStoreClosed}
+                    onClick={openBankWithdrawalDialog}
+                  >
+                    Bank Withdrawal
+                  </Button>
+                </Box>
+              )}
             </Paper>
           )}
         </Box>
@@ -5033,8 +5124,13 @@ function CashDrawer() {
                       color="warning"
                       size="small"
                       onClick={() => {
-                        setCloseDrawerDialog(false);
-                        setManagerApprovalDialog(true);
+                        if (isManager) {
+                          setCloseDrawerDialog(false);
+                          handleCloseDrawer(true);
+                        } else {
+                          setCloseDrawerDialog(false);
+                          setManagerApprovalDialog(true);
+                        }
                       }}
                       disabled={isStoreClosed}
                     >
@@ -5256,7 +5352,11 @@ function CashDrawer() {
             <Button
               onClick={() => {
                 setDiscrepancyWarningDialog(false);
-                setManagerApprovalDialog(true);
+                if (isManager) {
+                  handleCloseDrawer(true);
+                } else {
+                  setManagerApprovalDialog(true);
+                }
               }}
               variant="contained"
               color="success"
@@ -6347,8 +6447,8 @@ function CashDrawer() {
         </DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2 }}>
-            {/* Source info */}
-            {interStoreTransferSourceSession && (
+            {/* Source info or source picker for managers without active session */}
+            {interStoreTransferSourceSession ? (
               <Box sx={{ mb: 3, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
                 <Typography variant="subtitle2" color="text.secondary">From</Typography>
                 <Typography variant="body1">
@@ -6358,6 +6458,24 @@ function CashDrawer() {
                   Balance: {formatCurrency(interStoreTransferSourceSession.current_expected_balance || 0)}
                 </Typography>
               </Box>
+            ) : (
+              <FormControl fullWidth sx={{ mb: 3 }}>
+                <InputLabel>Source Drawer/Safe</InputLabel>
+                <Select
+                  value=""
+                  onChange={(e) => {
+                    const session = allActiveSessions.find(s => s.session_id === e.target.value);
+                    if (session) setInterStoreTransferSourceSession(session);
+                  }}
+                  label="Source Drawer/Safe"
+                >
+                  {allActiveSessions.map((session) => (
+                    <MenuItem key={session.session_id} value={session.session_id}>
+                      {session.drawer_name} ({session.drawer_type}) - Balance: {formatCurrency(session.current_expected_balance || 0)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             )}
 
             {/* Destination Store Selection */}
