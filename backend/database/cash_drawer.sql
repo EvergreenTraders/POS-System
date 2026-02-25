@@ -414,19 +414,26 @@ COMMENT ON TABLE cash_denominations IS 'Stores denomination counts for cash draw
 COMMENT ON COLUMN cash_denominations.denomination_type IS 'Type of count: opening (start of shift) or closing (end of shift)';
 COMMENT ON COLUMN cash_denominations.total_amount IS 'Automatically calculated total from all denominations';
 
+-- Reset user_preferences sequence to avoid primary key conflicts
+SELECT setval(pg_get_serial_sequence('user_preferences', 'id'), COALESCE((SELECT MAX(id) FROM user_preferences), 0) + 1, false);
+
 -- Add blindCount preferences for cash drawer closing mode (separate for drawers and safe)
 INSERT INTO user_preferences (preference_name, preference_value)
-VALUES 
-  ('blindCount_drawers', 'true'),
-  ('blindCount_safe', 'true')
-ON CONFLICT (preference_name) DO NOTHING;
+SELECT 'blindCount_drawers', 'true'
+WHERE NOT EXISTS (SELECT 1 FROM user_preferences WHERE preference_name = 'blindCount_drawers');
+
+INSERT INTO user_preferences (preference_name, preference_value)
+SELECT 'blindCount_safe', 'true'
+WHERE NOT EXISTS (SELECT 1 FROM user_preferences WHERE preference_name = 'blindCount_safe');
 
 -- Add individualDenominations preferences for cash drawer opening mode (separate for drawers and safe)
 INSERT INTO user_preferences (preference_name, preference_value)
-VALUES
-  ('individualDenominations_drawers', 'false'),
-  ('individualDenominations_safe', 'false')
-ON CONFLICT (preference_name) DO NOTHING;
+SELECT 'individualDenominations_drawers', 'false'
+WHERE NOT EXISTS (SELECT 1 FROM user_preferences WHERE preference_name = 'individualDenominations_drawers');
+
+INSERT INTO user_preferences (preference_name, preference_value)
+SELECT 'individualDenominations_safe', 'false'
+WHERE NOT EXISTS (SELECT 1 FROM user_preferences WHERE preference_name = 'individualDenominations_safe');
 
 -- Migrate existing blindCount preference to blindCount_drawers if it exists
 UPDATE user_preferences 
