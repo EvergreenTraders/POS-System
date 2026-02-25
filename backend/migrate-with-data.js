@@ -116,17 +116,62 @@ async function importData() {
     const client = await pool.connect();
 
     try {
-      // Import tables in dependency order (only tables that exist in export)
+      // Import tables in dependency order - must match all tables from export-data.js
       const importOrder = [
-        'employees',
-        'customers',
+        // Core configuration tables (no dependencies)
+        'stores',
         'business_info',
+        'backup_settings',
+        'system_config',
         'user_preferences',
         'pawn_config',
         'tax_config',
         'cases_config',
         'receipt_config',
         'inventory_status',
+        'inventory_hold_period',
+        'quote_expiration',
+
+        // Reference/lookup tables
+        'currency_types',
+        'metal_category',
+        'metal_color',
+        'metal_purity',
+        'metal_style',
+        'metal_style_category',
+        'metal_style_subcategory',
+        'precious_metal_type',
+        'non_precious_metal_type',
+        'stone_types',
+        'stone_color',
+        'stone_shape',
+        'diamond_clarity',
+        'diamond_color',
+        'diamond_cut',
+        'diamond_shape',
+        'diamond_size_weight',
+        'carat_to_gram_conversion',
+        'spot_prices',
+        'live_spot_prices',
+        'live_pricing',
+        'price_estimates',
+        'diamond_estimates',
+        'transaction_type',
+
+        // Employee and store related
+        'employees',
+        'employee_sessions',
+        'store_sessions',
+        'trusted_pcs',
+
+        // Customer tables
+        'customers',
+        'customer_account_links',
+        'customer_headers_preferences',
+        'linked_account_authorization_template',
+        'linked_account_authorizations',
+
+        // Drawer and cash management
         'drawers',
         'drawer_config',
         'discrepancy_threshold',
@@ -134,9 +179,30 @@ async function importData() {
         'cash_drawer_transactions',
         'cash_drawer_adjustments',
         'cash_denominations',
+        'adjustment_denominations',
+        'drawer_session_connections',
+        'drawer_tender_balances',
+        'banks',
+        'bank_deposits',
+        'petty_cash_accounts',
+        'petty_cash_expenses',
+        'petty_cash_payouts',
+
+        // Inventory
         'storage_location',
         'jewelry',
         'jewelry_secondary_gems',
+        'jewelry_item_history',
+        'hardgoods_category',
+        'hardgoods_subcategory',
+        'hardgoods',
+        'hardgoods_sku',
+        'hardgoods_bucket',
+        'hardgoods_item_history',
+        'item_attributes',
+        'attribute_config',
+
+        // Transactions
         'transactions',
         'transaction_items',
         'payment_methods',
@@ -147,16 +213,16 @@ async function importData() {
         'sale_ticket',
         'layaway',
         'layaway_payments',
-        'scrap_buckets',
-        'scrap_items',
-        'scrap_bucket_history',
+        'layaway_history',
         'quotes',
         'quote_items',
-        'jewelry_item_history',
-        'customer_account_links',
-        'customer_headers_preferences',
-        'attribute_config',
-        'item_attributes'
+        'scrap',
+        'scrap_bucket_history',
+        'inter_store_transfers',
+
+        // Other
+        'products',
+        'orders'
       ];
 
       let importedCount = 0;
@@ -201,6 +267,7 @@ async function importData() {
         // cash_denominations has a generated 'total_amount' column, jewelry has 'total_weight'
         const generatedColumnsMap = {
           'cash_denominations': ['total_amount'],
+          'adjustment_denominations': ['total_amount'],
           'jewelry': ['total_weight']
         };
         const generatedColumns = generatedColumnsMap[tableName] || [];
