@@ -694,7 +694,7 @@ app.post('/api/employee-sessions/clock-in', async (req, res) => {
     res.status(201).json(session);
   } catch (error) {
     console.error('Error clocking in employee:', error);
-    res.status(500).json({ error: 'Failed to clock in employee' });
+    res.status(500).json({ error: 'Failed to clock in employee', details: error.message });
   }
 });
 
@@ -739,7 +739,7 @@ app.post('/api/employee-sessions/clock-out', async (req, res) => {
     res.json(session);
   } catch (error) {
     console.error('Error clocking out employee:', error);
-    res.status(500).json({ error: 'Failed to clock out employee' });
+    res.status(500).json({ error: 'Failed to clock out employee', details: error.message });
   }
 });
 
