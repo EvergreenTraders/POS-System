@@ -835,7 +835,7 @@ app.get('/api/employee-sessions/closing-notification', async (req, res) => {
 // GET /api/employee-sessions/report - Get time clock report for date range
 app.get('/api/employee-sessions/report', async (req, res) => {
   try {
-    const { start_date, end_date } = req.query;
+    const { start_date, end_date, employee_id } = req.query;
 
     if (!start_date || !end_date) {
       return res.status(400).json({ error: 'start_date and end_date are required' });
@@ -847,14 +847,15 @@ app.get('/api/employee-sessions/report', async (req, res) => {
     );
     const currentStore = storeResult.rows[0] || { store_id: null, store_name: 'Unknown', store_code: 'N/A' };
 
-    // Get employees for the current store only
+    // Get employees for the current store only (optionally filtered to a single employee)
     const employeesResult = await pool.query(`
       SELECT employee_id, first_name, last_name, username, status
       FROM employees
       WHERE status = 'Active'
         AND ($1::int IS NULL OR store_id = $1)
+        ${employee_id ? 'AND employee_id = $2' : ''}
       ORDER BY first_name ASC
-    `, [currentStore.store_id]);
+    `, employee_id ? [currentStore.store_id, employee_id] : [currentStore.store_id]);
 
     // Get sessions within date range
     const sessionsResult = await pool.query(`
@@ -869,8 +870,9 @@ app.get('/api/employee-sessions/report', async (req, res) => {
       FROM employee_sessions es
       WHERE es.clock_in_time >= $1::date
         AND es.clock_in_time < ($2::date + INTERVAL '1 day')
+        ${employee_id ? 'AND es.employee_id = $3' : ''}
       ORDER BY es.clock_in_time ASC
-    `, [start_date, end_date]);
+    `, employee_id ? [start_date, end_date, employee_id] : [start_date, end_date]);
 
     // Build report: group sessions by employee
     const report = employeesResult.rows.map(emp => {
