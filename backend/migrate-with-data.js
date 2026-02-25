@@ -40,39 +40,8 @@ const pool = new Pool({
   query_timeout: 120000
 });
 
-// Migration files in order
-const MIGRATION_FILES = [
-  // Core tables first (no dependencies)
-  'business_info.sql',
-  'backup_settings.sql',
-  'inter_store_transfers.sql',
-  'employees.sql',
-  'employee_sessions.sql',
-  'store_sessions.sql',
-  'trusted_pcs.sql',
-  'customers.sql',
-  'inventory.sql',
-  'metal_estimator.sql',
-  'gem_estimator.sql',
-  'system_config.sql',
-  'linked_account_authorization.sql',
-  'create_customer_account_links.sql',
-  'item_attributes.sql',
-  'item_history.sql',
-  'transactions.sql',
-  'customer_ticket.sql',
-  'layaway.sql',
-  'scrap.sql',
-  'scrap_history.sql',
-  'quotes.sql',
-  'tax_config.sql',
-  'cash_drawer.sql',
-  'petty_cash_expenses.sql',
-  'add_performance_indexes.sql',
-  'customer_headers_preferences.sql',
-  'pawn.sql',
-  'reset_sequences.sql'
-];
+// Import migration file list from migrate.js (single source of truth)
+const { MIGRATION_FILES } = require('./migrate');
 
 async function runMigrations() {
   console.log('=== STEP 1: Running Database Schema Migrations ===\n');
