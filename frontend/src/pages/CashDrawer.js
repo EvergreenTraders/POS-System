@@ -647,6 +647,13 @@ function CashDrawer() {
 
   const handleDeleteDrawer = async () => {
     if (!selectedConfigDrawer) return;
+
+    // Master safe should never be deletable (enforced in UI as well as backend)
+    if (selectedConfigDrawer.drawer_type === 'master_safe') {
+      showSnackbar('Master safe cannot be deleted.', 'error');
+      setDeleteDrawerDialog(false);
+      return;
+    }
     
     try {
       // Check if drawer is open
@@ -4255,7 +4262,10 @@ function CashDrawer() {
                   variant="outlined"
                   color="error"
                   startIcon={<DeleteIcon />}
-                  disabled={!selectedConfigDrawer || selectedConfigDrawer.drawer_name === 'Master'}
+                  disabled={
+                    !selectedConfigDrawer ||
+                    selectedConfigDrawer.drawer_type === 'master_safe'
+                  }
                   onClick={() => setDeleteDrawerDialog(true)}
                 >
                   Delete
@@ -4280,21 +4290,23 @@ function CashDrawer() {
                 <TableBody>
                   {configDrawers
                     .filter(d => d.drawer_type === 'safe' || d.drawer_type === 'master_safe')
-                    .map((drawer) => (
+                    .map((drawer) => {
+                      const isSelected = selectedConfigDrawer?.drawer_id === drawer.drawer_id;
+                      return (
                       <TableRow
                         key={drawer.drawer_id}
                         hover
-                        selected={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
-                        onClick={() => setSelectedConfigDrawer(drawer)}
+                        selected={isSelected}
+                        onClick={() => setSelectedConfigDrawer(isSelected ? null : drawer)}
                         sx={{
-                          bgcolor: selectedConfigDrawer?.drawer_id === drawer.drawer_id ? '#e3f2fd' : 'white',
+                          bgcolor: isSelected ? '#e3f2fd' : 'white',
                           cursor: 'pointer'
                         }}
                       >
                         <TableCell>
                           <Checkbox
-                            checked={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
-                            onChange={() => setSelectedConfigDrawer(drawer)}
+                            checked={isSelected}
+                            onChange={() => setSelectedConfigDrawer(isSelected ? null : drawer)}
                           />
                         </TableCell>
                         <TableCell>{drawer.drawer_name}</TableCell>
@@ -4306,7 +4318,8 @@ function CashDrawer() {
                         <TableCell>{formatCurrency(drawer.min_close || 0)}</TableCell>
                         <TableCell>{formatCurrency(drawer.max_close || 0)}</TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -4331,21 +4344,23 @@ function CashDrawer() {
                 <TableBody>
                   {configDrawers
                     .filter(d => d.drawer_type === 'physical')
-                    .map((drawer) => (
+                    .map((drawer) => {
+                      const isSelected = selectedConfigDrawer?.drawer_id === drawer.drawer_id;
+                      return (
                       <TableRow
                         key={drawer.drawer_id}
                         hover
-                        selected={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
-                        onClick={() => setSelectedConfigDrawer(drawer)}
+                        selected={isSelected}
+                        onClick={() => setSelectedConfigDrawer(isSelected ? null : drawer)}
                         sx={{
-                          bgcolor: selectedConfigDrawer?.drawer_id === drawer.drawer_id ? '#e3f2fd' : 'white',
+                          bgcolor: isSelected ? '#e3f2fd' : 'white',
                           cursor: 'pointer'
                         }}
                       >
-                        <TableCell>
+                      <TableCell>
                           <Checkbox
-                            checked={selectedConfigDrawer?.drawer_id === drawer.drawer_id}
-                            onChange={() => setSelectedConfigDrawer(drawer)}
+                            checked={isSelected}
+                            onChange={() => setSelectedConfigDrawer(isSelected ? null : drawer)}
                           />
                         </TableCell>
                         <TableCell>{drawer.drawer_name}</TableCell>
@@ -4359,7 +4374,8 @@ function CashDrawer() {
                         <TableCell>{formatCurrency(drawer.min_close || 0)}</TableCell>
                         <TableCell>{formatCurrency(drawer.max_close || 0)}</TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                 </TableBody>
               </Table>
             </TableContainer>
