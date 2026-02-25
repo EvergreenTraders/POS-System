@@ -835,11 +835,16 @@ app.get('/api/employee-sessions/closing-notification', async (req, res) => {
 // GET /api/employee-sessions/report - Get time clock report for date range
 app.get('/api/employee-sessions/report', async (req, res) => {
   try {
-    const { start_date, end_date } = req.query;
+    const { start_date, end_date, employee_ids } = req.query;
 
     if (!start_date || !end_date) {
       return res.status(400).json({ error: 'start_date and end_date are required' });
     }
+
+    // Parse optional employee_ids filter (comma-separated)
+    const empIdFilter = employee_ids
+      ? employee_ids.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id))
+      : null;
 
     // Get current store
     const storeResult = await pool.query(
@@ -847,16 +852,29 @@ app.get('/api/employee-sessions/report', async (req, res) => {
     );
     const currentStore = storeResult.rows[0] || { store_id: null, store_name: 'Unknown', store_code: 'N/A' };
 
-    // Get employees for the current store only
+    // Get employees for the current store only (optionally filtered to specific employees)
+    const empParams = [currentStore.store_id];
+    let empFilter = '';
+    if (empIdFilter && empIdFilter.length > 0) {
+      empFilter = `AND employee_id = ANY($2::int[])`;
+      empParams.push(empIdFilter);
+    }
     const employeesResult = await pool.query(`
       SELECT employee_id, first_name, last_name, username, status
       FROM employees
       WHERE status = 'Active'
         AND ($1::int IS NULL OR store_id = $1)
+        ${empFilter}
       ORDER BY first_name ASC
-    `, [currentStore.store_id]);
+    `, empParams);
 
     // Get sessions within date range
+    const sessParams = [start_date, end_date];
+    let sessFilter = '';
+    if (empIdFilter && empIdFilter.length > 0) {
+      sessFilter = `AND es.employee_id = ANY($3::int[])`;
+      sessParams.push(empIdFilter);
+    }
     const sessionsResult = await pool.query(`
       SELECT
         es.session_id,
@@ -869,8 +887,9 @@ app.get('/api/employee-sessions/report', async (req, res) => {
       FROM employee_sessions es
       WHERE es.clock_in_time >= $1::date
         AND es.clock_in_time < ($2::date + INTERVAL '1 day')
+        ${sessFilter}
       ORDER BY es.clock_in_time ASC
-    `, [start_date, end_date]);
+    `, sessParams);
 
     // Build report: group sessions by employee
     const report = employeesResult.rows.map(emp => {
@@ -4372,7 +4391,18 @@ app.post('/api/drawers', async (req, res) => {
 app.put('/api/drawers/:drawerId', async (req, res) => {
   try {
     const { drawerId } = req.params;
-    const { drawer_name, is_active, min_close, max_close, has_location, is_shared, transfer_location_to } = req.body;
+    const {
+      drawer_name,
+      is_active,
+      min_close,
+      max_close,
+      has_location,
+      is_shared,
+      transfer_location_to,
+      blind_count,
+      individual_denominations,
+      electronic_blind_count
+    } = req.body;
 
     // Get current store id
     const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
@@ -4508,6 +4538,19 @@ app.put('/api/drawers/:drawerId', async (req, res) => {
     if (is_shared !== undefined && drawer.drawer_type === 'physical') {
       updates.push(`is_shared = $${paramCount++}`);
       values.push(is_shared === true);
+    }
+    // Per-drawer tracking and count options
+    if (blind_count !== undefined) {
+      updates.push(`blind_count = $${paramCount++}`);
+      values.push(blind_count === true);
+    }
+    if (individual_denominations !== undefined) {
+      updates.push(`individual_denominations = $${paramCount++}`);
+      values.push(individual_denominations === true);
+    }
+    if (electronic_blind_count !== undefined) {
+      updates.push(`electronic_blind_count = $${paramCount++}`);
+      values.push(electronic_blind_count === true);
     }
 
     if (updates.length === 0) {
@@ -10266,8 +10309,8 @@ app.post('/api/payment-methods', async (req, res) => {
       accepted_for_pawn_redeems
     } = req.body;
 
-    if (!method_name || !method_value) {
-      return res.status(400).json({ error: 'Method name and method value are required' });
+    if (!method_name) {
+      return res.status(400).json({ error: 'Method name is required' });
     }
 
     // Check if method_name already exists (must be unique)
@@ -10279,8 +10322,9 @@ app.post('/api/payment-methods', async (req, res) => {
       return res.status(400).json({ error: 'A payment method with this name already exists' });
     }
 
-    // Validate method_value format (should be lowercase with underscores)
-    const validMethodValue = method_value.toLowerCase().replace(/\s+/g, '_');
+    // Auto-generate method_value from method_name if not provided
+    const rawValue = method_value || method_name;
+    const validMethodValue = rawValue.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '_').replace(/^_+|_+$/g, '');
 
     // Check if method_value already exists (must be unique)
     const valueCheck = await pool.query(
@@ -12118,7 +12162,7 @@ app.post('/api/layaways/:id/payment', async (req, res) => {
     await client.query(
       `INSERT INTO layaway_payments (layaway_id, amount, payment_method, notes, received_by)
        VALUES ($1, $2, $3, $4, $5)`,
-      [id, amount, payment_method || 'CASH', notes, received_by]
+      [id, amount, payment_method || 'cash', notes, received_by]
     );
 
     // Update layaway
@@ -12942,8 +12986,9 @@ app.post('/api/payments', async (req, res) => {
 
     const { transaction_id, amount, payment_method } = req.body;
 
-    // Validate payment method
-    if (!['CASH', 'CREDIT_CARD', 'DEBIT_CARD', 'BANK_TRANSFER', 'CHECK'].includes(payment_method)) {
+    // Validate payment method exists in configured tender types
+    const pmCheck = await client.query('SELECT id FROM payment_methods WHERE method_value = $1', [payment_method]);
+    if (pmCheck.rows.length === 0) {
       throw new Error('Invalid payment method');
     }
 
@@ -12989,8 +13034,9 @@ app.post('/api/payments', async (req, res) => {
       [transaction_id, amount, payment_method]
     );
 
-    // If this is a CASH payment, link it to the employee's active cash drawer session
-    if (payment_method === 'CASH') {
+    // If this is a cash payment, link it to the employee's active cash drawer session
+    const isCashPayment = await client.query('SELECT id FROM payment_methods WHERE method_value = $1 AND is_default_cash = true', [payment_method]);
+    if (isCashPayment.rows.length > 0) {
       // Get the employee's active cash drawer session
       const sessionResult = await client.query(
         `SELECT session_id FROM cash_drawer_sessions

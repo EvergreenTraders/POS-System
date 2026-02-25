@@ -248,6 +248,11 @@ function SystemConfig() {
   const [tenderTypesLoading, setTenderTypesLoading] = useState(false);
   const [tenderTypeDialogOpen, setTenderTypeDialogOpen] = useState(false);
   const [editingTenderType, setEditingTenderType] = useState(null);
+  // Auto-generate method_value from method_name (lowercase, spaces to underscores, strip special chars)
+  const generateMethodValue = (name) => {
+    return name.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, '_').replace(/^_+|_+$/g, '');
+  };
+
   const [tenderTypeForm, setTenderTypeForm] = useState({
     method_name: '',
     method_value: '',
@@ -2337,10 +2342,10 @@ function SystemConfig() {
 
   // Handle save tender type (add or update)
   const handleSaveTenderType = async () => {
-    if (!tenderTypeForm.method_name.trim() || !tenderTypeForm.method_value.trim()) {
+    if (!tenderTypeForm.method_name.trim()) {
       setSnackbar({
         open: true,
-        message: 'Method name and value are required',
+        message: 'Method name is required',
         severity: 'error'
       });
       return;
@@ -5083,22 +5088,17 @@ function SystemConfig() {
                   fullWidth
                   label="Name"
                   value={tenderTypeForm.method_name}
-                  onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, method_name: e.target.value })}
+                  onChange={(e) => {
+                    const newName = e.target.value;
+                    const updates = { ...tenderTypeForm, method_name: newName };
+                    if (!editingTenderType) {
+                      updates.method_value = generateMethodValue(newName);
+                    }
+                    setTenderTypeForm(updates);
+                  }}
                   placeholder="e.g., Cash, Credit Card, Check, US Cash"
                   required
                   helperText="Must be unique (e.g., can't create a second 'Cash', but can create 'US Cash')"
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Method Value"
-                  value={tenderTypeForm.method_value}
-                  onChange={(e) => setTenderTypeForm({ ...tenderTypeForm, method_value: e.target.value })}
-                  placeholder="e.g., cash, credit_card, check, us_cash"
-                  helperText="Lowercase with underscores (e.g., credit_card)"
-                  required
-                  disabled={editingTenderType?.is_default_cash}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
