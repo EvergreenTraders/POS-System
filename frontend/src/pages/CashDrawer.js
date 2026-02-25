@@ -165,7 +165,10 @@ function CashDrawer() {
     min_close: 0,
     max_close: 0,
     has_location: false,
-    is_shared: true
+    is_shared: true,
+    blind_count: true,
+    individual_denominations: false,
+    electronic_blind_count: false
   });
   const [locationTransferDialog, setLocationTransferDialog] = useState(false);
   const [transferLocationTo, setTransferLocationTo] = useState('');
@@ -529,7 +532,10 @@ function CashDrawer() {
       min_close: minClose,
       max_close: maxClose,
       has_location: selectedConfigDrawer.has_location || false,
-      is_shared: selectedConfigDrawer.is_shared !== false // Default to true if null/undefined
+      is_shared: selectedConfigDrawer.is_shared !== false, // Default to true if null/undefined
+      blind_count: selectedConfigDrawer.blind_count !== false, // default to true
+      individual_denominations: !!selectedConfigDrawer.individual_denominations,
+      electronic_blind_count: !!selectedConfigDrawer.electronic_blind_count
     });
     setEditDrawerDialog(true);
   };
@@ -560,7 +566,10 @@ function CashDrawer() {
             min_close: editDrawerForm.min_close,
             max_close: editDrawerForm.max_close,
             has_location: editDrawerForm.has_location,
-            is_shared: editDrawerForm.is_shared
+            is_shared: editDrawerForm.is_shared,
+            blind_count: editDrawerForm.blind_count,
+            individual_denominations: editDrawerForm.individual_denominations,
+            electronic_blind_count: editDrawerForm.electronic_blind_count
           });
           // If successful, no items exist, proceed normally
         } catch (err) {
@@ -590,7 +599,10 @@ function CashDrawer() {
           min_close: editDrawerForm.min_close,
           max_close: editDrawerForm.max_close,
           has_location: editDrawerForm.has_location,
-          is_shared: editDrawerForm.is_shared
+          is_shared: editDrawerForm.is_shared,
+          blind_count: editDrawerForm.blind_count,
+          individual_denominations: editDrawerForm.individual_denominations,
+          electronic_blind_count: editDrawerForm.electronic_blind_count
         });
       }
 
@@ -619,6 +631,9 @@ function CashDrawer() {
         max_close: editDrawerForm.max_close,
         has_location: editDrawerForm.has_location,
         is_shared: editDrawerForm.is_shared,
+        blind_count: editDrawerForm.blind_count,
+        individual_denominations: editDrawerForm.individual_denominations,
+        electronic_blind_count: editDrawerForm.electronic_blind_count,
         transfer_location_to: transferLocationTo
       });
 
@@ -4527,6 +4542,33 @@ function CashDrawer() {
                 />
               }
               label="Available"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={editDrawerForm.individual_denominations}
+                  onChange={(e) => setEditDrawerForm({ ...editDrawerForm, individual_denominations: e.target.checked })}
+                />
+              }
+              label="Track by denominations (instead of balance)"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={editDrawerForm.blind_count}
+                  onChange={(e) => setEditDrawerForm({ ...editDrawerForm, blind_count: e.target.checked })}
+                />
+              }
+              label="Blind count for cash (hide expected balance while counting)"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={editDrawerForm.electronic_blind_count}
+                  onChange={(e) => setEditDrawerForm({ ...editDrawerForm, electronic_blind_count: e.target.checked })}
+                />
+              }
+              label="Blind count for electronic tenders"
             />
             <TextField
               label="Min Amount"

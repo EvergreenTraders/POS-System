@@ -4372,7 +4372,18 @@ app.post('/api/drawers', async (req, res) => {
 app.put('/api/drawers/:drawerId', async (req, res) => {
   try {
     const { drawerId } = req.params;
-    const { drawer_name, is_active, min_close, max_close, has_location, is_shared, transfer_location_to } = req.body;
+    const {
+      drawer_name,
+      is_active,
+      min_close,
+      max_close,
+      has_location,
+      is_shared,
+      transfer_location_to,
+      blind_count,
+      individual_denominations,
+      electronic_blind_count
+    } = req.body;
 
     // Get current store id
     const currentStoreResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
@@ -4508,6 +4519,19 @@ app.put('/api/drawers/:drawerId', async (req, res) => {
     if (is_shared !== undefined && drawer.drawer_type === 'physical') {
       updates.push(`is_shared = $${paramCount++}`);
       values.push(is_shared === true);
+    }
+    // Per-drawer tracking and count options
+    if (blind_count !== undefined) {
+      updates.push(`blind_count = $${paramCount++}`);
+      values.push(blind_count === true);
+    }
+    if (individual_denominations !== undefined) {
+      updates.push(`individual_denominations = $${paramCount++}`);
+      values.push(individual_denominations === true);
+    }
+    if (electronic_blind_count !== undefined) {
+      updates.push(`electronic_blind_count = $${paramCount++}`);
+      values.push(electronic_blind_count === true);
     }
 
     if (updates.length === 0) {
