@@ -567,14 +567,24 @@ CREATE TABLE IF NOT EXISTS drawer_session_connections (
     FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (employee_id) REFERENCES employees(employee_id),
 
-    -- Ensure an employee can only have one active connection per session
-    CONSTRAINT unique_active_connection UNIQUE (session_id, employee_id, is_active)
+    -- Ensure an employee can only have one active connection per session (partial index applied below)
 );
 
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_drawer_connections_session ON drawer_session_connections(session_id);
 CREATE INDEX IF NOT EXISTS idx_drawer_connections_employee ON drawer_session_connections(employee_id);
 CREATE INDEX IF NOT EXISTS idx_drawer_connections_active ON drawer_session_connections(is_active);
+
+-- Partial unique index: only one active connection allowed per employee per session
+-- Allows multiple historical (is_active = FALSE) rows for the same employee/session
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes WHERE indexname = 'unique_active_connection'
+  ) THEN
+    EXECUTE 'CREATE UNIQUE INDEX unique_active_connection ON drawer_session_connections (session_id, employee_id) WHERE is_active = TRUE';
+  END IF;
+END $$;
 
 -- Add comments for documentation
 COMMENT ON TABLE drawer_session_connections IS 'Tracks employees connected to shared drawer sessions (safe/master_safe). When an employee opens a shared drawer that is already open, they connect to the existing session.';

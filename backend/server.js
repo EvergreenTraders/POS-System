@@ -339,6 +339,9 @@ pool.query(`
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS petty_cash_limit DECIMAL(10,2) DEFAULT NULL
 `).catch(err => console.error('petty_cash_limit migration:', err.message));
+pool.query(`
+  ALTER TABLE employees ADD COLUMN IF NOT EXISTS employment_type VARCHAR(20) NOT NULL DEFAULT 'hourly'
+`).catch(err => console.error('employment_type migration:', err.message));
 
 // Bank account migrations
 pool.query(`
@@ -359,6 +362,13 @@ pool.query(`
 pool.query(`
   ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
 `).catch(err => console.error('banks store_id migration:', err.message));
+
+// Fix unique_active_connection: replace table constraint with partial index
+// Allows multiple historical (is_active = FALSE) rows per employee/session
+pool.query(`ALTER TABLE drawer_session_connections DROP CONSTRAINT IF EXISTS unique_active_connection`)
+  .then(() => pool.query(`DROP INDEX IF EXISTS unique_active_connection`))
+  .then(() => pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS unique_active_connection ON drawer_session_connections (session_id, employee_id) WHERE is_active = TRUE`))
+  .catch(err => console.error('unique_active_connection migration:', err.message));
 
 app.post('/api/auth/login', async (req, res) => {
   try {
@@ -420,7 +430,8 @@ app.post('/api/auth/login', async (req, res) => {
           transfer_limit: user.transfer_limit != null ? parseFloat(user.transfer_limit) : null,
           can_petty_cash: user.can_petty_cash !== false,
           petty_cash_limit: user.petty_cash_limit != null ? parseFloat(user.petty_cash_limit) : null,
-          discrepancy_threshold: user.discrepancy_threshold != null ? parseFloat(user.discrepancy_threshold) : null
+          discrepancy_threshold: user.discrepancy_threshold != null ? parseFloat(user.discrepancy_threshold) : null,
+          employment_type: user.employment_type || 'hourly'
         }
       });
     } else {
@@ -605,7 +616,11 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
     const { id } = req.params;
     const { trackHours, canOpenStore, canOpenDrawer, canViewDrawer, canViewSafe,
             transferAllowedDrawer, transferAllowedSafe, transferAllowedBank, transferAllowedStore,
-            transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold } = req.body;
+            transferLimit, canPettyCash, pettyCashLimit, discrepancyThreshold, employmentType } = req.body;
+
+    const empType = employmentType === 'salary' ? 'salary' : 'hourly';
+    // Salary employees are always exempt from clocking in
+    const effectiveTrackHours = empType === 'salary' ? false : trackHours !== false;
 
     const query = `
       UPDATE employees
@@ -614,16 +629,16 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
           transfer_allowed_drawer = $6, transfer_allowed_safe = $7,
           transfer_allowed_bank = $8, transfer_allowed_store = $9,
           transfer_limit = $10, can_petty_cash = $11, petty_cash_limit = $12,
-          discrepancy_threshold = $13,
+          discrepancy_threshold = $13, employment_type = $14,
           updated_at = CURRENT_TIMESTAMP
-      WHERE employee_id = $14
+      WHERE employee_id = $15
       RETURNING employee_id, username, first_name, last_name, role,
         track_hours, can_open_store, can_open_drawer, can_view_drawer, can_view_safe,
         transfer_allowed_drawer, transfer_allowed_safe, transfer_allowed_bank, transfer_allowed_store,
-        transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold
+        transfer_limit, can_petty_cash, petty_cash_limit, discrepancy_threshold, employment_type
     `;
     const result = await pool.query(query, [
-      trackHours !== false,
+      effectiveTrackHours,
       canOpenStore !== false,
       canOpenDrawer !== false,
       canViewDrawer !== false,
@@ -636,6 +651,7 @@ app.put('/api/employees/:id/permissions', async (req, res) => {
       canPettyCash !== false,
       pettyCashLimit != null && pettyCashLimit !== '' ? parseFloat(pettyCashLimit) : null,
       discrepancyThreshold != null && discrepancyThreshold !== '' ? parseFloat(discrepancyThreshold) : null,
+      empType,
       id
     ]);
 

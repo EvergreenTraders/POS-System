@@ -68,6 +68,9 @@ COMMENT ON COLUMN employees.discrepancy_threshold IS 'Per-employee cash drawer d
 
 -- Add store_id column to link employees to stores
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+
+-- Add employment_type column (hourly or salary; salary employees are exempt from clocking in)
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS employment_type VARCHAR(20) NOT NULL DEFAULT 'hourly';
 COMMENT ON COLUMN employees.store_id IS 'The store this employee belongs to. NULL means employee can work at any store.';
 
 -- Set store_id = 1 for all existing employees

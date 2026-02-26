@@ -943,6 +943,7 @@ function SystemConfig() {
       canPettyCash: get('can_petty_cash', true),
       pettyCashLimit: overrideField === 'petty_cash_limit' ? overrideValue : (employee.petty_cash_limit != null ? employee.petty_cash_limit : null),
       discrepancyThreshold: overrideField === 'discrepancy_threshold' ? overrideValue : (employee.discrepancy_threshold != null ? employee.discrepancy_threshold : null),
+      employmentType: overrideField === 'employment_type' ? overrideValue : (employee.employment_type || 'hourly'),
     };
   };
 
@@ -4916,6 +4917,7 @@ function SystemConfig() {
                   <TableHead>
                     <TableRow>
                       <TableCell>Employee</TableCell>
+                      <TableCell align="center">Type</TableCell>
                       <TableCell align="center">Track Hours</TableCell>
                       <TableCell align="center">Can Open/Close Store</TableCell>
                       <TableCell align="center">Can Open Drawer</TableCell>
@@ -4938,11 +4940,35 @@ function SystemConfig() {
                           <Chip label={emp.role} size="small" sx={{ mt: 0.5 }} />
                         </TableCell>
                         <TableCell align="center" sx={{ p: 1 }}>
+                          <Chip
+                            label={emp.employment_type === 'salary' ? 'Salary' : 'Hourly'}
+                            size="small"
+                            color={emp.employment_type === 'salary' ? 'secondary' : 'default'}
+                            onClick={() => {
+                              const newType = emp.employment_type === 'salary' ? 'hourly' : 'salary';
+                              setEmployeePermissions(prev =>
+                                prev.map(e => e.employee_id === emp.employee_id ? { ...e, employment_type: newType, track_hours: newType === 'salary' ? false : e.track_hours } : e)
+                              );
+                              const payload = buildPermissionPayload(emp, 'employment_type', newType);
+                              axios.put(`${API_BASE_URL}/employees/${emp.employee_id}/permissions`, payload)
+                                .then(() => setSnackbar({ open: true, message: 'Employment type updated', severity: 'success' }))
+                                .catch(() => {
+                                  setEmployeePermissions(prev =>
+                                    prev.map(e => e.employee_id === emp.employee_id ? { ...e, employment_type: emp.employment_type } : e)
+                                  );
+                                  setSnackbar({ open: true, message: 'Failed to update employment type', severity: 'error' });
+                                });
+                            }}
+                            sx={{ cursor: 'pointer', minWidth: 64 }}
+                          />
+                        </TableCell>
+                        <TableCell align="center" sx={{ p: 1 }}>
                           <Checkbox
                             checked={emp.track_hours !== false}
                             onChange={() => handlePermissionToggle(emp.employee_id, 'track_hours', emp.track_hours !== false)}
                             color="primary"
                             size="small"
+                            disabled={emp.employment_type === 'salary'}
                           />
                         </TableCell>
                         <TableCell align="center" sx={{ p: 1 }}>
