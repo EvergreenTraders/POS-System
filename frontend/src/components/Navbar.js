@@ -479,8 +479,8 @@ function Navbar() {
 
           {user && (
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              {/* Clock In/Out Button — hidden for salary employees */}
-              {user?.employment_type !== 'salary' && (clockedIn ? (
+              {/* Clock In/Out Button */}
+              {clockedIn ? (
                 <Chip
                   icon={<ClockIcon />}
                   label={`Clocked in: ${clockInTime?.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`}
@@ -520,7 +520,7 @@ function Navbar() {
                     }
                   }}
                 />
-              ))}
+              )}
 
               {balanceAlerts.length > 0 && (
                 <Tooltip

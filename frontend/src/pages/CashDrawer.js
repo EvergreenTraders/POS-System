@@ -1379,23 +1379,17 @@ function CashDrawer() {
     const employeeId = selectedEmployee || currentUser.id;
 
     // Check employee permissions and clock-in status
-    try {
-      const [empResponse, clockResponse] = await Promise.all([
-        fetch(`${config.apiUrl}/employees`),
-        fetch(`${config.apiUrl}/employee-sessions/clocked-in`)
-      ]);
-      if (empResponse.ok && clockResponse.ok) {
-        const employees = await empResponse.json();
-        const currentEmployee = employees.find(e => e.employee_id === currentUser.id);
+    if (currentUser.can_open_drawer === false) {
+      showSnackbar('You do not have permission to open a drawer', 'error');
+      return;
+    }
 
-        // Check if employee has permission to open drawers
-        if (currentEmployee && currentEmployee.can_open_drawer === false) {
-          showSnackbar('You do not have permission to open a drawer', 'error');
-          return;
-        }
-
-        // Check if employee has track_hours enabled and is not clocked in
-        if (currentEmployee && currentEmployee.track_hours !== false) {
+    // Require clock-in for hourly employees (salary employees are exempt)
+    const isSalary = currentUser.employment_type === 'salary';
+    if (currentUser.track_hours !== false && !isSalary) {
+      try {
+        const clockResponse = await fetch(`${config.apiUrl}/employee-sessions/clocked-in`);
+        if (clockResponse.ok) {
           const clockedInList = await clockResponse.json();
           const isClockedIn = clockedInList.some(emp => emp.employee_id === currentUser.id);
           if (!isClockedIn) {
@@ -1403,9 +1397,9 @@ function CashDrawer() {
             return;
           }
         }
+      } catch (err) {
+        console.error('Error checking clock-in status:', err);
       }
-    } catch (err) {
-      console.error('Error checking employee permissions:', err);
     }
 
     // Calculate balance based on opening mode (individual denominations vs drawer total)
@@ -1937,6 +1931,24 @@ function CashDrawer() {
 
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const employeeId = selectedEmployee || currentUser.id;
+
+    // Require clock-in for hourly employees (salary employees are exempt)
+    const isSalary = currentUser.employment_type === 'salary';
+    if (currentUser.track_hours !== false && !isSalary) {
+      try {
+        const clockResponse = await fetch(`${config.apiUrl}/employee-sessions/clocked-in`);
+        if (clockResponse.ok) {
+          const clockedInList = await clockResponse.json();
+          const isClockedIn = clockedInList.some(emp => emp.employee_id === currentUser.id);
+          if (!isClockedIn) {
+            setClockInWarningOpen(true);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Error checking clock-in status:', err);
+      }
+    }
 
     try {
       // Call the open drawer API - it will detect the existing session and create a connection
