@@ -565,9 +565,7 @@ CREATE TABLE IF NOT EXISTS drawer_session_connections (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
 
     FOREIGN KEY (session_id) REFERENCES cash_drawer_sessions(session_id) ON DELETE CASCADE,
-    FOREIGN KEY (employee_id) REFERENCES employees(employee_id),
-
-    -- Ensure an employee can only have one active connection per session (partial index applied below)
+    FOREIGN KEY (employee_id) REFERENCES employees(employee_id)
 );
 
 -- Create indexes for performance
