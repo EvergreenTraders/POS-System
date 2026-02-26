@@ -672,13 +672,13 @@ app.post('/api/employee-sessions/clock-in', async (req, res) => {
       return res.status(404).json({ error: 'Employee not found. Please log out and log back in.' });
     }
 
-    // Check if employee is already clocked in
-    const existingSession = await pool.query(
-      "SELECT session_id FROM employee_sessions WHERE employee_id = $1 AND status = 'clocked_in'",
+    // Check if the most recent session is still clocked_in
+    const lastSession = await pool.query(
+      "SELECT status FROM employee_sessions WHERE employee_id = $1 ORDER BY clock_in_time DESC LIMIT 1",
       [employee_id]
     );
 
-    if (existingSession.rows.length > 0) {
+    if (lastSession.rows.length > 0 && lastSession.rows[0].status === 'clocked_in') {
       return res.status(400).json({ error: 'Employee is already clocked in' });
     }
 
@@ -701,9 +701,6 @@ app.post('/api/employee-sessions/clock-in', async (req, res) => {
     }
     if (error.code === '23503') {
       return res.status(400).json({ error: 'Employee not found. Please log out and log back in.' });
-    }
-    if (error.code === '23505') {
-      return res.status(400).json({ error: 'Employee is already clocked in.' });
     }
     res.status(500).json({ error: 'Failed to clock in employee', details: error.message });
   }
