@@ -93,7 +93,7 @@ function TimeClock() {
         const clockedInEmployees = await response.json();
         setClockedInEmployeeIds(new Set(clockedInEmployees.map(e => e.employee_id)));
         const currentSession = clockedInEmployees.find(
-          emp => emp.employee_id === user.id
+          emp => emp.employee_id == user.id
         );
         if (currentSession) {
           setClockedIn(true);
@@ -232,7 +232,9 @@ function TimeClock() {
         hasIncomplete = true;
         continue;
       }
-      totalMs += new Date(s.clock_out_time) - new Date(s.clock_in_time);
+      const inT = new Date(s.clock_in_time); inT.setSeconds(0, 0);
+      const outT = new Date(s.clock_out_time); outT.setSeconds(0, 0);
+      totalMs += outT - inT;
     }
 
     if (totalMs === 0 && hasIncomplete) return null;
@@ -265,7 +267,31 @@ function TimeClock() {
     });
   };
 
-  // Calculate total net hours for an employee across all days
+  // Calculate raw total minutes for an employee (no deduction) — matches sum of displayed session rows
+  const calculateEmployeeRawMinutes = (sessions) => {
+    let total = 0;
+    for (const s of sessions) {
+      if (!s.clock_in_time || !s.clock_out_time) continue;
+      const inT = new Date(s.clock_in_time); inT.setSeconds(0, 0);
+      const outT = new Date(s.clock_out_time); outT.setSeconds(0, 0);
+      total += Math.round((outT - inT) / 60000);
+    }
+    return total;
+  };
+
+  // Calculate lunch deduction in minutes for an employee across all days
+  const calculateEmployeeLunchMinutes = (sessions) => {
+    const days = buildEmployeeDays(sessions);
+    let deductionMinutes = 0;
+    for (const day of days) {
+      if (day.sessions.length === 0) continue;
+      const dayHrs = calculateDayHours(day.sessions);
+      if (dayHrs) deductionMinutes += Math.round((dayHrs.raw - dayHrs.net) * 60);
+    }
+    return deductionMinutes;
+  };
+
+  // Keep for grand total calculation
   const calculateEmployeeTotal = (sessions) => {
     const days = buildEmployeeDays(sessions);
     let total = 0;
@@ -284,6 +310,13 @@ function TimeClock() {
       minute: '2-digit',
       hour12: false,
     });
+  };
+
+  const formatHoursMinutes = (hours) => {
+    const totalMinutes = Math.round(hours * 60);
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return `${h}h ${m}m`;
   };
 
   // Edit handlers
@@ -427,9 +460,8 @@ function TimeClock() {
   };
 
   // Compute report totals
-  const totalHours = report.reduce((sum, emp) => {
-    return sum + calculateEmployeeTotal(emp.sessions);
-  }, 0);
+  const totalHours = report.reduce((sum, emp) => sum + calculateEmployeeTotal(emp.sessions), 0);
+  const grandNetMinutes = Math.round(totalHours * 60);
 
   return (
     <Box>
@@ -572,6 +604,7 @@ function TimeClock() {
                   <>
                     {report.map((emp, empIdx) => {
                       const days = buildEmployeeDays(emp.sessions);
+                      const empNetMinutes = Math.round(calculateEmployeeTotal(emp.sessions) * 60);
                       const empTotal = calculateEmployeeTotal(emp.sessions);
                       const empBg = empIdx % 2 === 0 ? '#f5f5f5' : 'white';
                       const colCount = isAuthorized ? 7 : 6;
@@ -598,11 +631,21 @@ function TimeClock() {
                           );
                           isFirstRow = false;
                         } else {
-                          const dayHours = calculateDayHours(day.sessions);
+                          const dayHrs = calculateDayHours(day.sessions);
+                          const dayLunchMinutes = dayHrs ? Math.round((dayHrs.raw - dayHrs.net) * 60) : 0;
+
                           day.sessions.forEach((session, sIdx) => {
                             const clockIn = session.clock_in_time ? new Date(session.clock_in_time) : null;
                             const clockOut = session.clock_out_time ? new Date(session.clock_out_time) : null;
-                            const isLastSessionOfDay = sIdx === day.sessions.length - 1;
+                            const inTrunc = clockIn ? (d => { d.setSeconds(0,0); return d; })(new Date(clockIn)) : null;
+                            const outTrunc = clockOut ? (d => { d.setSeconds(0,0); return d; })(new Date(clockOut)) : null;
+                            const rawMinutes = inTrunc && outTrunc
+                              ? Math.round((outTrunc.getTime() - inTrunc.getTime()) / 60000)
+                              : null;
+                            // Apply lunch deduction to the first session of the day
+                            const sessionMinutes = rawMinutes !== null && sIdx === 0
+                              ? Math.max(0, rawMinutes - dayLunchMinutes)
+                              : rawMinutes;
 
                             rows.push(
                               <TableRow key={`${emp.employee_id}-${session.session_id}`} sx={{ bgcolor: empBg }}>
@@ -612,11 +655,11 @@ function TimeClock() {
                                 <TableCell>{formatTime(clockIn)}</TableCell>
                                 <TableCell>{formatTime(clockOut)}</TableCell>
                                 <TableCell>
-                                  {isLastSessionOfDay
-                                    ? (dayHours
-                                        ? dayHours.net.toFixed(2) + (dayHours.hasIncomplete ? '*' : '')
-                                        : '\u2014')
-                                    : ''}
+                                  {sessionMinutes !== null
+                                    ? `${Math.floor(sessionMinutes / 60)}h ${sessionMinutes % 60}m`
+                                    : clockIn && !clockOut
+                                      ? '*'
+                                      : '\u2014'}
                                 </TableCell>
                                 {isAuthorized && (
                                   <TableCell sx={{ py: 0 }}>
@@ -664,13 +707,13 @@ function TimeClock() {
                         }
                       });
 
-                      // Employee subtotal row — TOTAL: under Time OUT, value under Hours
+                      // Employee subtotal row
                       rows.push(
                         <TableRow key={`${emp.employee_id}-total`} sx={{ bgcolor: empBg }}>
                           <TableCell colSpan={4} sx={{ borderBottom: 'none' }} />
                           <TableCell sx={{ fontWeight: 700 }}>TOTAL:</TableCell>
                           <TableCell sx={{ fontWeight: 700 }}>
-                            {empTotal.toFixed(2)}
+                            {`${Math.floor(empNetMinutes / 60)}h ${empNetMinutes % 60}m`}
                           </TableCell>
                           {isAuthorized && <TableCell />}
                         </TableRow>
@@ -693,7 +736,7 @@ function TimeClock() {
                         <TableCell colSpan={4} />
                         <TableCell sx={{ fontWeight: 700 }}>All Employees:</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>
-                          {totalHours.toFixed(2)}
+                          {`${Math.floor(grandNetMinutes / 60)}h ${grandNetMinutes % 60}m`}
                         </TableCell>
                         {isAuthorized && <TableCell />}
                       </TableRow>

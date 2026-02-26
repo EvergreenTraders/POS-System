@@ -71,7 +71,7 @@ function Navbar() {
         if (response.ok) {
           const clockedInEmployees = await response.json();
           const currentEmployeeSession = clockedInEmployees.find(
-            emp => emp.employee_id === user.id
+            emp => emp.employee_id == user.id
           );
 
           if (currentEmployeeSession) {
