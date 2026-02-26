@@ -281,7 +281,7 @@ function Navbar() {
         window.dispatchEvent(new CustomEvent('clockStatusChanged'));
       } else {
         const error = await response.json();
-        alert(error.details || error.error || 'Failed to clock in');
+        alert(error.error || 'Failed to clock in');
       }
     } catch (error) {
       console.error('Error clocking in:', error);

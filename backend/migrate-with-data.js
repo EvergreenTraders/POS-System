@@ -236,7 +236,7 @@ async function importData() {
       for (let i = importOrder.length - 1; i >= 0; i--) {
         const tableName = importOrder[i];
         try {
-          await client.query(`TRUNCATE TABLE ${tableName} RESTART IDENTITY CASCADE`);
+          await client.query(`TRUNCATE TABLE ${tableName} CASCADE`);
           console.log(`    Cleared ${tableName}`);
         } catch (error) {
           console.log(`    ⚠ Could not clear ${tableName}: ${error.message}`);
@@ -406,6 +406,12 @@ async function importData() {
       // Re-enable foreign key checks
       console.log('\n  Re-enabling foreign key checks...');
       await client.query('SET session_replication_role = DEFAULT;');
+
+      // Reset all sequences to be above the max imported IDs
+      console.log('\n  Resetting sequences after data import...');
+      const resetSeqSql = fs.readFileSync(path.join(__dirname, 'database', 'reset_sequences.sql'), 'utf8');
+      await client.query(resetSeqSql);
+      console.log('  ✓ Sequences reset\n');
 
       console.log(`\n✓ Data import completed!`);
       console.log(`  Imported: ${importedCount} tables`);

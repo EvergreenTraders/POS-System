@@ -695,14 +695,14 @@ app.post('/api/employee-sessions/clock-in', async (req, res) => {
 
     res.status(201).json(session);
   } catch (error) {
-    console.error('Error clocking in employee:', error.code, error.message);
+    console.error('Error clocking in employee:', error);
     if (error.code === '42P01') {
       return res.status(500).json({ error: 'Database table missing. Please contact your administrator.' });
     }
     if (error.code === '23503') {
       return res.status(400).json({ error: 'Employee not found. Please log out and log back in.' });
     }
-    res.status(500).json({ error: 'Failed to clock in employee', details: error.message });
+    res.status(500).json({ error: 'Failed to clock in employee' });
   }
 });
 
