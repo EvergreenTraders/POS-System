@@ -391,7 +391,7 @@ const Login = () => {
                 }
             }
         } catch (err) {
-            setClockError(err.response?.data?.error || 'Failed to process time clock action');
+            setClockError(err.response?.data?.details || err.response?.data?.error || 'Failed to process time clock action');
         }
     };
 

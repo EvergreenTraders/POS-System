@@ -663,6 +663,15 @@ app.post('/api/employee-sessions/clock-in', async (req, res) => {
       return res.status(400).json({ error: 'Employee ID is required' });
     }
 
+    // Verify employee exists before doing anything
+    const empCheck = await pool.query(
+      'SELECT employee_id, first_name, last_name FROM employees WHERE employee_id = $1',
+      [employee_id]
+    );
+    if (empCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found. Please log out and log back in.' });
+    }
+
     // Check if employee is already clocked in
     const existingSession = await pool.query(
       "SELECT session_id FROM employee_sessions WHERE employee_id = $1 AND status = 'clocked_in'",
@@ -680,20 +689,22 @@ app.post('/api/employee-sessions/clock-in', async (req, res) => {
       RETURNING *
     `, [employee_id, notes || null]);
 
-    // Get employee details for response
-    const employee = await pool.query(
-      'SELECT first_name, last_name FROM employees WHERE employee_id = $1',
-      [employee_id]
-    );
-
+    const emp = empCheck.rows[0];
     const session = result.rows[0];
-    session.employee_name = employee.rows[0]
-      ? `${employee.rows[0].first_name} ${employee.rows[0].last_name}`
-      : 'Unknown';
+    session.employee_name = `${emp.first_name} ${emp.last_name}`;
 
     res.status(201).json(session);
   } catch (error) {
-    console.error('Error clocking in employee:', error);
+    console.error('Error clocking in employee:', error.code, error.message);
+    if (error.code === '42P01') {
+      return res.status(500).json({ error: 'Database table missing. Please contact your administrator.' });
+    }
+    if (error.code === '23503') {
+      return res.status(400).json({ error: 'Employee not found. Please log out and log back in.' });
+    }
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Employee is already clocked in.' });
+    }
     res.status(500).json({ error: 'Failed to clock in employee', details: error.message });
   }
 });
