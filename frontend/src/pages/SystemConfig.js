@@ -2572,7 +2572,7 @@ function SystemConfig() {
   return (
     <Container>
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
-        <Tabs value={activeTab} onChange={handleTabChange}>
+        <Tabs value={activeTab} onChange={handleTabChange} variant="scrollable" scrollButtons="auto">
           <Tab label="General" />
           <Tab label="Pawn Configuration" />
           <Tab label="Tax Configuration" />
@@ -4842,10 +4842,6 @@ function SystemConfig() {
       <TabPanel value={activeTab} index={6}>
         <StyledPaper elevation={2}>
           <ConfigSection>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Configure per-employee permissions, transfer limits, and petty cash settings. Changes take effect immediately.
-            </Typography>
-
             {employeePermissionsLoading ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
                 <CircularProgress />
