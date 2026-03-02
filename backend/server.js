@@ -363,6 +363,7 @@ pool.query(`
   ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
 `).catch(err => console.error('banks store_id migration:', err.message));
 
+
 // Fix unique_active_connection: replace table constraint with partial index
 // Allows multiple historical (is_active = FALSE) rows per employee/session
 pool.query(`ALTER TABLE drawer_session_connections DROP CONSTRAINT IF EXISTS unique_active_connection`)
@@ -11772,7 +11773,13 @@ app.put('/api/jewelry/history/:history_id', async (req, res) => {
 // GET business info
 app.get('/api/business-info', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM business_info ORDER BY id LIMIT 1');
+    const result = await pool.query(`
+      SELECT * FROM business_info
+      WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+         OR store_id IS NULL
+      ORDER BY store_id DESC NULLS LAST
+      LIMIT 1
+    `);
     if (result.rows.length === 0) {
       // Return default values if no record exists
       return res.json({
@@ -11810,8 +11817,15 @@ app.put('/api/business-info', upload.single('logo'), async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Check if a record exists
-    const checkResult = await client.query('SELECT id FROM business_info LIMIT 1');
+    // Get current store_id
+    const storeResult = await client.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const storeId = storeResult.rows[0]?.store_id || null;
+
+    // Check if a record exists for this store
+    const checkResult = await client.query(
+      'SELECT id FROM business_info WHERE store_id = $1 LIMIT 1',
+      [storeId]
+    );
 
     let query;
     let values;
@@ -11826,11 +11840,11 @@ app.put('/api/business-info', upload.single('logo'), async (req, res) => {
         // Insert new record
         query = `
           INSERT INTO business_info
-          (business_name, email, phone, address, currency, timezone, logo, logo_filename, logo_mimetype)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          (business_name, email, phone, address, currency, timezone, logo, logo_filename, logo_mimetype, store_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           RETURNING *
         `;
-        values = [business_name, email, phone, address, currency, timezone, logoBuffer, logoFilename, logoMimetype];
+        values = [business_name, email, phone, address, currency, timezone, logoBuffer, logoFilename, logoMimetype, storeId];
       } else {
         // Update existing record
         query = `
@@ -11848,11 +11862,11 @@ app.put('/api/business-info', upload.single('logo'), async (req, res) => {
         // Insert new record
         query = `
           INSERT INTO business_info
-          (business_name, email, phone, address, currency, timezone)
-          VALUES ($1, $2, $3, $4, $5, $6)
+          (business_name, email, phone, address, currency, timezone, store_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
           RETURNING *
         `;
-        values = [business_name, email, phone, address, currency, timezone];
+        values = [business_name, email, phone, address, currency, timezone, storeId];
       } else {
         // Update existing record
         query = `
@@ -11889,7 +11903,9 @@ app.put('/api/business-info', upload.single('logo'), async (req, res) => {
 app.delete('/api/business-info/logo', async (req, res) => {
   try {
     const result = await pool.query(
-      'UPDATE business_info SET logo = NULL, logo_filename = NULL, logo_mimetype = NULL WHERE id = (SELECT id FROM business_info LIMIT 1) RETURNING *'
+      `UPDATE business_info SET logo = NULL, logo_filename = NULL, logo_mimetype = NULL
+       WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+       RETURNING *`
     );
 
     if (result.rows.length === 0) {
