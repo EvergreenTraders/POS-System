@@ -4842,9 +4842,6 @@ function SystemConfig() {
       <TabPanel value={activeTab} index={6}>
         <StyledPaper elevation={2}>
           <ConfigSection>
-            <Typography variant="h6" gutterBottom>
-              Employee Configuration
-            </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Configure per-employee permissions, transfer limits, and petty cash settings. Changes take effect immediately.
             </Typography>
@@ -4861,10 +4858,10 @@ function SystemConfig() {
                       <TableCell>Employee</TableCell>
                       <TableCell align="center">Type</TableCell>
                       <TableCell align="center">Track Hours</TableCell>
-                      <TableCell align="center">Can Open/Close Store</TableCell>
-                      <TableCell align="center">Can Open Drawer</TableCell>
-                      <TableCell align="center">Can View Drawer</TableCell>
-                      <TableCell align="center">Can View Safe</TableCell>
+                      <TableCell align="center">Open/Close Store</TableCell>
+                      <TableCell align="center">Open Drawer</TableCell>
+                      <TableCell align="center">View Drawer</TableCell>
+                      <TableCell align="center">View Safe</TableCell>
                       <TableCell align="center">Over/Short Limit</TableCell>
                       <TableCell align="center">Transfers Allowed</TableCell>
                       <TableCell align="center">Transfer Limit</TableCell>
@@ -4961,24 +4958,24 @@ function SystemConfig() {
                           />
                         </TableCell>
                         <TableCell align="center" sx={{ p: 1 }}>
-                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0 }}>
+                          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
                             <FormControlLabel
-                              control={<Checkbox size="small" checked={emp.transfer_allowed_drawer !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_drawer', emp.transfer_allowed_drawer !== false)} />}
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.transfer_allowed_drawer !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_drawer', emp.transfer_allowed_drawer !== false)} />}
                               label={<Typography variant="caption">Drawer</Typography>}
                               sx={{ m: 0 }}
                             />
                             <FormControlLabel
-                              control={<Checkbox size="small" checked={emp.transfer_allowed_safe !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_safe', emp.transfer_allowed_safe !== false)} />}
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.transfer_allowed_safe !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_safe', emp.transfer_allowed_safe !== false)} />}
                               label={<Typography variant="caption">Safe</Typography>}
                               sx={{ m: 0 }}
                             />
                             <FormControlLabel
-                              control={<Checkbox size="small" checked={emp.transfer_allowed_bank !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_bank', emp.transfer_allowed_bank !== false)} />}
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.transfer_allowed_bank !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_bank', emp.transfer_allowed_bank !== false)} />}
                               label={<Typography variant="caption">Bank</Typography>}
                               sx={{ m: 0 }}
                             />
                             <FormControlLabel
-                              control={<Checkbox size="small" checked={emp.transfer_allowed_store !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_store', emp.transfer_allowed_store !== false)} />}
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.transfer_allowed_store !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_store', emp.transfer_allowed_store !== false)} />}
                               label={<Typography variant="caption">Store</Typography>}
                               sx={{ m: 0 }}
                             />
