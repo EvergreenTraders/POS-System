@@ -4371,230 +4371,180 @@ function SystemConfig() {
 
       <TabPanel value={activeTab} index={3}>
         <StyledPaper elevation={2}>
-          <Grid container spacing={3}>
+          <Grid container spacing={2}>
             {/* Configuration Block - Left Side */}
             <Grid item xs={12} md={6}>
-              <ConfigSection>
-                <Typography variant="h5" gutterBottom>
-                  Configuration (Weight in grams → Markup %)
-                </Typography>
-                
-                <TableContainer component={Paper}>
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Weight (g)</TableCell>
-                        <TableCell>Markup %</TableCell>
+              <Typography variant="h6" gutterBottom>
+                Configuration (Weight in grams → Markup %)
+              </Typography>
+              <TableContainer component={Paper}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Weight (g)</TableCell>
+                      <TableCell>Markup %</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {weightMarkupConfig.map((config, index) => (
+                      <TableRow key={index}>
+                        <TableCell>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            value={config.weight}
+                            onChange={(e) => handleWeightMarkupChange(index, 'weight', e.target.value)}
+                            inputProps={{ inputMode: 'numeric' }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            value={config.markup}
+                            onChange={(e) => handleWeightMarkupChange(index, 'markup', e.target.value)}
+                            inputProps={{ inputMode: 'numeric' }}
+                          />
+                        </TableCell>
                       </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {weightMarkupConfig.map((config, index) => (
-                        <TableRow key={index}>
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              value={config.weight}
-                              onChange={(e) => handleWeightMarkupChange(index, 'weight', e.target.value)}
-                              inputProps={{ inputMode: 'numeric' }}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              value={config.markup}
-                              onChange={(e) => handleWeightMarkupChange(index, 'markup', e.target.value)}
-                              inputProps={{ inputMode: 'numeric' }}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-                
-                <Box mt={2} display="flex" gap={2}>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={saveWeightMarkupConfig}
-                  >
-                    Save Configuration
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={resetWeightMarkupConfig}
-                  >
-                    Reset to Default
-                  </Button>
-                </Box>
-              </ConfigSection>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <Box mt={1} display="flex" gap={1}>
+                <Button variant="contained" color="primary" size="small" onClick={saveWeightMarkupConfig}>
+                  Save Configuration
+                </Button>
+                <Button variant="outlined" size="small" onClick={resetWeightMarkupConfig}>
+                  Reset to Default
+                </Button>
+              </Box>
             </Grid>
-            
+
             {/* Calculate Price Block - Right Side */}
             <Grid item xs={12} md={6}>
-              <ConfigSection>
-                <Typography variant="h5" gutterBottom>
-                  Calculate Price
-                </Typography>
-                
-                <Box mb={2}>
-                  <Typography component="label" htmlFor="calc-weight" variant="body1" display="block" gutterBottom>
-                    Weight (g):
-                  </Typography>
+              <Typography variant="h6" gutterBottom>
+                Calculate Price
+              </Typography>
+              <Grid container spacing={1}>
+                <Grid item xs={12}>
                   <TextField
                     id="calc-weight"
                     name="weight"
+                    label="Weight (g)"
                     value={calculatorSettings.weight}
                     onChange={handleCalculatorChange}
                     fullWidth
+                    size="small"
                     type="number"
-                    inputProps={{ 
-                      inputMode: 'numeric',
-                      step: 'any' 
-                    }}
+                    inputProps={{ inputMode: 'numeric', step: 'any' }}
                   />
-                </Box>
-                
-                <Box mb={2}>
-                  <Typography component="label" htmlFor="calc-purity" variant="body1" display="block" gutterBottom>
-                    Purity:
-                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
                   <TextField
                     id="calc-purity"
                     name="purity"
+                    label="Purity"
                     select
                     value={calculatorSettings.purity}
                     onChange={handleCalculatorChange}
                     fullWidth
-                    SelectProps={{
-                      native: true,
-                    }}
+                    size="small"
                   >
-                    <option value="0.999">24K (99.9%)</option>
-                    <option value="0.917">22K (91.7%)</option>
-                    <option value="0.750">18K (75.0%)</option>
-                    <option value="0.583">14K (58.3%)</option>
-                    <option value="0.417">10K (41.7%)</option>
-                    <option value="0.375">9K (37.5%)</option>
+                    <MenuItem value="0.999">24K (99.9%)</MenuItem>
+                    <MenuItem value="0.917">22K (91.7%)</MenuItem>
+                    <MenuItem value="0.750">18K (75.0%)</MenuItem>
+                    <MenuItem value="0.583">14K (58.3%)</MenuItem>
+                    <MenuItem value="0.417">10K (41.7%)</MenuItem>
+                    <MenuItem value="0.375">9K (37.5%)</MenuItem>
                   </TextField>
-                </Box>
-                
-                <Box mb={2}>
-                  <Typography component="label" htmlFor="calc-market-price" variant="body1" display="block" gutterBottom>
-                    Market Price per g (pure gold, $):
-                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
                   <TextField
                     id="calc-market-price"
                     name="marketPrice"
+                    label="Market Price per g (pure gold, $)"
                     value={calculatorSettings.marketPrice}
                     onChange={handleCalculatorChange}
                     fullWidth
+                    size="small"
                     type="number"
-                    inputProps={{ 
-                      inputMode: 'numeric',
-                      step: 'any' 
-                    }}
+                    inputProps={{ inputMode: 'numeric', step: 'any' }}
                   />
-                </Box>
-                
-                <Box mb={2}>
-                  <Box display="flex" alignItems="center">
+                </Grid>
+                <Grid item xs={12}>
+                  <Box display="flex" alignItems="center" gap={1}>
                     <Checkbox
                       id="stone-check"
                       name="hasColoredStones"
                       checked={calculatorSettings.hasColoredStones}
                       onChange={handleCalculatorChange}
+                      size="small"
+                      sx={{ p: 0.5 }}
                     />
-                    <Typography component="label" htmlFor="stone-check">
+                    <Typography component="label" htmlFor="stone-check" variant="body2">
                       Coloured stone(s)
                     </Typography>
-                    <Box ml={2}>
-                      <Typography component="span" mr={1}>
-                        Extra Markup %:
-                      </Typography>
-                      <TextField
-                        id="extra-markup"
-                        name="extraMarkup"
-                        value={calculatorSettings.extraMarkup}
-                        onChange={handleCalculatorChange}
-                        sx={{ width: '150px' }}
-                        type="number"
-                        inputProps={{ step: 'any' }}
-                      />
-                    </Box>
+                    <TextField
+                      name="extraMarkup"
+                      label="Extra Markup %"
+                      value={calculatorSettings.extraMarkup}
+                      onChange={handleCalculatorChange}
+                      sx={{ width: '140px', ml: 'auto' }}
+                      size="small"
+                      type="number"
+                      inputProps={{ step: 'any' }}
+                    />
                   </Box>
-                </Box>
-                
-                <Box mb={3}>
-                  <Box display="flex" alignItems="center">
+                </Grid>
+                <Grid item xs={12}>
+                  <Box display="flex" alignItems="center" gap={1}>
                     <Checkbox
                       id="diamond-check"
                       name="hasDiamonds"
                       checked={calculatorSettings.hasDiamonds}
                       onChange={handleCalculatorChange}
+                      size="small"
+                      sx={{ p: 0.5 }}
                     />
-                    <Typography component="label" htmlFor="diamond-check">
+                    <Typography component="label" htmlFor="diamond-check" variant="body2">
                       Diamond(s)
                     </Typography>
-                    <Box ml={2}>
-                      <Typography component="span" mr={1}>
-                        Diamond Value ($):
-                      </Typography>
-                      <TextField
-                        id="diamond-value"
-                        name="diamondValue"
-                        value={calculatorSettings.diamondValue}
-                        onChange={handleCalculatorChange}
-                        sx={{ width: '150px' }}
-                        type="number"
-                        inputProps={{ step: 'any' }}
-                      />
-                    </Box>
+                    <TextField
+                      name="diamondValue"
+                      label="Diamond Value ($)"
+                      value={calculatorSettings.diamondValue}
+                      onChange={handleCalculatorChange}
+                      sx={{ width: '140px', ml: 'auto' }}
+                      size="small"
+                      type="number"
+                      inputProps={{ step: 'any' }}
+                    />
                   </Box>
-                </Box>
-                
-                <Box>
-                  <Button
-                    variant="outlined"
-                    onClick={calculatePrice}
-                  >
+                </Grid>
+                <Grid item xs={12}>
+                  <Button variant="outlined" size="small" onClick={calculatePrice}>
                     Calculate
                   </Button>
-                </Box>
-                
+                </Grid>
                 {calculatorSettings.result && (
-                  <Box mt={4}>
-                    <Typography variant="body1" component="div">
-                      <Box fontWeight="bold" component="span">
-                        Market metal value: 
-                      </Box>
-                      <Box component="span" fontWeight="bold">
-                        ${calculatorSettings.result.metalMarketValue}
-                      </Box>
-                    </Typography>
-                    
-                    <Typography variant="body1" component="div">
-                      <Box component="span">
-                        Retail price: 
-                      </Box>
-                      <Box component="span" fontWeight="bold">
-                        ${calculatorSettings.result.retailPrice}
-                      </Box>
-                      <Box component="span">
-                        {' '}(Markup {calculatorSettings.result.appliedMarkup}%)
-                      </Box>
-                    </Typography>
-                    
-                    {calculatorSettings.result.notes && calculatorSettings.result.notes.length > 0 && (
-                      <Typography variant="body1" component="div">
-                        <Box component="span">
-                          Includes: {calculatorSettings.result.notes.join(', ')}
-                        </Box>
+                  <Grid item xs={12}>
+                    <Box sx={{ p: 1.5, bgcolor: 'background.default', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                      <Typography variant="body2">
+                        <strong>Market metal value:</strong> ${calculatorSettings.result.metalMarketValue}
                       </Typography>
-                    )}
-                  </Box>
+                      <Typography variant="body2">
+                        Retail price: <strong>${calculatorSettings.result.retailPrice}</strong> (Markup {calculatorSettings.result.appliedMarkup}%)
+                      </Typography>
+                      {calculatorSettings.result.notes && calculatorSettings.result.notes.length > 0 && (
+                        <Typography variant="body2">
+                          Includes: {calculatorSettings.result.notes.join(', ')}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Grid>
                 )}
-              </ConfigSection>
+              </Grid>
             </Grid>
           </Grid>
         </StyledPaper>
