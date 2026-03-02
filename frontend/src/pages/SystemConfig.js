@@ -72,17 +72,17 @@ const TIMEZONES = [
 
 const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
-  margin: theme.spacing(2, 0),
+  margin: theme.spacing(0, 0),
   borderRadius: theme.spacing(1),
 }));
 
 const ConfigSection = styled(Box)(({ theme }) => ({
-  marginBottom: theme.spacing(3),
+  marginBottom: theme.spacing(1.5),
 }));
 
 function TabPanel({ children, value, index }) {
   return (
-    <div hidden={value !== index} style={{ padding: '20px 0' }}>
+    <div hidden={value !== index} style={{ padding: '8px 0' }}>
       {value === index && children}
     </div>
   );
@@ -2571,7 +2571,7 @@ function SystemConfig() {
 
   return (
     <Container>
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
         <Tabs value={activeTab} onChange={handleTabChange}>
           <Tab label="General" />
           <Tab label="Pawn Configuration" />
@@ -2850,7 +2850,7 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Bank Accounts
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Manage bank accounts for deposits, withdrawals, and accounting exports.
             </Typography>
             <TableContainer>
@@ -3058,7 +3058,7 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Petty Cash Expenses
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Manage petty cash expense categories. If "Includes Sales Tax" is enabled, payouts will be split between expense and tax based on the configured tax rate.
             </Typography>
             <TableContainer>
@@ -3283,7 +3283,7 @@ function SystemConfig() {
                 )}
 
                 {/* File Path to Backups */}
-                <Box sx={{ mt: 3 }}>
+                <Box sx={{ mt: 1.5 }}>
                   <TextField
                     fullWidth
                     label="File Path to Backups"
@@ -3387,7 +3387,7 @@ function SystemConfig() {
                 </Box>
 
                 {/* Save Button */}
-                <Box sx={{ mt: 3 }}>
+                <Box sx={{ mt: 1.5 }}>
                   <Button
                     variant="contained"
                     color="primary"
@@ -3417,7 +3417,7 @@ function SystemConfig() {
                 Add Tender Type
               </Button>
             </Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Configure payment methods (tender types) available in the system. Tender types can be physical (cash, checks) or electronic (credit cards, debit cards).
             </Typography>
             {tenderTypesLoading ? (
@@ -3591,7 +3591,7 @@ function SystemConfig() {
                       Tracking
                     </Typography>
                     <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                         Select between keeping track of individual denominations or just the total cash balance
                       </Typography>
                       <Box display="flex" gap={3} flexWrap="wrap">
@@ -3641,7 +3641,7 @@ function SystemConfig() {
                       Physical Count
                     </Typography>
                     <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                         Select how to count the physical tenders at open/close
                       </Typography>
                       <Box display="flex" gap={3} flexWrap="wrap">
@@ -3691,7 +3691,7 @@ function SystemConfig() {
                       Electronic Count
                     </Typography>
                     <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                         Select how to count the electronic tenders at open/close
                       </Typography>
                       <Box display="flex" gap={3} flexWrap="wrap">
@@ -3741,7 +3741,7 @@ function SystemConfig() {
 
           {/* Storage Cases Configuration */}
           <ConfigSection>
-            <Box sx={{ mt: 4 }}>
+            <Box sx={{ mt: 1 }}>
               <Typography variant="h6" gutterBottom fontWeight="bold">
                 Storage Cases Configuration
               </Typography>
@@ -3827,7 +3827,7 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Customer Columns
             </Typography>
-            <Box sx={{ mb: 3 }}>
+            <Box sx={{ mb: 1 }}>
               <Typography variant="body2" color="textSecondary" paragraph>
                 Select which customer columns should be displayed for each transaction type:
               </Typography>
@@ -3999,7 +3999,7 @@ function SystemConfig() {
               </div>
             ) : (
               <Box>
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 3 }}>
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 1.5 }}>
                   {Object.keys(preciousMetalNames).map((metal) => (
                     <TextField
                       key={metal}
@@ -4056,7 +4056,7 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Receipt Footer Text
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Configure the footer text that appears on different types of receipts
             </Typography>
             <Grid container spacing={3}>
@@ -4133,7 +4133,7 @@ function SystemConfig() {
                 />
               </Grid>
             </Grid>
-            <Box sx={{ mt: 3 }}>
+            <Box sx={{ mt: 1.5 }}>
               <Button
                 variant="contained"
                 color="primary"
@@ -4221,19 +4221,12 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Provincial Tax Rates
             </Typography>
-            <Typography variant="body2" color="textSecondary" paragraph>
-              Configure tax rates for each Canadian province. Use GST + PST for provinces with separate taxes, or HST for harmonized sales tax provinces.
-            </Typography>
-
             {/* Default Province Selector */}
-            <Paper sx={{ p: 2, mb: 3, bgcolor: 'primary.light', color: 'primary.contrastText' }}>
+            <Paper sx={{ p: 1.5, mb: 2, bgcolor: 'primary.light', color: 'primary.contrastText' }}>
               <Grid container spacing={2} alignItems="center">
                 <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle1" fontWeight="bold">
+                  <Typography variant="body2" fontWeight="bold">
                     Default Province for Checkout
-                  </Typography>
-                  <Typography variant="body2">
-                    Select the province to use for tax calculations at checkout
                   </Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
@@ -4267,8 +4260,8 @@ function SystemConfig() {
               </Grid>
             </Paper>
 
-            <TableContainer component={Paper} sx={{ mt: 2 }}>
-              <Table>
+            <TableContainer component={Paper} sx={{ mt: 1 }}>
+              <Table size="small">
                 <TableHead>
                   <TableRow>
                     <TableCell><strong>Province/Territory</strong></TableCell>
@@ -4356,14 +4349,13 @@ function SystemConfig() {
               </Table>
             </TableContainer>
 
-            <Box sx={{ mt: 3 }}>
-              <Typography variant="body2" color="textSecondary">
-                <strong>Note:</strong> GST (Goods and Services Tax), PST (Provincial Sales Tax), and HST (Harmonized Sales Tax) cannot be used together.
-                Provinces use either GST+PST or HST.
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="caption" color="textSecondary">
+                <strong>Note:</strong> GST+PST and HST are mutually exclusive per province.
               </Typography>
             </Box>
 
-            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
               <Button
                 variant="contained"
                 color="primary"
@@ -4615,14 +4607,14 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Linked Account Authorization Forms
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Configure the authorization forms that customers must sign when linking their accounts.
               Each link type (Full Access, View Only, Limited) has its own authorization form.
               Available placeholders: {'{'}{'{'} CUSTOMER_NAME {'}'}{'}'},  {'{'}{'{'} PRIMARY_CUSTOMER_NAME {'}'}{'}'}
             </Typography>
 
             {/* Link Type Selector */}
-            <Box sx={{ mb: 3 }}>
+            <Box sx={{ mb: 1.5 }}>
               <Tabs
                 value={selectedLinkType}
                 onChange={(e, newValue) => setSelectedLinkType(newValue)}
@@ -4702,7 +4694,7 @@ function SystemConfig() {
             </Typography>
 
             {/* Add New Attribute */}
-            <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.default' }}>
+            <Paper sx={{ p: 1.5, mb: 1.5, bgcolor: 'background.default' }}>
               <Typography variant="subtitle1" gutterBottom fontWeight="bold">
                 Add New Attribute
               </Typography>
@@ -4903,7 +4895,7 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Employee Configuration
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Configure per-employee permissions, transfer limits, and petty cash settings. Changes take effect immediately.
             </Typography>
 
