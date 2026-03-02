@@ -23,6 +23,17 @@ COMMENT ON COLUMN petty_cash_expenses.name IS 'Name of the expense category (e.g
 COMMENT ON COLUMN petty_cash_expenses.accounting_code IS 'Accounting code to post expenses to (e.g., "5001")';
 COMMENT ON COLUMN petty_cash_expenses.includes_sales_tax IS 'If true, payouts will be split between expense and tax based on configured tax rate';
 
+ALTER TABLE petty_cash_expenses ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+-- Replace single-column unique with composite unique per store
+DO $$
+BEGIN
+    ALTER TABLE petty_cash_expenses DROP CONSTRAINT IF EXISTS unique_expense_name;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'unique_expense_name_store') THEN
+        ALTER TABLE petty_cash_expenses ADD CONSTRAINT unique_expense_name_store UNIQUE (name, store_id);
+    END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
 -- Create trigger to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_petty_cash_expenses_timestamp()
 RETURNS TRIGGER AS $$

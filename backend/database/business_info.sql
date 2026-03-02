@@ -40,6 +40,10 @@ CREATE TRIGGER business_info_updated_at
 ALTER TABLE business_info ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE business_info ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
 
+-- Assign existing unscoped rows to store 1
+UPDATE business_info SET store_id = (SELECT store_id FROM stores ORDER BY store_id LIMIT 1) WHERE store_id IS NULL;
+ALTER TABLE currency_types ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+
 
 -- Currency Types Table
 -- Stores supported currencies for the company/store

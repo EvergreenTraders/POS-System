@@ -19,6 +19,8 @@ INSERT INTO drawer_config (number_of_drawers)
 SELECT 0
 WHERE NOT EXISTS (SELECT 1 FROM drawer_config LIMIT 1);
 
+ALTER TABLE drawer_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+
 -- Create drawers table to store individual drawer information
 CREATE TABLE IF NOT EXISTS drawers (
     drawer_id SERIAL PRIMARY KEY,
