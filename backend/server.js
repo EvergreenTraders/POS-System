@@ -12802,6 +12802,49 @@ app.get('/api/store-status', async (req, res) => {
   }
 });
 
+// Business Hours Endpoints
+app.get('/api/store-hours', async (req, res) => {
+  try {
+    const storeResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const storeId = storeResult.rows[0]?.store_id || null;
+
+    const result = await pool.query(
+      'SELECT * FROM store_hours WHERE store_id = $1 ORDER BY day_of_week',
+      [storeId]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching store hours:', error);
+    res.status(500).json({ error: 'Failed to fetch store hours' });
+  }
+});
+
+app.put('/api/store-hours', async (req, res) => {
+  try {
+    const { hours } = req.body; // array of { day_of_week, open_time, close_time, is_closed }
+    const storeResult = await pool.query('SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1');
+    const storeId = storeResult.rows[0]?.store_id || null;
+
+    for (const h of hours) {
+      await pool.query(`
+        INSERT INTO store_hours (store_id, day_of_week, open_time, close_time, is_closed)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (store_id, day_of_week) DO UPDATE
+          SET open_time = $3, close_time = $4, is_closed = $5, updated_at = CURRENT_TIMESTAMP
+      `, [storeId, h.day_of_week, h.open_time || null, h.close_time || null, h.is_closed || false]);
+    }
+
+    const result = await pool.query(
+      'SELECT * FROM store_hours WHERE store_id = $1 ORDER BY day_of_week',
+      [storeId]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error updating store hours:', error);
+    res.status(500).json({ error: 'Failed to update store hours' });
+  }
+});
+
 // Open store
 app.post('/api/store-sessions/open', async (req, res) => {
   try {

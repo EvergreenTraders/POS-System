@@ -75,7 +75,7 @@ function CashDrawer() {
   const API_BASE_URL = config.apiUrl;
   const location = useLocation();
   const navigate = useNavigate();
-  const { isStoreClosed } = useStoreStatus();
+  const { isStoreClosed, isPastBusinessHours, todayHours } = useStoreStatus();
   const { user: currentUser } = useAuth();
 
   const [activeSession, setActiveSession] = useState(null);
@@ -2752,6 +2752,23 @@ function CashDrawer() {
 
   return (
     <Box sx={{ width: '100%', height: '100%' }}>
+      {/* Past Business Hours Warning */}
+      {isPastBusinessHours && (
+        <Alert
+          severity="warning"
+          variant="filled"
+          sx={{ borderRadius: 0 }}
+          action={
+            <Button color="inherit" size="small" variant="outlined" onClick={handleCloseStoreClick}>
+              Close Store
+            </Button>
+          }
+        >
+          Business hours have ended
+          {todayHours?.close_time ? ` (closed at ${todayHours.close_time.substring(0, 5)})` : ''}.
+          Please close the store.
+        </Alert>
+      )}
       {/* Top Bar with Store Status on Right */}
       <Box sx={{
         display: 'flex',

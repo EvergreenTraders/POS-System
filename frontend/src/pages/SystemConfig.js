@@ -151,6 +151,17 @@ function SystemConfig() {
   ]);
   const [newCurrency, setNewCurrency] = useState({ code: '', description: '' });
 
+  // Business Hours
+  const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const DEFAULT_HOURS = DAY_NAMES.map((day, i) => ({
+    day_of_week: i,
+    day_name: day,
+    open_time: '09:00',
+    close_time: '17:00',
+    is_closed: i === 0 || i === 6, // Sun/Sat closed by default
+  }));
+  const [businessHours, setBusinessHours] = useState(DEFAULT_HOURS);
+
   // Bank accounts
   const [bankAccounts, setBankAccounts] = useState([]);
   const [bankEditId, setBankEditId] = useState(null);
@@ -764,8 +775,47 @@ function SystemConfig() {
     fetchPettyCashExpenses();
     fetchPawnConfig();
     fetchBankAccounts();
+    fetchBusinessHours();
     axios.get(`${API_BASE_URL}/stores/current`).then(res => setCurrentStoreId(res.data.store_id)).catch(() => {});
   }, []);
+
+  const fetchBusinessHours = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/store-hours`);
+      if (response.data && response.data.length > 0) {
+        setBusinessHours(prev => prev.map(def => {
+          const saved = response.data.find(h => h.day_of_week === def.day_of_week);
+          if (!saved) return def;
+          return {
+            ...def,
+            open_time: saved.open_time ? saved.open_time.substring(0, 5) : def.open_time,
+            close_time: saved.close_time ? saved.close_time.substring(0, 5) : def.close_time,
+            is_closed: saved.is_closed,
+          };
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching business hours:', error);
+    }
+  };
+
+  const handleSaveBusinessHours = async () => {
+    const invalid = businessHours.filter(h => {
+      if (h.is_closed || !h.open_time || !h.close_time) return false;
+      return h.close_time <= h.open_time;
+    });
+    if (invalid.length > 0) {
+      const names = invalid.map(h => h.day_name).join(', ');
+      setSnackbar({ open: true, message: `Close time must be after open time for: ${names}`, severity: 'error' });
+      return;
+    }
+    try {
+      await axios.put(`${API_BASE_URL}/store-hours`, { hours: businessHours });
+      setSnackbar({ open: true, message: 'Business hours saved', severity: 'success' });
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to save business hours', severity: 'error' });
+    }
+  };
 
   const fetchBankAccounts = async () => {
     try {
@@ -2844,6 +2894,71 @@ function SystemConfig() {
                 </Typography>
               </Box>
             )}
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
+              Business Hours
+            </Typography>
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: 110 }}><strong>Day</strong></TableCell>
+                    <TableCell align="center" sx={{ width: 80 }}><strong>Closed</strong></TableCell>
+                    <TableCell><strong>Open</strong></TableCell>
+                    <TableCell><strong>Close</strong></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {businessHours.map((row, idx) => (
+                    <TableRow key={row.day_of_week}>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight={row.day_of_week === new Date().getDay() ? 600 : 400}
+                          color={row.day_of_week === new Date().getDay() ? 'primary' : 'inherit'}>
+                          {row.day_name}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Checkbox
+                          size="small"
+                          checked={row.is_closed}
+                          onChange={e => setBusinessHours(prev => prev.map((h, i) => i === idx ? { ...h, is_closed: e.target.checked } : h))}
+                          sx={{ p: '2px' }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <TextField
+                          type="time"
+                          size="small"
+                          value={row.open_time}
+                          disabled={row.is_closed}
+                          onChange={e => setBusinessHours(prev => prev.map((h, i) => i === idx ? { ...h, open_time: e.target.value } : h))}
+                          inputProps={{ step: 300 }}
+                          sx={{ width: 130 }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <TextField
+                          type="time"
+                          size="small"
+                          value={row.close_time}
+                          disabled={row.is_closed}
+                          onChange={e => setBusinessHours(prev => prev.map((h, i) => i === idx ? { ...h, close_time: e.target.value } : h))}
+                          inputProps={{ step: 300 }}
+                          sx={{ width: 130 }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'flex-end' }}>
+              <Button variant="contained" size="small" onClick={handleSaveBusinessHours}>
+                Save Business Hours
+              </Button>
+            </Box>
           </ConfigSection>
 
           <ConfigSection>
