@@ -1402,6 +1402,33 @@ function CashDrawer() {
       }
     }
 
+    // Check business hours
+    if (todayHours) {
+      if (todayHours.is_closed) {
+        showSnackbar('Cannot open drawer: the store is closed today', 'error');
+        return;
+      }
+      const now = new Date();
+      if (todayHours.open_time) {
+        const [openHour, openMin] = todayHours.open_time.substring(0, 5).split(':').map(Number);
+        const openDate = new Date();
+        openDate.setHours(openHour, openMin, 0, 0);
+        if (now < openDate) {
+          showSnackbar(`Cannot open drawer: store doesn't open until ${todayHours.open_time.substring(0, 5)}`, 'error');
+          return;
+        }
+      }
+      if (todayHours.close_time) {
+        const [closeHour, closeMin] = todayHours.close_time.substring(0, 5).split(':').map(Number);
+        const closeDate = new Date();
+        closeDate.setHours(closeHour, closeMin, 0, 0);
+        if (now > closeDate) {
+          showSnackbar(`Cannot open drawer: store closed at ${todayHours.close_time.substring(0, 5)}`, 'error');
+          return;
+        }
+      }
+    }
+
     // Calculate balance based on opening mode (individual denominations vs drawer total)
     const calculatedBalance = isIndividualDenominations
       ? calculateDenominationTotal(openingDenominations)
@@ -1786,8 +1813,8 @@ function CashDrawer() {
 
     // If not forcing close, check for discrepancies
     if (!forceClose) {
-      // Show discrepancy dialog if there's any discrepancy
-      if (physicalDiscrepancyAmount > 0.01 || hasElectronicDiscrepancy) {
+      // Show discrepancy dialog only if discrepancy exceeds threshold
+      if ((physicalDiscrepancyAmount > 0.01 || hasElectronicDiscrepancy) && !isWithinLimit) {
         // Ensure we have opening denominations - fetch if not already available
         let expectedDenoms = openingDenominationsFromDB ? { ...openingDenominationsFromDB } : {};
         
@@ -2752,23 +2779,6 @@ function CashDrawer() {
 
   return (
     <Box sx={{ width: '100%', height: '100%' }}>
-      {/* Past Business Hours Warning */}
-      {isPastBusinessHours && (
-        <Alert
-          severity="warning"
-          variant="filled"
-          sx={{ borderRadius: 0 }}
-          action={
-            <Button color="inherit" size="small" variant="outlined" onClick={handleCloseStoreClick}>
-              Close Store
-            </Button>
-          }
-        >
-          Business hours have ended
-          {todayHours?.close_time ? ` (closed at ${todayHours.close_time.substring(0, 5)})` : ''}.
-          Please close the store.
-        </Alert>
-      )}
       {/* Top Bar with Store Status on Right */}
       <Box sx={{
         display: 'flex',
@@ -3115,12 +3125,6 @@ function CashDrawer() {
                           // If user is a connected employee (not opener), just disconnect
                           if (isConnectedEmployee) {
                             handleDisconnectFromDrawer();
-                            return;
-                          }
-
-                          // If opener and others are still connected, prevent closing
-                          if (activeSession.is_opener && othersConnected) {
-                            showSnackbar('Other employees are still connected to this drawer. They must disconnect before you can close it.', 'warning');
                             return;
                           }
 
@@ -5184,7 +5188,7 @@ function CashDrawer() {
               const physicalActual = activeSession?.drawer_type === 'physical'
                 ? calculateDenominationTotal(closingDenominations) +
                   physicalPaymentMethods.reduce((sum, m) => sum + (parseFloat(closingTenderBalances[m.method_value]) || 0), 0)
-                : (isIndividualDenominations ? calculateDenominationTotal(closingDenominations) : parseFloat(actualBalance) || 0);
+                : calculateDenominationTotal(closingDenominations);
               const physicalExpected = parseFloat(activeSession?.current_expected_balance || 0);
               const physicalDiscrepancy = Math.abs(physicalActual - physicalExpected);
               const threshold = parseFloat(discrepancyThreshold || 0);
