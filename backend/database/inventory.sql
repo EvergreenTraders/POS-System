@@ -260,3 +260,5 @@ CREATE TABLE IF NOT EXISTS cases_config (
 
 COMMENT ON TABLE cases_config IS 'Configuration for number of storage cases';
 COMMENT ON COLUMN cases_config.number_of_cases IS 'Total number of storage cases configured (0-100)';
+
+ALTER TABLE cases_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);

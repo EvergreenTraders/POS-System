@@ -115,6 +115,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+ALTER TABLE linked_account_authorization_template ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+-- Replace single-column unique with composite unique per store
+DO $$
+BEGIN
+    ALTER TABLE linked_account_authorization_template DROP CONSTRAINT IF EXISTS linked_account_authorization_template_link_type_key;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'linked_account_auth_link_type_store_key') THEN
+        ALTER TABLE linked_account_authorization_template ADD CONSTRAINT linked_account_auth_link_type_store_key UNIQUE (link_type, store_id);
+    END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
 DROP TRIGGER IF EXISTS linked_account_authorization_template_updated_at ON linked_account_authorization_template;
 CREATE TRIGGER linked_account_authorization_template_updated_at
     BEFORE UPDATE ON linked_account_authorization_template

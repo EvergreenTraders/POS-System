@@ -1,8 +1,13 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { Box, Alert } from '@mui/material';
+import {
+  Box, Alert, Button, Dialog, DialogTitle, DialogContent, DialogActions,
+  Typography, FormControlLabel, Checkbox, CircularProgress,
+} from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
+import axios from 'axios';
+import config from './config';
 import { CartProvider } from './context/CartContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WorkingDateProvider } from './context/WorkingDateContext';
@@ -76,7 +81,17 @@ const ProtectedRoute = ({ children }) => {
 
 // Layout component for authenticated pages
 const AuthenticatedLayout = ({ children }) => {
+  const { user } = useAuth();
   const [isFullScreen, setIsFullScreen] = React.useState(false);
+
+  // Close store dialog state
+  const [closeStoreDialogOpen, setCloseStoreDialogOpen] = React.useState(false);
+  const [closeStoreLoading, setCloseStoreLoading] = React.useState(false);
+  const [clockedInEmployees, setClockedInEmployees] = React.useState([]);
+  const [isBackupComputer, setIsBackupComputer] = React.useState(false);
+  const [closeStoreError, setCloseStoreError] = React.useState('');
+
+  const { isStoreClosed, isPastBusinessHours, todayHours, refreshStatus } = useStoreStatus();
 
   const requestFullScreen = async (element) => {
     try {
@@ -119,7 +134,42 @@ const AuthenticatedLayout = ({ children }) => {
     };
   }, []);
 
-  const { isStoreClosed } = useStoreStatus();
+  const isManagerOrOwner = user?.role === 'Store Manager' || user?.role === 'Store Owner';
+
+  const handleCloseStoreClick = async () => {
+    setCloseStoreError('');
+    setCloseStoreLoading(true);
+    try {
+      await axios.get(`${config.apiUrl}/store-sessions/check-open-drawers`);
+      const clockedInResponse = await axios.get(`${config.apiUrl}/employee-sessions/clocked-in`);
+      setClockedInEmployees(clockedInResponse.data || []);
+      if (clockedInResponse.data && clockedInResponse.data.length > 0) {
+        await axios.post(`${config.apiUrl}/employee-sessions/notify-closing`);
+      }
+      setIsBackupComputer(false);
+      setCloseStoreDialogOpen(true);
+    } catch (err) {
+      setCloseStoreError(err.response?.data?.error || 'Failed to check store closure prerequisites');
+    } finally {
+      setCloseStoreLoading(false);
+    }
+  };
+
+  const handleCloseStore = async () => {
+    setCloseStoreLoading(true);
+    try {
+      await axios.post(`${config.apiUrl}/store-sessions/close`, {
+        employee_id: user?.id || user?.employee_id,
+      });
+      await refreshStatus();
+      window.dispatchEvent(new Event('storeStatusChanged'));
+      setCloseStoreDialogOpen(false);
+    } catch (err) {
+      setCloseStoreError(err.response?.data?.error || 'Failed to close store');
+    } finally {
+      setCloseStoreLoading(false);
+    }
+  };
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -148,8 +198,88 @@ const AuthenticatedLayout = ({ children }) => {
             Store is CLOSED &mdash; Read-only mode. Financial transactions are disabled.
           </Alert>
         )}
+        {isPastBusinessHours && isManagerOrOwner && !isStoreClosed && (
+          <Alert
+            severity="warning"
+            variant="filled"
+            sx={{ borderRadius: 0 }}
+            action={
+              <Button
+                color="inherit"
+                size="small"
+                variant="outlined"
+                onClick={handleCloseStoreClick}
+                disabled={closeStoreLoading}
+                startIcon={closeStoreLoading ? <CircularProgress size={14} color="inherit" /> : null}
+              >
+                Close Store
+              </Button>
+            }
+          >
+            Business hours have ended{todayHours?.close_time ? ` (closed at ${todayHours.close_time.substring(0, 5)})` : ''}. Please close the store.
+          </Alert>
+        )}
         {children}
       </Box>
+
+      {/* Close Store Confirmation Dialog */}
+      <Dialog open={closeStoreDialogOpen} onClose={() => setCloseStoreDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Close Store</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Closing the store will disable all financial transactions until it is reopened.
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Before closing the store, ensure:
+          </Typography>
+          <Box component="ul" sx={{ pl: 2, mb: 2 }}>
+            <Typography component="li" variant="body2">All cash drawers and safes (except the master safe) are closed</Typography>
+            <Typography component="li" variant="body2">End-of-day reports have been generated</Typography>
+            <Typography component="li" variant="body2">All pending transactions are complete</Typography>
+          </Box>
+          {clockedInEmployees.length > 0 && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                Currently Clocked-In Employees ({clockedInEmployees.length}):
+              </Typography>
+              {clockedInEmployees.map((emp) => (
+                <Typography key={emp.session_id} variant="body2">
+                  {emp.employee_name} - {emp.role} (since {new Date(emp.clock_in_time).toLocaleTimeString()})
+                </Typography>
+              ))}
+            </Alert>
+          )}
+          {closeStoreError && (
+            <Alert severity="error" sx={{ mb: 2 }}>{closeStoreError}</Alert>
+          )}
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={isBackupComputer}
+                onChange={(e) => setIsBackupComputer(e.target.checked)}
+                color="primary"
+              />
+            }
+            label={
+              <Typography variant="body2">
+                I confirm this is the designated backup computer for end-of-day procedures
+              </Typography>
+            }
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCloseStoreDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleCloseStore}
+            disabled={!isBackupComputer || closeStoreLoading}
+            startIcon={closeStoreLoading ? <CircularProgress size={20} /> : null}
+          >
+            Close Store
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

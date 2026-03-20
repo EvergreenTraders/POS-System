@@ -5,6 +5,7 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions, Container,
   FormControlLabel, Checkbox
 } from '@mui/material';
+import { Country, State, City } from 'country-state-city';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
@@ -130,9 +131,26 @@ const CustomerEditor = () => {
       });
   };
 
+  // Country / state / city derived lists
+  const allCountries = Country.getAllCountries();
+  const selectedCountry = allCountries.find(c => c.name === formData.country);
+  const stateList = selectedCountry ? State.getStatesOfCountry(selectedCountry.isoCode) : [];
+  const selectedState = stateList.find(s => s.name === formData.state);
+  const cityList = (selectedCountry && selectedState)
+    ? City.getCitiesOfState(selectedCountry.isoCode, selectedState.isoCode)
+    : [];
+
   // Form handling functions
   const handleFormChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleCountryChange = (e) => {
+    setFormData(prev => ({ ...prev, country: e.target.value, state: '', city: '' }));
+  };
+
+  const handleStateChange = (e) => {
+    setFormData(prev => ({ ...prev, state: e.target.value, city: '' }));
   };
 
   const handleSubmit = async (e) => {
@@ -558,40 +576,58 @@ const CustomerEditor = () => {
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
-                  <TextField
-                    name="city"
-                    label="City"
-                    value={formData.city || ''}
-                    onChange={handleFormChange}
-                    fullWidth
-                    margin="dense"
-                  />
+                  <FormControl fullWidth margin="dense">
+                    <InputLabel>Country</InputLabel>
+                    <Select
+                      name="country"
+                      value={formData.country || ''}
+                      onChange={handleCountryChange}
+                      label="Country"
+                    >
+                      <MenuItem value=""><em>Select Country</em></MenuItem>
+                      {allCountries.map(c => (
+                        <MenuItem key={c.isoCode} value={c.name}>{c.name}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
                 </Grid>
                 <Grid item xs={12} sm={6}>
-                  <TextField
-                    name="state"
-                    label="State/Province"
-                    value={formData.state || ''}
-                    onChange={handleFormChange}
-                    fullWidth
-                    margin="dense"
-                  />
+                  <FormControl fullWidth margin="dense" disabled={!stateList.length}>
+                    <InputLabel>State/Province</InputLabel>
+                    <Select
+                      name="state"
+                      value={formData.state || ''}
+                      onChange={handleStateChange}
+                      label="State/Province"
+                    >
+                      <MenuItem value=""><em>{stateList.length ? 'Select State' : 'No states available'}</em></MenuItem>
+                      {stateList.map(s => (
+                        <MenuItem key={s.isoCode} value={s.name}>{s.name}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth margin="dense" disabled={!cityList.length}>
+                    <InputLabel>City</InputLabel>
+                    <Select
+                      name="city"
+                      value={formData.city || ''}
+                      onChange={handleFormChange}
+                      label="City"
+                    >
+                      <MenuItem value=""><em>{cityList.length ? 'Select City' : 'No cities available'}</em></MenuItem>
+                      {cityList.map(c => (
+                        <MenuItem key={c.name} value={c.name}>{c.name}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
                 </Grid>
                 <Grid item xs={12} sm={6}>
                   <TextField
                     name="postal_code"
                     label="Postal Code"
                     value={formData.postal_code || ''}
-                    onChange={handleFormChange}
-                    fullWidth
-                    margin="dense"
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    name="country"
-                    label="Country"
-                    value={formData.country || ''}
                     onChange={handleFormChange}
                     fullWidth
                     margin="dense"

@@ -137,8 +137,8 @@ function JewelEstimator({
     setSnackbar({ ...snackbar, open: false });
   };
   const [customer, setCustomer] = useState(location.state?.customer || null);
-  const [transactionType, setTransactionType] = useState(propTransactionType || location.state?.transactionType || location.state?.itemToEdit?.transaction_type || 'buy');
-  const [freeText, setFreeText] = useState(propPrefilledData?.free_text || location.state?.prefilledData?.free_text || location.state?.itemToEdit?.notes || '');
+  const [transactionType, setTransactionType] = useState(propTransactionType ?? location.state?.transactionType ?? location.state?.itemToEdit?.transaction_type ?? 'buy');
+  const [freeText, setFreeText] = useState(location.state?.itemToEdit?.notes || '');
   const [diamondSummary, setDiamondSummary] = useState(() => {
     // Skip localStorage restoration if in edit mode
     if (location.state?.editMode) return [];

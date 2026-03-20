@@ -11,6 +11,7 @@
     "@mui/x-date-pickers": "^7.27.3",
     "@react-pdf/renderer": "^4.3.2",
     "axios": "^1.6.2",
+    "country-state-city": "^3.2.1",
     "date-fns": "^2.30.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.3",

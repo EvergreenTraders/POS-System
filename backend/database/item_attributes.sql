@@ -38,3 +38,14 @@ BEGIN
     UPDATE attribute_config SET attribute_type = 'dropdown' WHERE attribute_type IS NULL;
   END IF;
 END $$;
+
+ALTER TABLE attribute_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+-- Replace single-column unique with composite unique per store
+DO $$
+BEGIN
+    ALTER TABLE attribute_config DROP CONSTRAINT IF EXISTS attribute_config_attribute_name_key;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attribute_config_name_store_key') THEN
+        ALTER TABLE attribute_config ADD CONSTRAINT attribute_config_name_store_key UNIQUE (attribute_name, store_id);
+    END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;

@@ -138,6 +138,8 @@ UPDATE payment_methods SET
     accepted_for_pawn_redeems = true
 WHERE currency IS NULL;
 
+ALTER TABLE payment_methods ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+
 COMMENT ON COLUMN payment_methods.currency IS 'Currency code (CAD, USD, etc.)';
 COMMENT ON COLUMN payment_methods.accounting_code IS 'Accounting code (up to 8 digits)';
 COMMENT ON COLUMN payment_methods.store_designator IS 'Whether to append store number to accounting code';

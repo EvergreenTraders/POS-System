@@ -36,9 +36,13 @@ CREATE TRIGGER business_info_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_business_info_updated_at();
 
--- ALTER command to add address column (if table already exists without it)
--- Uncomment the line below if you need to add the address column to an existing table
--- ALTER TABLE business_info ADD COLUMN IF NOT EXISTS address TEXT;
+-- ALTER commands for existing tables
+ALTER TABLE business_info ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE business_info ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+
+-- Assign existing unscoped rows to store 1
+UPDATE business_info SET store_id = (SELECT store_id FROM stores ORDER BY store_id LIMIT 1) WHERE store_id IS NULL;
+ALTER TABLE currency_types ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
 
 
 -- Currency Types Table

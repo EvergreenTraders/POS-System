@@ -72,17 +72,17 @@ const TIMEZONES = [
 
 const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
-  margin: theme.spacing(2, 0),
+  margin: theme.spacing(0, 0),
   borderRadius: theme.spacing(1),
 }));
 
 const ConfigSection = styled(Box)(({ theme }) => ({
-  marginBottom: theme.spacing(3),
+  marginBottom: theme.spacing(1.5),
 }));
 
 function TabPanel({ children, value, index }) {
   return (
-    <div hidden={value !== index} style={{ padding: '20px 0' }}>
+    <div hidden={value !== index} style={{ padding: '8px 0' }}>
       {value === index && children}
     </div>
   );
@@ -150,6 +150,17 @@ function SystemConfig() {
     { code: 'CAD', description: 'Canadian Dollar', isDefault: true }
   ]);
   const [newCurrency, setNewCurrency] = useState({ code: '', description: '' });
+
+  // Business Hours
+  const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const DEFAULT_HOURS = DAY_NAMES.map((day, i) => ({
+    day_of_week: i,
+    day_name: day,
+    open_time: '09:00',
+    close_time: '17:00',
+    is_closed: i === 0 || i === 6, // Sun/Sat closed by default
+  }));
+  const [businessHours, setBusinessHours] = useState(DEFAULT_HOURS);
 
   // Bank accounts
   const [bankAccounts, setBankAccounts] = useState([]);
@@ -764,8 +775,47 @@ function SystemConfig() {
     fetchPettyCashExpenses();
     fetchPawnConfig();
     fetchBankAccounts();
+    fetchBusinessHours();
     axios.get(`${API_BASE_URL}/stores/current`).then(res => setCurrentStoreId(res.data.store_id)).catch(() => {});
   }, []);
+
+  const fetchBusinessHours = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/store-hours`);
+      if (response.data && response.data.length > 0) {
+        setBusinessHours(prev => prev.map(def => {
+          const saved = response.data.find(h => h.day_of_week === def.day_of_week);
+          if (!saved) return def;
+          return {
+            ...def,
+            open_time: saved.open_time ? saved.open_time.substring(0, 5) : def.open_time,
+            close_time: saved.close_time ? saved.close_time.substring(0, 5) : def.close_time,
+            is_closed: saved.is_closed,
+          };
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching business hours:', error);
+    }
+  };
+
+  const handleSaveBusinessHours = async () => {
+    const invalid = businessHours.filter(h => {
+      if (h.is_closed || !h.open_time || !h.close_time) return false;
+      return h.close_time <= h.open_time;
+    });
+    if (invalid.length > 0) {
+      const names = invalid.map(h => h.day_name).join(', ');
+      setSnackbar({ open: true, message: `Close time must be after open time for: ${names}`, severity: 'error' });
+      return;
+    }
+    try {
+      await axios.put(`${API_BASE_URL}/store-hours`, { hours: businessHours });
+      setSnackbar({ open: true, message: 'Business hours saved', severity: 'success' });
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to save business hours', severity: 'error' });
+    }
+  };
 
   const fetchBankAccounts = async () => {
     try {
@@ -2571,8 +2621,8 @@ function SystemConfig() {
 
   return (
     <Container>
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={activeTab} onChange={handleTabChange}>
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
+        <Tabs value={activeTab} onChange={handleTabChange} variant="scrollable" scrollButtons="auto">
           <Tab label="General" />
           <Tab label="Pawn Configuration" />
           <Tab label="Tax Configuration" />
@@ -2848,9 +2898,74 @@ function SystemConfig() {
 
           <ConfigSection>
             <Typography variant="h6" gutterBottom>
+              Business Hours
+            </Typography>
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: 110 }}><strong>Day</strong></TableCell>
+                    <TableCell align="center" sx={{ width: 80 }}><strong>Closed</strong></TableCell>
+                    <TableCell><strong>Open</strong></TableCell>
+                    <TableCell><strong>Close</strong></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {businessHours.map((row, idx) => (
+                    <TableRow key={row.day_of_week}>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight={row.day_of_week === new Date().getDay() ? 600 : 400}
+                          color={row.day_of_week === new Date().getDay() ? 'primary' : 'inherit'}>
+                          {row.day_name}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Checkbox
+                          size="small"
+                          checked={row.is_closed}
+                          onChange={e => setBusinessHours(prev => prev.map((h, i) => i === idx ? { ...h, is_closed: e.target.checked } : h))}
+                          sx={{ p: '2px' }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <TextField
+                          type="time"
+                          size="small"
+                          value={row.open_time}
+                          disabled={row.is_closed}
+                          onChange={e => setBusinessHours(prev => prev.map((h, i) => i === idx ? { ...h, open_time: e.target.value } : h))}
+                          inputProps={{ step: 300 }}
+                          sx={{ width: 130 }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <TextField
+                          type="time"
+                          size="small"
+                          value={row.close_time}
+                          disabled={row.is_closed}
+                          onChange={e => setBusinessHours(prev => prev.map((h, i) => i === idx ? { ...h, close_time: e.target.value } : h))}
+                          inputProps={{ step: 300 }}
+                          sx={{ width: 130 }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'flex-end' }}>
+              <Button variant="contained" size="small" onClick={handleSaveBusinessHours}>
+                Save Business Hours
+              </Button>
+            </Box>
+          </ConfigSection>
+
+          <ConfigSection>
+            <Typography variant="h6" gutterBottom>
               Bank Accounts
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Manage bank accounts for deposits, withdrawals, and accounting exports.
             </Typography>
             <TableContainer>
@@ -3058,7 +3173,7 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Petty Cash Expenses
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Manage petty cash expense categories. If "Includes Sales Tax" is enabled, payouts will be split between expense and tax based on the configured tax rate.
             </Typography>
             <TableContainer>
@@ -3283,7 +3398,7 @@ function SystemConfig() {
                 )}
 
                 {/* File Path to Backups */}
-                <Box sx={{ mt: 3 }}>
+                <Box sx={{ mt: 1.5 }}>
                   <TextField
                     fullWidth
                     label="File Path to Backups"
@@ -3387,7 +3502,7 @@ function SystemConfig() {
                 </Box>
 
                 {/* Save Button */}
-                <Box sx={{ mt: 3 }}>
+                <Box sx={{ mt: 1.5 }}>
                   <Button
                     variant="contained"
                     color="primary"
@@ -3417,7 +3532,7 @@ function SystemConfig() {
                 Add Tender Type
               </Button>
             </Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Configure payment methods (tender types) available in the system. Tender types can be physical (cash, checks) or electronic (credit cards, debit cards).
             </Typography>
             {tenderTypesLoading ? (
@@ -3591,7 +3706,7 @@ function SystemConfig() {
                       Tracking
                     </Typography>
                     <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                         Select between keeping track of individual denominations or just the total cash balance
                       </Typography>
                       <Box display="flex" gap={3} flexWrap="wrap">
@@ -3641,7 +3756,7 @@ function SystemConfig() {
                       Physical Count
                     </Typography>
                     <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                         Select how to count the physical tenders at open/close
                       </Typography>
                       <Box display="flex" gap={3} flexWrap="wrap">
@@ -3691,7 +3806,7 @@ function SystemConfig() {
                       Electronic Count
                     </Typography>
                     <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                         Select how to count the electronic tenders at open/close
                       </Typography>
                       <Box display="flex" gap={3} flexWrap="wrap">
@@ -3741,7 +3856,7 @@ function SystemConfig() {
 
           {/* Storage Cases Configuration */}
           <ConfigSection>
-            <Box sx={{ mt: 4 }}>
+            <Box sx={{ mt: 1 }}>
               <Typography variant="h6" gutterBottom fontWeight="bold">
                 Storage Cases Configuration
               </Typography>
@@ -3827,7 +3942,7 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Customer Columns
             </Typography>
-            <Box sx={{ mb: 3 }}>
+            <Box sx={{ mb: 1 }}>
               <Typography variant="body2" color="textSecondary" paragraph>
                 Select which customer columns should be displayed for each transaction type:
               </Typography>
@@ -3999,7 +4114,7 @@ function SystemConfig() {
               </div>
             ) : (
               <Box>
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 3 }}>
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 1.5 }}>
                   {Object.keys(preciousMetalNames).map((metal) => (
                     <TextField
                       key={metal}
@@ -4056,7 +4171,7 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Receipt Footer Text
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Configure the footer text that appears on different types of receipts
             </Typography>
             <Grid container spacing={3}>
@@ -4133,7 +4248,7 @@ function SystemConfig() {
                 />
               </Grid>
             </Grid>
-            <Box sx={{ mt: 3 }}>
+            <Box sx={{ mt: 1.5 }}>
               <Button
                 variant="contained"
                 color="primary"
@@ -4221,19 +4336,12 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Provincial Tax Rates
             </Typography>
-            <Typography variant="body2" color="textSecondary" paragraph>
-              Configure tax rates for each Canadian province. Use GST + PST for provinces with separate taxes, or HST for harmonized sales tax provinces.
-            </Typography>
-
             {/* Default Province Selector */}
-            <Paper sx={{ p: 2, mb: 3, bgcolor: 'primary.light', color: 'primary.contrastText' }}>
+            <Paper sx={{ p: 1.5, mb: 2, bgcolor: 'primary.light', color: 'primary.contrastText' }}>
               <Grid container spacing={2} alignItems="center">
                 <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle1" fontWeight="bold">
+                  <Typography variant="body2" fontWeight="bold">
                     Default Province for Checkout
-                  </Typography>
-                  <Typography variant="body2">
-                    Select the province to use for tax calculations at checkout
                   </Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
@@ -4267,8 +4375,8 @@ function SystemConfig() {
               </Grid>
             </Paper>
 
-            <TableContainer component={Paper} sx={{ mt: 2 }}>
-              <Table>
+            <TableContainer component={Paper} sx={{ mt: 1 }}>
+              <Table size="small">
                 <TableHead>
                   <TableRow>
                     <TableCell><strong>Province/Territory</strong></TableCell>
@@ -4356,14 +4464,13 @@ function SystemConfig() {
               </Table>
             </TableContainer>
 
-            <Box sx={{ mt: 3 }}>
-              <Typography variant="body2" color="textSecondary">
-                <strong>Note:</strong> GST (Goods and Services Tax), PST (Provincial Sales Tax), and HST (Harmonized Sales Tax) cannot be used together.
-                Provinces use either GST+PST or HST.
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="caption" color="textSecondary">
+                <strong>Note:</strong> GST+PST and HST are mutually exclusive per province.
               </Typography>
             </Box>
 
-            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
               <Button
                 variant="contained"
                 color="primary"
@@ -4379,230 +4486,180 @@ function SystemConfig() {
 
       <TabPanel value={activeTab} index={3}>
         <StyledPaper elevation={2}>
-          <Grid container spacing={3}>
+          <Grid container spacing={2}>
             {/* Configuration Block - Left Side */}
             <Grid item xs={12} md={6}>
-              <ConfigSection>
-                <Typography variant="h5" gutterBottom>
-                  Configuration (Weight in grams → Markup %)
-                </Typography>
-                
-                <TableContainer component={Paper}>
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Weight (g)</TableCell>
-                        <TableCell>Markup %</TableCell>
+              <Typography variant="h6" gutterBottom>
+                Configuration (Weight in grams → Markup %)
+              </Typography>
+              <TableContainer component={Paper}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Weight (g)</TableCell>
+                      <TableCell>Markup %</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {weightMarkupConfig.map((config, index) => (
+                      <TableRow key={index}>
+                        <TableCell>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            value={config.weight}
+                            onChange={(e) => handleWeightMarkupChange(index, 'weight', e.target.value)}
+                            inputProps={{ inputMode: 'numeric' }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            value={config.markup}
+                            onChange={(e) => handleWeightMarkupChange(index, 'markup', e.target.value)}
+                            inputProps={{ inputMode: 'numeric' }}
+                          />
+                        </TableCell>
                       </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {weightMarkupConfig.map((config, index) => (
-                        <TableRow key={index}>
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              value={config.weight}
-                              onChange={(e) => handleWeightMarkupChange(index, 'weight', e.target.value)}
-                              inputProps={{ inputMode: 'numeric' }}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              value={config.markup}
-                              onChange={(e) => handleWeightMarkupChange(index, 'markup', e.target.value)}
-                              inputProps={{ inputMode: 'numeric' }}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-                
-                <Box mt={2} display="flex" gap={2}>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={saveWeightMarkupConfig}
-                  >
-                    Save Configuration
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={resetWeightMarkupConfig}
-                  >
-                    Reset to Default
-                  </Button>
-                </Box>
-              </ConfigSection>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <Box mt={1} display="flex" gap={1}>
+                <Button variant="contained" color="primary" size="small" onClick={saveWeightMarkupConfig}>
+                  Save Configuration
+                </Button>
+                <Button variant="outlined" size="small" onClick={resetWeightMarkupConfig}>
+                  Reset to Default
+                </Button>
+              </Box>
             </Grid>
-            
+
             {/* Calculate Price Block - Right Side */}
             <Grid item xs={12} md={6}>
-              <ConfigSection>
-                <Typography variant="h5" gutterBottom>
-                  Calculate Price
-                </Typography>
-                
-                <Box mb={2}>
-                  <Typography component="label" htmlFor="calc-weight" variant="body1" display="block" gutterBottom>
-                    Weight (g):
-                  </Typography>
+              <Typography variant="h6" gutterBottom>
+                Calculate Price
+              </Typography>
+              <Grid container spacing={1}>
+                <Grid item xs={12}>
                   <TextField
                     id="calc-weight"
                     name="weight"
+                    label="Weight (g)"
                     value={calculatorSettings.weight}
                     onChange={handleCalculatorChange}
                     fullWidth
+                    size="small"
                     type="number"
-                    inputProps={{ 
-                      inputMode: 'numeric',
-                      step: 'any' 
-                    }}
+                    inputProps={{ inputMode: 'numeric', step: 'any' }}
                   />
-                </Box>
-                
-                <Box mb={2}>
-                  <Typography component="label" htmlFor="calc-purity" variant="body1" display="block" gutterBottom>
-                    Purity:
-                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
                   <TextField
                     id="calc-purity"
                     name="purity"
+                    label="Purity"
                     select
                     value={calculatorSettings.purity}
                     onChange={handleCalculatorChange}
                     fullWidth
-                    SelectProps={{
-                      native: true,
-                    }}
+                    size="small"
                   >
-                    <option value="0.999">24K (99.9%)</option>
-                    <option value="0.917">22K (91.7%)</option>
-                    <option value="0.750">18K (75.0%)</option>
-                    <option value="0.583">14K (58.3%)</option>
-                    <option value="0.417">10K (41.7%)</option>
-                    <option value="0.375">9K (37.5%)</option>
+                    <MenuItem value="0.999">24K (99.9%)</MenuItem>
+                    <MenuItem value="0.917">22K (91.7%)</MenuItem>
+                    <MenuItem value="0.750">18K (75.0%)</MenuItem>
+                    <MenuItem value="0.583">14K (58.3%)</MenuItem>
+                    <MenuItem value="0.417">10K (41.7%)</MenuItem>
+                    <MenuItem value="0.375">9K (37.5%)</MenuItem>
                   </TextField>
-                </Box>
-                
-                <Box mb={2}>
-                  <Typography component="label" htmlFor="calc-market-price" variant="body1" display="block" gutterBottom>
-                    Market Price per g (pure gold, $):
-                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
                   <TextField
                     id="calc-market-price"
                     name="marketPrice"
+                    label="Market Price per g (pure gold, $)"
                     value={calculatorSettings.marketPrice}
                     onChange={handleCalculatorChange}
                     fullWidth
+                    size="small"
                     type="number"
-                    inputProps={{ 
-                      inputMode: 'numeric',
-                      step: 'any' 
-                    }}
+                    inputProps={{ inputMode: 'numeric', step: 'any' }}
                   />
-                </Box>
-                
-                <Box mb={2}>
-                  <Box display="flex" alignItems="center">
+                </Grid>
+                <Grid item xs={12}>
+                  <Box display="flex" alignItems="center" gap={1}>
                     <Checkbox
                       id="stone-check"
                       name="hasColoredStones"
                       checked={calculatorSettings.hasColoredStones}
                       onChange={handleCalculatorChange}
+                      size="small"
+                      sx={{ p: 0.5 }}
                     />
-                    <Typography component="label" htmlFor="stone-check">
+                    <Typography component="label" htmlFor="stone-check" variant="body2">
                       Coloured stone(s)
                     </Typography>
-                    <Box ml={2}>
-                      <Typography component="span" mr={1}>
-                        Extra Markup %:
-                      </Typography>
-                      <TextField
-                        id="extra-markup"
-                        name="extraMarkup"
-                        value={calculatorSettings.extraMarkup}
-                        onChange={handleCalculatorChange}
-                        sx={{ width: '150px' }}
-                        type="number"
-                        inputProps={{ step: 'any' }}
-                      />
-                    </Box>
+                    <TextField
+                      name="extraMarkup"
+                      label="Extra Markup %"
+                      value={calculatorSettings.extraMarkup}
+                      onChange={handleCalculatorChange}
+                      sx={{ width: '140px', ml: 'auto' }}
+                      size="small"
+                      type="number"
+                      inputProps={{ step: 'any' }}
+                    />
                   </Box>
-                </Box>
-                
-                <Box mb={3}>
-                  <Box display="flex" alignItems="center">
+                </Grid>
+                <Grid item xs={12}>
+                  <Box display="flex" alignItems="center" gap={1}>
                     <Checkbox
                       id="diamond-check"
                       name="hasDiamonds"
                       checked={calculatorSettings.hasDiamonds}
                       onChange={handleCalculatorChange}
+                      size="small"
+                      sx={{ p: 0.5 }}
                     />
-                    <Typography component="label" htmlFor="diamond-check">
+                    <Typography component="label" htmlFor="diamond-check" variant="body2">
                       Diamond(s)
                     </Typography>
-                    <Box ml={2}>
-                      <Typography component="span" mr={1}>
-                        Diamond Value ($):
-                      </Typography>
-                      <TextField
-                        id="diamond-value"
-                        name="diamondValue"
-                        value={calculatorSettings.diamondValue}
-                        onChange={handleCalculatorChange}
-                        sx={{ width: '150px' }}
-                        type="number"
-                        inputProps={{ step: 'any' }}
-                      />
-                    </Box>
+                    <TextField
+                      name="diamondValue"
+                      label="Diamond Value ($)"
+                      value={calculatorSettings.diamondValue}
+                      onChange={handleCalculatorChange}
+                      sx={{ width: '140px', ml: 'auto' }}
+                      size="small"
+                      type="number"
+                      inputProps={{ step: 'any' }}
+                    />
                   </Box>
-                </Box>
-                
-                <Box>
-                  <Button
-                    variant="outlined"
-                    onClick={calculatePrice}
-                  >
+                </Grid>
+                <Grid item xs={12}>
+                  <Button variant="outlined" size="small" onClick={calculatePrice}>
                     Calculate
                   </Button>
-                </Box>
-                
+                </Grid>
                 {calculatorSettings.result && (
-                  <Box mt={4}>
-                    <Typography variant="body1" component="div">
-                      <Box fontWeight="bold" component="span">
-                        Market metal value: 
-                      </Box>
-                      <Box component="span" fontWeight="bold">
-                        ${calculatorSettings.result.metalMarketValue}
-                      </Box>
-                    </Typography>
-                    
-                    <Typography variant="body1" component="div">
-                      <Box component="span">
-                        Retail price: 
-                      </Box>
-                      <Box component="span" fontWeight="bold">
-                        ${calculatorSettings.result.retailPrice}
-                      </Box>
-                      <Box component="span">
-                        {' '}(Markup {calculatorSettings.result.appliedMarkup}%)
-                      </Box>
-                    </Typography>
-                    
-                    {calculatorSettings.result.notes && calculatorSettings.result.notes.length > 0 && (
-                      <Typography variant="body1" component="div">
-                        <Box component="span">
-                          Includes: {calculatorSettings.result.notes.join(', ')}
-                        </Box>
+                  <Grid item xs={12}>
+                    <Box sx={{ p: 1.5, bgcolor: 'background.default', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                      <Typography variant="body2">
+                        <strong>Market metal value:</strong> ${calculatorSettings.result.metalMarketValue}
                       </Typography>
-                    )}
-                  </Box>
+                      <Typography variant="body2">
+                        Retail price: <strong>${calculatorSettings.result.retailPrice}</strong> (Markup {calculatorSettings.result.appliedMarkup}%)
+                      </Typography>
+                      {calculatorSettings.result.notes && calculatorSettings.result.notes.length > 0 && (
+                        <Typography variant="body2">
+                          Includes: {calculatorSettings.result.notes.join(', ')}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Grid>
                 )}
-              </ConfigSection>
+              </Grid>
             </Grid>
           </Grid>
         </StyledPaper>
@@ -4615,14 +4672,14 @@ function SystemConfig() {
             <Typography variant="h6" gutterBottom>
               Linked Account Authorization Forms
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Configure the authorization forms that customers must sign when linking their accounts.
               Each link type (Full Access, View Only, Limited) has its own authorization form.
               Available placeholders: {'{'}{'{'} CUSTOMER_NAME {'}'}{'}'},  {'{'}{'{'} PRIMARY_CUSTOMER_NAME {'}'}{'}'}
             </Typography>
 
             {/* Link Type Selector */}
-            <Box sx={{ mb: 3 }}>
+            <Box sx={{ mb: 1.5 }}>
               <Tabs
                 value={selectedLinkType}
                 onChange={(e, newValue) => setSelectedLinkType(newValue)}
@@ -4702,7 +4759,7 @@ function SystemConfig() {
             </Typography>
 
             {/* Add New Attribute */}
-            <Paper sx={{ p: 2, mb: 3, bgcolor: 'background.default' }}>
+            <Paper sx={{ p: 1.5, mb: 1.5, bgcolor: 'background.default' }}>
               <Typography variant="subtitle1" gutterBottom fontWeight="bold">
                 Add New Attribute
               </Typography>
@@ -4900,13 +4957,6 @@ function SystemConfig() {
       <TabPanel value={activeTab} index={6}>
         <StyledPaper elevation={2}>
           <ConfigSection>
-            <Typography variant="h6" gutterBottom>
-              Employee Configuration
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Configure per-employee permissions, transfer limits, and petty cash settings. Changes take effect immediately.
-            </Typography>
-
             {employeePermissionsLoading ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
                 <CircularProgress />
@@ -4919,10 +4969,10 @@ function SystemConfig() {
                       <TableCell>Employee</TableCell>
                       <TableCell align="center">Type</TableCell>
                       <TableCell align="center">Track Hours</TableCell>
-                      <TableCell align="center">Can Open/Close Store</TableCell>
-                      <TableCell align="center">Can Open Drawer</TableCell>
-                      <TableCell align="center">Can View Drawer</TableCell>
-                      <TableCell align="center">Can View Safe</TableCell>
+                      <TableCell align="center">Open/Close Store</TableCell>
+                      <TableCell align="center">Open Drawer</TableCell>
+                      <TableCell align="center">View Drawer</TableCell>
+                      <TableCell align="center">View Safe</TableCell>
                       <TableCell align="center">Over/Short Limit</TableCell>
                       <TableCell align="center">Transfers Allowed</TableCell>
                       <TableCell align="center">Transfer Limit</TableCell>
@@ -5019,24 +5069,24 @@ function SystemConfig() {
                           />
                         </TableCell>
                         <TableCell align="center" sx={{ p: 1 }}>
-                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0 }}>
+                          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
                             <FormControlLabel
-                              control={<Checkbox size="small" checked={emp.transfer_allowed_drawer !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_drawer', emp.transfer_allowed_drawer !== false)} />}
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.transfer_allowed_drawer !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_drawer', emp.transfer_allowed_drawer !== false)} />}
                               label={<Typography variant="caption">Drawer</Typography>}
                               sx={{ m: 0 }}
                             />
                             <FormControlLabel
-                              control={<Checkbox size="small" checked={emp.transfer_allowed_safe !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_safe', emp.transfer_allowed_safe !== false)} />}
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.transfer_allowed_safe !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_safe', emp.transfer_allowed_safe !== false)} />}
                               label={<Typography variant="caption">Safe</Typography>}
                               sx={{ m: 0 }}
                             />
                             <FormControlLabel
-                              control={<Checkbox size="small" checked={emp.transfer_allowed_bank !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_bank', emp.transfer_allowed_bank !== false)} />}
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.transfer_allowed_bank !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_bank', emp.transfer_allowed_bank !== false)} />}
                               label={<Typography variant="caption">Bank</Typography>}
                               sx={{ m: 0 }}
                             />
                             <FormControlLabel
-                              control={<Checkbox size="small" checked={emp.transfer_allowed_store !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_store', emp.transfer_allowed_store !== false)} />}
+                              control={<Checkbox size="small" sx={{ p: '2px' }} checked={emp.transfer_allowed_store !== false} onChange={() => handlePermissionToggle(emp.employee_id, 'transfer_allowed_store', emp.transfer_allowed_store !== false)} />}
                               label={<Typography variant="caption">Store</Typography>}
                               sx={{ m: 0 }}
                             />

@@ -41,6 +41,8 @@ COMMENT ON COLUMN pawn_config.term_days IS 'Default pawn term in days';
 COMMENT ON COLUMN pawn_config.frequency_days IS 'Payment frequency in days';
 COMMENT ON COLUMN pawn_config.forfeiture_mode IS 'Forfeiture mode: manual (FORFEITED status) or automatic (ACTIVE status)';
 
+ALTER TABLE pawn_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+
 -- Create pawn_history table for tracking extensions, redemptions, and forfeitures
 CREATE TABLE IF NOT EXISTS pawn_history (
     id SERIAL PRIMARY KEY,

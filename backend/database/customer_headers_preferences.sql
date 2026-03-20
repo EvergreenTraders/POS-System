@@ -34,7 +34,8 @@ BEGIN
     END LOOP;
 
     -- Close the CREATE TABLE statement
-    create_table_sql := create_table_sql || '
+    create_table_sql := create_table_sql || ',
+        store_id INTEGER REFERENCES stores(store_id)
     )';
 
     -- Execute the CREATE TABLE statement

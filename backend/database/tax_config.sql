@@ -51,3 +51,14 @@ COMMENT ON TABLE tax_config IS 'Stores tax configuration for Canadian provinces 
 COMMENT ON COLUMN tax_config.gst_rate IS 'GST (Goods and Services Tax) rate as percentage';
 COMMENT ON COLUMN tax_config.pst_rate IS 'PST (Provincial Sales Tax) rate as percentage';
 COMMENT ON COLUMN tax_config.hst_rate IS 'HST (Harmonized Sales Tax) rate as percentage';
+
+ALTER TABLE tax_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+-- Replace single-column unique with composite unique per store
+DO $$
+BEGIN
+    ALTER TABLE tax_config DROP CONSTRAINT IF EXISTS tax_config_province_code_key;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tax_config_province_store_key') THEN
+        ALTER TABLE tax_config ADD CONSTRAINT tax_config_province_store_key UNIQUE (province_code, store_id);
+    END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;

@@ -185,3 +185,13 @@ BEGIN
     END IF;
 
 END $$;
+
+-- Store-scope all system config tables
+ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+ALTER TABLE live_pricing ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+ALTER TABLE spot_prices ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+ALTER TABLE diamond_estimates ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+ALTER TABLE price_estimates ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+ALTER TABLE carat_to_gram_conversion ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+ALTER TABLE inventory_hold_period ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
+ALTER TABLE receipt_config ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id);
