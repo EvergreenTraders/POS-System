@@ -17,7 +17,12 @@ import {
   DialogActions,
   Button,
   Tooltip,
+  Alert,
+  FormControlLabel,
+  Checkbox,
+  CircularProgress,
 } from '@mui/material';
+import axios from 'axios';
 import {
   ShoppingCart as CartIcon,
   AccountCircle as AccountIcon,
@@ -56,7 +61,15 @@ function Navbar() {
   const { cartItems } = useCart();
   const { user, logout, lockScreen } = useAuth();
   const { workingDate, isWorkingDateEnabled } = useWorkingDate();
-  const { storeStatus } = useStoreStatus();
+  const { storeStatus, refreshStatus } = useStoreStatus();
+  const isManagerOrOwner = user?.role === 'Store Manager' || user?.role === 'Store Owner';
+
+  const [openStoreDialogOpen, setOpenStoreDialogOpen] = useState(false);
+  const [closeStoreDialogOpen, setCloseStoreDialogOpen] = useState(false);
+  const [storeActionLoading, setStoreActionLoading] = useState(false);
+  const [storeActionError, setStoreActionError] = useState('');
+  const [closeStoreClockedIn, setCloseStoreClockedIn] = useState([]);
+  const [isBackupComputer, setIsBackupComputer] = useState(false);
   const navigate = useNavigate();
 
   const cartItemCount = cartItems.length; // Just count number of items, not quantity
@@ -327,6 +340,63 @@ function Navbar() {
     }
   };
 
+  const handleStoreChipClick = async () => {
+    if (!isManagerOrOwner) return;
+    setStoreActionError('');
+    if (storeStatus === 'open') {
+      setStoreActionLoading(true);
+      try {
+        await axios.get(`${config.apiUrl}/store-sessions/check-open-drawers`);
+        const res = await axios.get(`${config.apiUrl}/employee-sessions/clocked-in`);
+        setCloseStoreClockedIn(res.data || []);
+        if (res.data && res.data.length > 0) {
+          await axios.post(`${config.apiUrl}/employee-sessions/notify-closing`);
+        }
+        setIsBackupComputer(false);
+        setCloseStoreDialogOpen(true);
+      } catch (err) {
+        setStoreActionError(err.response?.data?.error || 'Failed to check store closure prerequisites');
+        setCloseStoreDialogOpen(true);
+      } finally {
+        setStoreActionLoading(false);
+      }
+    } else {
+      setOpenStoreDialogOpen(true);
+    }
+  };
+
+  const handleOpenStoreConfirm = async () => {
+    setStoreActionLoading(true);
+    try {
+      await axios.post(`${config.apiUrl}/store-sessions/open`, {
+        employee_id: user?.id || user?.employee_id,
+      });
+      await refreshStatus();
+      window.dispatchEvent(new Event('storeStatusChanged'));
+      setOpenStoreDialogOpen(false);
+    } catch (err) {
+      setStoreActionError(err.response?.data?.error || 'Failed to open store');
+    } finally {
+      setStoreActionLoading(false);
+    }
+  };
+
+  const handleCloseStoreConfirm = async () => {
+    setStoreActionLoading(true);
+    try {
+      await axios.post(`${config.apiUrl}/store-sessions/close`, {
+        employee_id: user?.id || user?.employee_id,
+      });
+      await refreshStatus();
+      window.dispatchEvent(new Event('storeStatusChanged'));
+      setCloseStoreDialogOpen(false);
+    } catch (err) {
+      setStoreActionError(err.response?.data?.error || 'Failed to close store');
+    } finally {
+      setStoreActionLoading(false);
+    }
+  };
+
   return (
     <>
       <StyledAppBar position="fixed">
@@ -346,6 +416,7 @@ function Navbar() {
             {businessName}
             <Box
               component="span"
+              onClick={isManagerOrOwner ? (e) => { e.stopPropagation(); handleStoreChipClick(); } : (e) => e.stopPropagation()}
               sx={{
                 fontSize: '0.75rem',
                 fontWeight: 'bold',
@@ -354,9 +425,15 @@ function Navbar() {
                 borderRadius: 1,
                 bgcolor: storeStatus === 'open' ? 'success.main' : 'error.main',
                 color: 'white',
-                letterSpacing: '0.5px'
+                letterSpacing: '0.5px',
+                cursor: isManagerOrOwner ? 'pointer' : 'default',
+                '&:hover': isManagerOrOwner ? { opacity: 0.85 } : {},
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 0.5,
               }}
             >
+              {storeActionLoading ? <CircularProgress size={10} color="inherit" /> : null}
               {storeStatus === 'open' ? 'OPEN' : 'CLOSED'}
             </Box>
           </Typography>
@@ -652,6 +729,80 @@ function Navbar() {
             disabled={clockLoading}
           >
             Confirm Clock Out
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Open Store Dialog */}
+      <Dialog open={openStoreDialogOpen} onClose={() => { setOpenStoreDialogOpen(false); setStoreActionError(''); }} maxWidth="xs" fullWidth>
+        <DialogTitle>Open Store</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            Are you sure you want to open the store for business?
+          </Typography>
+          {storeActionError && <Alert severity="error" sx={{ mt: 1 }}>{storeActionError}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setOpenStoreDialogOpen(false); setStoreActionError(''); }}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="success"
+            onClick={handleOpenStoreConfirm}
+            disabled={storeActionLoading}
+            startIcon={storeActionLoading ? <CircularProgress size={16} /> : null}
+          >
+            Open Store
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Close Store Dialog */}
+      <Dialog open={closeStoreDialogOpen} onClose={() => { setCloseStoreDialogOpen(false); setStoreActionError(''); }} maxWidth="sm" fullWidth>
+        <DialogTitle>Close Store</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Closing the store will disable all financial transactions until it is reopened.
+          </Alert>
+          <Typography variant="body2" sx={{ mb: 2 }}>Before closing the store, ensure:</Typography>
+          <Box component="ul" sx={{ pl: 2, mb: 2 }}>
+            <Typography component="li" variant="body2">All cash drawers and safes (except the master safe) are closed</Typography>
+            <Typography component="li" variant="body2">End-of-day reports have been generated</Typography>
+            <Typography component="li" variant="body2">All pending transactions are complete</Typography>
+          </Box>
+          {closeStoreClockedIn.length > 0 && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                Currently Clocked-In Employees ({closeStoreClockedIn.length}):
+              </Typography>
+              {closeStoreClockedIn.map((emp) => (
+                <Typography key={emp.session_id} variant="body2">
+                  {emp.employee_name} - {emp.role} (since {new Date(emp.clock_in_time).toLocaleTimeString()})
+                </Typography>
+              ))}
+            </Alert>
+          )}
+          {storeActionError && <Alert severity="error" sx={{ mb: 2 }}>{storeActionError}</Alert>}
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={isBackupComputer}
+                onChange={(e) => setIsBackupComputer(e.target.checked)}
+                color="primary"
+              />
+            }
+            label={<Typography variant="body2">I confirm this is the designated backup computer for end-of-day procedures</Typography>}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setCloseStoreDialogOpen(false); setStoreActionError(''); }}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleCloseStoreConfirm}
+            disabled={!isBackupComputer || storeActionLoading || !!storeActionError}
+            startIcon={storeActionLoading ? <CircularProgress size={16} /> : null}
+          >
+            Close Store
           </Button>
         </DialogActions>
       </Dialog>
