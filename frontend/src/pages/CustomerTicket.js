@@ -5945,7 +5945,7 @@ return (
               prefilledData={prefilledData}
               onCancel={handleCombinedCancel}
               onSave={handleCombinedSave}
-              transactionType={activeTab}
+              transactionType={activeTab === 0 ? 'pawn' : activeTab === 1 ? 'buy' : activeTab === 3 ? 'retail' : 'buy'}
             />
           )}
         </DialogContent>
