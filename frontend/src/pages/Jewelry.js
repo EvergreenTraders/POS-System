@@ -804,16 +804,17 @@ function Jewelry() {
   };
 
   const formatPrice = (price) => {
-    if (typeof price !== 'number' || isNaN(price)) {
-      return '0.00';
-    }
-    return price.toFixed(2);
+    const num = typeof price === 'number' ? price : parseFloat(price);
+    if (isNaN(num)) return '0.00';
+    return num.toFixed(2);
   };
+
+  const PLACEHOLDER_IMAGE = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect width='120' height='120' fill='%23f5f5f5'/%3E%3Ctext x='60' y='68' font-family='sans-serif' font-size='11' fill='%23bbb' text-anchor='middle'%3ENo Image%3C/text%3E%3C/svg%3E";
 
   // Helper function to extract image URL from various image formats
   const getImageUrl = (images) => {
     // Default placeholder image
-    const placeholderImage = 'https://via.placeholder.com/150';
+    const placeholderImage = PLACEHOLDER_IMAGE;
 
     // Helper to convert relative paths to absolute URLs
     const makeAbsoluteUrl = (url) => {
@@ -1134,11 +1135,8 @@ function Jewelry() {
                     src={getImageUrl(selectedItem.images)}
                     alt={selectedItem.name || 'Item'}
                     onError={(e) => {
-                      console.error('Image failed to load:', e.target.src);
-                      e.target.src = 'https://via.placeholder.com/150';
-                    }}
-                    onLoad={(e) => {
-                      console.log('Image loaded successfully:', e.target.src);
+                      e.target.onerror = null;
+                      e.target.src = PLACEHOLDER_IMAGE;
                     }}
                     style={{
                       width: '100%',
