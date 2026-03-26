@@ -362,6 +362,9 @@ pool.query(`
 pool.query(`
   ALTER TABLE banks ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
 `).catch(err => console.error('banks store_id migration:', err.message));
+pool.query(`
+  ALTER TABLE transactions ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
+`).catch(err => console.error('transactions store_id migration:', err.message));
 
 
 // Fix unique_active_connection: replace table constraint with partial index
@@ -9585,6 +9588,7 @@ app.get('/api/transactions', async (req, res) => {
       LEFT JOIN customers c ON t.customer_id = c.id
       LEFT JOIN employees e ON t.employee_id = e.employee_id
       LEFT JOIN transaction_items_count tic ON t.transaction_id = tic.transaction_id
+      WHERE t.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       GROUP BY
         t.transaction_id, t.customer_id, c.first_name, c.last_name, c.phone,
         c.address_line1, c.address_line2, c.city, c.state, c.postal_code,
@@ -9623,6 +9627,7 @@ app.get('/api/transactions/:id', async (req, res) => {
       LEFT JOIN employees e ON t.employee_id = e.employee_id
       LEFT JOIN payments p ON t.payment_id = p.id
       WHERE t.id = $1
+        AND t.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
     `;
 
     const transactionResult = await pool.query(transactionQuery, [id]);
@@ -9678,9 +9683,9 @@ app.post('/api/transactions', async (req, res) => {
         const transactionQuery = `
             INSERT INTO transactions (
                 transaction_id, customer_id, employee_id, session_id,
-                total_amount, transaction_date
+                total_amount, transaction_date, store_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1))
             RETURNING *
         `;
 
