@@ -32,6 +32,7 @@ import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
+  AttachMoney as AttachMoneyIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -304,6 +305,14 @@ function Employees() {
                       onClick={() => handleDeleteEmployee(employee.employee_id)}
                     >
                       <DeleteIcon />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      color="success"
+                      title="View Sales History"
+                      onClick={() => window.open(`/employees/${employee.employee_id}/sales-history`, '_blank')}
+                    >
+                      <AttachMoneyIcon />
                     </IconButton>
                   </Box>
                 </TableCell>

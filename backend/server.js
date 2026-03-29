@@ -9549,6 +9549,104 @@ app.put('/api/transactions/:transaction_id/payments', async (req, res) => {
   }
 });
 
+// Employee sales summary for current store
+app.get('/api/employee-sales-summary', async (req, res) => {
+  try {
+    const { start_date, end_date, employee_id } = req.query;
+    const params = [];
+    let dateFilter = '';
+    if (start_date) { params.push(start_date); dateFilter += ` AND t.transaction_date >= $${params.length}`; }
+    if (end_date)   { params.push(end_date);   dateFilter += ` AND t.transaction_date <= $${params.length}`; }
+    let empFilter = '';
+    if (employee_id) { params.push(employee_id); empFilter = ` AND e.employee_id = $${params.length}`; }
+
+    const result = await pool.query(`
+      SELECT
+        e.employee_id,
+        e.first_name || ' ' || e.last_name AS employee_name,
+        e.role,
+        COUNT(t.id)                          AS transaction_count,
+        COALESCE(SUM(t.total_amount), 0)     AS total_sales,
+        COALESCE(AVG(t.total_amount), 0)     AS avg_sale,
+        MAX(t.transaction_date)              AS last_sale_date
+      FROM employees e
+      LEFT JOIN transactions t
+        ON t.employee_id = e.employee_id
+        AND t.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+        ${dateFilter}
+      WHERE e.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+        ${empFilter}
+      GROUP BY e.employee_id, e.first_name, e.last_name, e.role
+      ORDER BY total_sales DESC
+    `, params);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching employee sales summary:', err);
+    res.status(500).json({ error: 'Failed to fetch employee sales summary' });
+  }
+});
+
+// Employee sales history (full transactions list with summary)
+app.get('/api/employees/:employee_id/sales-history', async (req, res) => {
+  try {
+    const { employee_id } = req.params;
+    const { start_date, end_date } = req.query;
+    const params = [employee_id];
+    let dateFilter = '';
+    if (start_date) { params.push(start_date); dateFilter += ` AND t.transaction_date >= $${params.length}`; }
+    if (end_date)   { params.push(end_date);   dateFilter += ` AND t.transaction_date <= $${params.length}`; }
+
+    const empResult = await pool.query(
+      `SELECT employee_id, first_name, last_name, role FROM employees WHERE employee_id = $1`, [employee_id]
+    );
+    if (empResult.rows.length === 0) return res.status(404).json({ error: 'Employee not found' });
+
+    const txResult = await pool.query(`
+      SELECT
+        t.transaction_id,
+        t.created_at,
+        t.transaction_date,
+        t.total_amount,
+        c.first_name || ' ' || c.last_name AS customer_name,
+        c.phone AS customer_phone,
+        COALESCE(
+          STRING_AGG(DISTINCT tt.type, ', '),
+          'N/A'
+        ) AS transaction_types,
+        COUNT(DISTINCT ti.id) AS item_count,
+        COALESCE(SUM(DISTINCT p2.amount), 0) AS total_paid,
+        COALESCE(
+          STRING_AGG(DISTINCT p2.payment_method, ', '),
+          'N/A'
+        ) AS payment_methods
+      FROM transactions t
+      LEFT JOIN customers c ON t.customer_id = c.id
+      LEFT JOIN transaction_items ti ON ti.transaction_id = t.transaction_id
+      LEFT JOIN transaction_type tt ON ti.transaction_type_id = tt.id
+      LEFT JOIN payments p2 ON p2.transaction_id = t.transaction_id
+      WHERE t.employee_id = $1
+        AND t.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
+        ${dateFilter}
+      GROUP BY t.transaction_id, t.created_at, t.transaction_date, t.total_amount,
+               c.first_name, c.last_name, c.phone
+      ORDER BY t.created_at DESC
+    `, params);
+
+    const summary = {
+      total_transactions: txResult.rows.length,
+      total_sales: txResult.rows.reduce((s, r) => s + parseFloat(r.total_amount || 0), 0),
+      avg_sale: txResult.rows.length ? txResult.rows.reduce((s, r) => s + parseFloat(r.total_amount || 0), 0) / txResult.rows.length : 0,
+      last_sale_date: txResult.rows.length ? txResult.rows[0].transaction_date : null,
+    };
+
+    res.json({ employee: empResult.rows[0], summary, transactions: txResult.rows });
+  } catch (err) {
+    console.error('Error fetching employee sales history:', err);
+    res.status(500).json({ error: 'Failed to fetch employee sales history' });
+  }
+});
+
 // Transaction routes
 app.get('/api/transactions', async (req, res) => {
   try {
