@@ -899,6 +899,108 @@ function Jewelry() {
     return matchesSearch && matchesSerial && notQuoted && notHold && matchesStatus;
   });
 
+  const handleExportPDF = () => {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 30;
+
+    // Centered title — matches customer report style
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+    doc.text('Jewelry Inventory Report', pageWidth / 2, 30, { align: 'center' });
+
+    const genDate = new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true });
+    doc.setFontSize(9);
+    doc.text(`Generated: ${genDate}`, pageWidth / 2, 44, { align: 'center' });
+
+    const truncate = (val) => {
+      const s = String(val ?? '-');
+      return s.length > 25 ? s.substring(0, 22) + '...' : s;
+    };
+
+    const rows = filteredItems.map(item => {
+      const status = item.inventory_status || item.status || '';
+      const isSold = status === 'SOLD';
+      const date = isSold && item.sold_date
+        ? new Date(item.sold_date).toLocaleDateString()
+        : new Date(item.created_at).toLocaleDateString();
+      const category = typeof item.category === 'object' && item.category !== null
+        ? (item.category.category || item.category.value || item.category.name || '')
+        : (item.category || '');
+      return [
+        truncate(item.item_id),
+        truncate(item.short_desc || item.long_desc),
+        truncate(category),
+        item.metal_weight ? `${item.metal_weight}g` : '-',
+        truncate(status),
+        item.age_days || '-',
+        `$${formatPrice(parseFloat(item.sold_price || item.item_price || 0))}`,
+        item.days_to_sell || '-',
+        date
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 55,
+      margin: { left: margin, right: margin },
+      head: [['ID', 'Description', 'Category', 'Weight', 'Status', 'Age (Days)', 'Price', 'Days to Sell', 'Date']],
+      body: rows,
+      styles: { fontSize: 8, cellPadding: 3, font: 'helvetica', textColor: [0, 0, 0] },
+      headStyles: {
+        fillColor: [240, 240, 240],
+        textColor: [0, 0, 0],
+        fontStyle: 'bold',
+        fontSize: 10,
+      },
+      bodyStyles: { fillColor: [255, 255, 255] },
+      alternateRowStyles: { fillColor: [249, 249, 249] },
+      showHead: 'everyPage',
+    });
+
+    const pdfBlob = doc.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+    const win = window.open();
+    if (win) {
+      win.location.href = pdfUrl;
+    } else {
+      doc.save('jewelry_inventory.pdf');
+    }
+  };
+
+  const handleExportCSV = () => {
+    const toISODate = (d) => { const dt = new Date(d); return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`; };
+    const headers = ['ID', 'Description', 'Category', 'Weight (g)', 'Status', 'Age (Days)', 'Price', 'Days to Sell', 'Date'];
+    const rows = filteredItems.map(item => {
+      const status = item.inventory_status || item.status || '';
+      const isSold = status === 'SOLD';
+      const date = `="${isSold && item.sold_date ? toISODate(item.sold_date) : toISODate(item.created_at)}"`;
+      const category = typeof item.category === 'object' && item.category !== null
+        ? (item.category.category || item.category.value || item.category.name || '')
+        : (item.category || '');
+      const escape = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+      return [
+        escape(item.item_id),
+        escape(item.short_desc || item.long_desc || ''),
+        escape(category),
+        escape(item.metal_weight || ''),
+        escape(status),
+        escape(item.age_days || ''),
+        escape(formatPrice(parseFloat(item.sold_price || item.item_price || 0))),
+        escape(item.days_to_sell || ''),
+        date
+      ].join(',');
+    });
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'jewelry_inventory.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Main Content */}
@@ -958,6 +1060,22 @@ function Jewelry() {
                 ))}
               </Select>
             </FormControl>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleExportPDF}
+              sx={{ whiteSpace: 'nowrap' }}
+            >
+              Export PDF
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleExportCSV}
+              sx={{ whiteSpace: 'nowrap' }}
+            >
+              Export CSV
+            </Button>
           </Box>
 
           <TableContainer component={Paper} sx={{ flex: 1, overflow: 'auto' }}>
