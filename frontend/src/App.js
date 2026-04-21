@@ -35,6 +35,7 @@ import CustomerDashboard from './pages/CustomerDashboard';
 import Cart from './pages/Cart';
 import JewelryEdit from './pages/JewelryEdit';
 import SalesHistory from './pages/SalesHistory';
+import EmployeeSalesHistory from './pages/EmployeeSalesHistory';
 import Layaway from './pages/Layaway';
 import CashDrawer from './pages/CashDrawer';
 import TimeClock from './pages/TimeClock';
@@ -539,6 +540,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <SalesHistory />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/employees/:employee_id/sales-history"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <EmployeeSalesHistory />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
