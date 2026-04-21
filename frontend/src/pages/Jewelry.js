@@ -29,7 +29,11 @@ import {
   InputLabel,
   Select,
   Badge,
-  IconButton
+  IconButton,
+  Checkbox,
+  FormControlLabel,
+  FormGroup,
+  Divider
 } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -43,6 +47,51 @@ import SearchIcon from '@mui/icons-material/Search';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import config from '../config';
 import axios from 'axios';
+
+const COLUMN_GROUPS = {
+  'Basic Info': [
+    { key: 'item_id', label: 'Item ID' },
+    { key: 'short_desc', label: 'Description' },
+    { key: 'category', label: 'Category' },
+    { key: 'inventory_status', label: 'Status' },
+    { key: 'source', label: 'Source' },
+    { key: 'bought_from', label: 'Bought From' },
+  ],
+  'Metal Details': [
+    { key: 'metal_weight', label: 'Metal Weight (g)' },
+    { key: 'precious_metal_type', label: 'Metal Type' },
+    { key: 'metal_purity', label: 'Purity' },
+    { key: 'jewelry_color', label: 'Color' },
+  ],
+  'Gem Details': [
+    { key: 'primary_gem_type', label: 'Primary Gem' },
+    { key: 'primary_gem_weight', label: 'Gem Weight (ct)' },
+    { key: 'primary_gem_color', label: 'Gem Color' },
+    { key: 'primary_gem_clarity', label: 'Gem Clarity' },
+  ],
+  'Pricing': [
+    { key: 'item_price', label: 'Item Price' },
+    { key: 'sold_price', label: 'Sold Price' },
+  ],
+  'Analytics': [
+    { key: 'age_days', label: 'Age (Days)' },
+    { key: 'days_to_sell', label: 'Days to Sell' },
+  ],
+  'Dates': [
+    { key: 'created_at', label: 'Created Date' },
+    { key: 'sold_date', label: 'Sold Date' },
+  ],
+};
+
+const DEFAULT_COLUMNS = {
+  item_id: true, short_desc: true, category: true, inventory_status: true,
+  source: false, bought_from: false,
+  metal_weight: true, precious_metal_type: false, metal_purity: false, jewelry_color: false,
+  primary_gem_type: false, primary_gem_weight: false, primary_gem_color: false, primary_gem_clarity: false,
+  item_price: true, sold_price: false,
+  age_days: true, days_to_sell: true,
+  created_at: true, sold_date: false,
+};
 
 function Jewelry() {
   const navigate = useNavigate();
@@ -520,6 +569,13 @@ function Jewelry() {
   const [inventoryStatuses, setInventoryStatuses] = useState([]);
   const [selectedStatus, setSelectedStatus] = useState('ACTIVE');
 
+  // Report dialog state
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [reportTitle, setReportTitle] = useState('Jewelry Inventory Report');
+  const [reportFormat, setReportFormat] = useState('pdf');
+  const [reportColumns, setReportColumns] = useState({ ...DEFAULT_COLUMNS });
+  const [reportFilters, setReportFilters] = useState({ status: '', category: '', date_from: '', date_to: '' });
+
   const fetchScrapBuckets = async () => {
     try {
       setLoadingBuckets(true);
@@ -899,106 +955,114 @@ function Jewelry() {
     return matchesSearch && matchesSerial && notQuoted && notHold && matchesStatus;
   });
 
-  const handleExportPDF = () => {
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 30;
+  // Helpers shared by both export formats
+  const getReportItems = () => {
+    return filteredItems.filter(item => {
+      const status = item.inventory_status || item.status || '';
+      const category = typeof item.category === 'object' && item.category !== null
+        ? (item.category.category || item.category.value || item.category.name || '')
+        : (item.category || '');
+      const matchesStatus = !reportFilters.status || status === reportFilters.status;
+      const matchesCategory = !reportFilters.category ||
+        category.toLowerCase().includes(reportFilters.category.toLowerCase());
+      const itemDate = new Date(item.created_at);
+      const matchesFrom = !reportFilters.date_from || itemDate >= new Date(reportFilters.date_from);
+      const matchesTo = !reportFilters.date_to || itemDate <= new Date(reportFilters.date_to);
+      return matchesStatus && matchesCategory && matchesFrom && matchesTo;
+    });
+  };
 
-    // Centered title — matches customer report style
-    doc.setFontSize(18);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0, 0, 0);
-    doc.text('Jewelry Inventory Report', pageWidth / 2, 30, { align: 'center' });
+  const getCellValue = (item, key) => {
+    const toISODate = (d) => {
+      const dt = new Date(d);
+      return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    };
+    const status = item.inventory_status || item.status || '';
+    const isSold = status === 'SOLD';
+    const category = typeof item.category === 'object' && item.category !== null
+      ? (item.category.category || item.category.value || item.category.name || '')
+      : (item.category || '');
+    switch (key) {
+      case 'category': return category;
+      case 'inventory_status': return status;
+      case 'item_price': return `$${formatPrice(parseFloat(item.item_price || 0))}`;
+      case 'sold_price': return item.sold_price ? `$${formatPrice(parseFloat(item.sold_price))}` : '-';
+      case 'metal_weight': return item.metal_weight ? `${item.metal_weight}g` : '-';
+      case 'primary_gem_weight': return item.primary_gem_weight ? `${item.primary_gem_weight}ct` : '-';
+      case 'created_at': return item.created_at ? toISODate(item.created_at) : '-';
+      case 'sold_date': return isSold && item.sold_date ? toISODate(item.sold_date) : '-';
+      case 'short_desc': return item.short_desc || item.long_desc || '-';
+      default: return item[key] ?? '-';
+    }
+  };
 
-    const genDate = new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true });
-    doc.setFontSize(9);
-    doc.text(`Generated: ${genDate}`, pageWidth / 2, 44, { align: 'center' });
+  const getSelectedColumns = () =>
+    Object.values(COLUMN_GROUPS)
+      .flat()
+      .filter(col => reportColumns[col.key]);
 
+  const generateReport = () => {
+    const selectedCols = getSelectedColumns();
+    if (selectedCols.length === 0) {
+      enqueueSnackbar('Please select at least one column.', { variant: 'warning' });
+      return;
+    }
+    const items = getReportItems();
     const truncate = (val) => {
       const s = String(val ?? '-');
       return s.length > 25 ? s.substring(0, 22) + '...' : s;
     };
 
-    const rows = filteredItems.map(item => {
-      const status = item.inventory_status || item.status || '';
-      const isSold = status === 'SOLD';
-      const date = isSold && item.sold_date
-        ? new Date(item.sold_date).toLocaleDateString()
-        : new Date(item.created_at).toLocaleDateString();
-      const category = typeof item.category === 'object' && item.category !== null
-        ? (item.category.category || item.category.value || item.category.name || '')
-        : (item.category || '');
-      return [
-        truncate(item.item_id),
-        truncate(item.short_desc || item.long_desc),
-        truncate(category),
-        item.metal_weight ? `${item.metal_weight}g` : '-',
-        truncate(status),
-        item.age_days || '-',
-        `$${formatPrice(parseFloat(item.sold_price || item.item_price || 0))}`,
-        item.days_to_sell || '-',
-        date
-      ];
-    });
+    if (reportFormat === 'pdf') {
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 30;
+      doc.setFontSize(18);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(0, 0, 0);
+      doc.text(reportTitle, pageWidth / 2, 30, { align: 'center' });
+      const genDate = new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true });
+      doc.setFontSize(9);
+      doc.text(`Generated: ${genDate}`, pageWidth / 2, 44, { align: 'center' });
+      const head = [selectedCols.map(c => c.label)];
+      const body = items.map(item => selectedCols.map(c => truncate(getCellValue(item, c.key))));
+      autoTable(doc, {
+        startY: 55,
+        margin: { left: margin, right: margin },
+        head,
+        body,
+        styles: { fontSize: 8, cellPadding: 3, font: 'helvetica', textColor: [0, 0, 0] },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', fontSize: 10 },
+        bodyStyles: { fillColor: [255, 255, 255] },
+        alternateRowStyles: { fillColor: [249, 249, 249] },
+        showHead: 'everyPage',
+      });
+      const pdfBlob = doc.output('blob');
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const win = window.open();
+      if (win) { win.location.href = pdfUrl; } else { doc.save('jewelry_inventory.pdf'); }
 
-    autoTable(doc, {
-      startY: 55,
-      margin: { left: margin, right: margin },
-      head: [['ID', 'Description', 'Category', 'Weight', 'Status', 'Age (Days)', 'Price', 'Days to Sell', 'Date']],
-      body: rows,
-      styles: { fontSize: 8, cellPadding: 3, font: 'helvetica', textColor: [0, 0, 0] },
-      headStyles: {
-        fillColor: [240, 240, 240],
-        textColor: [0, 0, 0],
-        fontStyle: 'bold',
-        fontSize: 10,
-      },
-      bodyStyles: { fillColor: [255, 255, 255] },
-      alternateRowStyles: { fillColor: [249, 249, 249] },
-      showHead: 'everyPage',
-    });
-
-    const pdfBlob = doc.output('blob');
-    const pdfUrl = URL.createObjectURL(pdfBlob);
-    const win = window.open();
-    if (win) {
-      win.location.href = pdfUrl;
-    } else {
-      doc.save('jewelry_inventory.pdf');
-    }
-  };
-
-  const handleExportCSV = () => {
-    const toISODate = (d) => { const dt = new Date(d); return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`; };
-    const headers = ['ID', 'Description', 'Category', 'Weight (g)', 'Status', 'Age (Days)', 'Price', 'Days to Sell', 'Date'];
-    const rows = filteredItems.map(item => {
-      const status = item.inventory_status || item.status || '';
-      const isSold = status === 'SOLD';
-      const date = `="${isSold && item.sold_date ? toISODate(item.sold_date) : toISODate(item.created_at)}"`;
-      const category = typeof item.category === 'object' && item.category !== null
-        ? (item.category.category || item.category.value || item.category.name || '')
-        : (item.category || '');
+    } else if (reportFormat === 'csv') {
       const escape = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
-      return [
-        escape(item.item_id),
-        escape(item.short_desc || item.long_desc || ''),
-        escape(category),
-        escape(item.metal_weight || ''),
-        escape(status),
-        escape(item.age_days || ''),
-        escape(formatPrice(parseFloat(item.sold_price || item.item_price || 0))),
-        escape(item.days_to_sell || ''),
-        date
-      ].join(',');
-    });
-    const csv = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'jewelry_inventory.csv';
-    a.click();
-    URL.revokeObjectURL(url);
+      const headers = selectedCols.map(c => c.label).join(',');
+      const rows = items.map(item =>
+        selectedCols.map(c => {
+          const val = getCellValue(item, c.key);
+          // Wrap date columns in Excel formula to prevent auto-conversion
+          if (c.key === 'created_at' || c.key === 'sold_date') return `="${val}"`;
+          return escape(val);
+        }).join(',')
+      );
+      const csv = [headers, ...rows].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${reportTitle.replace(/\s+/g, '_')}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+    setReportDialogOpen(false);
   };
 
   return (
@@ -1063,18 +1127,10 @@ function Jewelry() {
             <Button
               variant="outlined"
               size="small"
-              onClick={handleExportPDF}
+              onClick={() => setReportDialogOpen(true)}
               sx={{ whiteSpace: 'nowrap' }}
             >
-              Export PDF
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={handleExportCSV}
-              sx={{ whiteSpace: 'nowrap' }}
-            >
-              Export CSV
+              Export Report
             </Button>
           </Box>
 
@@ -1390,6 +1446,140 @@ function Jewelry() {
           )}
         </Grid>
       </Grid>
+
+      {/* Export Report Dialog */}
+      <Dialog
+        open={reportDialogOpen}
+        onClose={() => setReportDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Ad-hoc Inventory Reporting</DialogTitle>
+        <DialogContent dividers>
+          <Grid container spacing={3}>
+            {/* Left column */}
+            <Grid item xs={12} md={4}>
+              <Paper elevation={1} sx={{ p: 2, mb: 2 }}>
+                <Typography variant="subtitle1" gutterBottom>Report Title</Typography>
+                <TextField
+                  fullWidth
+                  value={reportTitle}
+                  onChange={(e) => setReportTitle(e.target.value)}
+                  variant="outlined"
+                  size="small"
+                  sx={{ mb: 2 }}
+                />
+
+                <Typography variant="subtitle1" gutterBottom>Report Format</Typography>
+                <FormControl fullWidth size="small" sx={{ mb: 3 }}>
+                  <Select value={reportFormat} onChange={(e) => setReportFormat(e.target.value)}>
+                    <MenuItem value="pdf">PDF Download</MenuItem>
+                    <MenuItem value="csv">CSV Download</MenuItem>
+                  </Select>
+                </FormControl>
+
+                <Divider sx={{ my: 2 }} />
+
+                <Typography variant="subtitle1" gutterBottom>Report Filters</Typography>
+
+                <FormControl fullWidth sx={{ mb: 2 }} size="small">
+                  <InputLabel>Status</InputLabel>
+                  <Select
+                    value={reportFilters.status}
+                    onChange={(e) => setReportFilters(p => ({ ...p, status: e.target.value }))}
+                    label="Status"
+                  >
+                    <MenuItem value="">All</MenuItem>
+                    {inventoryStatuses.map(s => (
+                      <MenuItem key={s.status_code} value={s.status_code}>{s.status_name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                <TextField
+                  label="Category contains"
+                  value={reportFilters.category}
+                  onChange={(e) => setReportFilters(p => ({ ...p, category: e.target.value }))}
+                  fullWidth
+                  size="small"
+                  sx={{ mb: 2 }}
+                />
+
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={6}>
+                    <TextField
+                      label="Created From"
+                      type="date"
+                      value={reportFilters.date_from}
+                      onChange={(e) => setReportFilters(p => ({ ...p, date_from: e.target.value }))}
+                      fullWidth size="small"
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <TextField
+                      label="Created To"
+                      type="date"
+                      value={reportFilters.date_to}
+                      onChange={(e) => setReportFilters(p => ({ ...p, date_to: e.target.value }))}
+                      fullWidth size="small"
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  </Grid>
+                </Grid>
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => setReportFilters({ status: '', category: '', date_from: '', date_to: '' })}
+                  >
+                    Clear Filters
+                  </Button>
+                  <Button variant="contained" size="small" onClick={generateReport}>
+                    Generate Report
+                  </Button>
+                </Box>
+              </Paper>
+            </Grid>
+
+            {/* Right column — column selection */}
+            <Grid item xs={12} md={8}>
+              <Paper elevation={1} sx={{ p: 2 }}>
+                <Typography variant="subtitle1" gutterBottom>Report Columns</Typography>
+                {Object.entries(COLUMN_GROUPS).map(([groupName, cols]) => (
+                  <Box key={groupName} sx={{ mb: 2 }}>
+                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                      {groupName}
+                    </Typography>
+                    <Grid container>
+                      {cols.map(col => (
+                        <Grid item xs={6} sm={4} key={col.key}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={!!reportColumns[col.key]}
+                                onChange={(e) => setReportColumns(p => ({ ...p, [col.key]: e.target.checked }))}
+                                size="small"
+                              />
+                            }
+                            label={col.label}
+                          />
+                        </Grid>
+                      ))}
+                    </Grid>
+                    <Divider sx={{ mt: 1 }} />
+                  </Box>
+                ))}
+              </Paper>
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReportColumns({ ...DEFAULT_COLUMNS })}>Reset Columns</Button>
+          <Button onClick={() => setReportDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Move to Scrap Confirmation Dialog */}
       <Dialog
