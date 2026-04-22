@@ -365,6 +365,9 @@ pool.query(`
 pool.query(`
   ALTER TABLE transactions ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
 `).catch(err => console.error('transactions store_id migration:', err.message));
+pool.query(`
+  ALTER TABLE customers ADD COLUMN IF NOT EXISTS alert TEXT
+`).catch(err => console.error('customers alert migration:', err.message));
 
 
 // Fix unique_active_connection: replace table constraint with partial index
@@ -8445,7 +8448,7 @@ app.get('/api/customers', async (req, res) => {
         id_type, id_number,
         TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date,
         TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth,
-        status, risk_level, notes, gender, height, weight, tax_exempt,
+        status, risk_level, notes, alert, gender, height, weight, tax_exempt,
         image, id_image_front, id_image_back,
         created_at, updated_at
       FROM customers
@@ -8712,7 +8715,7 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
       id_type, id_number, id_expiry_date,
-      date_of_birth, status, risk_level, notes, gender, height, weight, tax_exempt
+      date_of_birth, status, risk_level, notes, alert, gender, height, weight, tax_exempt
     } = req.body;
 
     // Convert tax_exempt string to boolean (FormData sends "true"/"false" as strings)
@@ -8776,6 +8779,7 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
       `status = $${paramCount++}`,
       `risk_level = $${paramCount++}`,
       `notes = $${paramCount++}`,
+      `alert = $${paramCount++}`,
       `gender = $${paramCount++}`,
       `height = $${paramCount++}`,
       `weight = $${paramCount++}`,
@@ -8786,7 +8790,7 @@ app.put('/api/customers/:id', uploadCustomerImages, async (req, res) => {
       first_name, last_name, emailValue, phone,
       address_line1, address_line2, city, state, postal_code, country,
       id_type, id_number, id_expiry_date || null,
-      date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null,
+      date_of_birth || null, status, risk_level, notes, alert || null, gender, height || null, weight || null,
       taxExemptBool
     );
     
@@ -8852,56 +8856,61 @@ app.get('/api/reports/customers/export', async (req, res) => {
     
     const { format, title, columns, status, risk_level, start_date, end_date, transaction_min, transaction_max } = req.query;
     
-    // Get the customer data using the same logic as in the /api/customers endpoint
+    // Computed columns derived from transactions (not stored in customers table)
+    // These columns don't exist in the customers table — computed from transactions
+    const COMPUTED_COLUMN_SQL = {
+      total_sales:          `COALESCE((SELECT SUM(ti.item_price) FROM transaction_items ti JOIN transactions t2 ON ti.transaction_id = t2.transaction_id WHERE t2.customer_id = c.id AND ti.transaction_type_id = 3), 0)`,
+      total_buys:           `COALESCE((SELECT SUM(ti.item_price) FROM transaction_items ti JOIN transactions t2 ON ti.transaction_id = t2.transaction_id WHERE t2.customer_id = c.id AND ti.transaction_type_id = 2), 0)`,
+      total_loans:          `COALESCE((SELECT SUM(ti.item_price) FROM transaction_items ti JOIN transactions t2 ON ti.transaction_id = t2.transaction_id WHERE t2.customer_id = c.id AND ti.transaction_type_id = 1), 0)`,
+      total_purchase_amount:`COALESCE((SELECT SUM(ti.item_price) FROM transaction_items ti JOIN transactions t2 ON ti.transaction_id = t2.transaction_id WHERE t2.customer_id = c.id AND ti.transaction_type_id IN (2,3,4)), 0)`,
+      total_pawn_amount:    `COALESCE((SELECT SUM(ti.item_price) FROM transaction_items ti JOIN transactions t2 ON ti.transaction_id = t2.transaction_id WHERE t2.customer_id = c.id AND ti.transaction_type_id = 1), 0)`,
+      last_transaction_date:`(SELECT MAX(t2.transaction_date) FROM transactions t2 WHERE t2.customer_id = c.id)`,
+    };
+
+    // Columns that are image blobs — skip in report to avoid binary serialization issues
+    const SKIP_COLUMNS = new Set(['image', 'id_image_front', 'id_image_back']);
+
     let queryParams = [];
     let conditions = [];
     let paramCounter = 1;
-    
-    let selectFields = '*';
-    if (columns) {
-      const columnList = columns.split(',').map(col => col.trim());
-      if (columnList.length > 0) {
-        selectFields = columnList.join(', ');
+
+    const columnList = columns
+      ? columns.split(',').map(col => col.trim()).filter(col => !SKIP_COLUMNS.has(col))
+      : ['*'];
+
+    const selectParts = columnList.map(col => {
+      if (COMPUTED_COLUMN_SQL[col]) {
+        return `${COMPUTED_COLUMN_SQL[col]} AS ${col}`;
+      } else if (col === '*') {
+        // Expand * but exclude blob columns
+        return `c.id, c.first_name, c.last_name, c.email, c.phone, c.address_line1, c.address_line2, c.city, c.state, c.postal_code, c.country, c.id_type, c.id_number, c.id_expiry_date, c.date_of_birth, c.status, c.risk_level, c.notes, c.alert, c.gender, c.height, c.weight, c.tax_exempt, c.created_at, c.updated_at`;
+      } else {
+        return `c.${col}`;
       }
-    }
-    
-    let query = `SELECT ${selectFields} FROM customers WHERE 1=1`;
-    
+    });
+
+    let query = `SELECT ${selectParts.join(', ')} FROM customers c WHERE 1=1`;
+
     if (status) {
-      conditions.push(`status = $${paramCounter++}`);
+      conditions.push(`c.status = $${paramCounter++}`);
       queryParams.push(status);
     }
-    
     if (risk_level) {
-      conditions.push(`risk_level = $${paramCounter++}`);
+      conditions.push(`c.risk_level = $${paramCounter++}`);
       queryParams.push(risk_level);
     }
-    
     if (start_date) {
-      conditions.push(`created_at >= $${paramCounter++}`);
+      conditions.push(`c.created_at >= $${paramCounter++}`);
       queryParams.push(start_date);
     }
-    
     if (end_date) {
-      conditions.push(`created_at <= $${paramCounter++}`);
+      conditions.push(`c.created_at <= $${paramCounter++}`);
       queryParams.push(end_date);
     }
-    
-    if (transaction_min) {
-      conditions.push(`total_purchase_amount >= $${paramCounter++}`);
-      queryParams.push(parseFloat(transaction_min));
-    }
-    
-    if (transaction_max) {
-      conditions.push(`total_purchase_amount <= $${paramCounter++}`);
-      queryParams.push(parseFloat(transaction_max));
-    }
-    
     if (conditions.length > 0) {
       query += ' AND ' + conditions.join(' AND ');
     }
-    
-    // Execute the query to get the customer data
+
     const result = await pool.query(query, queryParams);
     const customers = result.rows;
     

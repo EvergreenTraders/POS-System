@@ -726,6 +726,20 @@ const CustomerEditor = () => {
                   />
                 </Grid>
                 <Grid item xs={12}>
+                  <TextField
+                    name="alert"
+                    label="Alert"
+                    value={formData.alert || ''}
+                    onChange={handleFormChange}
+                    fullWidth
+                    multiline
+                    rows={2}
+                    margin="dense"
+                    placeholder="Flag this customer with an alert message visible to staff"
+                    sx={{ '& .MuiOutlinedInput-root': { borderColor: 'warning.main' } }}
+                  />
+                </Grid>
+                <Grid item xs={12}>
                   <FormControlLabel
                     control={
                       <Checkbox

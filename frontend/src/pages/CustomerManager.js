@@ -347,12 +347,14 @@ const CustomerManager = () => {
   // Handle pagination change
   const handlePageChange = (event, newPage) => {
     setPage(newPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-  
+
   // Handle rows per page change
   const handleRowsPerPageChange = (event) => {
     setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(1); // Reset to first page when changing rows per page
+    setPage(1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
   
   // Get current page of customers (backend handles pagination, so just return filteredCustomers)
@@ -567,6 +569,7 @@ const CustomerManager = () => {
       status: customer.status || 'active',
       risk_level: customer.risk_level || 'normal',
       notes: customer.notes || '',
+      alert: customer.alert || '',
       gender: customer.gender || '',
       height: customer.height || '',
       weight: customer.weight || '',
@@ -864,7 +867,7 @@ const CustomerManager = () => {
 
       {/* Customer Table */}
       <TableContainer component={Paper} sx={{ mt: 2 }}>
-        <Table size="small" sx={{ '& .MuiTableCell-root': { py: 1 } }}>
+        <Table size="small" sx={{ '& .MuiTableCell-root': { py: 1.5, px: 2 }, '& .MuiTableRow-root': { '&:not(:last-child)': { borderBottom: '1px solid rgba(224,224,224,1)' } } }}>
           <TableHead>
             <TableRow>
               {/* Dynamically generate all columns based on preferences */}
@@ -893,7 +896,7 @@ const CustomerManager = () => {
           </TableHead>
           <TableBody>
             {getCurrentPageCustomers().map((customer) => (
-              <TableRow key={customer.id}>
+              <TableRow key={customer.id} sx={{ '&:hover': { backgroundColor: 'rgba(0,0,0,0.03)' } }}>
                 {/* Dynamically generate all cells based on preferences */}
                 {Object.entries(columnPreferences)
                   // Sort to ensure image comes first if enabled
@@ -908,7 +911,7 @@ const CustomerManager = () => {
                     
                     // Render based on column type
                     return (
-                      <TableCell key={column}>
+                      <TableCell key={column} sx={{ maxWidth: 160, verticalAlign: 'middle' }}>
                         {column === 'image' ? (
                           customer.image ? (
                             <Box
@@ -960,8 +963,15 @@ const CustomerManager = () => {
                             size="small"
                           />
                         ) : (
-                          // Default: show the field value directly
-                          customer[column]
+                          <Box sx={{
+                            overflow: 'hidden',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 3,
+                            WebkitBoxOrient: 'vertical',
+                            wordBreak: 'break-all',
+                          }}>
+                            {customer[column]}
+                          </Box>
                         )}
                       </TableCell>
                     );
