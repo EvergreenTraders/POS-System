@@ -147,7 +147,7 @@ const CustomerReporting = () => {
       const transactionFields = ['last_transaction_date', 'total_purchase_amount', 'total_pawn_amount', 'total_sales', 'total_buys', 'total_loans'];
       
       Object.keys(newReportColumns).forEach(column => {
-        if (['id', 'first_name', 'last_name', 'email', 'phone', 'status', 'notes', 'alert', 'risk_level', 'created_at'].includes(column)) {
+        if (['id', 'first_name', 'last_name', 'email', 'phone', 'status', 'notes', 'alert', 'risk_level', 'created_at', 'gender', 'height', 'weight', 'tax_exempt'].includes(column)) {
           basicInfoFields.push(column);
         } else if (['address_line1', 'address_line2','city', 'state', 'postal_code', 'country'].includes(column)) {
           addressFields.push(column);
@@ -529,7 +529,7 @@ const CustomerReporting = () => {
                   </Box>
                   
                   <TableContainer sx={{ maxHeight: 400 }}>
-                    <Table stickyHeader size="small">
+                    <Table stickyHeader size="small" sx={{ '& .MuiTableCell-root': { py: 1.5, px: 2 }, '& .MuiTableRow-root': { '&:hover': { backgroundColor: 'rgba(0,0,0,0.03)' }, '&:not(:last-child)': { borderBottom: '1px solid rgba(224,224,224,1)' } } }}>
                       <TableHead>
                         <TableRow>
                           {Object.entries(reportColumns)

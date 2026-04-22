@@ -369,6 +369,16 @@ pool.query(`
   ALTER TABLE customers ADD COLUMN IF NOT EXISTS alert TEXT
 `).catch(err => console.error('customers alert migration:', err.message));
 
+pool.query(`
+  ALTER TABLE customers DROP CONSTRAINT IF EXISTS customers_email_key
+`).catch(err => console.error('customers email unique drop migration:', err.message));
+
+pool.query(`
+  ALTER TABLE customers
+    ALTER COLUMN phone TYPE VARCHAR(50),
+    ALTER COLUMN postal_code TYPE VARCHAR(20)
+`).catch(err => console.error('customers column resize migration:', err.message));
+
 
 // Fix unique_active_connection: replace table constraint with partial index
 // Allows multiple historical (is_active = FALSE) rows per employee/session
@@ -8642,7 +8652,7 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
       first_name, last_name, email, phone,
       address_line1, address_line2, city, state, postal_code, country,
       id_type, id_number, id_expiry_date,
-      date_of_birth, status, risk_level, notes, gender, height, weight, tax_exempt
+      date_of_birth, status, risk_level, alert, notes, gender, height, weight, tax_exempt
     } = req.body;
 
     // Convert tax_exempt string to boolean (FormData sends "true"/"false" as strings)
@@ -8679,25 +8689,22 @@ app.post('/api/customers', uploadCustomerImages, async (req, res) => {
         first_name, last_name, email, phone,
         address_line1, address_line2, city, state, postal_code, country,
         id_type, id_number, id_expiry_date,
-        date_of_birth, status, risk_level, notes, gender, height, weight,
+        date_of_birth, status, risk_level, alert, notes, gender, height, weight,
         image, id_image_front, id_image_back, tax_exempt)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
       RETURNING *, TO_CHAR(date_of_birth, 'YYYY-MM-DD') as date_of_birth, TO_CHAR(id_expiry_date, 'YYYY-MM-DD') as id_expiry_date`,
       [first_name, last_name, emailValue, phone || '',
        address_line1, address_line2, city, state, postal_code, country,
        id_type, id_number, id_expiry_date || null,
-       date_of_birth || null, status, risk_level, notes, gender, height || null, weight || null,
+       date_of_birth || null, status, risk_level, alert || null, notes, gender, height || null, weight || null,
        image, id_image_front, id_image_back, taxExemptBool]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error creating customer:', err);
     if (err.code === '23505') { // Unique violation
-      // Check which field caused the violation
       const detail = err.detail || '';
-      if (detail.includes('email')) {
-        res.status(400).json({ error: 'A customer with this email already exists' });
-      } else if (detail.includes('id_number')) {
+      if (detail.includes('id_number')) {
         res.status(400).json({ error: 'A customer with this ID number already exists' });
       } else {
         res.status(400).json({ error: 'A customer with these details already exists' });
