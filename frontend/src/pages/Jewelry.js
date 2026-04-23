@@ -41,6 +41,7 @@ import { useCart } from '../context/CartContext';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import HistoryIcon from '@mui/icons-material/History';
+ import UploadIcon from '@mui/icons-material/Upload';
 import { useSnackbar } from 'notistack';
 import { useStoreStatus } from '../context/StoreStatusContext';
 import SearchIcon from '@mui/icons-material/Search';
@@ -575,6 +576,70 @@ function Jewelry() {
   const [reportFormat, setReportFormat] = useState('pdf');
   const [reportColumns, setReportColumns] = useState({ ...DEFAULT_COLUMNS });
   const [reportFilters, setReportFilters] = useState({ status: '', category: '', date_from: '', date_to: '' });
+
+  // CSV import state
+  const [openImportMappingDialog, setOpenImportMappingDialog] = useState(false);
+  const [importCsvHeaders, setImportCsvHeaders] = useState([]);
+  const [importCsvRawRows, setImportCsvRawRows] = useState([]);
+  const [importFieldMappings, setImportFieldMappings] = useState({});
+  const [importLoading, setImportLoading] = useState(false);
+  const [jewelryDbColumns, setJewelryDbColumns] = useState([]);
+
+  useEffect(() => {
+    axios.get(`${config.apiUrl}/jewelry/columns`)
+      .then(res => setJewelryDbColumns(res.data))
+      .catch(err => console.error('Failed to fetch jewelry columns:', err));
+  }, []);
+
+  const JEWELRY_ALIASES = {
+    short_desc: ['description', 'short description', 'desc', 'name', 'title'],
+    long_desc: ['long description', 'full description', 'details'],
+    category: ['category', 'type', 'jewelry type'],
+    brand: ['brand', 'make', 'manufacturer'],
+    stamps: ['stamps', 'hallmark', 'hallmarks', 'markings'],
+    condition: ['condition', 'item condition'],
+    location: ['location', 'bin', 'shelf', 'store location'],
+    metal_weight: ['metal weight', 'weight', 'weight (g)', 'grams'],
+    precious_metal_type: ['metal type', 'precious metal', 'metal'],
+    metal_purity: ['purity', 'metal purity', 'karat', 'fineness'],
+    jewelry_color: ['color', 'colour', 'jewelry color', 'metal color'],
+    item_price: ['price', 'item price', 'asking price', 'retail price', 'value'],
+    melt_value: ['melt value', 'scrap value'],
+    metal_spot_price: ['spot price', 'metal spot price'],
+    primary_gem_type: ['gem type', 'gem', 'stone', 'stone type', 'primary gem'],
+    primary_gem_weight: ['gem weight', 'carat weight', 'stone weight', 'ct weight'],
+    primary_gem_color: ['gem color', 'stone color'],
+    primary_gem_clarity: ['clarity', 'gem clarity'],
+    primary_gem_cut: ['cut', 'gem cut'],
+    primary_gem_shape: ['shape', 'gem shape'],
+    notes: ['notes', 'note', 'comments', 'remarks'],
+    source: ['source', 'origin'],
+    bought_from: ['bought from', 'vendor', 'seller', 'supplier'],
+    inventory_type: ['inventory type', 'type'],
+  };
+
+  const autoMapJewelryField = (csvHeader) => {
+    const normalized = csvHeader.toLowerCase().replace(/[_\-]/g, ' ').trim();
+    for (const [field, aliases] of Object.entries(JEWELRY_ALIASES)) {
+      if (aliases.includes(normalized) || normalized === field.replace(/_/g, ' ')) return field;
+    }
+    const underscored = normalized.replace(/\s+/g, '_');
+    if (jewelryDbColumns.includes(underscored)) return underscored;
+    return '';
+  };
+
+  const parseCSVRow = (line) => {
+    const cols = [];
+    let cur = '', inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuote = !inQuote; }
+      else if (ch === ',' && !inQuote) { cols.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    cols.push(cur.trim());
+    return cols;
+  };
 
   const fetchScrapBuckets = async () => {
     try {
@@ -1132,6 +1197,40 @@ function Jewelry() {
             >
               Export Report
             </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<UploadIcon />}
+              onClick={() => document.getElementById('jewelry-upload-input').click()}
+              sx={{ whiteSpace: 'nowrap' }}
+            >
+              Upload
+            </Button>
+            <input
+              id="jewelry-upload-input"
+              type="file"
+              accept=".csv"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                  const lines = evt.target.result.split(/\r?\n/).filter(l => l.trim());
+                  if (lines.length < 2) { enqueueSnackbar('CSV file is empty or has no data rows.', { variant: 'warning' }); return; }
+                  const headers = parseCSVRow(lines[0]);
+                  const rows = lines.slice(1).map(l => parseCSVRow(l));
+                  const initial = {};
+                  headers.forEach(h => { initial[h] = autoMapJewelryField(h); });
+                  setImportCsvHeaders(headers);
+                  setImportCsvRawRows(rows);
+                  setImportFieldMappings(initial);
+                  setOpenImportMappingDialog(true);
+                };
+                reader.readAsText(file);
+                e.target.value = '';
+              }}
+            />
           </Box>
 
           <TableContainer component={Paper} sx={{ flex: 1, overflow: 'auto' }}>
@@ -1578,6 +1677,104 @@ function Jewelry() {
         <DialogActions>
           <Button onClick={() => setReportColumns({ ...DEFAULT_COLUMNS })}>Reset Columns</Button>
           <Button onClick={() => setReportDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* CSV Import Mapping Dialog */}
+      <Dialog open={openImportMappingDialog} onClose={() => setOpenImportMappingDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Map CSV Columns to Jewelry Fields</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {importCsvRawRows.length} row(s) found. Map each CSV column to the corresponding jewelry field, or leave as "Skip" to ignore it.
+          </Typography>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell><strong>CSV Column</strong></TableCell>
+                <TableCell><strong>Maps To</strong></TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {importCsvHeaders.map(header => (
+                <TableRow key={header}>
+                  <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{header}</TableCell>
+                  <TableCell>
+                    <FormControl fullWidth size="small">
+                      <Select
+                        value={importFieldMappings[header] || ''}
+                        onChange={(e) => setImportFieldMappings(prev => ({ ...prev, [header]: e.target.value }))}
+                        displayEmpty
+                      >
+                        <MenuItem value=""><em>— Skip —</em></MenuItem>
+                        {jewelryDbColumns.map(field => (
+                          <MenuItem key={field} value={field}>
+                            {field.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenImportMappingDialog(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={importLoading}
+            onClick={async () => {
+              setImportLoading(true);
+              const saved = [];
+              const failed = [];
+
+              for (const vals of importCsvRawRows) {
+                const item = {};
+                importCsvHeaders.forEach((header, i) => {
+                  const field = importFieldMappings[header];
+                  if (field) item[field] = vals[i] ?? '';
+                });
+                // Backend uses metal_category for category and price for item_price
+                if (item.category) { item.metal_category = item.category; }
+                if (item.item_price) { item.price = item.item_price; }
+
+                try {
+                  const fd = new FormData();
+                  fd.append('cartItems', JSON.stringify([item]));
+                  const res = await fetch(`${config.apiUrl}/jewelry/with-images`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+                    body: fd,
+                  });
+                  if (!res.ok) {
+                    const err = await res.json();
+                    failed.push(err.error || 'Unknown error');
+                  } else {
+                    const data = await res.json();
+                    // Endpoint returns array directly
+                    saved.push(...(Array.isArray(data) ? data : [data]));
+                  }
+                } catch (e) {
+                  failed.push(e.message);
+                }
+              }
+
+              setImportLoading(false);
+              setOpenImportMappingDialog(false);
+
+              if (saved.length > 0) {
+                setJewelryItems(prev => [...saved, ...prev]);
+              }
+              if (failed.length > 0) {
+                enqueueSnackbar(`${saved.length} imported, ${failed.length} failed: ${failed[0]}`, { variant: 'warning' });
+              } else {
+                enqueueSnackbar(`${saved.length} item(s) saved to database`, { variant: 'success' });
+              }
+            }}
+          >
+            {importLoading ? <CircularProgress size={20} color="inherit" /> : 'Import'}
+          </Button>
         </DialogActions>
       </Dialog>
 

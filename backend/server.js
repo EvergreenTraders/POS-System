@@ -374,6 +374,10 @@ pool.query(`
 `).catch(err => console.error('customers email unique drop migration:', err.message));
 
 pool.query(`
+  ALTER TABLE jewelry DROP CONSTRAINT IF EXISTS valid_metal_weight
+`).catch(err => console.error('jewelry valid_metal_weight drop migration:', err.message));
+
+pool.query(`
   ALTER TABLE customers
     ALTER COLUMN phone TYPE VARCHAR(50),
     ALTER COLUMN postal_code TYPE VARCHAR(20)
@@ -6584,6 +6588,20 @@ app.put('/api/jewelry/:id/images', uploadJewelryImages, async (req, res) => {
   }
 });
 
+// Get importable jewelry column names (must be before /:id to avoid route conflict)
+app.get('/api/jewelry/columns', (req, res) => {
+  res.json([
+    'short_desc', 'long_desc', 'category', 'brand', 'vintage', 'stamps',
+    'metal_weight', 'precious_metal_type', 'non_precious_metal_type', 'metal_purity',
+    'jewelry_color', 'purity_value', 'est_metal_value',
+    'primary_gem_type', 'primary_gem_category', 'primary_gem_size', 'primary_gem_quantity',
+    'primary_gem_shape', 'primary_gem_weight', 'primary_gem_color', 'primary_gem_exact_color',
+    'primary_gem_clarity', 'primary_gem_cut', 'primary_gem_lab_grown', 'primary_gem_authentic',
+    'primary_gem_value', 'status', 'location', 'condition', 'metal_spot_price',
+    'notes', 'item_price', 'melt_value', 'total_weight', 'inventory_type'
+  ]);
+});
+
 // Get a single jewelry item by ID
 app.get('/api/jewelry/:id', async (req, res) => {
   try {
@@ -6675,6 +6693,13 @@ app.get('/api/jewelry', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+const parseNumeric = (val) => {
+  if (val === undefined || val === null || val === '') return null;
+  const cleaned = String(val).replace(/[$,\s]/g, '');
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? null : n;
+};
 
 // Add jewelry item endpoint
 // New endpoint for jewelry with image uploads
@@ -6808,7 +6833,7 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         item.vintage || false,
         item.stamps || '',
         JSON.stringify(processedImages),
-        parseFloat(item.metal_weight) || 0,
+        parseNumeric(item.metal_weight) ?? 0,
         item.precious_metal_type || '',
         item.non_precious_metal_type || '',
         item.metal_purity || '',
@@ -6831,12 +6856,12 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         status,
         item.location || 'SOUTH STORE',
         'GOOD',
-        item.metal_spot_price,
+        parseNumeric(item.metal_spot_price),
         item.notes,
-        item.price,
-        item.melt_value,
-        (parseFloat(item.metal_weight) || 0) +
-        (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
+        parseNumeric(item.price || item.item_price),
+        parseNumeric(item.melt_value),
+        (parseNumeric(item.metal_weight) || 0) +
+        (parseNumeric(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
         (item.secondary_gems || []).reduce((sum, gem) =>
           sum + (parseFloat(gem.weight) || 0) * (parseInt(gem.quantity) || 0), 0),
         'jewelry'
@@ -6881,7 +6906,7 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error creating jewelry with images:', error);
+    console.error('Error creating jewelry', error);
     res.status(500).json({ error: error.message }); // Match /api/jewelry error format
   } finally {
     client.release();
@@ -7025,14 +7050,14 @@ app.post('/api/jewelry', async (req, res) => {
         status,         // 29
         item.location || 'SOUTH STORE',          // 30
         'GOOD',          // 31
-        item.metal_spot_price,  // 32
+        parseNumeric(item.metal_spot_price),  // 32
         item.notes,  // 33
-        item.price,  // 34
-        item.melt_value,  // 35
+        parseNumeric(item.price || item.item_price),  // 34
+        parseNumeric(item.melt_value),  // 35
         // Calculate total weight: metal_weight + primary_gem_weight + sum(secondary_gem_weights)
-        (parseFloat(item.metal_weight) || 0) + 
-        (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
-        (item.secondary_gems || []).reduce((sum, gem) => 
+        (parseNumeric(item.metal_weight) || 0) +
+        (parseNumeric(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
+        (item.secondary_gems || []).reduce((sum, gem) =>
           sum + (parseFloat(gem.secondary_gem_weight) || 0) * (parseInt(gem.secondary_gem_quantity) || 1), 0),
         'jewelry'
       ];
