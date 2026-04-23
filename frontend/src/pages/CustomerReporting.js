@@ -124,13 +124,19 @@ const CustomerReporting = () => {
       });
       
       // Make sure we have some default transaction fields even if not in API
-      const defaultFields = ['last_transaction_date', 'total_purchase_amount', 'total_pawn_amount'];
+      const defaultFields = ['last_transaction_date', 'total_purchase_amount', 'total_pawn_amount', 'total_sales', 'total_buys', 'total_loans'];
       defaultFields.forEach(field => {
         if (!(field in newReportColumns)) {
           newReportColumns[field] = false;
         }
       });
-      
+      // Exclude image from report columns (binary data, not exportable)
+      delete newReportColumns['image'];
+      // Ensure alert is available
+      if (!('alert' in newReportColumns)) {
+        newReportColumns['alert'] = false;
+      }
+
       // Set the report columns from the API
       setReportColumns(newReportColumns);
       
@@ -138,10 +144,10 @@ const CustomerReporting = () => {
       const basicInfoFields = [];
       const addressFields = [];
       const identificationFields = [];
-      const transactionFields = ['last_transaction_date', 'total_purchase_amount', 'total_pawn_amount'];
+      const transactionFields = ['last_transaction_date', 'total_purchase_amount', 'total_pawn_amount', 'total_sales', 'total_buys', 'total_loans'];
       
       Object.keys(newReportColumns).forEach(column => {
-        if (['id', 'image', 'first_name', 'last_name', 'email', 'phone', 'status', 'notes','risk_level', 'created_at'].includes(column)) {
+        if (['id', 'first_name', 'last_name', 'email', 'phone', 'status', 'notes', 'alert', 'risk_level', 'created_at', 'gender', 'height', 'weight', 'tax_exempt'].includes(column)) {
           basicInfoFields.push(column);
         } else if (['address_line1', 'address_line2','city', 'state', 'postal_code', 'country'].includes(column)) {
           addressFields.push(column);
@@ -196,9 +202,9 @@ const CustomerReporting = () => {
         }
       });
       
-      // Extract selected columns based on reportColumns state
+      // Extract selected columns based on reportColumns state (exclude image - binary data)
       const selectedColumns = Object.entries(reportColumns)
-        .filter(([_, isSelected]) => isSelected)
+        .filter(([col, isSelected]) => isSelected && col !== 'image')
         .map(([column]) => column);
       
       if (selectedColumns.length === 0) {
@@ -523,7 +529,7 @@ const CustomerReporting = () => {
                   </Box>
                   
                   <TableContainer sx={{ maxHeight: 400 }}>
-                    <Table stickyHeader size="small">
+                    <Table stickyHeader size="small" sx={{ '& .MuiTableCell-root': { py: 1.5, px: 2 }, '& .MuiTableRow-root': { '&:hover': { backgroundColor: 'rgba(0,0,0,0.03)' }, '&:not(:last-child)': { borderBottom: '1px solid rgba(224,224,224,1)' } } }}>
                       <TableHead>
                         <TableRow>
                           {Object.entries(reportColumns)

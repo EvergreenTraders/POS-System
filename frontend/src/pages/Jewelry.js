@@ -29,7 +29,11 @@ import {
   InputLabel,
   Select,
   Badge,
-  IconButton
+  IconButton,
+  Checkbox,
+  FormControlLabel,
+  FormGroup,
+  Divider
 } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -37,12 +41,58 @@ import { useCart } from '../context/CartContext';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import HistoryIcon from '@mui/icons-material/History';
+ import UploadIcon from '@mui/icons-material/Upload';
 import { useSnackbar } from 'notistack';
 import { useStoreStatus } from '../context/StoreStatusContext';
 import SearchIcon from '@mui/icons-material/Search';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import config from '../config';
 import axios from 'axios';
+
+const COLUMN_GROUPS = {
+  'Basic Info': [
+    { key: 'item_id', label: 'Item ID' },
+    { key: 'short_desc', label: 'Description' },
+    { key: 'category', label: 'Category' },
+    { key: 'inventory_status', label: 'Status' },
+    { key: 'source', label: 'Source' },
+    { key: 'bought_from', label: 'Bought From' },
+  ],
+  'Metal Details': [
+    { key: 'metal_weight', label: 'Metal Weight (g)' },
+    { key: 'precious_metal_type', label: 'Metal Type' },
+    { key: 'metal_purity', label: 'Purity' },
+    { key: 'jewelry_color', label: 'Color' },
+  ],
+  'Gem Details': [
+    { key: 'primary_gem_type', label: 'Primary Gem' },
+    { key: 'primary_gem_weight', label: 'Gem Weight (ct)' },
+    { key: 'primary_gem_color', label: 'Gem Color' },
+    { key: 'primary_gem_clarity', label: 'Gem Clarity' },
+  ],
+  'Pricing': [
+    { key: 'item_price', label: 'Item Price' },
+    { key: 'sold_price', label: 'Sold Price' },
+  ],
+  'Analytics': [
+    { key: 'age_days', label: 'Age (Days)' },
+    { key: 'days_to_sell', label: 'Days to Sell' },
+  ],
+  'Dates': [
+    { key: 'created_at', label: 'Created Date' },
+    { key: 'sold_date', label: 'Sold Date' },
+  ],
+};
+
+const DEFAULT_COLUMNS = {
+  item_id: true, short_desc: true, category: true, inventory_status: true,
+  source: false, bought_from: false,
+  metal_weight: true, precious_metal_type: false, metal_purity: false, jewelry_color: false,
+  primary_gem_type: false, primary_gem_weight: false, primary_gem_color: false, primary_gem_clarity: false,
+  item_price: true, sold_price: false,
+  age_days: true, days_to_sell: true,
+  created_at: true, sold_date: false,
+};
 
 function Jewelry() {
   const navigate = useNavigate();
@@ -520,6 +570,77 @@ function Jewelry() {
   const [inventoryStatuses, setInventoryStatuses] = useState([]);
   const [selectedStatus, setSelectedStatus] = useState('ACTIVE');
 
+  // Report dialog state
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [reportTitle, setReportTitle] = useState('Jewelry Inventory Report');
+  const [reportFormat, setReportFormat] = useState('pdf');
+  const [reportColumns, setReportColumns] = useState({ ...DEFAULT_COLUMNS });
+  const [reportFilters, setReportFilters] = useState({ status: '', category: '', date_from: '', date_to: '' });
+
+  // CSV import state
+  const [openImportMappingDialog, setOpenImportMappingDialog] = useState(false);
+  const [importCsvHeaders, setImportCsvHeaders] = useState([]);
+  const [importCsvRawRows, setImportCsvRawRows] = useState([]);
+  const [importFieldMappings, setImportFieldMappings] = useState({});
+  const [importLoading, setImportLoading] = useState(false);
+  const [jewelryDbColumns, setJewelryDbColumns] = useState([]);
+
+  useEffect(() => {
+    axios.get(`${config.apiUrl}/jewelry/columns`)
+      .then(res => setJewelryDbColumns(res.data))
+      .catch(err => console.error('Failed to fetch jewelry columns:', err));
+  }, []);
+
+  const JEWELRY_ALIASES = {
+    short_desc: ['description', 'short description', 'desc', 'name', 'title'],
+    long_desc: ['long description', 'full description', 'details'],
+    category: ['category', 'type', 'jewelry type'],
+    brand: ['brand', 'make', 'manufacturer'],
+    stamps: ['stamps', 'hallmark', 'hallmarks', 'markings'],
+    condition: ['condition', 'item condition'],
+    location: ['location', 'bin', 'shelf', 'store location'],
+    metal_weight: ['metal weight', 'weight', 'weight (g)', 'grams'],
+    precious_metal_type: ['metal type', 'precious metal', 'metal'],
+    metal_purity: ['purity', 'metal purity', 'karat', 'fineness'],
+    jewelry_color: ['color', 'colour', 'jewelry color', 'metal color'],
+    item_price: ['price', 'item price', 'asking price', 'retail price', 'value'],
+    melt_value: ['melt value', 'scrap value'],
+    metal_spot_price: ['spot price', 'metal spot price'],
+    primary_gem_type: ['gem type', 'gem', 'stone', 'stone type', 'primary gem'],
+    primary_gem_weight: ['gem weight', 'carat weight', 'stone weight', 'ct weight'],
+    primary_gem_color: ['gem color', 'stone color'],
+    primary_gem_clarity: ['clarity', 'gem clarity'],
+    primary_gem_cut: ['cut', 'gem cut'],
+    primary_gem_shape: ['shape', 'gem shape'],
+    notes: ['notes', 'note', 'comments', 'remarks'],
+    source: ['source', 'origin'],
+    bought_from: ['bought from', 'vendor', 'seller', 'supplier'],
+    inventory_type: ['inventory type', 'type'],
+  };
+
+  const autoMapJewelryField = (csvHeader) => {
+    const normalized = csvHeader.toLowerCase().replace(/[_\-]/g, ' ').trim();
+    for (const [field, aliases] of Object.entries(JEWELRY_ALIASES)) {
+      if (aliases.includes(normalized) || normalized === field.replace(/_/g, ' ')) return field;
+    }
+    const underscored = normalized.replace(/\s+/g, '_');
+    if (jewelryDbColumns.includes(underscored)) return underscored;
+    return '';
+  };
+
+  const parseCSVRow = (line) => {
+    const cols = [];
+    let cur = '', inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuote = !inQuote; }
+      else if (ch === ',' && !inQuote) { cols.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    cols.push(cur.trim());
+    return cols;
+  };
+
   const fetchScrapBuckets = async () => {
     try {
       setLoadingBuckets(true);
@@ -899,6 +1020,116 @@ function Jewelry() {
     return matchesSearch && matchesSerial && notQuoted && notHold && matchesStatus;
   });
 
+  // Helpers shared by both export formats
+  const getReportItems = () => {
+    return filteredItems.filter(item => {
+      const status = item.inventory_status || item.status || '';
+      const category = typeof item.category === 'object' && item.category !== null
+        ? (item.category.category || item.category.value || item.category.name || '')
+        : (item.category || '');
+      const matchesStatus = !reportFilters.status || status === reportFilters.status;
+      const matchesCategory = !reportFilters.category ||
+        category.toLowerCase().includes(reportFilters.category.toLowerCase());
+      const itemDate = new Date(item.created_at);
+      const matchesFrom = !reportFilters.date_from || itemDate >= new Date(reportFilters.date_from);
+      const matchesTo = !reportFilters.date_to || itemDate <= new Date(reportFilters.date_to);
+      return matchesStatus && matchesCategory && matchesFrom && matchesTo;
+    });
+  };
+
+  const getCellValue = (item, key) => {
+    const toISODate = (d) => {
+      const dt = new Date(d);
+      return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    };
+    const status = item.inventory_status || item.status || '';
+    const isSold = status === 'SOLD';
+    const category = typeof item.category === 'object' && item.category !== null
+      ? (item.category.category || item.category.value || item.category.name || '')
+      : (item.category || '');
+    switch (key) {
+      case 'category': return category;
+      case 'inventory_status': return status;
+      case 'item_price': return `$${formatPrice(parseFloat(item.item_price || 0))}`;
+      case 'sold_price': return item.sold_price ? `$${formatPrice(parseFloat(item.sold_price))}` : '-';
+      case 'metal_weight': return item.metal_weight ? `${item.metal_weight}g` : '-';
+      case 'primary_gem_weight': return item.primary_gem_weight ? `${item.primary_gem_weight}ct` : '-';
+      case 'created_at': return item.created_at ? toISODate(item.created_at) : '-';
+      case 'sold_date': return isSold && item.sold_date ? toISODate(item.sold_date) : '-';
+      case 'short_desc': return item.short_desc || item.long_desc || '-';
+      default: return item[key] ?? '-';
+    }
+  };
+
+  const getSelectedColumns = () =>
+    Object.values(COLUMN_GROUPS)
+      .flat()
+      .filter(col => reportColumns[col.key]);
+
+  const generateReport = () => {
+    const selectedCols = getSelectedColumns();
+    if (selectedCols.length === 0) {
+      enqueueSnackbar('Please select at least one column.', { variant: 'warning' });
+      return;
+    }
+    const items = getReportItems();
+    const truncate = (val) => {
+      const s = String(val ?? '-');
+      return s.length > 25 ? s.substring(0, 22) + '...' : s;
+    };
+
+    if (reportFormat === 'pdf') {
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 30;
+      doc.setFontSize(18);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(0, 0, 0);
+      doc.text(reportTitle, pageWidth / 2, 30, { align: 'center' });
+      const genDate = new Date().toLocaleString('en-US', { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true });
+      doc.setFontSize(9);
+      doc.text(`Generated: ${genDate}`, pageWidth / 2, 44, { align: 'center' });
+      const head = [selectedCols.map(c => c.label)];
+      const body = items.map(item => selectedCols.map(c => truncate(getCellValue(item, c.key))));
+      autoTable(doc, {
+        startY: 55,
+        margin: { left: margin, right: margin },
+        head,
+        body,
+        styles: { fontSize: 8, cellPadding: 3, font: 'helvetica', textColor: [0, 0, 0] },
+        headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold', fontSize: 10 },
+        bodyStyles: { fillColor: [255, 255, 255] },
+        alternateRowStyles: { fillColor: [249, 249, 249] },
+        showHead: 'everyPage',
+      });
+      const pdfBlob = doc.output('blob');
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const win = window.open();
+      if (win) { win.location.href = pdfUrl; } else { doc.save('jewelry_inventory.pdf'); }
+
+    } else if (reportFormat === 'csv') {
+      const escape = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+      const headers = selectedCols.map(c => c.label).join(',');
+      const rows = items.map(item =>
+        selectedCols.map(c => {
+          const val = getCellValue(item, c.key);
+          // Wrap date columns in Excel formula to prevent auto-conversion
+          if (c.key === 'created_at' || c.key === 'sold_date') return `="${val}"`;
+          return escape(val);
+        }).join(',')
+      );
+      const csv = [headers, ...rows].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${reportTitle.replace(/\s+/g, '_')}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+    setReportDialogOpen(false);
+  };
+
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Main Content */}
@@ -958,6 +1189,48 @@ function Jewelry() {
                 ))}
               </Select>
             </FormControl>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => setReportDialogOpen(true)}
+              sx={{ whiteSpace: 'nowrap' }}
+            >
+              Export Report
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<UploadIcon />}
+              onClick={() => document.getElementById('jewelry-upload-input').click()}
+              sx={{ whiteSpace: 'nowrap' }}
+            >
+              Upload
+            </Button>
+            <input
+              id="jewelry-upload-input"
+              type="file"
+              accept=".csv"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                  const lines = evt.target.result.split(/\r?\n/).filter(l => l.trim());
+                  if (lines.length < 2) { enqueueSnackbar('CSV file is empty or has no data rows.', { variant: 'warning' }); return; }
+                  const headers = parseCSVRow(lines[0]);
+                  const rows = lines.slice(1).map(l => parseCSVRow(l));
+                  const initial = {};
+                  headers.forEach(h => { initial[h] = autoMapJewelryField(h); });
+                  setImportCsvHeaders(headers);
+                  setImportCsvRawRows(rows);
+                  setImportFieldMappings(initial);
+                  setOpenImportMappingDialog(true);
+                };
+                reader.readAsText(file);
+                e.target.value = '';
+              }}
+            />
           </Box>
 
           <TableContainer component={Paper} sx={{ flex: 1, overflow: 'auto' }}>
@@ -1272,6 +1545,238 @@ function Jewelry() {
           )}
         </Grid>
       </Grid>
+
+      {/* Export Report Dialog */}
+      <Dialog
+        open={reportDialogOpen}
+        onClose={() => setReportDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Ad-hoc Inventory Reporting</DialogTitle>
+        <DialogContent dividers>
+          <Grid container spacing={3}>
+            {/* Left column */}
+            <Grid item xs={12} md={4}>
+              <Paper elevation={1} sx={{ p: 2, mb: 2 }}>
+                <Typography variant="subtitle1" gutterBottom>Report Title</Typography>
+                <TextField
+                  fullWidth
+                  value={reportTitle}
+                  onChange={(e) => setReportTitle(e.target.value)}
+                  variant="outlined"
+                  size="small"
+                  sx={{ mb: 2 }}
+                />
+
+                <Typography variant="subtitle1" gutterBottom>Report Format</Typography>
+                <FormControl fullWidth size="small" sx={{ mb: 3 }}>
+                  <Select value={reportFormat} onChange={(e) => setReportFormat(e.target.value)}>
+                    <MenuItem value="pdf">PDF Download</MenuItem>
+                    <MenuItem value="csv">CSV Download</MenuItem>
+                  </Select>
+                </FormControl>
+
+                <Divider sx={{ my: 2 }} />
+
+                <Typography variant="subtitle1" gutterBottom>Report Filters</Typography>
+
+                <FormControl fullWidth sx={{ mb: 2 }} size="small">
+                  <InputLabel>Status</InputLabel>
+                  <Select
+                    value={reportFilters.status}
+                    onChange={(e) => setReportFilters(p => ({ ...p, status: e.target.value }))}
+                    label="Status"
+                  >
+                    <MenuItem value="">All</MenuItem>
+                    {inventoryStatuses.map(s => (
+                      <MenuItem key={s.status_code} value={s.status_code}>{s.status_name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                <TextField
+                  label="Category contains"
+                  value={reportFilters.category}
+                  onChange={(e) => setReportFilters(p => ({ ...p, category: e.target.value }))}
+                  fullWidth
+                  size="small"
+                  sx={{ mb: 2 }}
+                />
+
+                <Grid container spacing={2} sx={{ mb: 2 }}>
+                  <Grid item xs={6}>
+                    <TextField
+                      label="Created From"
+                      type="date"
+                      value={reportFilters.date_from}
+                      onChange={(e) => setReportFilters(p => ({ ...p, date_from: e.target.value }))}
+                      fullWidth size="small"
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <TextField
+                      label="Created To"
+                      type="date"
+                      value={reportFilters.date_to}
+                      onChange={(e) => setReportFilters(p => ({ ...p, date_to: e.target.value }))}
+                      fullWidth size="small"
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  </Grid>
+                </Grid>
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => setReportFilters({ status: '', category: '', date_from: '', date_to: '' })}
+                  >
+                    Clear Filters
+                  </Button>
+                  <Button variant="contained" size="small" onClick={generateReport}>
+                    Generate Report
+                  </Button>
+                </Box>
+              </Paper>
+            </Grid>
+
+            {/* Right column — column selection */}
+            <Grid item xs={12} md={8}>
+              <Paper elevation={1} sx={{ p: 2 }}>
+                <Typography variant="subtitle1" gutterBottom>Report Columns</Typography>
+                {Object.entries(COLUMN_GROUPS).map(([groupName, cols]) => (
+                  <Box key={groupName} sx={{ mb: 2 }}>
+                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                      {groupName}
+                    </Typography>
+                    <Grid container>
+                      {cols.map(col => (
+                        <Grid item xs={6} sm={4} key={col.key}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={!!reportColumns[col.key]}
+                                onChange={(e) => setReportColumns(p => ({ ...p, [col.key]: e.target.checked }))}
+                                size="small"
+                              />
+                            }
+                            label={col.label}
+                          />
+                        </Grid>
+                      ))}
+                    </Grid>
+                    <Divider sx={{ mt: 1 }} />
+                  </Box>
+                ))}
+              </Paper>
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReportColumns({ ...DEFAULT_COLUMNS })}>Reset Columns</Button>
+          <Button onClick={() => setReportDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* CSV Import Mapping Dialog */}
+      <Dialog open={openImportMappingDialog} onClose={() => setOpenImportMappingDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Map CSV Columns to Jewelry Fields</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {importCsvRawRows.length} row(s) found. Map each CSV column to the corresponding jewelry field, or leave as "Skip" to ignore it.
+          </Typography>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell><strong>CSV Column</strong></TableCell>
+                <TableCell><strong>Maps To</strong></TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {importCsvHeaders.map(header => (
+                <TableRow key={header}>
+                  <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{header}</TableCell>
+                  <TableCell>
+                    <FormControl fullWidth size="small">
+                      <Select
+                        value={importFieldMappings[header] || ''}
+                        onChange={(e) => setImportFieldMappings(prev => ({ ...prev, [header]: e.target.value }))}
+                        displayEmpty
+                      >
+                        <MenuItem value=""><em>— Skip —</em></MenuItem>
+                        {jewelryDbColumns.map(field => (
+                          <MenuItem key={field} value={field}>
+                            {field.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenImportMappingDialog(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={importLoading}
+            onClick={async () => {
+              setImportLoading(true);
+              const saved = [];
+              const failed = [];
+
+              for (const vals of importCsvRawRows) {
+                const item = {};
+                importCsvHeaders.forEach((header, i) => {
+                  const field = importFieldMappings[header];
+                  if (field) item[field] = vals[i] ?? '';
+                });
+                // Backend uses metal_category for category and price for item_price
+                if (item.category) { item.metal_category = item.category; }
+                if (item.item_price) { item.price = item.item_price; }
+
+                try {
+                  const fd = new FormData();
+                  fd.append('cartItems', JSON.stringify([item]));
+                  const res = await fetch(`${config.apiUrl}/jewelry/with-images`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+                    body: fd,
+                  });
+                  if (!res.ok) {
+                    const err = await res.json();
+                    failed.push(err.error || 'Unknown error');
+                  } else {
+                    const data = await res.json();
+                    // Endpoint returns array directly
+                    saved.push(...(Array.isArray(data) ? data : [data]));
+                  }
+                } catch (e) {
+                  failed.push(e.message);
+                }
+              }
+
+              setImportLoading(false);
+              setOpenImportMappingDialog(false);
+
+              if (saved.length > 0) {
+                setJewelryItems(prev => [...saved, ...prev]);
+              }
+              if (failed.length > 0) {
+                enqueueSnackbar(`${saved.length} imported, ${failed.length} failed: ${failed[0]}`, { variant: 'warning' });
+              } else {
+                enqueueSnackbar(`${saved.length} item(s) saved to database`, { variant: 'success' });
+              }
+            }}
+          >
+            {importLoading ? <CircularProgress size={20} color="inherit" /> : 'Import'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Move to Scrap Confirmation Dialog */}
       <Dialog

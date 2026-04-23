@@ -9,7 +9,7 @@ import {
 } from '@mui/material';
 import { Add as AddIcon, Edit as EditIcon, FilterList as FilterListIcon,
   ExpandMore as ExpandMoreIcon, Clear as ClearIcon, Assessment as AssessmentIcon,
-  History as HistoryIcon, Link as LinkIcon } from '@mui/icons-material';
+  History as HistoryIcon, Link as LinkIcon, Upload as UploadIcon } from '@mui/icons-material';
 import CustomerReporting from './CustomerReporting';
 import LinkedAccountsManager from '../components/LinkedAccountsManager';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -109,6 +109,56 @@ const CustomerManager = () => {
   
   // State for column preferences
   const [columnPreferences, setColumnPreferences] = useState({});
+
+  // State for CSV upload mapping
+  const [openMappingDialog, setOpenMappingDialog] = useState(false);
+  const [csvHeaders, setCsvHeaders] = useState([]);
+  const [csvRawRows, setCsvRawRows] = useState([]);
+  const [fieldMappings, setFieldMappings] = useState({});
+
+  const CUSTOMER_FIELDS = [
+    'first_name', 'last_name', 'email', 'phone',
+    'address_line1', 'address_line2', 'city', 'state', 'postal_code', 'country',
+    'id_type', 'id_number', 'id_expiry_date', 'id_issuing_authority',
+    'date_of_birth', 'status', 'risk_level', 'alert', 'notes', 'gender', 'height', 'weight', 'tax_exempt'
+  ];
+
+  const FIELD_ALIASES = {
+    first_name: ['first name', 'firstname', 'given name', 'forename'],
+    last_name: ['last name', 'lastname', 'surname', 'family name'],
+    email: ['email address', 'e-mail', 'e mail'],
+    phone: ['phone number', 'telephone', 'mobile', 'cell', 'contact number'],
+    address_line1: ['address', 'address line 1', 'street', 'street address'],
+    address_line2: ['address line 2', 'address 2', 'apt', 'suite'],
+    city: ['city', 'town', 'municipality'],
+    state: ['state', 'province', 'state/province', 'state / province', 'region'],
+    postal_code: ['postal code', 'zip', 'zip code', 'postcode', 'post code'],
+    country: ['country', 'nation'],
+    id_type: ['id type', 'identification type', 'id kind'],
+    id_number: ['id number', 'id no', 'identification number', 'id#'],
+    id_expiry_date: ['id expiry', 'expiry date', 'id expiry date', 'id expiration'],
+    id_issuing_authority: ['issuing authority', 'issued by', 'id issuer'],
+    date_of_birth: ['date of birth', 'dob', 'birth date', 'birthdate'],
+    status: ['status', 'account status'],
+    risk_level: ['risk level', 'risk', 'risk rating'],
+    notes: ['notes', 'note', 'comments', 'remarks'],
+    gender: ['gender', 'sex'],
+    height: ['height', 'height (cm)'],
+    weight: ['weight', 'weight (kg)'],
+    alert: ['alert', 'alert message', 'warning'],
+    tax_exempt: ['tax exempt', 'tax exemption', 'exempt'],
+  };
+
+  const autoMapField = (csvHeader) => {
+    const normalized = csvHeader.toLowerCase().replace(/[_\-]/g, ' ').trim();
+    for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
+      if (aliases.includes(normalized) || normalized === field.replace(/_/g, ' ')) return field;
+    }
+    // Fallback: direct underscore match
+    const underscored = normalized.replace(/\s+/g, '_');
+    if (CUSTOMER_FIELDS.includes(underscored)) return underscored;
+    return '';
+  };
 
   // Camera effect
   useEffect(() => {
@@ -347,12 +397,14 @@ const CustomerManager = () => {
   // Handle pagination change
   const handlePageChange = (event, newPage) => {
     setPage(newPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-  
+
   // Handle rows per page change
   const handleRowsPerPageChange = (event) => {
     setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(1); // Reset to first page when changing rows per page
+    setPage(1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
   
   // Get current page of customers (backend handles pagination, so just return filteredCustomers)
@@ -567,6 +619,7 @@ const CustomerManager = () => {
       status: customer.status || 'active',
       risk_level: customer.risk_level || 'normal',
       notes: customer.notes || '',
+      alert: customer.alert || '',
       gender: customer.gender || '',
       height: customer.height || '',
       weight: customer.weight || '',
@@ -718,6 +771,56 @@ const CustomerManager = () => {
           >
             Ad-hoc Reports
           </Button>
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<UploadIcon />}
+            onClick={() => document.getElementById('customer-upload-input').click()}
+            sx={{ ml: 1 }}
+          >
+            Upload
+          </Button>
+          <input
+            id="customer-upload-input"
+            type="file"
+            accept=".csv"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = (evt) => {
+                const text = evt.target.result;
+                const lines = text.split(/\r?\n/).filter(l => l.trim());
+                if (lines.length < 2) {
+                  showSnackbar('CSV file is empty or has no data rows.', 'warning');
+                  return;
+                }
+                const parseRow = (line) => {
+                  const cols = [];
+                  let cur = '', inQuote = false;
+                  for (let i = 0; i < line.length; i++) {
+                    const ch = line[i];
+                    if (ch === '"') { inQuote = !inQuote; }
+                    else if (ch === ',' && !inQuote) { cols.push(cur.trim()); cur = ''; }
+                    else { cur += ch; }
+                  }
+                  cols.push(cur.trim());
+                  return cols;
+                };
+                const headers = parseRow(lines[0]);
+                const rows = lines.slice(1).map(line => parseRow(line));
+                const initialMappings = {};
+                headers.forEach(h => { initialMappings[h] = autoMapField(h); });
+                setCsvHeaders(headers);
+                setCsvRawRows(rows);
+                setFieldMappings(initialMappings);
+                setOpenMappingDialog(true);
+              };
+              reader.readAsText(file);
+              e.target.value = '';
+            }}
+          />
         </Box>
       </Box>
 
@@ -864,7 +967,7 @@ const CustomerManager = () => {
 
       {/* Customer Table */}
       <TableContainer component={Paper} sx={{ mt: 2 }}>
-        <Table size="small" sx={{ '& .MuiTableCell-root': { py: 1 } }}>
+        <Table size="small" sx={{ tableLayout: 'fixed', width: '100%', '& .MuiTableCell-root': { py: 1.5, px: 2, overflow: 'hidden' }, '& .MuiTableRow-root': { '&:hover': { backgroundColor: 'rgba(0,0,0,0.03)' }, '&:not(:last-child)': { borderBottom: '1px solid rgba(224,224,224,1)' } } }}>
           <TableHead>
             <TableRow>
               {/* Dynamically generate all columns based on preferences */}
@@ -877,7 +980,7 @@ const CustomerManager = () => {
                 })
                 .map(([column, isVisible]) => {
                   // Skip columns that aren't visible
-                  if (!isVisible) return null;
+                  if (!isVisible || column === 'id') return null;
                   
                   // Format column name for display (capitalize, replace underscores with spaces)
                   const displayName = column
@@ -885,7 +988,8 @@ const CustomerManager = () => {
                     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                     .join(' ');
                   
-                  return <TableCell key={column}>{displayName}</TableCell>;
+                  const hw = column === 'image' ? 56 : ['email', 'notes', 'address_line1', 'address_line2'].includes(column) ? 140 : ['id'].includes(column) ? 50 : 100;
+                  return <TableCell key={column} sx={{ width: hw, maxWidth: hw, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</TableCell>;
                 })}
               {/* Always show actions column */}
               <TableCell>Actions</TableCell>
@@ -893,7 +997,7 @@ const CustomerManager = () => {
           </TableHead>
           <TableBody>
             {getCurrentPageCustomers().map((customer) => (
-              <TableRow key={customer.id}>
+              <TableRow key={customer.id} sx={{ '&:hover': { backgroundColor: 'rgba(0,0,0,0.03)' } }}>
                 {/* Dynamically generate all cells based on preferences */}
                 {Object.entries(columnPreferences)
                   // Sort to ensure image comes first if enabled
@@ -904,11 +1008,12 @@ const CustomerManager = () => {
                   })
                   .map(([column, isVisible]) => {
                     // Skip columns that aren't visible
-                    if (!isVisible) return null;
+                    if (!isVisible || column === 'id') return null;
                     
                     // Render based on column type
+                    const colWidth = column === 'image' ? 56 : ['email', 'notes', 'address_line1', 'address_line2'].includes(column) ? 140 : ['id'].includes(column) ? 50 : 100;
                     return (
-                      <TableCell key={column}>
+                      <TableCell key={column} sx={{ width: colWidth, maxWidth: colWidth, verticalAlign: 'middle' }}>
                         {column === 'image' ? (
                           customer.image ? (
                             <Box
@@ -960,8 +1065,16 @@ const CustomerManager = () => {
                             size="small"
                           />
                         ) : (
-                          // Default: show the field value directly
-                          customer[column]
+                          <Box sx={{
+                            overflow: 'hidden',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            wordBreak: 'break-all',
+                            fontSize: '0.8rem',
+                          }}>
+                            {customer[column]}
+                          </Box>
                         )}
                       </TableCell>
                     );
@@ -1565,6 +1678,106 @@ const CustomerManager = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenReportingDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* CSV Field Mapping Dialog */}
+      <Dialog open={openMappingDialog} onClose={() => setOpenMappingDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Map CSV Columns to Customer Fields</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {csvRawRows.length} row(s) found. Map each CSV column to the corresponding customer field, or leave as "Skip" to ignore it.
+          </Typography>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell><strong>CSV Column</strong></TableCell>
+                <TableCell><strong>Maps To</strong></TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {csvHeaders.map(header => (
+                <TableRow key={header}>
+                  <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{header}</TableCell>
+                  <TableCell>
+                    <FormControl fullWidth size="small">
+                      <Select
+                        value={fieldMappings[header] || ''}
+                        onChange={(e) => setFieldMappings(prev => ({ ...prev, [header]: e.target.value }))}
+                        displayEmpty
+                      >
+                        <MenuItem value=""><em>— Skip —</em></MenuItem>
+                        {CUSTOMER_FIELDS.map(field => (
+                          <MenuItem key={field} value={field}>
+                            {field.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenMappingDialog(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={loading}
+            onClick={async () => {
+              const mappedRows = csvRawRows.map((vals) => {
+                const row = {};
+                csvHeaders.forEach((header, i) => {
+                  const field = fieldMappings[header];
+                  if (field) row[field] = vals[i] ?? '';
+                });
+                row.notes = row.notes
+                  ? `${row.notes}; uploaded customer`
+                  : 'uploaded customer';
+                return row;
+              });
+
+              setLoading(true);
+              const saved = [];
+              const failed = [];
+
+              for (const row of mappedRows) {
+                try {
+                  const fd = new FormData();
+                  Object.entries(row).forEach(([k, v]) => { if (v !== undefined && v !== null) fd.append(k, v); });
+                  const res = await fetch(`${config.apiUrl}/customers`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+                    body: fd,
+                  });
+                  if (!res.ok) {
+                    const err = await res.json();
+                    failed.push(err.error || 'Unknown error');
+                  } else {
+                    saved.push(await res.json());
+                  }
+                } catch (e) {
+                  failed.push(e.message);
+                }
+              }
+
+              setLoading(false);
+              setOpenMappingDialog(false);
+
+              if (saved.length > 0) {
+                setFilteredCustomers(prev => [...saved, ...prev]);
+                setTotalCustomers(prev => prev + saved.length);
+              }
+              if (failed.length > 0) {
+                showSnackbar(`${saved.length} imported, ${failed.length} failed: ${failed[0]}`, 'warning');
+              } else {
+                showSnackbar(`${saved.length} customer(s) saved to database`, 'success');
+              }
+            }}
+          >
+            {loading ? <CircularProgress size={20} color="inherit" /> : 'Import'}
+          </Button>
         </DialogActions>
       </Dialog>
 
