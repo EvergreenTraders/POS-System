@@ -6339,7 +6339,11 @@ app.put('/api/jewelry/:id', async (req, res) => {
       'secondary_gem_category', 'secondary_gem_size', 'secondary_gem_quantity',
       'secondary_gem_shape', 'secondary_gem_color',
       'secondary_gem_weight', 'metal_spot_price', 'notes', 'price',
-      'melt_value', 'weight_grams', 'metal_category', 'item_price'
+      'melt_value', 'weight_grams', 'metal_category', 'item_price',
+      'processing_status', 'processing_queue', 'current_location_id',
+      'sellable_status', 'blocking_reason', 'next_action',
+      'mode', 'source', 'part_number',
+      'catalog_item_id', 'category_id', 'vendor_id'
     ];
 
     for (const field of allowedFields) {
