@@ -6385,6 +6385,33 @@ app.put('/api/jewelry/:id', async (req, res) => {
   }
 });
 
+app.put('/api/jewelry/:id/processing', async (req, res) => {
+  const { id } = req.params;
+  const {
+    processing_status, processing_queue, sellable_status,
+    current_location_id, blocking_reason, next_action, notes
+  } = req.body;
+
+  // Auto-set sellable_status for terminal processing stages
+  const autoSellable = ['ON_RETAIL_FLOOR', 'READY_HOLDING'].includes(processing_status);
+  const finalSellable = autoSellable ? 'SELLABLE' : (sellable_status || 'NOT_SELLABLE');
+
+  await db.query(
+    `UPDATE jewelry SET
+       processing_status = $1, processing_queue = $2,
+       current_location_id = $3, sellable_status = $4,
+       blocking_reason = $5, next_action = $6
+     WHERE item_id = $7`,
+    [processing_status, processing_queue, current_location_id,
+     finalSellable, blocking_reason, next_action, id]
+  );
+
+  // Write processing_events audit record (when Phase 1.12 table exists)
+  // await db.query(`INSERT INTO processing_events ...`, [...]);
+
+  res.json({ success: true });
+});
+
 // Update jewelry item status
 app.put('/api/jewelry/:id/status', async (req, res) => {
   const client = await pool.connect();
