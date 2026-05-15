@@ -36,6 +36,13 @@ ALTER TABLE jewelry
   ADD COLUMN IF NOT EXISTS blocking_reason     TEXT         DEFAULT NULL,
   ADD COLUMN IF NOT EXISTS next_action         TEXT         DEFAULT NULL;
 
+-- Migration: add mode column
+ALTER TABLE jewelry
+  ADD COLUMN IF NOT EXISTS mode VARCHAR(10) DEFAULT 'PIECE'
+    CHECK (mode IN ('PIECE', 'UNIT', 'STOCK', 'BUCKET'));
+
+UPDATE jewelry SET mode = 'PIECE' WHERE mode IS NULL;
+
 -- Migration: backfill processing_status and sellable_status from existing status values
 UPDATE jewelry SET processing_status = 'ON_RETAIL_FLOOR', sellable_status = 'SELLABLE'
   WHERE status = 'ACTIVE';
