@@ -29,8 +29,10 @@ import {
   InputLabel,
   Select,
   Badge,
-  IconButton
+  IconButton,
+  Chip
 } from '@mui/material';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
@@ -43,6 +45,22 @@ import SearchIcon from '@mui/icons-material/Search';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import config from '../config';
 import axios from 'axios';
+
+const DEFAULT_COLUMNS = {
+  processing: {
+    processing_status: { label: 'Stage',           visible: false },
+    processing_queue:  { label: 'Queue',           visible: false },
+    blocking_reason:   { label: 'Blocking Reason', visible: false },
+  },
+};
+
+const PROCESSING_STATUS_STYLES = {
+  ON_RETAIL_FLOOR: { color: 'success', label: 'Retail Floor' },
+  READY_HOLDING:   { color: 'info',    label: 'Ready/Holding' },
+  IN_PROCESSING:   { color: 'warning', label: 'In Processing' },
+  INTAKE_PENDING:  { color: 'default', label: 'Intake Pending' },
+  EXCEPTION:       { color: 'error',   label: 'Exception' },
+};
 
 function Jewelry() {
   const navigate = useNavigate();
@@ -520,6 +538,8 @@ function Jewelry() {
   const [inventoryStatuses, setInventoryStatuses] = useState([]);
   const [selectedStatus, setSelectedStatus] = useState('SELLABLE');
   const [sellableFilter, setSellableFilter] = useState('SELLABLE');
+  // Show processing columns in any non-sales view
+  const showProcessingCols = selectedStatus !== 'SELLABLE';
 
   const fetchScrapBuckets = async () => {
     try {
@@ -973,19 +993,22 @@ function Jewelry() {
                   <TableCell>Sold Price</TableCell>
                   <TableCell>Days to Sell</TableCell>
                   <TableCell>Date</TableCell>
+                  {showProcessingCols && <TableCell>{DEFAULT_COLUMNS.processing.processing_status.label}</TableCell>}
+                  {showProcessingCols && <TableCell>{DEFAULT_COLUMNS.processing.processing_queue.label}</TableCell>}
+                  {showProcessingCols && <TableCell>{DEFAULT_COLUMNS.processing.blocking_reason.label}</TableCell>}
                   <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={10} align="center">
+                    <TableCell colSpan={showProcessingCols ? 13 : 10} align="center">
                       <CircularProgress />
                     </TableCell>
                   </TableRow>
                 ) : filteredItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} align="center">
+                    <TableCell colSpan={showProcessingCols ? 13 : 10} align="center">
                       No jewelry items found
                     </TableCell>
                   </TableRow>
@@ -1019,6 +1042,40 @@ function Jewelry() {
                           ? new Date(item.sold_date).toLocaleDateString()
                           : new Date(item.created_at).toLocaleDateString()}
                       </TableCell>
+                      {showProcessingCols && (
+                        <TableCell>
+                          {item.processing_status ? (() => {
+                            const s = PROCESSING_STATUS_STYLES[item.processing_status];
+                            return (
+                              <Chip
+                                label={s?.label || item.processing_status}
+                                color={s?.color || 'default'}
+                                size="small"
+                                icon={item.processing_status === 'EXCEPTION' ? <WarningAmberIcon /> : undefined}
+                              />
+                            );
+                          })() : '-'}
+                        </TableCell>
+                      )}
+                      {showProcessingCols && (
+                        <TableCell sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
+                          {item.processing_queue || '-'}
+                        </TableCell>
+                      )}
+                      {showProcessingCols && (
+                        <TableCell>
+                          {item.blocking_reason ? (
+                            <Tooltip title={item.blocking_reason} arrow>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'warning.main', cursor: 'default' }}>
+                                <WarningAmberIcon fontSize="small" />
+                                <Typography variant="caption" noWrap sx={{ maxWidth: 120 }}>
+                                  {item.blocking_reason}
+                                </Typography>
+                              </Box>
+                            </Tooltip>
+                          ) : '-'}
+                        </TableCell>
+                      )}
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1 }}>
                           {/* Only show Edit button for IN_PROCESS status items */}
