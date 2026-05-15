@@ -27,6 +27,33 @@ WHERE NOT EXISTS (SELECT 1 FROM inventory_status LIMIT 1);
 -- Drop change_notes column if it exists (migration)
 ALTER TABLE jewelry DROP COLUMN IF EXISTS change_notes;
 
+-- Migration: add processing fields
+ALTER TABLE jewelry
+  ADD COLUMN IF NOT EXISTS processing_status   VARCHAR(30)  DEFAULT 'INTAKE_PENDING',
+  ADD COLUMN IF NOT EXISTS processing_queue    VARCHAR(30)  DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS current_location_id INTEGER      DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS sellable_status     VARCHAR(20)  DEFAULT 'NOT_SELLABLE',
+  ADD COLUMN IF NOT EXISTS blocking_reason     TEXT         DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS next_action         TEXT         DEFAULT NULL;
+
+-- Migration: backfill processing_status and sellable_status from existing status values
+UPDATE jewelry SET processing_status = 'ON_RETAIL_FLOOR', sellable_status = 'SELLABLE'
+  WHERE status = 'ACTIVE';
+UPDATE jewelry SET processing_status = 'INTAKE_PENDING',  sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'HOLD';
+UPDATE jewelry SET processing_status = 'IN_PROCESSING',   sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'IN_PROCESS';
+UPDATE jewelry SET processing_status = 'SCRAPPED',        sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'SCRAP';
+UPDATE jewelry SET processing_status = 'SOLD',            sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'SOLD';
+UPDATE jewelry SET processing_status = 'PAWNED',          sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'PAWN';
+UPDATE jewelry SET processing_status = 'INTAKE_PENDING',  sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'FORFEITED';
+UPDATE jewelry SET processing_status = 'ON_RETAIL_FLOOR', sellable_status = 'SELLABLE'
+  WHERE status IN ('REDEEMED', 'RESERVED');
+
 -- Create jewelry table for inventory
 CREATE TABLE IF NOT EXISTS jewelry (
     item_id VARCHAR(10) PRIMARY KEY,
