@@ -6609,7 +6609,7 @@ app.get('/api/jewelry/:id', async (req, res) => {
 // Get all jewelry items
 app.get('/api/jewelry', async (req, res) => {
   try {
-    const { status, metal_category } = req.query;
+    const {status, metal_category, processing_status, processing_queue, sellable_status, mode, source, location_id } = req.query;
     const conditions = [];
     const params = [];
     let paramCount = 1;
@@ -6627,6 +6627,18 @@ app.get('/api/jewelry', async (req, res) => {
       params.push(metal_category);
       paramCount++;
     }
+    if (processing_status) 
+      conditions.push(`processing_status = $${params.push(processing_status)}`);
+    if (processing_queue)  
+      conditions.push(`processing_queue = $${params.push(processing_queue)}`);
+    if (sellable_status)   
+      conditions.push(`sellable_status = $${params.push(sellable_status)}`);
+    if (mode)              
+      conditions.push(`mode = $${params.push(mode)}`);
+    if (source)            
+      conditions.push(`source = $${params.push(source)}`);
+    if (location_id)       
+      conditions.push(`current_location_id = $${params.push(location_id)}`);
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
