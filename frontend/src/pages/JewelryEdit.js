@@ -2615,7 +2615,23 @@ function JewelryEdit() {
 
               {/* Editable Fields in Grid Layout */}
               <Grid container spacing={2}>
-                
+
+                {/* Original Intake Description — permanently locked, display only */}
+                {item.original_intake_description && (
+                  <Grid item xs={12}>
+                    <TextField
+                      label="Original Intake Description"
+                      value={item.original_intake_description}
+                      multiline
+                      fullWidth
+                      disabled
+                      InputProps={{ readOnly: true }}
+                      sx={{ backgroundColor: '#f5f5f5', mb: 2 }}
+                      helperText="This field is permanently locked."
+                    />
+                  </Grid>
+                )}
+
                 {/* Description - Double-click to edit */}
                 <Grid item xs={12}>
                   <Typography variant="caption" color="textSecondary">
