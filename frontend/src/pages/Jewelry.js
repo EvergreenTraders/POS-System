@@ -47,6 +47,9 @@ import config from '../config';
 import axios from 'axios';
 
 const DEFAULT_COLUMNS = {
+  basic_info: {
+    mode: { label: 'Mode', visible: false },
+  },
   processing: {
     processing_status: { label: 'Stage',           visible: false },
     processing_queue:  { label: 'Queue',           visible: false },
@@ -540,6 +543,7 @@ function Jewelry() {
   const [sellableFilter, setSellableFilter] = useState('SELLABLE');
   // Show processing columns in any non-sales view
   const showProcessingCols = selectedStatus !== 'SELLABLE';
+  const [showModeCol] = useState(DEFAULT_COLUMNS.basic_info.mode.visible);
 
   const fetchScrapBuckets = async () => {
     try {
@@ -987,6 +991,7 @@ function Jewelry() {
                   <TableCell sx={{ width: '100px' }}>ID</TableCell>
                   <TableCell>Description</TableCell>
                   <TableCell>Category</TableCell>
+                  {showModeCol && <TableCell>{DEFAULT_COLUMNS.basic_info.mode.label}</TableCell>}
                   <TableCell>Weight</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Age (Days)</TableCell>
@@ -1002,13 +1007,13 @@ function Jewelry() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={showProcessingCols ? 13 : 10} align="center">
+                    <TableCell colSpan={10 + (showModeCol ? 1 : 0) + (showProcessingCols ? 3 : 0)} align="center">
                       <CircularProgress />
                     </TableCell>
                   </TableRow>
                 ) : filteredItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={showProcessingCols ? 13 : 10} align="center">
+                    <TableCell colSpan={10 + (showModeCol ? 1 : 0) + (showProcessingCols ? 3 : 0)} align="center">
                       No jewelry items found
                     </TableCell>
                   </TableRow>
@@ -1030,6 +1035,15 @@ function Jewelry() {
                           ? (item.category.category || item.category.value || item.category.name || '')
                           : (item.category || '')}
                       </TableCell>
+                      {showModeCol && (
+                        <TableCell>
+                          <Chip
+                            label={item.mode || 'PIECE'}
+                            size="small"
+                            color={item.mode === 'UNIT' ? 'primary' : 'default'}
+                          />
+                        </TableCell>
+                      )}
                       <TableCell>{item.metal_weight}g</TableCell>
                       <TableCell>{item.inventory_status || item.status}</TableCell>
                       <TableCell>{item.age_days || '-'}</TableCell>
