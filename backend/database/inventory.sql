@@ -36,6 +36,20 @@ ALTER TABLE jewelry
   ADD COLUMN IF NOT EXISTS blocking_reason     TEXT         DEFAULT NULL,
   ADD COLUMN IF NOT EXISTS next_action         TEXT         DEFAULT NULL;
 
+-- Migration: add catalog_item_id, category_id, vendor_id columns
+ALTER TABLE jewelry
+  ADD COLUMN IF NOT EXISTS catalog_item_id INTEGER DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS category_id     INTEGER DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS vendor_id       INTEGER DEFAULT NULL;
+
+-- FK constraints to add LATER once referenced tables exist:
+-- ALTER TABLE jewelry ADD CONSTRAINT fk_jewelry_catalog_item
+--   FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id);
+-- ALTER TABLE jewelry ADD CONSTRAINT fk_jewelry_category
+--   FOREIGN KEY (category_id) REFERENCES categories(id);
+-- ALTER TABLE jewelry ADD CONSTRAINT fk_jewelry_vendor
+--   FOREIGN KEY (vendor_id) REFERENCES vendors(id);
+
 -- Migration: add part_number column
 ALTER TABLE jewelry
   ADD COLUMN IF NOT EXISTS part_number VARCHAR(50) DEFAULT NULL;
