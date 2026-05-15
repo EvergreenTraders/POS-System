@@ -36,6 +36,24 @@ ALTER TABLE jewelry
   ADD COLUMN IF NOT EXISTS blocking_reason     TEXT         DEFAULT NULL,
   ADD COLUMN IF NOT EXISTS next_action         TEXT         DEFAULT NULL;
 
+-- Migration: add part_number column
+ALTER TABLE jewelry
+  ADD COLUMN IF NOT EXISTS part_number VARCHAR(50) DEFAULT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jewelry_part_number
+  ON jewelry (part_number) WHERE part_number IS NOT NULL;
+
+UPDATE jewelry SET part_number = item_id WHERE part_number IS NULL;
+
+-- Migration: add source and original_intake_description columns
+ALTER TABLE jewelry
+  ADD COLUMN IF NOT EXISTS source                     VARCHAR(30)  DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS original_intake_description TEXT         DEFAULT NULL;
+
+UPDATE jewelry
+  SET original_intake_description = long_desc
+  WHERE original_intake_description IS NULL AND long_desc IS NOT NULL;
+
 -- Migration: add mode column
 ALTER TABLE jewelry
   ADD COLUMN IF NOT EXISTS mode VARCHAR(10) DEFAULT 'PIECE'
