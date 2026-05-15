@@ -518,7 +518,8 @@ function Jewelry() {
   const [selectedBucket, setSelectedBucket] = useState('');
   const [loadingBuckets, setLoadingBuckets] = useState(false);
   const [inventoryStatuses, setInventoryStatuses] = useState([]);
-  const [selectedStatus, setSelectedStatus] = useState('ACTIVE');
+  const [selectedStatus, setSelectedStatus] = useState('SELLABLE');
+  const [sellableFilter, setSellableFilter] = useState('SELLABLE');
 
   const fetchScrapBuckets = async () => {
     try {
@@ -687,9 +688,9 @@ function Jewelry() {
   };
 
   useEffect(() => {
-    fetchJewelryItems();
+    fetchJewelryItems(selectedStatus);
     fetchInventoryStatuses();
-  }, []);
+  }, [selectedStatus]);
 
   const fetchInventoryStatuses = async () => {
     try {
@@ -702,10 +703,16 @@ function Jewelry() {
     }
   };
 
-  const fetchJewelryItems = async () => {
+  const fetchJewelryItems = async (statusFilter = 'SELLABLE') => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_BASE_URL}/jewelry`);
+      let params = '';
+      if (statusFilter === 'SELLABLE') {
+        params = '?sellable_status=SELLABLE';
+      } else if (statusFilter !== 'ALL') {
+        params = `?status=${statusFilter}`;
+      }
+      const response = await axios.get(`${API_BASE_URL}/jewelry${params}`);
       // Filter out items with status 'SCRAP PROCESS' and 'SOLD TO REFINER'
       const nonScrapItems = response.data.filter(item =>
         item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER'
@@ -877,13 +884,9 @@ function Jewelry() {
     }
   };
 
-  // Filter jewelry items based on search queries and status
+  // Filter jewelry items based on search queries (status filtering is done server-side)
   const filteredItems = jewelryItems.filter(item => {
-    // Exclude items with 'quoted' status
     const notQuoted = item.status?.toLowerCase() !== 'quoted';
-
-    // Only exclude HOLD items when 'ALL' is selected, not when specifically filtering for HOLD
-    const notHold = selectedStatus === 'ALL' ? (item.inventory_status || item.status) !== 'HOLD' : true;
 
     const matchesSearch = searchQuery === '' ||
       item.short_desc?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -892,11 +895,7 @@ function Jewelry() {
     const matchesSerial = serialQuery === '' ||
       item.item_id?.toLowerCase().includes(serialQuery.toLowerCase());
 
-    // Filter by selected status (show all if 'ALL' is selected)
-    const matchesStatus = selectedStatus === 'ALL' ||
-      (item.inventory_status || item.status) === selectedStatus;
-
-    return matchesSearch && matchesSerial && notQuoted && notHold && matchesStatus;
+    return matchesSearch && matchesSerial && notQuoted;
   });
 
   return (
@@ -950,6 +949,7 @@ function Jewelry() {
                 onChange={(e) => setSelectedStatus(e.target.value)}
                 label="Status"
               >
+                <MenuItem value="SELLABLE">Sellable Items</MenuItem>
                 <MenuItem value="ALL">All Statuses</MenuItem>
                 {inventoryStatuses.map((status) => (
                   <MenuItem key={status.status_code} value={status.status_code}>
