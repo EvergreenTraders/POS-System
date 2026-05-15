@@ -1418,6 +1418,19 @@ function JewelryEdit() {
   const [nextAction, setNextAction] = useState('');
   const [isSavingProcessing, setIsSavingProcessing] = useState(false);
 
+  // Auto-recalculate est_metal_value when spot price, purity, or weight changes
+  useEffect(() => {
+    if (!editedItem) return;
+    // spot_price is used by the inline edit field; metal_spot_price is what the API returns
+    const spotPrice = parseFloat(editedItem.spot_price || editedItem.metal_spot_price);
+    const purityValue = parseFloat(editedItem.purity_value);
+    const weight = parseFloat(editedItem.metal_weight);
+    if (spotPrice > 0 && purityValue > 0 && weight > 0) {
+      const calculated = parseFloat((spotPrice * purityValue * weight).toFixed(2));
+      setEditedItem(prev => ({ ...prev, est_metal_value: calculated }));
+      setItem(prev => ({ ...prev, est_metal_value: calculated }));
+    }
+  }, [editedItem?.spot_price, editedItem?.metal_spot_price, editedItem?.purity_value, editedItem?.metal_weight]);
 
   // Effects
   useEffect(() => {
@@ -1840,7 +1853,7 @@ function JewelryEdit() {
         purity_value: foundItem.purity_value ?? 0,
         metal_weight: foundItem.metal_weight ?? 0,
         est_metal_value: foundItem.est_metal_value ?? 0,
-        spot_price: foundItem.spot_price ?? 0,
+        spot_price: foundItem.spot_price ?? foundItem.metal_spot_price ?? 0,
         jewelry_color: foundItem.jewelry_color ?? '',
         secondaryGems: finalSecondaryGems,
         ...flatSecondaryGemProps
@@ -1876,7 +1889,7 @@ function JewelryEdit() {
         purity_value: foundItem.purity_value ?? 0,
         metal_weight: foundItem.metal_weight ?? 0,
         est_metal_value: foundItem.est_metal_value ?? 0,
-        spot_price: foundItem.spot_price ?? 0,
+        spot_price: foundItem.spot_price ?? foundItem.metal_spot_price ?? 0,
         jewelry_color: foundItem.jewelry_color ?? '',
         // Include secondary gems in the edited item
         secondaryGems: finalSecondaryGems,
