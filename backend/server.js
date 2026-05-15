@@ -6335,9 +6335,9 @@ app.put('/api/jewelry/:id', async (req, res) => {
       'precious_metal_type', 'metal_purity', 'metal_weight',
       'primary_gem_type', 'primary_gem_category', 'primary_gem_size',
       'primary_gem_quantity', 'primary_gem_shape', 'primary_gem_color',
-      'primary_gem_quality', 'primary_gem_weight', 'secondary_gem_type',
+      'primary_gem_weight', 'secondary_gem_type',
       'secondary_gem_category', 'secondary_gem_size', 'secondary_gem_quantity',
-      'secondary_gem_shape', 'secondary_gem_color', 'secondary_gem_quality',
+      'secondary_gem_shape', 'secondary_gem_color',
       'secondary_gem_weight', 'metal_spot_price', 'notes', 'price',
       'melt_value', 'weight_grams', 'metal_category', 'item_price'
     ];
