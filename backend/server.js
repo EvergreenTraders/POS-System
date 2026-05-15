@@ -6836,26 +6836,26 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         for (const gem of item.secondary_gems) {
           const secondaryGemQuery = `
             INSERT INTO jewelry_secondary_gems (
-              item_id, gem_type, gem_category, gem_size, gem_quantity,
-              gem_shape, gem_weight, gem_color, gem_exact_color,
-              gem_clarity, gem_cut, gem_lab_grown, gem_authentic, gem_value
+              item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+              secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+              secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`;
 
           await client.query(secondaryGemQuery, [
             item_id,
-            gem.gem_type || null,
-            gem.gem_category || null,
-            gem.gem_size || null,
-            parseInt(gem.gem_quantity) || 0,
-            gem.gem_shape || null,
-            parseFloat(gem.gem_weight) || 0,
-            gem.gem_color || null,
-            gem.gem_exact_color || null,
-            gem.gem_clarity || null,
-            gem.gem_cut || null,
-            gem.gem_lab_grown || false,
-            gem.gem_authentic || false,
-            parseFloat(gem.gem_value) || 0
+            gem.secondary_gem_type || null,
+            gem.secondary_gem_category || null,
+            parseFloat(gem.secondary_gem_size) || null,
+            parseInt(gem.secondary_gem_quantity) || 0,
+            gem.secondary_gem_shape || null,
+            parseFloat(gem.secondary_gem_weight) || 0,
+            gem.secondary_gem_color || null,
+            gem.secondary_gem_exact_color || null,
+            gem.secondary_gem_clarity || null,
+            gem.secondary_gem_cut || null,
+            gem.secondary_gem_lab_grown || false,
+            gem.secondary_gem_authentic || false,
+            parseFloat(gem.secondary_gem_value) || 0
           ]);
         }
       }
@@ -7026,7 +7026,35 @@ app.post('/api/jewelry', async (req, res) => {
 
       const result = await client.query(jewelryQuery, jewelryValues);
       results.push(result.rows[0]);
-      
+      // Insert secondary gems if any
+      if (item.secondary_gems && Array.isArray(item.secondary_gems)) {
+        for (const gem of item.secondary_gems) {
+          const secondaryGemQuery = `
+            INSERT INTO jewelry_secondary_gems (
+              item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+              secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+              secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`;
+
+          await client.query(secondaryGemQuery, [
+            item_id,
+            gem.secondary_gem_type || null,
+            gem.secondary_gem_category || null,
+            parseFloat(gem.secondary_gem_size) || null,
+            parseInt(gem.secondary_gem_quantity) || 0,
+            gem.secondary_gem_shape || null,
+            parseFloat(gem.secondary_gem_weight) || 0,
+            gem.secondary_gem_color || null,
+            gem.secondary_gem_exact_color || null,
+            gem.secondary_gem_clarity || null,
+            gem.secondary_gem_cut || null,
+            gem.secondary_gem_lab_grown || false,
+            gem.secondary_gem_authentic || false,
+            parseFloat(gem.secondary_gem_value) || 0
+          ]);
+        }
+      }
+
       if(quote_id) {
         const itemQuery = `
           INSERT INTO quote_items (
@@ -7044,7 +7072,7 @@ app.post('/api/jewelry', async (req, res) => {
           item.price
         ]);
       }
-      
+
     }
 
     await client.query('COMMIT');

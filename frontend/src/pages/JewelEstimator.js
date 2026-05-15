@@ -339,7 +339,7 @@ function JewelEstimator({
       non_precious_metal_type: latestMetalData.non_precious_metal_type || null,
       metal_purity: latestMetalData.metal_purity,
       metal_category: latestMetalData.metal_category,
-      jewelry_color: latestMetalData.color,
+      jewelry_color: latestMetalData.precious_metal_type === 'Gold' ? (latestMetalData.color || '') : '',
       metal_spot_price: latestMetalData.metal_spot_price,
       est_metal_value: latestMetalData.estimated_value?.toFixed(2),
       purity_value: latestMetalData.purity_value,
