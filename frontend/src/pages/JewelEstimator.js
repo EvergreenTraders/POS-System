@@ -247,6 +247,19 @@ function JewelEstimator({
   };
 
   const handleAddMetal = (newItem) => {
+    // Validate required fields before adding
+    const errors = [];
+    if (!newItem.precious_metal_type && !newItem.non_precious_metal_type)
+      errors.push('Metal type is required');
+    if (!newItem.metal_weight || parseFloat(newItem.metal_weight) <= 0)
+      errors.push('Metal weight must be greater than 0');
+    if (!newItem.estimated_value || parseFloat(newItem.estimated_value) <= 0)
+      errors.push('Item price must be set (check spot price and purity)');
+    if (errors.length > 0) {
+      showSnackbar(errors.join(' · '), 'error');
+      return;
+    }
+
     // Find the metal type from the state
     const metalType = metalTypes.find(mt =>
       mt.type === newItem.precious_metal_type
@@ -339,7 +352,7 @@ function JewelEstimator({
       non_precious_metal_type: latestMetalData.non_precious_metal_type || null,
       metal_purity: latestMetalData.metal_purity,
       metal_category: latestMetalData.metal_category,
-      jewelry_color: latestMetalData.color,
+      jewelry_color: latestMetalData.precious_metal_type === 'Gold' ? (latestMetalData.color || '') : '',
       metal_spot_price: latestMetalData.metal_spot_price,
       est_metal_value: latestMetalData.estimated_value?.toFixed(2),
       purity_value: latestMetalData.purity_value,

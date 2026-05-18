@@ -27,6 +27,72 @@ WHERE NOT EXISTS (SELECT 1 FROM inventory_status LIMIT 1);
 -- Drop change_notes column if it exists (migration)
 ALTER TABLE jewelry DROP COLUMN IF EXISTS change_notes;
 
+-- Migration: add processing fields
+ALTER TABLE jewelry
+  ADD COLUMN IF NOT EXISTS processing_status   VARCHAR(30)  DEFAULT 'INTAKE_PENDING',
+  ADD COLUMN IF NOT EXISTS processing_queue    VARCHAR(30)  DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS current_location_id INTEGER      DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS sellable_status     VARCHAR(20)  DEFAULT 'NOT_SELLABLE',
+  ADD COLUMN IF NOT EXISTS blocking_reason     TEXT         DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS next_action         TEXT         DEFAULT NULL;
+
+-- Migration: add catalog_item_id, category_id, vendor_id columns
+ALTER TABLE jewelry
+  ADD COLUMN IF NOT EXISTS catalog_item_id INTEGER DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS category_id     INTEGER DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS vendor_id       INTEGER DEFAULT NULL;
+
+-- FK constraints to add LATER once referenced tables exist:
+-- ALTER TABLE jewelry ADD CONSTRAINT fk_jewelry_catalog_item
+--   FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id);
+-- ALTER TABLE jewelry ADD CONSTRAINT fk_jewelry_category
+--   FOREIGN KEY (category_id) REFERENCES categories(id);
+-- ALTER TABLE jewelry ADD CONSTRAINT fk_jewelry_vendor
+--   FOREIGN KEY (vendor_id) REFERENCES vendors(id);
+
+-- Migration: add part_number column
+ALTER TABLE jewelry
+  ADD COLUMN IF NOT EXISTS part_number VARCHAR(50) DEFAULT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jewelry_part_number
+  ON jewelry (part_number) WHERE part_number IS NOT NULL;
+
+UPDATE jewelry SET part_number = item_id WHERE part_number IS NULL;
+
+-- Migration: add source and original_intake_description columns
+ALTER TABLE jewelry
+  ADD COLUMN IF NOT EXISTS source                     VARCHAR(30)  DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS original_intake_description TEXT         DEFAULT NULL;
+
+UPDATE jewelry
+  SET original_intake_description = long_desc
+  WHERE original_intake_description IS NULL AND long_desc IS NOT NULL;
+
+-- Migration: add mode column
+ALTER TABLE jewelry
+  ADD COLUMN IF NOT EXISTS mode VARCHAR(10) DEFAULT 'PIECE'
+    CHECK (mode IN ('PIECE', 'UNIT', 'STOCK', 'BUCKET'));
+
+UPDATE jewelry SET mode = 'PIECE' WHERE mode IS NULL;
+
+-- Migration: backfill processing_status and sellable_status from existing status values
+UPDATE jewelry SET processing_status = 'ON_RETAIL_FLOOR', sellable_status = 'SELLABLE'
+  WHERE status = 'ACTIVE';
+UPDATE jewelry SET processing_status = 'INTAKE_PENDING',  sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'HOLD';
+UPDATE jewelry SET processing_status = 'IN_PROCESSING',   sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'IN_PROCESS';
+UPDATE jewelry SET processing_status = 'SCRAPPED',        sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'SCRAP';
+UPDATE jewelry SET processing_status = 'SOLD',            sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'SOLD';
+UPDATE jewelry SET processing_status = 'PAWNED',          sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'PAWN';
+UPDATE jewelry SET processing_status = 'INTAKE_PENDING',  sellable_status = 'NOT_SELLABLE'
+  WHERE status = 'FORFEITED';
+UPDATE jewelry SET processing_status = 'ON_RETAIL_FLOOR', sellable_status = 'SELLABLE'
+  WHERE status IN ('REDEEMED', 'RESERVED');
+
 -- Create jewelry table for inventory
 CREATE TABLE IF NOT EXISTS jewelry (
     item_id VARCHAR(10) PRIMARY KEY,

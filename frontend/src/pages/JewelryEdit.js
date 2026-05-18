@@ -32,8 +32,12 @@ import {
   Tabs,
   Tab,
   Checkbox,
-  Slider
+  Slider,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
 import EditIcon from '@mui/icons-material/Edit';
@@ -564,6 +568,25 @@ function JewelryEdit() {
       });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveProcessing = async (overrideStatus) => {
+    try {
+      setIsSavingProcessing(true);
+      const status = overrideStatus || processingStatus;
+      await axios.put(`${API_BASE_URL}/jewelry/${item.item_id}/processing`, {
+        processing_status: status,
+        blocking_reason: blockingReason,
+        next_action: nextAction,
+      }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+      if (overrideStatus) setProcessingStatus(overrideStatus);
+      setItem(prev => ({ ...prev, processing_status: status, blocking_reason: blockingReason, next_action: nextAction }));
+      setSnackbar({ open: true, message: 'Processing status saved', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: `Failed to save: ${err.response?.data?.error || err.message}`, severity: 'error' });
+    } finally {
+      setIsSavingProcessing(false);
     }
   };
 
@@ -1390,7 +1413,24 @@ function JewelryEdit() {
   const [updatedMetalData, setUpdatedMetalData] = useState(null);
   const [attributeConfig, setAttributeConfig] = useState([]);
   const [itemAttributeValues, setItemAttributeValues] = useState({});
+  const [processingStatus, setProcessingStatus] = useState('');
+  const [blockingReason, setBlockingReason] = useState('');
+  const [nextAction, setNextAction] = useState('');
+  const [isSavingProcessing, setIsSavingProcessing] = useState(false);
 
+  // Auto-recalculate est_metal_value when spot price, purity, or weight changes
+  useEffect(() => {
+    if (!editedItem) return;
+    // spot_price is used by the inline edit field; metal_spot_price is what the API returns
+    const spotPrice = parseFloat(editedItem.spot_price || editedItem.metal_spot_price);
+    const purityValue = parseFloat(editedItem.purity_value);
+    const weight = parseFloat(editedItem.metal_weight);
+    if (spotPrice > 0 && purityValue > 0 && weight > 0) {
+      const calculated = parseFloat((spotPrice * purityValue * weight).toFixed(2));
+      setEditedItem(prev => ({ ...prev, est_metal_value: calculated }));
+      setItem(prev => ({ ...prev, est_metal_value: calculated }));
+    }
+  }, [editedItem?.spot_price, editedItem?.metal_spot_price, editedItem?.purity_value, editedItem?.metal_weight]);
 
   // Effects
   useEffect(() => {
@@ -1813,7 +1853,7 @@ function JewelryEdit() {
         purity_value: foundItem.purity_value ?? 0,
         metal_weight: foundItem.metal_weight ?? 0,
         est_metal_value: foundItem.est_metal_value ?? 0,
-        spot_price: foundItem.spot_price ?? 0,
+        spot_price: foundItem.spot_price ?? foundItem.metal_spot_price ?? 0,
         jewelry_color: foundItem.jewelry_color ?? '',
         secondaryGems: finalSecondaryGems,
         ...flatSecondaryGemProps
@@ -1821,14 +1861,20 @@ function JewelryEdit() {
 
       // Set the jewelry item data to state
       setItem(itemWithGems);
-      // Set baseline for comparison (this represents the current state with all history applied)
-      setBaselineItem(JSON.parse(JSON.stringify(itemWithGems))); // Deep clone to avoid reference issues
+      setBaselineItem(JSON.parse(JSON.stringify(itemWithGems)));
+      setProcessingStatus(foundItem.processing_status || 'INTAKE_PENDING');
+      setBlockingReason(foundItem.blocking_reason || '');
+      setNextAction(foundItem.next_action || '');
 
       // Set initial edited item state for form (with same defaults as itemWithGems)
       setEditedItem({
         ...foundItem,
         inventory_status: foundItem.status || foundItem.inventory_status || 'HOLD',
         short_desc: foundItem.short_desc ?? '',
+        brand: foundItem.brand ?? '',
+        notes: foundItem.notes ?? '',
+        vintage: foundItem.vintage ?? false,
+        stamps: foundItem.stamps ?? '',
         gemstone: foundItem.gemstone ?? '',
         stone_weight: foundItem.stone_weight ?? '',
         // Ensure metal-related fields are properly initialized
@@ -1843,7 +1889,7 @@ function JewelryEdit() {
         purity_value: foundItem.purity_value ?? 0,
         metal_weight: foundItem.metal_weight ?? 0,
         est_metal_value: foundItem.est_metal_value ?? 0,
-        spot_price: foundItem.spot_price ?? 0,
+        spot_price: foundItem.spot_price ?? foundItem.metal_spot_price ?? 0,
         jewelry_color: foundItem.jewelry_color ?? '',
         // Include secondary gems in the edited item
         secondaryGems: finalSecondaryGems,
@@ -2615,7 +2661,23 @@ function JewelryEdit() {
 
               {/* Editable Fields in Grid Layout */}
               <Grid container spacing={2}>
-                
+
+                {/* Original Intake Description — permanently locked, display only */}
+                {item.original_intake_description && (
+                  <Grid item xs={12}>
+                    <TextField
+                      label="Original Intake Description"
+                      value={item.original_intake_description}
+                      multiline
+                      fullWidth
+                      disabled
+                      InputProps={{ readOnly: true }}
+                      sx={{ backgroundColor: '#f5f5f5', mb: 2 }}
+                      helperText="This field is permanently locked."
+                    />
+                  </Grid>
+                )}
+
                 {/* Description - Double-click to edit */}
                 <Grid item xs={12}>
                   <Typography variant="caption" color="textSecondary">
@@ -2641,6 +2703,70 @@ function JewelryEdit() {
                   )}
                 </Grid>
                 
+                {/* Brand */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">Brand</Typography>
+                  {renderEditableField(
+                    'brand',
+                    item.brand || '—',
+                    <TextField
+                      fullWidth size="small" name="brand"
+                      value={editedItem?.brand ?? ''}
+                      onChange={(e) => setEditedItem(prev => ({ ...prev, brand: e.target.value }))}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'brand')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'brand')}
+                      autoFocus margin="dense"
+                    />
+                  )}
+                </Grid>
+
+                {/* Vintage */}
+                <Grid item xs={6} sx={{ display: 'flex', alignItems: 'center', pt: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={editedItem?.vintage ?? item.vintage ?? false}
+                        onChange={(e) => setEditedItem(prev => ({ ...prev, vintage: e.target.checked }))}
+                      />
+                    }
+                    label="Vintage"
+                  />
+                </Grid>
+
+                {/* Stamps / Engraving */}
+                <Grid item xs={6}>
+                  <Typography variant="caption" color="textSecondary">Stamps / Engraving</Typography>
+                  {renderEditableField(
+                    'stamps',
+                    item.stamps || '—',
+                    <TextField
+                      fullWidth size="small" multiline rows={2} name="stamps"
+                      value={editedItem?.stamps ?? ''}
+                      onChange={(e) => setEditedItem(prev => ({ ...prev, stamps: e.target.value }))}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'stamps')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'stamps')}
+                      autoFocus margin="dense"
+                    />
+                  )}
+                </Grid>
+
+                {/* Additional Info / Damages */}
+                <Grid item xs={12}>
+                  <Typography variant="caption" color="textSecondary">Additional Information / Damages</Typography>
+                  {renderEditableField(
+                    'notes',
+                    item.notes || '—',
+                    <TextField
+                      fullWidth size="small" multiline rows={4} name="notes"
+                      value={editedItem?.notes ?? ''}
+                      onChange={(e) => setEditedItem(prev => ({ ...prev, notes: e.target.value }))}
+                      onKeyDown={(e) => handleInlineEditComplete(e, 'notes')}
+                      onBlur={(e) => handleInlineEditComplete(e, 'notes')}
+                      autoFocus margin="dense"
+                    />
+                  )}
+                </Grid>
+
                 {/* Metal Type with Edit Button and Double-Click Editing */}
                                 {/* Precious Metal Type - Double-click to edit */}
                 <Grid item xs={4}>
@@ -4701,6 +4827,79 @@ function JewelryEdit() {
             </Paper>
           </Grid>
         </Grid>
+
+        {/* Processing Status Section */}
+        <Accordion sx={{ mt: 2 }}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Typography variant="h6">Processing Status</Typography>
+              {item?.sellable_status && (
+                <Chip
+                  label={item.sellable_status}
+                  color={item.sellable_status === 'SELLABLE' ? 'success' : 'warning'}
+                  size="small"
+                />
+              )}
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Processing Stage</InputLabel>
+                  <Select
+                    value={processingStatus}
+                    onChange={(e) => setProcessingStatus(e.target.value)}
+                    label="Processing Stage"
+                  >
+                    <MenuItem value="INTAKE_PENDING">Intake Pending</MenuItem>
+                    <MenuItem value="IN_PROCESSING">In Processing</MenuItem>
+                    <MenuItem value="REPAIR_QUEUE">Repair Queue</MenuItem>
+                    <MenuItem value="READY_HOLDING">Ready / Holding</MenuItem>
+                    <MenuItem value="ON_RETAIL_FLOOR">On Retail Floor</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth size="small"
+                  label="Next Action"
+                  value={nextAction}
+                  onChange={(e) => setNextAction(e.target.value)}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth size="small" multiline rows={2}
+                  label="Blocking Reason"
+                  value={blockingReason}
+                  onChange={(e) => setBlockingReason(e.target.value)}
+                  helperText="Leave blank if nothing is blocking this item."
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <Button
+                    variant="contained"
+                    onClick={() => handleSaveProcessing()}
+                    disabled={isSavingProcessing}
+                    startIcon={isSavingProcessing ? <CircularProgress size={18} /> : null}
+                  >
+                    Save Processing Status
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={() => handleSaveProcessing('ON_RETAIL_FLOOR')}
+                    disabled={isSavingProcessing || item?.sellable_status === 'SELLABLE'}
+                  >
+                    Mark as Sellable
+                  </Button>
+                </Box>
+              </Grid>
+            </Grid>
+          </AccordionDetails>
+        </Accordion>
       </Paper>
 
       {/* Snackbar for notifications */}

@@ -2838,7 +2838,9 @@ const CustomerTicket = () => {
         updatedItem.purity_value = metalFormState.purity?.value || 0;
         updatedItem.metal_spot_price = metalFormState.spotPrice || 0;
         updatedItem.est_metal_value = metalFormState.metalValue || 0;
-        updatedItem.jewelry_color = metalFormState.jewelryColor || '';
+        if (metalFormState.preciousMetalType === 'Gold') {
+          updatedItem.jewelry_color = metalFormState.jewelryColor || '';
+        }
         updatedItem.category = metalFormState.metalCategory || '';
 
         // Copy estimated metal value to the price column (rounded to 2 decimal places)

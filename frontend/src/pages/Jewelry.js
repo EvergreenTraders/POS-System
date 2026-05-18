@@ -29,8 +29,10 @@ import {
   InputLabel,
   Select,
   Badge,
-  IconButton
+  IconButton,
+  Chip
 } from '@mui/material';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
@@ -43,6 +45,25 @@ import SearchIcon from '@mui/icons-material/Search';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import config from '../config';
 import axios from 'axios';
+
+const DEFAULT_COLUMNS = {
+  basic_info: {
+    mode: { label: 'Mode', visible: false },
+  },
+  processing: {
+    processing_status: { label: 'Stage',           visible: false },
+    processing_queue:  { label: 'Queue',           visible: false },
+    blocking_reason:   { label: 'Blocking Reason', visible: false },
+  },
+};
+
+const PROCESSING_STATUS_STYLES = {
+  ON_RETAIL_FLOOR: { color: 'success', label: 'Retail Floor' },
+  READY_HOLDING:   { color: 'info',    label: 'Ready/Holding' },
+  IN_PROCESSING:   { color: 'warning', label: 'In Processing' },
+  INTAKE_PENDING:  { color: 'default', label: 'Intake Pending' },
+  EXCEPTION:       { color: 'error',   label: 'Exception' },
+};
 
 function Jewelry() {
   const navigate = useNavigate();
@@ -518,7 +539,11 @@ function Jewelry() {
   const [selectedBucket, setSelectedBucket] = useState('');
   const [loadingBuckets, setLoadingBuckets] = useState(false);
   const [inventoryStatuses, setInventoryStatuses] = useState([]);
-  const [selectedStatus, setSelectedStatus] = useState('ACTIVE');
+  const [selectedStatus, setSelectedStatus] = useState('SELLABLE');
+  const [sellableFilter, setSellableFilter] = useState('SELLABLE');
+  // Show processing columns in any non-sales view
+  const showProcessingCols = selectedStatus !== 'SELLABLE';
+  const [showModeCol] = useState(DEFAULT_COLUMNS.basic_info.mode.visible);
 
   const fetchScrapBuckets = async () => {
     try {
@@ -687,9 +712,9 @@ function Jewelry() {
   };
 
   useEffect(() => {
-    fetchJewelryItems();
+    fetchJewelryItems(selectedStatus);
     fetchInventoryStatuses();
-  }, []);
+  }, [selectedStatus]);
 
   const fetchInventoryStatuses = async () => {
     try {
@@ -702,10 +727,16 @@ function Jewelry() {
     }
   };
 
-  const fetchJewelryItems = async () => {
+  const fetchJewelryItems = async (statusFilter = 'SELLABLE') => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_BASE_URL}/jewelry`);
+      let params = '';
+      if (statusFilter === 'SELLABLE') {
+        params = '?sellable_status=SELLABLE';
+      } else if (statusFilter !== 'ALL') {
+        params = `?status=${statusFilter}`;
+      }
+      const response = await axios.get(`${API_BASE_URL}/jewelry${params}`);
       // Filter out items with status 'SCRAP PROCESS' and 'SOLD TO REFINER'
       const nonScrapItems = response.data.filter(item =>
         item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER'
@@ -877,13 +908,9 @@ function Jewelry() {
     }
   };
 
-  // Filter jewelry items based on search queries and status
+  // Filter jewelry items based on search queries (status filtering is done server-side)
   const filteredItems = jewelryItems.filter(item => {
-    // Exclude items with 'quoted' status
     const notQuoted = item.status?.toLowerCase() !== 'quoted';
-
-    // Only exclude HOLD items when 'ALL' is selected, not when specifically filtering for HOLD
-    const notHold = selectedStatus === 'ALL' ? (item.inventory_status || item.status) !== 'HOLD' : true;
 
     const matchesSearch = searchQuery === '' ||
       item.short_desc?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -892,11 +919,7 @@ function Jewelry() {
     const matchesSerial = serialQuery === '' ||
       item.item_id?.toLowerCase().includes(serialQuery.toLowerCase());
 
-    // Filter by selected status (show all if 'ALL' is selected)
-    const matchesStatus = selectedStatus === 'ALL' ||
-      (item.inventory_status || item.status) === selectedStatus;
-
-    return matchesSearch && matchesSerial && notQuoted && notHold && matchesStatus;
+    return matchesSearch && matchesSerial && notQuoted;
   });
 
   return (
@@ -950,6 +973,7 @@ function Jewelry() {
                 onChange={(e) => setSelectedStatus(e.target.value)}
                 label="Status"
               >
+                <MenuItem value="SELLABLE">Sellable Items</MenuItem>
                 <MenuItem value="ALL">All Statuses</MenuItem>
                 {inventoryStatuses.map((status) => (
                   <MenuItem key={status.status_code} value={status.status_code}>
@@ -967,25 +991,29 @@ function Jewelry() {
                   <TableCell sx={{ width: '100px' }}>ID</TableCell>
                   <TableCell>Description</TableCell>
                   <TableCell>Category</TableCell>
+                  {showModeCol && <TableCell>{DEFAULT_COLUMNS.basic_info.mode.label}</TableCell>}
                   <TableCell>Weight</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Age (Days)</TableCell>
                   <TableCell>Sold Price</TableCell>
                   <TableCell>Days to Sell</TableCell>
                   <TableCell>Date</TableCell>
+                  {showProcessingCols && <TableCell>{DEFAULT_COLUMNS.processing.processing_status.label}</TableCell>}
+                  {showProcessingCols && <TableCell>{DEFAULT_COLUMNS.processing.processing_queue.label}</TableCell>}
+                  {showProcessingCols && <TableCell>{DEFAULT_COLUMNS.processing.blocking_reason.label}</TableCell>}
                   <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={10} align="center">
+                    <TableCell colSpan={10 + (showModeCol ? 1 : 0) + (showProcessingCols ? 3 : 0)} align="center">
                       <CircularProgress />
                     </TableCell>
                   </TableRow>
                 ) : filteredItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} align="center">
+                    <TableCell colSpan={10 + (showModeCol ? 1 : 0) + (showProcessingCols ? 3 : 0)} align="center">
                       No jewelry items found
                     </TableCell>
                   </TableRow>
@@ -1007,6 +1035,15 @@ function Jewelry() {
                           ? (item.category.category || item.category.value || item.category.name || '')
                           : (item.category || '')}
                       </TableCell>
+                      {showModeCol && (
+                        <TableCell>
+                          <Chip
+                            label={item.mode || 'PIECE'}
+                            size="small"
+                            color={item.mode === 'UNIT' ? 'primary' : 'default'}
+                          />
+                        </TableCell>
+                      )}
                       <TableCell>{item.metal_weight}g</TableCell>
                       <TableCell>{item.inventory_status || item.status}</TableCell>
                       <TableCell>{item.age_days || '-'}</TableCell>
@@ -1019,6 +1056,40 @@ function Jewelry() {
                           ? new Date(item.sold_date).toLocaleDateString()
                           : new Date(item.created_at).toLocaleDateString()}
                       </TableCell>
+                      {showProcessingCols && (
+                        <TableCell>
+                          {item.processing_status ? (() => {
+                            const s = PROCESSING_STATUS_STYLES[item.processing_status];
+                            return (
+                              <Chip
+                                label={s?.label || item.processing_status}
+                                color={s?.color || 'default'}
+                                size="small"
+                                icon={item.processing_status === 'EXCEPTION' ? <WarningAmberIcon /> : undefined}
+                              />
+                            );
+                          })() : '-'}
+                        </TableCell>
+                      )}
+                      {showProcessingCols && (
+                        <TableCell sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
+                          {item.processing_queue || '-'}
+                        </TableCell>
+                      )}
+                      {showProcessingCols && (
+                        <TableCell>
+                          {item.blocking_reason ? (
+                            <Tooltip title={item.blocking_reason} arrow>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'warning.main', cursor: 'default' }}>
+                                <WarningAmberIcon fontSize="small" />
+                                <Typography variant="caption" noWrap sx={{ maxWidth: 120 }}>
+                                  {item.blocking_reason}
+                                </Typography>
+                              </Box>
+                            </Tooltip>
+                          ) : '-'}
+                        </TableCell>
+                      )}
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1 }}>
                           {/* Only show Edit button for IN_PROCESS status items */}
