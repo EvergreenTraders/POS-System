@@ -13354,3 +13354,629 @@ app.post('/api/payments', async (req, res) => {
         client.release();
     }
 });
+
+// ============================================================
+// DIVISIONS
+// ============================================================
+
+app.get('/api/divisions', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, code, name, description, is_active FROM divisions ORDER BY id ASC'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching divisions:', err);
+    res.status(500).json({ error: 'Failed to fetch divisions' });
+  }
+});
+
+// ============================================================
+// CATEGORIES
+// ============================================================
+
+// GET /api/categories?division_id=1  — flat list, optionally filtered by division
+app.get('/api/categories', async (req, res) => {
+  try {
+    const { division_id } = req.query;
+    const params = [];
+    let where = 'WHERE c.is_active = true';
+    if (division_id) {
+      params.push(division_id);
+      where += ` AND c.division_id = $${params.length}`;
+    }
+    const result = await pool.query(
+      `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
+              c.description, c.is_active, d.code AS division_code, d.name AS division_name
+       FROM categories c
+       JOIN divisions d ON d.id = c.division_id
+       ${where}
+       ORDER BY c.division_id, c.parent_category_id NULLS FIRST, c.name`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching categories:', err);
+    res.status(500).json({ error: 'Failed to fetch categories' });
+  }
+});
+
+// GET /api/categories/tree?division_id=1  — nested tree, optionally filtered by division
+app.get('/api/categories/tree', async (req, res) => {
+  try {
+    const { division_id } = req.query;
+    const params = [];
+    let where = 'WHERE c.is_active = true';
+    if (division_id) {
+      params.push(division_id);
+      where += ` AND c.division_id = $${params.length}`;
+    }
+    const result = await pool.query(
+      `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
+              c.description, d.code AS division_code, d.name AS division_name
+       FROM categories c
+       JOIN divisions d ON d.id = c.division_id
+       ${where}
+       ORDER BY c.division_id, c.name`,
+      params
+    );
+
+    // Build nested tree in JS
+    const buildTree = (rows, parentId) =>
+      rows
+        .filter(r => r.parent_category_id === parentId)
+        .map(r => ({ ...r, children: buildTree(rows, r.id) }));
+
+    // Group by division
+    const divisions = [...new Map(result.rows.map(r =>
+      [r.division_id, { id: r.division_id, code: r.division_code, name: r.division_name }]
+    )).values()];
+
+    const tree = divisions.map(div => ({
+      ...div,
+      categories: buildTree(result.rows.filter(r => r.division_id === div.id), null)
+    }));
+
+    res.json(tree);
+  } catch (err) {
+    console.error('Error fetching category tree:', err);
+    res.status(500).json({ error: 'Failed to fetch category tree' });
+  }
+});
+
+// GET /api/categories/:id  — single category
+app.get('/api/categories/:id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT c.id, c.division_id, c.parent_category_id, c.code, c.name,
+              c.description, c.is_active, d.code AS division_code, d.name AS division_name
+       FROM categories c
+       JOIN divisions d ON d.id = c.division_id
+       WHERE c.id = $1`,
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Category not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching category:', err);
+    res.status(500).json({ error: 'Failed to fetch category' });
+  }
+});
+
+// POST /api/categories  — create a new category
+app.post('/api/categories', async (req, res) => {
+  try {
+    const { division_id, parent_category_id, code, name, description } = req.body;
+    if (!division_id || !code || !name) {
+      return res.status(400).json({ error: 'division_id, code, and name are required' });
+    }
+    const result = await pool.query(
+      `INSERT INTO categories (division_id, parent_category_id, code, name, description)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [division_id, parent_category_id || null, code.toUpperCase(), name, description || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'A category with this code already exists under the same parent' });
+    }
+    console.error('Error creating category:', err);
+    res.status(500).json({ error: 'Failed to create category' });
+  }
+});
+
+// PUT /api/categories/:id  — update a category
+app.put('/api/categories/:id', async (req, res) => {
+  try {
+    const { name, description, is_active } = req.body;
+    const result = await pool.query(
+      `UPDATE categories
+       SET name = COALESCE($1, name),
+           description = COALESCE($2, description),
+           is_active = COALESCE($3, is_active),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4
+       RETURNING *`,
+      [name, description, is_active, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Category not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating category:', err);
+    res.status(500).json({ error: 'Failed to update category' });
+  }
+});
+
+// ============================================================
+// FIELD DEFINITIONS
+// ============================================================
+
+// GET /api/field-definitions  — list all
+app.get('/api/field-definitions', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, field_key, label, data_type, allowed_values,
+              unit_of_measure, normalizer, validation_rule
+       FROM field_definitions
+       ORDER BY field_key ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching field definitions:', err);
+    res.status(500).json({ error: 'Failed to fetch field definitions' });
+  }
+});
+
+// POST /api/field-definitions  — create
+app.post('/api/field-definitions', async (req, res) => {
+  try {
+    const { field_key, label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule } = req.body;
+    if (!field_key || !label || !data_type) {
+      return res.status(400).json({ error: 'field_key, label, and data_type are required' });
+    }
+    const validTypes = ['TEXT', 'NUMBER', 'ENUM', 'BOOLEAN', 'DATE'];
+    if (!validTypes.includes(data_type)) {
+      return res.status(400).json({ error: `data_type must be one of: ${validTypes.join(', ')}` });
+    }
+    const result = await pool.query(
+      `INSERT INTO field_definitions
+         (field_key, label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [field_key, label, data_type, allowed_values || null, unit_of_measure || null, normalizer || null, validation_rule || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'A field with this field_key already exists' });
+    }
+    console.error('Error creating field definition:', err);
+    res.status(500).json({ error: 'Failed to create field definition' });
+  }
+});
+
+// PUT /api/field-definitions/:id  — update
+app.put('/api/field-definitions/:id', async (req, res) => {
+  try {
+    const { label, allowed_values, unit_of_measure, normalizer, validation_rule } = req.body;
+    const result = await pool.query(
+      `UPDATE field_definitions
+       SET label           = COALESCE($1, label),
+           allowed_values  = COALESCE($2, allowed_values),
+           unit_of_measure = COALESCE($3, unit_of_measure),
+           normalizer      = COALESCE($4, normalizer),
+           validation_rule = COALESCE($5, validation_rule),
+           updated_at      = CURRENT_TIMESTAMP
+       WHERE id = $6
+       RETURNING *`,
+      [label, allowed_values, unit_of_measure, normalizer, validation_rule, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Field definition not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating field definition:', err);
+    res.status(500).json({ error: 'Failed to update field definition' });
+  }
+});
+
+// ============================================================
+// CATEGORY FIELD RULES
+// ============================================================
+
+// GET /api/category-field-rules/:cat_id  — all rules for a category
+app.get('/api/category-field-rules/:cat_id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT r.id, r.category_id, r.field_definition_id, r.action, r.scope,
+              r.required_for_catalog, r.required_for_inventory, r.applies_to_modes,
+              r.display_order, r.default_value, r.label_override, r.help_text,
+              f.field_key, f.label, f.data_type, f.allowed_values, f.unit_of_measure
+       FROM category_field_rules r
+       JOIN field_definitions f ON f.id = r.field_definition_id
+       WHERE r.category_id = $1
+       ORDER BY r.display_order ASC, f.field_key ASC`,
+      [req.params.cat_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching category field rules:', err);
+    res.status(500).json({ error: 'Failed to fetch category field rules' });
+  }
+});
+
+// POST /api/category-field-rules  — add a rule to a category
+app.post('/api/category-field-rules', async (req, res) => {
+  try {
+    const {
+      category_id, field_definition_id, action, scope,
+      required_for_catalog, required_for_inventory, applies_to_modes,
+      display_order, default_value, label_override, help_text
+    } = req.body;
+    if (!category_id || !field_definition_id || !action || !scope) {
+      return res.status(400).json({ error: 'category_id, field_definition_id, action, and scope are required' });
+    }
+    const result = await pool.query(
+      `INSERT INTO category_field_rules
+         (category_id, field_definition_id, action, scope,
+          required_for_catalog, required_for_inventory, applies_to_modes,
+          display_order, default_value, label_override, help_text)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING *`,
+      [
+        category_id, field_definition_id, action, scope,
+        required_for_catalog || false, required_for_inventory || false,
+        applies_to_modes || [],
+        display_order || 0, default_value || null, label_override || null, help_text || null
+      ]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'A rule for this field and scope already exists on this category' });
+    }
+    console.error('Error creating category field rule:', err);
+    res.status(500).json({ error: 'Failed to create category field rule' });
+  }
+});
+
+// PUT /api/category-field-rules/:id  — update a rule
+app.put('/api/category-field-rules/:id', async (req, res) => {
+  try {
+    const {
+      action, required_for_catalog, required_for_inventory,
+      applies_to_modes, display_order, default_value, label_override, help_text
+    } = req.body;
+    const result = await pool.query(
+      `UPDATE category_field_rules
+       SET action                 = COALESCE($1, action),
+           required_for_catalog   = COALESCE($2, required_for_catalog),
+           required_for_inventory = COALESCE($3, required_for_inventory),
+           applies_to_modes       = COALESCE($4, applies_to_modes),
+           display_order          = COALESCE($5, display_order),
+           default_value          = COALESCE($6, default_value),
+           label_override         = COALESCE($7, label_override),
+           help_text              = COALESCE($8, help_text),
+           updated_at             = CURRENT_TIMESTAMP
+       WHERE id = $9
+       RETURNING *`,
+      [action, required_for_catalog, required_for_inventory, applies_to_modes,
+       display_order, default_value, label_override, help_text, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Category field rule not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating category field rule:', err);
+    res.status(500).json({ error: 'Failed to update category field rule' });
+  }
+});
+
+// DELETE /api/category-field-rules/:id  — remove a rule
+app.delete('/api/category-field-rules/:id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM category_field_rules WHERE id = $1 RETURNING id',
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Category field rule not found' });
+    res.json({ message: 'Rule removed' });
+  } catch (err) {
+    console.error('Error deleting category field rule:', err);
+    res.status(500).json({ error: 'Failed to delete category field rule' });
+  }
+});
+
+// ============================================================
+// HARDGOODS CRUD
+// ============================================================
+
+// GET /api/hardgoods  — list with optional filters
+app.get('/api/hardgoods', async (req, res) => {
+  try {
+    const { status, category_id, mode, processing_status, sellable_status, vendor_id, source } = req.query;
+
+    const conditions = [];
+    const params = [];
+
+    const addFilter = (col, val) => {
+      if (val !== undefined && val !== '') {
+        params.push(val);
+        conditions.push(`h.${col} = $${params.length}`);
+      }
+    };
+
+    addFilter('status', status);
+    addFilter('category_id', category_id);
+    addFilter('mode', mode);
+    addFilter('processing_status', processing_status);
+    addFilter('sellable_status', sellable_status);
+    addFilter('vendor_id', vendor_id);
+    addFilter('source', source);
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const result = await pool.query(
+      `SELECT
+         h.item_id, h.mode, h.category_id, h.catalog_item_id, h.stock_sku_id, h.vendor_id,
+         h.long_desc, h.short_desc, h.condition, h.location, h.status,
+         h.cost_price, h.retail_price,
+         h.serial_number, h.quantity, h.bucket_value,
+         h.processing_status, h.processing_queue, h.sellable_status,
+         h.blocking_reason, h.next_action,
+         h.source, h.is_memo, h.memo_due_date,
+         h.part_number, h.images, h.notes,
+         h.created_at, h.updated_at,
+         c.name  AS category_name,
+         c.code  AS category_code,
+         d.name  AS division_name
+       FROM hardgoods h
+       LEFT JOIN categories c ON c.id = h.category_id
+       LEFT JOIN divisions  d ON d.id = c.division_id
+       ${where}
+       ORDER BY h.created_at DESC`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching hardgoods:', err);
+    res.status(500).json({ error: 'Failed to fetch hardgoods' });
+  }
+});
+
+// GET /api/hardgoods/:id  — single item with attributes
+app.get('/api/hardgoods/:id', async (req, res) => {
+  try {
+    const itemResult = await pool.query(
+      `SELECT
+         h.item_id, h.mode, h.category_id, h.catalog_item_id, h.stock_sku_id, h.vendor_id,
+         h.long_desc, h.short_desc, h.original_intake_description,
+         h.condition, h.location, h.status,
+         h.cost_price, h.retail_price,
+         h.serial_number, h.quantity, h.bucket_value,
+         h.processing_status, h.processing_queue, h.current_location_id,
+         h.sellable_status, h.blocking_reason, h.next_action,
+         h.source, h.is_memo, h.memo_due_date,
+         h.part_number, h.images, h.notes,
+         h.created_at, h.updated_at,
+         c.name AS category_name, c.code AS category_code,
+         d.name AS division_name
+       FROM hardgoods h
+       LEFT JOIN categories c ON c.id = h.category_id
+       LEFT JOIN divisions  d ON d.id = c.division_id
+       WHERE h.item_id = $1`,
+      [req.params.id]
+    );
+    if (!itemResult.rows.length) return res.status(404).json({ error: 'Item not found' });
+
+    const attrsResult = await pool.query(
+      `SELECT field_key, field_value FROM hardgoods_attributes WHERE item_id = $1 ORDER BY field_key`,
+      [req.params.id]
+    );
+
+    res.json({ ...itemResult.rows[0], attributes: attrsResult.rows });
+  } catch (err) {
+    console.error('Error fetching hardgoods item:', err);
+    res.status(500).json({ error: 'Failed to fetch hardgoods item' });
+  }
+});
+
+// POST /api/hardgoods  — create new item
+app.post('/api/hardgoods', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const {
+      item_id, mode, category_id, catalog_item_id, stock_sku_id, vendor_id,
+      long_desc, short_desc, condition, location, status,
+      cost_price, retail_price, serial_number, quantity, bucket_value,
+      processing_status, processing_queue, sellable_status, blocking_reason, next_action,
+      source, is_memo, memo_due_date, part_number, images, notes,
+      attributes
+    } = req.body;
+
+    if (!item_id) return res.status(400).json({ error: 'item_id is required' });
+
+    const itemResult = await client.query(
+      `INSERT INTO hardgoods (
+         item_id, mode, category_id, catalog_item_id, stock_sku_id, vendor_id,
+         long_desc, short_desc, original_intake_description,
+         condition, location, status,
+         cost_price, retail_price, serial_number, quantity, bucket_value,
+         processing_status, processing_queue, sellable_status, blocking_reason, next_action,
+         source, is_memo, memo_due_date, part_number, images, notes
+       ) VALUES (
+         $1,$2,$3,$4,$5,$6,
+         $7,$8,$8,
+         $9,$10,$11,
+         $12,$13,$14,$15,$16,
+         $17,$18,$19,$20,$21,
+         $22,$23,$24,$25,$26,$27
+       ) RETURNING *`,
+      [
+        item_id, mode || 'PIECE', category_id || null, catalog_item_id || null,
+        stock_sku_id || null, vendor_id || null,
+        long_desc || null, short_desc || null,
+        condition || null, location || null, status || 'HOLD',
+        cost_price || null, retail_price || null,
+        serial_number || null, quantity || null, bucket_value || null,
+        processing_status || 'INTAKE_PENDING', processing_queue || null,
+        sellable_status || 'NOT_SELLABLE', blocking_reason || null, next_action || null,
+        source || null, is_memo || false, memo_due_date || null,
+        part_number || null, images ? JSON.stringify(images) : '[]', notes || null
+      ]
+    );
+
+    // Insert dynamic attributes if provided
+    if (attributes && Array.isArray(attributes)) {
+      for (const { field_key, field_value } of attributes) {
+        if (field_key) {
+          await client.query(
+            `INSERT INTO hardgoods_attributes (item_id, field_key, field_value)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (item_id, field_key) DO UPDATE SET field_value = $3, updated_at = CURRENT_TIMESTAMP`,
+            [item_id, field_key, field_value ?? null]
+          );
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json(itemResult.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23505') return res.status(409).json({ error: 'An item with this item_id already exists' });
+    console.error('Error creating hardgoods item:', err);
+    res.status(500).json({ error: 'Failed to create hardgoods item' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/hardgoods/:id  — update item (excluding original_intake_description)
+app.put('/api/hardgoods/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const {
+      mode, category_id, catalog_item_id, stock_sku_id, vendor_id,
+      long_desc, short_desc, condition, location, status,
+      cost_price, retail_price, serial_number, quantity, bucket_value,
+      processing_status, processing_queue, current_location_id,
+      sellable_status, blocking_reason, next_action,
+      source, is_memo, memo_due_date, part_number, images, notes,
+      attributes
+    } = req.body;
+
+    const result = await client.query(
+      `UPDATE hardgoods SET
+         mode                = COALESCE($1,  mode),
+         category_id         = COALESCE($2,  category_id),
+         catalog_item_id     = COALESCE($3,  catalog_item_id),
+         stock_sku_id        = COALESCE($4,  stock_sku_id),
+         vendor_id           = COALESCE($5,  vendor_id),
+         long_desc           = COALESCE($6,  long_desc),
+         short_desc          = COALESCE($7,  short_desc),
+         condition           = COALESCE($8,  condition),
+         location            = COALESCE($9,  location),
+         status              = COALESCE($10, status),
+         cost_price          = COALESCE($11, cost_price),
+         retail_price        = COALESCE($12, retail_price),
+         serial_number       = COALESCE($13, serial_number),
+         quantity            = COALESCE($14, quantity),
+         bucket_value        = COALESCE($15, bucket_value),
+         processing_status   = COALESCE($16, processing_status),
+         processing_queue    = COALESCE($17, processing_queue),
+         current_location_id = COALESCE($18, current_location_id),
+         sellable_status     = COALESCE($19, sellable_status),
+         blocking_reason     = COALESCE($20, blocking_reason),
+         next_action         = COALESCE($21, next_action),
+         source              = COALESCE($22, source),
+         is_memo             = COALESCE($23, is_memo),
+         memo_due_date       = COALESCE($24, memo_due_date),
+         part_number         = COALESCE($25, part_number),
+         images              = COALESCE($26, images),
+         notes               = COALESCE($27, notes),
+         updated_at          = CURRENT_TIMESTAMP
+       WHERE item_id = $28
+       RETURNING *`,
+      [
+        mode, category_id, catalog_item_id, stock_sku_id, vendor_id,
+        long_desc, short_desc, condition, location, status,
+        cost_price, retail_price, serial_number, quantity, bucket_value,
+        processing_status, processing_queue, current_location_id,
+        sellable_status, blocking_reason, next_action,
+        source, is_memo, memo_due_date,
+        part_number, images ? JSON.stringify(images) : undefined, notes,
+        req.params.id
+      ]
+    );
+    if (!result.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    // Upsert attributes if provided
+    if (attributes && Array.isArray(attributes)) {
+      for (const { field_key, field_value } of attributes) {
+        if (field_key) {
+          await client.query(
+            `INSERT INTO hardgoods_attributes (item_id, field_key, field_value)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (item_id, field_key) DO UPDATE SET field_value = $3, updated_at = CURRENT_TIMESTAMP`,
+            [req.params.id, field_key, field_value ?? null]
+          );
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating hardgoods item:', err);
+    res.status(500).json({ error: 'Failed to update hardgoods item' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/hardgoods/:id/status  — lightweight status-only update
+app.put('/api/hardgoods/:id/status', async (req, res) => {
+  try {
+    const { status, processing_status, sellable_status, blocking_reason, next_action } = req.body;
+    const result = await pool.query(
+      `UPDATE hardgoods SET
+         status            = COALESCE($1, status),
+         processing_status = COALESCE($2, processing_status),
+         sellable_status   = COALESCE($3, sellable_status),
+         blocking_reason   = COALESCE($4, blocking_reason),
+         next_action       = COALESCE($5, next_action),
+         updated_at        = CURRENT_TIMESTAMP
+       WHERE item_id = $6
+       RETURNING item_id, status, processing_status, sellable_status, blocking_reason, next_action`,
+      [status, processing_status, sellable_status, blocking_reason, next_action, req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Item not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error updating hardgoods status:', err);
+    res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
+// DELETE /api/hardgoods/:id
+app.delete('/api/hardgoods/:id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM hardgoods WHERE item_id = $1 RETURNING item_id',
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Item not found' });
+    res.json({ message: 'Item deleted' });
+  } catch (err) {
+    console.error('Error deleting hardgoods item:', err);
+    res.status(500).json({ error: 'Failed to delete hardgoods item' });
+  }
+});
