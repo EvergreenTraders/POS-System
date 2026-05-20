@@ -456,6 +456,58 @@ function HardgoodsEdit() {
       </Paper>
 
 
+      {/* ── Photo strip ── */}
+      <Box sx={{ px: 3, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: 1, borderColor: 'divider', flexShrink: 0, flexWrap: 'wrap' }}>
+        {images.map((img, idx) => (
+          <Box key={idx} sx={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
+            <img
+              src={makeAbsoluteUrl(img.url || img.image_url || img)}
+              alt={`item-${idx + 1}`}
+              style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: img.isPrimary ? '2px solid #1976d2' : '1px solid #ddd' }}
+            />
+            <IconButton
+              size="small"
+              color="error"
+              sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
+              onClick={() => handleDeleteImage(idx)}
+            >
+              <DeleteIcon sx={{ fontSize: 14 }} />
+            </IconButton>
+          </Box>
+        ))}
+        {pendingImages.map((file, idx) => (
+          <Box key={`p-${idx}`} sx={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
+            <img
+              src={URL.createObjectURL(file)}
+              alt={`pending-${idx + 1}`}
+              style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: '2px dashed #1976d2', opacity: 0.75 }}
+            />
+            <IconButton
+              size="small"
+              color="error"
+              sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
+              onClick={() => setPendingImages(prev => prev.filter((_, i) => i !== idx))}
+            >
+              <DeleteIcon sx={{ fontSize: 14 }} />
+            </IconButton>
+          </Box>
+        ))}
+        <Button variant="outlined" size="small" component="label" startIcon={<AddIcon />} sx={{ height: 80, minWidth: 100, flexShrink: 0 }}>
+          Add Photos
+          <input type="file" hidden multiple accept="image/*" onChange={e => {
+            const files = Array.from(e.target.files);
+            if (files.length) {
+              setPendingImages(prev => [...prev, ...files]);
+              enqueueSnackbar(`${files.length} photo(s) selected — click Save to upload`, { variant: 'info' });
+            }
+            e.target.value = '';
+          }} />
+        </Button>
+        {pendingImages.length > 0 && (
+          <Typography variant="caption" color="primary">{pendingImages.length} pending save</Typography>
+        )}
+      </Box>
+
       {/* ── Tabs ── */}
       <Box sx={{ flex: 1, overflow: 'auto', px: 3, pb: 3 }}>
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
@@ -513,63 +565,6 @@ function HardgoodsEdit() {
                 )}
               </Box>
               <TextField label="Notes" value={notes} onChange={e => setNotes(e.target.value)} fullWidth multiline minRows={2} size="small" />
-
-              {/* Images */}
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.75, display: 'block' }}>Photos</Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1 }}>
-                  {images.map((img, idx) => (
-                    <Box key={idx} sx={{ position: 'relative', width: 72, height: 72 }}>
-                      <img
-                        src={makeAbsoluteUrl(img.url || img.image_url || img)}
-                        alt={`item-${idx + 1}`}
-                        style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 4, border: img.isPrimary ? '2px solid #1976d2' : '1px solid #ddd' }}
-                      />
-                      <IconButton
-                        size="small"
-                        color="error"
-                        sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
-                        onClick={() => handleDeleteImage(idx)}
-                      >
-                        <DeleteIcon sx={{ fontSize: 14 }} />
-                      </IconButton>
-                    </Box>
-                  ))}
-                  {pendingImages.map((file, idx) => (
-                    <Box key={`p-${idx}`} sx={{ position: 'relative', width: 72, height: 72 }}>
-                      <img
-                        src={URL.createObjectURL(file)}
-                        alt={`pending-${idx + 1}`}
-                        style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 4, border: '2px dashed #1976d2', opacity: 0.75 }}
-                      />
-                      <IconButton
-                        size="small"
-                        color="error"
-                        sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
-                        onClick={() => setPendingImages(prev => prev.filter((_, i) => i !== idx))}
-                      >
-                        <DeleteIcon sx={{ fontSize: 14 }} />
-                      </IconButton>
-                    </Box>
-                  ))}
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Button variant="outlined" size="small" component="label" startIcon={<AddIcon />}>
-                    Add Photos
-                    <input type="file" hidden multiple accept="image/*" onChange={e => {
-                      const files = Array.from(e.target.files);
-                      if (files.length) {
-                        setPendingImages(prev => [...prev, ...files]);
-                        enqueueSnackbar(`${files.length} photo(s) selected — click Save to upload`, { variant: 'info' });
-                      }
-                      e.target.value = '';
-                    }} />
-                  </Button>
-                  {pendingImages.length > 0 && (
-                    <Typography variant="caption" color="primary">{pendingImages.length} pending save</Typography>
-                  )}
-                </Box>
-              </Box>
             </Box>
 
             <Divider orientation="vertical" flexItem />

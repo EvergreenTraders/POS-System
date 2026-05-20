@@ -1119,12 +1119,15 @@ function Checkout() {
                 createdHardgoodsItems.push(res.data);
 
                 // Upload any photos captured during estimation
-                if (item.pendingImages && item.pendingImages.length > 0) {
+                const imageFiles = (item.images || [])
+                  .filter(img => img.file instanceof File)
+                  .map(img => img.file);
+                if (imageFiles.length > 0) {
                   try {
                     const formData = new FormData();
-                    item.pendingImages.forEach(f => formData.append('images', f));
+                    imageFiles.forEach(f => formData.append('images', f));
                     await axios.put(`${config.apiUrl}/hardgoods/${itemId}/images`, formData, {
-                      headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` },
+                      headers: { Authorization: `Bearer ${token}` },
                     });
                   } catch (imgErr) {
                     console.error('Error uploading hardgoods images:', imgErr);

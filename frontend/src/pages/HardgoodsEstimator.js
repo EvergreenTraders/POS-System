@@ -129,7 +129,11 @@ function HardgoodsEstimator() {
       retail_price: form.retailPrice ? parseFloat(form.retailPrice) : null,
       notes: form.notes || null,
       fromEstimator: 'hardgoods',
-      pendingImages: form.images,
+      images: form.images.map((img, idx) => ({
+        url: img.url,
+        file: img.file,
+        isPrimary: idx === 0,
+      })),
     };
   };
 
@@ -267,10 +271,10 @@ function HardgoodsEstimator() {
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Photos</Typography>
 
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {form.images.map((file, idx) => (
+            {form.images.map((img, idx) => (
               <Box key={idx} sx={{ position: 'relative', width: 72, height: 72 }}>
                 <img
-                  src={URL.createObjectURL(file)}
+                  src={img.url}
                   alt={`photo-${idx + 1}`}
                   style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 4, border: '1px solid #ddd' }}
                 />
@@ -296,7 +300,12 @@ function HardgoodsEstimator() {
               onChange={e => {
                 const files = Array.from(e.target.files);
                 if (files.length) {
-                  setField('images', [...form.images, ...files]);
+                  const newImgs = files.map((file, i) => ({
+                    url: URL.createObjectURL(file),
+                    file,
+                    isPrimary: form.images.length === 0 && i === 0,
+                  }));
+                  setField('images', [...form.images, ...newImgs]);
                 }
                 e.target.value = '';
               }}
