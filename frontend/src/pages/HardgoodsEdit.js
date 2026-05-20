@@ -9,6 +9,7 @@ import {
   Divider,
   FormControl,
   FormControlLabel,
+  FormHelperText,
   Grid,
   IconButton,
   InputLabel,
@@ -64,11 +65,11 @@ function HardgoodsEdit() {
   const [inventoryStatuses, setInventoryStatuses] = useState([]);
   const [categories, setCategories] = useState([]);
 
-  // Read-only display
+  // Read-only display (edit mode only)
   const [originalIntakeDesc, setOriginalIntakeDesc] = useState('');
   const [createdAt, setCreatedAt] = useState('');
 
-  // Editable form state — Tab 1: Details
+  // Editable form state — Tab 0: Details
   const [shortDesc, setShortDesc] = useState('');
   const [longDesc, setLongDesc] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -80,7 +81,7 @@ function HardgoodsEdit() {
   const [isMemo, setIsMemo] = useState(false);
   const [memoDueDate, setMemoDueDate] = useState('');
 
-  // Tab 2: Mode & Pricing
+  // Tab 1: Mode & Pricing
   const [mode, setMode] = useState('PIECE');
   const [costPrice, setCostPrice] = useState('');
   const [retailPrice, setRetailPrice] = useState('');
@@ -88,7 +89,7 @@ function HardgoodsEdit() {
   const [quantity, setQuantity] = useState('');
   const [bucketValue, setBucketValue] = useState('');
 
-  // Tab 3: Processing
+  // Tab 2: Processing
   const [status, setStatus] = useState('HOLD');
   const [sellableStatus, setSellableStatus] = useState('NOT_SELLABLE');
   const [processingStatus, setProcessingStatus] = useState('INTAKE_PENDING');
@@ -96,20 +97,24 @@ function HardgoodsEdit() {
   const [blockingReason, setBlockingReason] = useState('');
   const [nextAction, setNextAction] = useState('');
 
-  // Dynamic attributes
+  // Tab 3: Attributes
   const [attributes, setAttributes] = useState([]);
   const [newAttrKey, setNewAttrKey] = useState('');
   const [newAttrValue, setNewAttrValue] = useState('');
 
+  // Category-driven schema fields
+  const [categoryFields, setCategoryFields] = useState([]);
+  const [categoryFieldValues, setCategoryFieldValues] = useState({});
+
   useEffect(() => {
     if (!itemId) {
-      enqueueSnackbar('No item ID provided', { variant: 'error' });
       navigate('/inventory/hardgoods');
       return;
     }
     loadAll();
   }, [itemId]);
 
+  // ── Full load (edit mode) ───────────────────────────────────────────────────
   const loadAll = async () => {
     try {
       setLoading(true);
@@ -132,6 +137,10 @@ function HardgoodsEdit() {
       }
 
       populateForm(itemRes.data);
+
+      if (itemRes.data.category_id) {
+        await loadCategoryFields(itemRes.data.category_id, itemRes.data.attributes || []);
+      }
     } catch (err) {
       console.error('Error loading hardgoods item:', err);
       enqueueSnackbar('Failed to load item', { variant: 'error' });
@@ -140,6 +149,37 @@ function HardgoodsEdit() {
     }
   };
 
+  // ── Category field schema ───────────────────────────────────────────────────
+  const loadCategoryFields = async (catId, existingAttrs = []) => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/category-field-rules/${catId}`);
+      setCategoryFields(res.data);
+      const valMap = {};
+      for (const f of res.data) {
+        const existing = existingAttrs.find(a => a.field_key === f.field_key);
+        valMap[f.field_key] = existing
+          ? (existing.field_value ?? '')
+          : f.data_type === 'BOOLEAN'
+            ? (f.default_value ?? 'false')
+            : (f.default_value ?? '');
+      }
+      setCategoryFieldValues(valMap);
+    } catch (err) {
+      console.error('Error loading category fields:', err);
+    }
+  };
+
+  const handleCategoryChange = async (newCatId) => {
+    setCategoryId(newCatId);
+    if (newCatId) {
+      await loadCategoryFields(newCatId, attributes);
+    } else {
+      setCategoryFields([]);
+      setCategoryFieldValues({});
+    }
+  };
+
+  // ── Populate form from API response ────────────────────────────────────────
   const populateForm = (item) => {
     setOriginalIntakeDesc(item.original_intake_description || '');
     setCreatedAt(item.created_at ? new Date(item.created_at).toLocaleString() : '');
@@ -172,41 +212,63 @@ function HardgoodsEdit() {
     setAttributes(item.attributes || []);
   };
 
+  // ── Build payload (shared by POST and PUT) ─────────────────────────────────
+  const buildPayload = () => {
+    const skKeys = new Set(categoryFields.map(f => f.field_key));
+    const schemaAttrList = categoryFields
+      .map(f => ({ field_key: f.field_key, field_value: categoryFieldValues[f.field_key] ?? null }))
+      .filter(a => a.field_value !== null && a.field_value !== '');
+    const freeAttrList = attributes.filter(a => a.field_key && !skKeys.has(a.field_key));
+
+    return {
+      short_desc:        shortDesc    || null,
+      long_desc:         longDesc     || null,
+      category_id:       categoryId   || null,
+      condition:         condition    || null,
+      location:          itemLocation || null,
+      notes:             notes        || null,
+      source:            source       || null,
+      part_number:       partNumber   || null,
+      is_memo:           isMemo,
+      memo_due_date:     isMemo && memoDueDate ? memoDueDate : null,
+
+      mode,
+      cost_price:        costPrice   !== '' ? parseFloat(costPrice)   : null,
+      retail_price:      retailPrice !== '' ? parseFloat(retailPrice) : null,
+      serial_number:     mode === 'UNIT'   ? (serialNumber || null)                                  : null,
+      quantity:          mode === 'STOCK'  ? (quantity !== '' ? parseInt(quantity, 10) : null)       : null,
+      bucket_value:      mode === 'BUCKET' ? (bucketValue !== '' ? parseFloat(bucketValue) : null)   : null,
+
+      status,
+      sellable_status:   sellableStatus,
+      processing_status: processingStatus,
+      processing_queue:  processingQueue  || null,
+      blocking_reason:   blockingReason   || null,
+      next_action:       nextAction       || null,
+
+      attributes: [...schemaAttrList, ...freeAttrList],
+    };
+  };
+
+  // ── Save ───────────────────────────────────────────────────────────────────
   const handleSave = async () => {
+    // Validate required category fields
+    const requiredMissing = categoryFields.filter(
+      f => f.required_for_inventory && !categoryFieldValues[f.field_key]
+    );
+    if (requiredMissing.length > 0) {
+      const keys = requiredMissing
+        .map(f => f.label_override || f.label || f.field_key)
+        .join(', ');
+      enqueueSnackbar(`Required fields missing: ${keys}`, { variant: 'warning' });
+      setTab(3);
+      return;
+    }
+
     try {
       setSaving(true);
-
-      const payload = {
-        short_desc:         shortDesc   || null,
-        long_desc:          longDesc    || null,
-        category_id:        categoryId  || null,
-        condition:          condition   || null,
-        location:           itemLocation || null,
-        notes:              notes       || null,
-        source:             source      || null,
-        part_number:        partNumber  || null,
-        is_memo:            isMemo,
-        memo_due_date:      isMemo && memoDueDate ? memoDueDate : null,
-
-        mode:               mode,
-        cost_price:         costPrice  !== '' ? parseFloat(costPrice)  : null,
-        retail_price:       retailPrice !== '' ? parseFloat(retailPrice) : null,
-        serial_number:      mode === 'UNIT'   ? (serialNumber || null) : null,
-        quantity:           mode === 'STOCK'  ? (quantity !== '' ? parseInt(quantity, 10) : null) : null,
-        bucket_value:       mode === 'BUCKET' ? (bucketValue !== '' ? parseFloat(bucketValue) : null) : null,
-
-        status:             status,
-        sellable_status:    sellableStatus,
-        processing_status:  processingStatus,
-        processing_queue:   processingQueue  || null,
-        blocking_reason:    blockingReason   || null,
-        next_action:        nextAction        || null,
-
-        attributes: attributes.filter(a => a.field_key),
-      };
-
-      await axios.put(`${API_BASE_URL}/hardgoods/${itemId}`, payload);
-      enqueueSnackbar('Item saved successfully', { variant: 'success' });
+      await axios.put(`${API_BASE_URL}/hardgoods/${itemId}`, buildPayload());
+      enqueueSnackbar('Item saved', { variant: 'success' });
     } catch (err) {
       console.error('Error saving hardgoods item:', err);
       enqueueSnackbar('Failed to save item', { variant: 'error' });
@@ -215,12 +277,17 @@ function HardgoodsEdit() {
     }
   };
 
+  // ── Free-form attribute helpers ────────────────────────────────────────────
   const handleAttrChange = (index, field, value) => {
     setAttributes(prev => prev.map((a, i) => i === index ? { ...a, [field]: value } : a));
   };
 
   const handleAddAttr = () => {
     if (!newAttrKey.trim()) return;
+    if (categoryFields.some(f => f.field_key === newAttrKey.trim())) {
+      enqueueSnackbar(`'${newAttrKey.trim()}' is managed by category fields above`, { variant: 'info' });
+      return;
+    }
     setAttributes(prev => [...prev, { field_key: newAttrKey.trim(), field_value: newAttrValue }]);
     setNewAttrKey('');
     setNewAttrValue('');
@@ -229,6 +296,75 @@ function HardgoodsEdit() {
   const handleRemoveAttr = (index) => {
     setAttributes(prev => prev.filter((_, i) => i !== index));
   };
+
+  // ── Typed input renderer for schema fields ─────────────────────────────────
+  const renderCategoryField = (field) => {
+    const label = field.label_override || field.label || field.field_key;
+    const val = categoryFieldValues[field.field_key] ?? '';
+    const isRequired = field.required_for_inventory;
+    const onCFVChange = (newVal) =>
+      setCategoryFieldValues(prev => ({ ...prev, [field.field_key]: newVal }));
+
+    switch (field.data_type) {
+      case 'NUMBER':
+        return (
+          <TextField
+            label={label} type="number" value={val}
+            onChange={e => onCFVChange(e.target.value)}
+            size="small" fullWidth required={isRequired}
+            helperText={field.help_text || undefined}
+          />
+        );
+      case 'ENUM': {
+        const opts = Array.isArray(field.allowed_values) ? field.allowed_values : [];
+        return (
+          <FormControl fullWidth size="small" required={isRequired}>
+            <InputLabel>{label}</InputLabel>
+            <Select value={val} onChange={e => onCFVChange(e.target.value)} label={label}>
+              <MenuItem value=""><em>Not specified</em></MenuItem>
+              {opts.map(v => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+            </Select>
+            {field.help_text && <FormHelperText>{field.help_text}</FormHelperText>}
+          </FormControl>
+        );
+      }
+      case 'BOOLEAN':
+        return (
+          <FormControlLabel
+            control={
+              <Switch
+                checked={val === 'true' || val === true}
+                onChange={e => onCFVChange(e.target.checked ? 'true' : 'false')}
+              />
+            }
+            label={label}
+          />
+        );
+      case 'DATE':
+        return (
+          <TextField
+            label={label} type="date" value={val}
+            onChange={e => onCFVChange(e.target.value)}
+            size="small" fullWidth required={isRequired}
+            InputLabelProps={{ shrink: true }}
+            helperText={field.help_text || undefined}
+          />
+        );
+      default: // TEXT
+        return (
+          <TextField
+            label={label} value={val}
+            onChange={e => onCFVChange(e.target.value)}
+            size="small" fullWidth required={isRequired}
+            helperText={field.help_text || undefined}
+          />
+        );
+    }
+  };
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const schemaKeys = new Set(categoryFields.map(f => f.field_key));
+  const freeFormAttrs = attributes.filter(a => a.field_key && !schemaKeys.has(a.field_key));
 
   if (loading) {
     return (
@@ -268,8 +404,8 @@ function HardgoodsEdit() {
         </Button>
       </Paper>
 
-      {/* ── Original intake description (locked) ── */}
-      {originalIntakeDesc && (
+      {/* ── Original intake description (edit mode, locked) ── */}
+      {!isCreate && originalIntakeDesc && (
         <Box sx={{ px: 3, pt: 1.5, pb: 0.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, bgcolor: 'grey.50', p: 1.5, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
             <Tooltip title="Original intake description — cannot be changed">
@@ -289,7 +425,7 @@ function HardgoodsEdit() {
           <Tab label="Details" />
           <Tab label="Mode & Pricing" />
           <Tab label="Processing" />
-          <Tab label={`Attributes (${attributes.length})`} />
+          <Tab label={`Attributes (${categoryFields.length + freeFormAttrs.length})`} />
         </Tabs>
 
         {/* ── Tab 0: Details ── */}
@@ -306,7 +442,7 @@ function HardgoodsEdit() {
             <Grid item xs={12} sm={4}>
               <FormControl fullWidth size="small">
                 <InputLabel>Category</InputLabel>
-                <Select value={categoryId} onChange={e => setCategoryId(e.target.value)} label="Category">
+                <Select value={categoryId} onChange={e => handleCategoryChange(e.target.value)} label="Category">
                   <MenuItem value=""><em>None</em></MenuItem>
                   {categories.map(c => (
                     <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
@@ -544,34 +680,60 @@ function HardgoodsEdit() {
 
         {/* ── Tab 3: Attributes ── */}
         <TabPanel value={tab} index={3}>
-          {attributes.length > 0 && (
+
+          {/* Schema-defined category fields */}
+          {categoryFields.length > 0 && (
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                Category Fields
+              </Typography>
+              <Grid container spacing={2}>
+                {categoryFields.map(field => (
+                  <Grid item xs={12} sm={6} key={field.field_key}>
+                    {renderCategoryField(field)}
+                  </Grid>
+                ))}
+              </Grid>
+              <Divider sx={{ mt: 2, mb: 2 }} />
+            </Box>
+          )}
+
+          {/* Free-form attributes (skip schema-managed keys) */}
+          {freeFormAttrs.length > 0 && (
             <Box sx={{ mb: 2 }}>
-              {attributes.map((attr, i) => (
-                <Box key={i} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-                  <TextField
-                    label="Field Key"
-                    value={attr.field_key}
-                    onChange={e => handleAttrChange(i, 'field_key', e.target.value)}
-                    size="small"
-                    sx={{ flex: 1 }}
-                  />
-                  <TextField
-                    label="Value"
-                    value={attr.field_value || ''}
-                    onChange={e => handleAttrChange(i, 'field_value', e.target.value)}
-                    size="small"
-                    sx={{ flex: 2 }}
-                  />
-                  <IconButton size="small" color="error" onClick={() => handleRemoveAttr(i)}>
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </Box>
-              ))}
+              {categoryFields.length > 0 && (
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Custom Attributes
+                </Typography>
+              )}
+              {attributes.map((attr, i) =>
+                schemaKeys.has(attr.field_key) ? null : (
+                  <Box key={i} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
+                    <TextField
+                      label="Field Key"
+                      value={attr.field_key}
+                      onChange={e => handleAttrChange(i, 'field_key', e.target.value)}
+                      size="small"
+                      sx={{ flex: 1 }}
+                    />
+                    <TextField
+                      label="Value"
+                      value={attr.field_value || ''}
+                      onChange={e => handleAttrChange(i, 'field_value', e.target.value)}
+                      size="small"
+                      sx={{ flex: 2 }}
+                    />
+                    <IconButton size="small" color="error" onClick={() => handleRemoveAttr(i)}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                )
+              )}
               <Divider sx={{ my: 2 }} />
             </Box>
           )}
 
-          {/* Add new attribute */}
+          {/* Add free-form attribute */}
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
             <TextField
               label="New Field Key"
@@ -599,9 +761,11 @@ function HardgoodsEdit() {
             </Button>
           </Box>
 
-          {attributes.length === 0 && !newAttrKey && (
+          {categoryFields.length === 0 && freeFormAttrs.length === 0 && !newAttrKey && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-              No custom attributes yet. Add key-value pairs above for category-specific details.
+              {categoryId
+                ? 'No fields defined for this category. Add custom key-value pairs above.'
+                : 'Select a category on the Details tab to see its fields, or add custom key-value pairs above.'}
             </Typography>
           )}
         </TabPanel>

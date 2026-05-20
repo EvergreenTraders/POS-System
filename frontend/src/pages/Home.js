@@ -779,10 +779,10 @@ const [selectedSearchIdx, setSelectedSearchIdx] = useState(0); // for search dia
                   color="info"
                   fullWidth
                   startIcon={<WatchIcon />}
-                  onClick={() => navigate('/manufacturing-estimator')}
+                  onClick={() => navigate('/hardgoods-estimator')}
                   sx={{ py: 1, fontSize: { xs: '0.75rem', sm: '0.8rem', md: '0.875rem' } }}
                 >
-                  Misc. Goods Estimator
+                   Hardgoods Estimator
                 </Button>
               </Grid>
             </Grid>
