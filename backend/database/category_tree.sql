@@ -54,12 +54,20 @@ CREATE INDEX IF NOT EXISTS idx_categories_code     ON categories(code);
 
 
 -- ============================================================
--- 3. FIELD DEFINITIONS
+-- 3. CATEGORY FIELD DEFINITIONS
 -- Global reusable field library shared across all categories.
 -- Use specific keys (screen_size_inches, pickup_type) not generic ones (size).
 -- allowed_values is populated only for ENUM data_type.
 -- ============================================================
-CREATE TABLE IF NOT EXISTS field_definitions (
+
+-- Rename from old name if upgrading
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'field_definitions') THEN
+    ALTER TABLE field_definitions RENAME TO category_field_definitions;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS category_field_definitions (
     id              SERIAL PRIMARY KEY,
     field_key       VARCHAR(100) NOT NULL UNIQUE,
     label           VARCHAR(100) NOT NULL,
@@ -72,7 +80,7 @@ CREATE TABLE IF NOT EXISTS field_definitions (
     updated_at      TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_field_definitions_key ON field_definitions(field_key);
+CREATE INDEX IF NOT EXISTS idx_category_field_definitions_key ON category_field_definitions(field_key);
 
 
 -- ============================================================
@@ -85,7 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_field_definitions_key ON field_definitions(field_
 CREATE TABLE IF NOT EXISTS category_field_rules (
     id                    SERIAL PRIMARY KEY,
     category_id           INTEGER      NOT NULL REFERENCES categories(id),
-    field_definition_id   INTEGER      NOT NULL REFERENCES field_definitions(id),
+    field_definition_id   INTEGER      NOT NULL REFERENCES category_field_definitions(id) ON DELETE CASCADE,
     action                VARCHAR(10)  NOT NULL CHECK (action IN ('ADD', 'OVERRIDE', 'SUPPRESS')),
     scope                 VARCHAR(15)  NOT NULL CHECK (scope IN ('CATALOG', 'INVENTORY', 'TRANSACTION')),
     required_for_catalog  BOOLEAN      NOT NULL DEFAULT false,
@@ -102,3 +110,12 @@ CREATE TABLE IF NOT EXISTS category_field_rules (
 
 CREATE INDEX IF NOT EXISTS idx_cfr_category ON category_field_rules(category_id);
 CREATE INDEX IF NOT EXISTS idx_cfr_field    ON category_field_rules(field_definition_id);
+
+-- Ensure FK has ON DELETE CASCADE (re-add if upgrading from version without it)
+DO $$ BEGIN
+  ALTER TABLE category_field_rules
+    DROP CONSTRAINT IF EXISTS category_field_rules_field_definition_id_fkey;
+  ALTER TABLE category_field_rules
+    ADD CONSTRAINT category_field_rules_field_definition_id_fkey
+    FOREIGN KEY (field_definition_id) REFERENCES category_field_definitions(id) ON DELETE CASCADE;
+END $$;

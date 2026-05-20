@@ -334,6 +334,11 @@ function Sidebar() {
                 {isOpen && <ListItemText primary="Settings" />}
               </StyledListItem>
             </StyledLink>
+            <StyledLink to="/system-config/categories">
+              <StyledListItem active={isActive('/system-config/categories')} sx={{ pl: 4 }}>
+                {isOpen && <ListItemText primary="Category Manager" />}
+              </StyledListItem>
+            </StyledLink>
           </List>
         </Collapse>
       </List>

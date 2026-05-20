@@ -13515,20 +13515,24 @@ app.post('/api/categories', async (req, res) => {
 // PUT /api/categories/:id  — update a category
 app.put('/api/categories/:id', async (req, res) => {
   try {
-    const { name, description, is_active } = req.body;
+    const { name, code, description, is_active } = req.body;
     const result = await pool.query(
       `UPDATE categories
-       SET name = COALESCE($1, name),
-           description = COALESCE($2, description),
-           is_active = COALESCE($3, is_active),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $4
+       SET name        = COALESCE($1, name),
+           code        = COALESCE($2, code),
+           description = COALESCE($3, description),
+           is_active   = COALESCE($4, is_active),
+           updated_at  = CURRENT_TIMESTAMP
+       WHERE id = $5
        RETURNING *`,
-      [name, description, is_active, req.params.id]
+      [name, code ? code.toUpperCase() : null, description, is_active, req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Category not found' });
     res.json(result.rows[0]);
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'A category with this code already exists under the same parent' });
+    }
     console.error('Error updating category:', err);
     res.status(500).json({ error: 'Failed to update category' });
   }
@@ -13544,7 +13548,7 @@ app.get('/api/field-definitions', async (req, res) => {
     const result = await pool.query(
       `SELECT id, field_key, label, data_type, allowed_values,
               unit_of_measure, normalizer, validation_rule
-       FROM field_definitions
+       FROM category_field_definitions
        ORDER BY field_key ASC`
     );
     res.json(result.rows);
@@ -13566,7 +13570,7 @@ app.post('/api/field-definitions', async (req, res) => {
       return res.status(400).json({ error: `data_type must be one of: ${validTypes.join(', ')}` });
     }
     const result = await pool.query(
-      `INSERT INTO field_definitions
+      `INSERT INTO category_field_definitions
          (field_key, label, data_type, allowed_values, unit_of_measure, normalizer, validation_rule)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
@@ -13587,7 +13591,7 @@ app.put('/api/field-definitions/:id', async (req, res) => {
   try {
     const { label, allowed_values, unit_of_measure, normalizer, validation_rule } = req.body;
     const result = await pool.query(
-      `UPDATE field_definitions
+      `UPDATE category_field_definitions
        SET label           = COALESCE($1, label),
            allowed_values  = COALESCE($2, allowed_values),
            unit_of_measure = COALESCE($3, unit_of_measure),
@@ -13606,6 +13610,21 @@ app.put('/api/field-definitions/:id', async (req, res) => {
   }
 });
 
+// DELETE /api/field-definitions/:id  — remove a field definition (and all its rules via CASCADE)
+app.delete('/api/field-definitions/:id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM category_field_definitions WHERE id = $1 RETURNING id, field_key',
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Field definition not found' });
+    res.json({ message: `Field '${result.rows[0].field_key}' deleted` });
+  } catch (err) {
+    console.error('Error deleting field definition:', err);
+    res.status(500).json({ error: 'Failed to delete field definition' });
+  }
+});
+
 // ============================================================
 // CATEGORY FIELD RULES
 // ============================================================
@@ -13619,7 +13638,7 @@ app.get('/api/category-field-rules/:cat_id', async (req, res) => {
               r.display_order, r.default_value, r.label_override, r.help_text,
               f.field_key, f.label, f.data_type, f.allowed_values, f.unit_of_measure
        FROM category_field_rules r
-       JOIN field_definitions f ON f.id = r.field_definition_id
+       JOIN category_field_definitions f ON f.id = r.field_definition_id
        WHERE r.category_id = $1
        ORDER BY r.display_order ASC, f.field_key ASC`,
       [req.params.cat_id]
