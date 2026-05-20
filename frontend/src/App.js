@@ -22,6 +22,7 @@ import TransactionJournals from './pages/TransactionJournals';
 import Jewelry from './pages/Jewelry';
 import CoinsBullions from './pages/CoinsBullions';
 import Hardgoods from './pages/Hardgoods';
+import HardgoodsEdit from './pages/HardgoodsEdit';
 import SystemConfig from './pages/SystemConfig';
 import Employees from './pages/Employees';
 import JewelEstimator from './pages/JewelEstimator';
@@ -353,6 +354,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <Hardgoods />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hardgoods-edit/:itemId"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <HardgoodsEdit />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

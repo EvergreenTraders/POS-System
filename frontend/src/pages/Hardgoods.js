@@ -146,7 +146,7 @@ function Hardgoods() {
   };
 
   const handleEditClick = (item) => {
-    navigate('/hardgoods-edit', { state: { itemId: item.item_id } });
+    navigate(`/hardgoods-edit/${item.item_id}`);
   };
 
   // Client-side search filter
