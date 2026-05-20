@@ -21,6 +21,10 @@ import Scrap from './pages/Scrap';
 import TransactionJournals from './pages/TransactionJournals';
 import Jewelry from './pages/Jewelry';
 import CoinsBullions from './pages/CoinsBullions';
+import Hardgoods from './pages/Hardgoods';
+import HardgoodsEdit from './pages/HardgoodsEdit';
+import HardgoodsEstimator from './pages/HardgoodsEstimator';
+import CategoryManager from './pages/CategoryManager';
 import SystemConfig from './pages/SystemConfig';
 import Employees from './pages/Employees';
 import JewelEstimator from './pages/JewelEstimator';
@@ -347,6 +351,36 @@ function App() {
                 }
               />
               <Route
+                path="/inventory/hardgoods"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <Hardgoods />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hardgoods-edit/:itemId"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <HardgoodsEdit />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/hardgoods-estimator"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <HardgoodsEstimator />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/jewel-estimator"
                 element={
                   <ProtectedRoute>
@@ -442,6 +476,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <SystemConfig />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/system-config/categories"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <CategoryManager />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }
