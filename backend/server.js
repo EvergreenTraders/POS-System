@@ -52,6 +52,12 @@ const uploadJewelryImages = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10 MB limit per file
 }).array('images', 10); // Allow up to 10 images
 
+// Configure multer for hardgoods image uploads (multiple images)
+const uploadHardgoodsImages = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }
+}).array('images', 10);
+
 // Configure multer for single file uploads (business logo, etc.)
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -67,6 +73,11 @@ if (!fs.existsSync(uploadDir)) {
 const jewelryUploadDir = 'uploads/jewelry/';
 if (!fs.existsSync(jewelryUploadDir)) {
   fs.mkdirSync(jewelryUploadDir, { recursive: true });
+}
+
+const hardgoodsUploadDir = 'uploads/hardgoods/';
+if (!fs.existsSync(hardgoodsUploadDir)) {
+  fs.mkdirSync(hardgoodsUploadDir, { recursive: true });
 }
 
 const scrapUploadDir = 'uploads/scrap/';
@@ -366,6 +377,10 @@ pool.query(`
   ALTER TABLE transactions ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
 `).catch(err => console.error('transactions store_id migration:', err.message));
 
+
+pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'`)
+  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_hardgoods_images ON hardgoods USING GIN (images)`))
+  .catch(err => console.error('hardgoods images migration:', err.message));
 
 // Fix unique_active_connection: replace table constraint with partial index
 // Allows multiple historical (is_active = FALSE) rows per employee/session
@@ -14011,6 +14026,113 @@ app.put('/api/hardgoods/:id', async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error updating hardgoods item:', err);
     res.status(500).json({ error: 'Failed to update hardgoods item' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/hardgoods/:id/images  — upload/add images
+app.put('/api/hardgoods/:id/images', uploadHardgoodsImages, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    const checkResult = await client.query('SELECT item_id, images FROM hardgoods WHERE item_id = $1', [id]);
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Hardgoods item not found' });
+    }
+
+    const uploadedFiles = req.files || [];
+    let existingImages = [];
+    try {
+      if (checkResult.rows[0].images) {
+        existingImages = typeof checkResult.rows[0].images === 'string'
+          ? JSON.parse(checkResult.rows[0].images)
+          : checkResult.rows[0].images;
+      }
+    } catch (e) { console.error('Error parsing existing images:', e); }
+
+    const processedImages = [];
+    for (let i = 0; i < uploadedFiles.length; i++) {
+      const file = uploadedFiles[i];
+      const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+      const imageNumber = existingImages.length + i + 1;
+      const filename = `${id}-${imageNumber}${ext}`;
+      const filepath = path.join(hardgoodsUploadDir, filename);
+      await fs.promises.writeFile(filepath, file.buffer);
+      processedImages.push({
+        url: `/uploads/hardgoods/${filename}`,
+        isPrimary: existingImages.length === 0 && i === 0
+      });
+    }
+
+    const allImages = [...existingImages, ...processedImages];
+    const result = await client.query(
+      'UPDATE hardgoods SET images = $1, updated_at = CURRENT_TIMESTAMP WHERE item_id = $2 RETURNING *',
+      [JSON.stringify(allImages), id]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, item: result.rows[0], message: `Added ${processedImages.length} image(s)` });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating hardgoods images:', err);
+    res.status(500).json({ error: 'Failed to update hardgoods images', details: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/hardgoods/:id/images/:imageIndex  — remove a single image
+app.delete('/api/hardgoods/:id/images/:imageIndex', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id, imageIndex } = req.params;
+    const idx = parseInt(imageIndex, 10);
+    await client.query('BEGIN');
+
+    const checkResult = await client.query('SELECT item_id, images FROM hardgoods WHERE item_id = $1', [id]);
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Hardgoods item not found' });
+    }
+
+    let existingImages = [];
+    try {
+      if (checkResult.rows[0].images) {
+        existingImages = typeof checkResult.rows[0].images === 'string'
+          ? JSON.parse(checkResult.rows[0].images)
+          : checkResult.rows[0].images;
+      }
+    } catch (e) {}
+
+    if (idx < 0 || idx >= existingImages.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Invalid image index' });
+    }
+
+    const imgUrl = existingImages[idx].url;
+    if (imgUrl && imgUrl.startsWith('/uploads/hardgoods/')) {
+      const filepath = path.join(hardgoodsUploadDir, path.basename(imgUrl));
+      try { await fs.promises.unlink(filepath); } catch (e) {}
+    }
+
+    const updatedImages = existingImages.filter((_, i) => i !== idx);
+    if (existingImages[idx].isPrimary && updatedImages.length > 0) {
+      updatedImages[0].isPrimary = true;
+    }
+
+    const result = await client.query(
+      'UPDATE hardgoods SET images = $1, updated_at = CURRENT_TIMESTAMP WHERE item_id = $2 RETURNING *',
+      [JSON.stringify(updatedImages), id]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, item: result.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting hardgoods image:', err);
+    res.status(500).json({ error: 'Failed to delete image', details: err.message });
   } finally {
     client.release();
   }

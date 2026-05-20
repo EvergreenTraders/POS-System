@@ -49,6 +49,7 @@ const EMPTY_FORM = {
   pawnPrice: '',
   buyPrice: '',
   retailPrice: '',
+  images: [],
 };
 
 function generateTicketId() {
@@ -128,29 +129,19 @@ function HardgoodsEstimator() {
       retail_price: form.retailPrice ? parseFloat(form.retailPrice) : null,
       notes: form.notes || null,
       fromEstimator: 'hardgoods',
+      pendingImages: form.images,
     };
-  };
-
-  const handleAddItem = () => {
-    if (!form.shortDesc.trim()) {
-      enqueueSnackbar('Description is required', { variant: 'warning' });
-      return;
-    }
-    if (!form.buyPrice || parseFloat(form.buyPrice) <= 0) {
-      enqueueSnackbar('Buy price is required', { variant: 'warning' });
-      return;
-    }
-    setEstimatedItems(prev => [...prev, buildItem()]);
-    setForm(EMPTY_FORM);
-    enqueueSnackbar('Item added', { variant: 'success' });
   };
 
   const handleRemoveItem = (index) => {
     setEstimatedItems(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleRemoveFormImage = (index) => {
+    setField('images', form.images.filter((_, i) => i !== index));
+  };
+
   const handleProceedToCheckout = () => {
-    // If the form has unsaved data, treat it as an implicit "Add Item"
     let items = [...estimatedItems];
     if (form.shortDesc.trim()) {
       if (!form.buyPrice || parseFloat(form.buyPrice) <= 0) {
@@ -165,7 +156,6 @@ function HardgoodsEstimator() {
       return;
     }
 
-    // All items in one session share one ticket ID; suffix 01, 02, 03... applied in Checkout
     const ticketId = generateTicketId();
     const itemsWithTicket = items.map(item => ({ ...item, buyTicketId: ticketId }));
 
@@ -190,14 +180,6 @@ function HardgoodsEstimator() {
           New Hardgoods Item — Intake
         </Typography>
         <Button
-          variant="outlined"
-          startIcon={<AddIcon />}
-          onClick={handleAddItem}
-          sx={{ mr: 1 }}
-        >
-          Add Item
-        </Button>
-        <Button
           variant="contained"
           endIcon={<ArrowForwardIcon />}
           onClick={handleProceedToCheckout}
@@ -207,7 +189,7 @@ function HardgoodsEstimator() {
         </Button>
       </Paper>
 
-      {/* Body: form left, price estimates + summary right */}
+      {/* Body */}
       <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
 
         {/* Left: intake form */}
@@ -280,8 +262,58 @@ function HardgoodsEstimator() {
 
         <Divider orientation="vertical" flexItem />
 
+        {/* Middle: Photos */}
+        <Box sx={{ width: 190, flexShrink: 0, overflow: 'auto', px: 2, py: 3, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Photos</Typography>
+
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {form.images.map((file, idx) => (
+              <Box key={idx} sx={{ position: 'relative', width: 72, height: 72 }}>
+                <img
+                  src={URL.createObjectURL(file)}
+                  alt={`photo-${idx + 1}`}
+                  style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 4, border: '1px solid #ddd' }}
+                />
+                <IconButton
+                  size="small"
+                  color="error"
+                  sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
+                  onClick={() => handleRemoveFormImage(idx)}
+                >
+                  <DeleteIcon sx={{ fontSize: 14 }} />
+                </IconButton>
+              </Box>
+            ))}
+          </Box>
+
+          <Button variant="outlined" size="small" component="label" startIcon={<AddIcon />}>
+            Add Photos
+            <input
+              type="file"
+              hidden
+              multiple
+              accept="image/*"
+              onChange={e => {
+                const files = Array.from(e.target.files);
+                if (files.length) {
+                  setField('images', [...form.images, ...files]);
+                }
+                e.target.value = '';
+              }}
+            />
+          </Button>
+
+          {form.images.length > 0 && (
+            <Typography variant="caption" color="text.secondary">
+              {form.images.length} photo{form.images.length > 1 ? 's' : ''} — uploaded on checkout
+            </Typography>
+          )}
+        </Box>
+
+        <Divider orientation="vertical" flexItem />
+
         {/* Right: price estimates + items added */}
-        <Box sx={{ width: 270, flexShrink: 0, overflow: 'auto', px: 2, py: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <Box sx={{ width: 260, flexShrink: 0, overflow: 'auto', px: 2, py: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
 
           {/* Price Estimates for current item */}
           <Box>

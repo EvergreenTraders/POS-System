@@ -95,6 +95,10 @@ function HardgoodsEdit() {
   const [blockingReason, setBlockingReason] = useState('');
   const [nextAction, setNextAction] = useState('');
 
+  // Images
+  const [images, setImages] = useState([]);
+  const [pendingImages, setPendingImages] = useState([]);
+
   // Tab 3: Attributes
   const [attributes, setAttributes] = useState([]);
   const [newAttrKey, setNewAttrKey] = useState('');
@@ -104,6 +108,12 @@ function HardgoodsEdit() {
   const [categoryFields, setCategoryFields] = useState([]);
   const [categoryFieldValues, setCategoryFieldValues] = useState({});
 
+  const makeAbsoluteUrl = (url) => {
+    if (!url) return '';
+    if (url.startsWith('http')) return url;
+    return `${API_BASE_URL.replace('/api', '')}${url}`;
+  };
+
   useEffect(() => {
     if (!itemId) {
       navigate('/inventory/hardgoods');
@@ -111,6 +121,10 @@ function HardgoodsEdit() {
     }
     loadAll();
   }, [itemId]);
+
+  useEffect(() => {
+    return () => { pendingImages.forEach(f => { if (f._preview) URL.revokeObjectURL(f._preview); }); };
+  }, [pendingImages]);
 
   // ── Full load (edit mode) ───────────────────────────────────────────────────
   const loadAll = async () => {
@@ -210,6 +224,14 @@ function HardgoodsEdit() {
     setNextAction(item.next_action || '');
 
     setAttributes(item.attributes || []);
+
+    let imgs = [];
+    try {
+      imgs = item.images
+        ? (typeof item.images === 'string' ? JSON.parse(item.images) : item.images)
+        : [];
+    } catch (e) {}
+    setImages(Array.isArray(imgs) ? imgs : []);
   };
 
   // ── Build payload (shared by POST and PUT) ─────────────────────────────────
@@ -267,6 +289,21 @@ function HardgoodsEdit() {
 
     try {
       setSaving(true);
+
+      if (pendingImages.length > 0) {
+        const formData = new FormData();
+        pendingImages.forEach(f => formData.append('images', f));
+        const imgRes = await axios.put(`${API_BASE_URL}/hardgoods/${itemId}/images`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        if (imgRes.data.success) {
+          let updatedImgs = imgRes.data.item.images;
+          if (typeof updatedImgs === 'string') updatedImgs = JSON.parse(updatedImgs);
+          setImages(Array.isArray(updatedImgs) ? updatedImgs : []);
+          setPendingImages([]);
+        }
+      }
+
       await axios.put(`${API_BASE_URL}/hardgoods/${itemId}`, buildPayload());
       enqueueSnackbar('Item saved', { variant: 'success' });
     } catch (err) {
@@ -295,6 +332,20 @@ function HardgoodsEdit() {
 
   const handleRemoveAttr = (index) => {
     setAttributes(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleDeleteImage = async (index) => {
+    try {
+      const res = await axios.delete(`${API_BASE_URL}/hardgoods/${itemId}/images/${index}`);
+      if (res.data.success) {
+        let updatedImgs = res.data.item.images;
+        if (typeof updatedImgs === 'string') updatedImgs = JSON.parse(updatedImgs);
+        setImages(Array.isArray(updatedImgs) ? updatedImgs : []);
+        enqueueSnackbar('Image removed', { variant: 'success' });
+      }
+    } catch (err) {
+      enqueueSnackbar('Failed to remove image', { variant: 'error' });
+    }
   };
 
   // ── Typed input renderer for schema fields ─────────────────────────────────
@@ -462,6 +513,63 @@ function HardgoodsEdit() {
                 )}
               </Box>
               <TextField label="Notes" value={notes} onChange={e => setNotes(e.target.value)} fullWidth multiline minRows={2} size="small" />
+
+              {/* Images */}
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.75, display: 'block' }}>Photos</Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1 }}>
+                  {images.map((img, idx) => (
+                    <Box key={idx} sx={{ position: 'relative', width: 72, height: 72 }}>
+                      <img
+                        src={makeAbsoluteUrl(img.url || img.image_url || img)}
+                        alt={`item-${idx + 1}`}
+                        style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 4, border: img.isPrimary ? '2px solid #1976d2' : '1px solid #ddd' }}
+                      />
+                      <IconButton
+                        size="small"
+                        color="error"
+                        sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
+                        onClick={() => handleDeleteImage(idx)}
+                      >
+                        <DeleteIcon sx={{ fontSize: 14 }} />
+                      </IconButton>
+                    </Box>
+                  ))}
+                  {pendingImages.map((file, idx) => (
+                    <Box key={`p-${idx}`} sx={{ position: 'relative', width: 72, height: 72 }}>
+                      <img
+                        src={URL.createObjectURL(file)}
+                        alt={`pending-${idx + 1}`}
+                        style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 4, border: '2px dashed #1976d2', opacity: 0.75 }}
+                      />
+                      <IconButton
+                        size="small"
+                        color="error"
+                        sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
+                        onClick={() => setPendingImages(prev => prev.filter((_, i) => i !== idx))}
+                      >
+                        <DeleteIcon sx={{ fontSize: 14 }} />
+                      </IconButton>
+                    </Box>
+                  ))}
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Button variant="outlined" size="small" component="label" startIcon={<AddIcon />}>
+                    Add Photos
+                    <input type="file" hidden multiple accept="image/*" onChange={e => {
+                      const files = Array.from(e.target.files);
+                      if (files.length) {
+                        setPendingImages(prev => [...prev, ...files]);
+                        enqueueSnackbar(`${files.length} photo(s) selected — click Save to upload`, { variant: 'info' });
+                      }
+                      e.target.value = '';
+                    }} />
+                  </Button>
+                  {pendingImages.length > 0 && (
+                    <Typography variant="caption" color="primary">{pendingImages.length} pending save</Typography>
+                  )}
+                </Box>
+              </Box>
             </Box>
 
             <Divider orientation="vertical" flexItem />
