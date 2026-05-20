@@ -7419,7 +7419,7 @@ app.get('/api/buy-ticket', async (req, res) => {
 app.post('/api/buy-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { buy_ticket_id, transaction_id, item_id } = req.body;
+    const { buy_ticket_id, transaction_id, item_id, inventory_type } = req.body;
 
     // Validate required fields
     if (!buy_ticket_id) {
@@ -7428,17 +7428,30 @@ app.post('/api/buy-ticket', async (req, res) => {
 
     await client.query('BEGIN');
 
+    // Auto-detect inventory_type by looking up item_id in both tables if not provided
+    let resolvedInventoryType = inventory_type || null;
+    if (!resolvedInventoryType && item_id) {
+      const jwCheck = await client.query('SELECT 1 FROM jewelry WHERE item_id = $1 LIMIT 1', [item_id]);
+      if (jwCheck.rows.length > 0) {
+        resolvedInventoryType = 'JW';
+      } else {
+        const hgCheck = await client.query('SELECT 1 FROM hardgoods WHERE item_id = $1 LIMIT 1', [item_id]);
+        if (hgCheck.rows.length > 0) resolvedInventoryType = 'HG';
+      }
+    }
+
     // Insert new buy_ticket record
     const insertQuery = `
-      INSERT INTO buy_ticket (buy_ticket_id, transaction_id, item_id)
-      VALUES ($1, $2, $3)
+      INSERT INTO buy_ticket (buy_ticket_id, transaction_id, item_id, inventory_type)
+      VALUES ($1, $2, $3, $4)
       RETURNING *
     `;
 
     const result = await client.query(insertQuery, [
       buy_ticket_id,
       transaction_id || null,
-      item_id || null
+      item_id || null,
+      resolvedInventoryType
     ]);
 
     await client.query('COMMIT');
@@ -9297,6 +9310,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
       };
     } else {
       // Fallback: Get items from buy_ticket, sale_ticket, and pawn_ticket tables (union of all)
+      // JOINs both jewelry (JW) and hardgoods (HG); uses stored inventory_type or auto-detects
       const ticketQuery = `
         WITH item_list AS (
           -- Get buy ticket items
@@ -9306,11 +9320,15 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             bt.item_id,
             bt.buy_ticket_id as ticket_id,
             bt.created_at,
-            j.updated_at,
+            COALESCE(j.updated_at, hg.updated_at) as updated_at,
             'buy' as transaction_type,
+            COALESCE(bt.inventory_type,
+              CASE WHEN j.item_id IS NOT NULL THEN 'JW'
+                   WHEN hg.item_id IS NOT NULL THEN 'HG'
+              END) as inventory_type,
             j.item_id as jewelry_item_id,
-            j.long_desc,
-            j.short_desc,
+            COALESCE(j.long_desc, hg.long_desc) as long_desc,
+            COALESCE(j.short_desc, hg.short_desc) as short_desc,
             j.category,
             j.metal_weight,
             j.precious_metal_type,
@@ -9320,9 +9338,9 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.jewelry_color,
             j.metal_spot_price,
             j.est_metal_value,
-            j.item_price,
-            j.images,
-            j.status as item_status,
+            COALESCE(j.item_price, hg.cost_price) as item_price,
+            COALESCE(j.images, hg.images) as images,
+            COALESCE(j.status, hg.status) as item_status,
             j.primary_gem_type,
             j.primary_gem_category,
             j.primary_gem_size,
@@ -9337,11 +9355,14 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.primary_gem_authentic,
             j.primary_gem_value,
             EXISTS (
-              SELECT * FROM jewelry_secondary_gems jsg
+              SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = bt.item_id
             ) as has_secondary_gems
           FROM buy_ticket bt
           LEFT JOIN jewelry j ON bt.item_id = j.item_id
+            AND COALESCE(bt.inventory_type, 'JW') = 'JW'
+          LEFT JOIN hardgoods hg ON bt.item_id = hg.item_id
+            AND bt.inventory_type = 'HG'
           WHERE bt.transaction_id = $1
 
           UNION ALL
@@ -9353,11 +9374,15 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             st.item_id,
             st.sale_ticket_id as ticket_id,
             st.created_at,
-            j.updated_at,
+            COALESCE(j.updated_at, hg.updated_at) as updated_at,
             'sale' as transaction_type,
+            COALESCE(st.inventory_type,
+              CASE WHEN j.item_id IS NOT NULL THEN 'JW'
+                   WHEN hg.item_id IS NOT NULL THEN 'HG'
+              END) as inventory_type,
             j.item_id as jewelry_item_id,
-            j.long_desc,
-            j.short_desc,
+            COALESCE(j.long_desc, hg.long_desc) as long_desc,
+            COALESCE(j.short_desc, hg.short_desc) as short_desc,
             j.category,
             j.metal_weight,
             j.precious_metal_type,
@@ -9367,9 +9392,9 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.jewelry_color,
             j.metal_spot_price,
             j.est_metal_value,
-            j.item_price,
-            j.images,
-            j.status as item_status,
+            COALESCE(j.item_price, hg.cost_price) as item_price,
+            COALESCE(j.images, hg.images) as images,
+            COALESCE(j.status, hg.status) as item_status,
             j.primary_gem_type,
             j.primary_gem_category,
             j.primary_gem_size,
@@ -9384,16 +9409,19 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.primary_gem_authentic,
             j.primary_gem_value,
             EXISTS (
-              SELECT * FROM jewelry_secondary_gems jsg
+              SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = st.item_id
             ) as has_secondary_gems
           FROM sale_ticket st
           LEFT JOIN jewelry j ON st.item_id = j.item_id
+            AND COALESCE(st.inventory_type, 'JW') = 'JW'
+          LEFT JOIN hardgoods hg ON st.item_id = hg.item_id
+            AND st.inventory_type = 'HG'
           WHERE st.transaction_id = $1
 
           UNION ALL
 
-          -- Get pawn ticket items
+          -- Get pawn ticket items (pawn is always jewelry/JW)
           SELECT
             pt.id,
             pt.transaction_id,
@@ -9402,6 +9430,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             pt.created_at,
             j.updated_at,
             'pawn' as transaction_type,
+            COALESCE(pt.inventory_type, 'JW') as inventory_type,
             j.item_id as jewelry_item_id,
             j.long_desc,
             j.short_desc,
@@ -9431,7 +9460,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.primary_gem_authentic,
             j.primary_gem_value,
             EXISTS (
-              SELECT * FROM jewelry_secondary_gems jsg
+              SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = pt.item_id
             ) as has_secondary_gems
           FROM pawn_ticket pt
