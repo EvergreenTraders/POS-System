@@ -38,8 +38,9 @@ const MIGRATION_FILES = [
   'store_sessions.sql',
   'trusted_pcs.sql',
   'customers.sql',
-  'category_tree.sql',  // divisions, categories, field_definitions, category_field_rules
-  'hardgoods.sql',      // hardgoods, hardgoods_attributes
+  'category_tree.sql',   // divisions, categories, field_definitions, category_field_rules
+  'inventory_modes.sql', // inventory_modes, processing_statuses
+  'hardgoods.sql',       // hardgoods, hardgoods_attributes
   'inventory.sql',
   'metal_estimator.sql',  // Creates metal_style_category, metal_style_subcategory
   'gem_estimator.sql',

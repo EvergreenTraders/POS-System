@@ -7160,6 +7160,32 @@ app.delete('/api/jewelry/:item_id', async (req, res) => {
     }
 });
 
+// Inventory Modes
+app.get('/api/inventory-modes', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT code, label, description, ui_color, display_order FROM inventory_modes WHERE is_active = true ORDER BY display_order ASC'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching inventory modes:', err);
+    res.status(500).json({ error: 'Failed to fetch inventory modes' });
+  }
+});
+
+// Processing Statuses
+app.get('/api/processing-statuses', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT code, label, description, ui_color FROM processing_statuses WHERE is_active = true ORDER BY label ASC'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching processing statuses:', err);
+    res.status(500).json({ error: 'Failed to fetch processing statuses' });
+  }
+});
+
 // Inventory Status API Endpoints
 app.get('/api/inventory-status', async (req, res) => {
   try {

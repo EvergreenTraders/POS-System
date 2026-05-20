@@ -223,6 +223,11 @@ function Sidebar() {
                 {isOpen && <ListItemText primary="Jewelry" />}
               </StyledListItem>
             </StyledLink>
+            <StyledLink to="/inventory/hardgoods">
+              <StyledListItem active={isActive('/inventory/hardgoods')} sx={{ pl: 4 }}>
+                {isOpen && <ListItemText primary="Hardgoods" />}
+              </StyledListItem>
+            </StyledLink>
             <StyledLink to="/inventory/coins-bullions">
               <StyledListItem active={isActive('/inventory/coins-bullions')} sx={{ pl: 4 }}>
                 {isOpen && <ListItemText primary="Coins & Bullions" />}
