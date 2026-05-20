@@ -10,7 +10,6 @@ import {
   FormControl,
   FormControlLabel,
   FormHelperText,
-  Grid,
   IconButton,
   InputLabel,
   MenuItem,
@@ -20,14 +19,12 @@ import {
   Tab,
   Tabs,
   TextField,
-  Tooltip,
   Typography,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
-import LockIcon from '@mui/icons-material/Lock';
 import { useSnackbar } from 'notistack';
 import config from '../config';
 
@@ -387,7 +384,7 @@ function HardgoodsEdit() {
         </IconButton>
         <Box sx={{ flex: 1 }}>
           <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
-            Edit Hardgoods Item
+            {originalIntakeDesc || 'Hardgoods Item'}
           </Typography>
           <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'text.secondary' }}>
             {itemId}
@@ -407,20 +404,6 @@ function HardgoodsEdit() {
         </Button>
       </Paper>
 
-      {/* ── Original intake description (edit mode, locked) ── */}
-      {originalIntakeDesc && (
-        <Box sx={{ px: 3, pt: 1.5, pb: 0.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, bgcolor: 'grey.50', p: 1.5, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-            <Tooltip title="Original intake description — cannot be changed">
-              <LockIcon fontSize="small" sx={{ mt: 0.2, color: 'text.disabled' }} />
-            </Tooltip>
-            <Box>
-              <Typography variant="caption" color="text.secondary">Original Intake Description</Typography>
-              <Typography variant="body2">{originalIntakeDesc}</Typography>
-            </Box>
-          </Box>
-        </Box>
-      )}
 
       {/* ── Tabs ── */}
       <Box sx={{ flex: 1, overflow: 'auto', px: 3, pb: 3 }}>
@@ -431,142 +414,124 @@ function HardgoodsEdit() {
 
         {/* ── Tab 0: Details (description + mode/pricing + processing) ── */}
         <TabPanel value={tab} index={0}>
-          <Grid container spacing={2}>
+          <Box sx={{ display: 'flex', gap: 2 }}>
 
-            {/* Description & identity */}
-            <Grid item xs={12} sm={8}>
-              <TextField label="Short Description" value={shortDesc} onChange={e => setShortDesc(e.target.value)} fullWidth size="small" />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Category</InputLabel>
-                <Select value={categoryId} onChange={e => handleCategoryChange(e.target.value)} label="Category">
-                  <MenuItem value=""><em>None</em></MenuItem>
-                  {categories.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <TextField label="Long Description" value={longDesc} onChange={e => setLongDesc(e.target.value)} fullWidth multiline minRows={3} size="small" />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Condition</InputLabel>
-                <Select value={condition} onChange={e => setCondition(e.target.value)} label="Condition">
-                  <MenuItem value=""><em>Not specified</em></MenuItem>
-                  {CONDITION_OPTIONS.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Location</InputLabel>
-                <Select value={itemLocation} onChange={e => setItemLocation(e.target.value)} label="Location">
-                  <MenuItem value=""><em>None</em></MenuItem>
-                  {storageLocations.map(loc => <MenuItem key={loc.location_id} value={loc.location}>{loc.location}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField label="Part Number" value={partNumber} onChange={e => setPartNumber(e.target.value)} fullWidth size="small" />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Source</InputLabel>
-                <Select value={source} onChange={e => setSource(e.target.value)} label="Source">
-                  <MenuItem value=""><em>Not specified</em></MenuItem>
-                  {SOURCE_OPTIONS.map(s => <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4} sx={{ display: 'flex', alignItems: 'center' }}>
-              <FormControlLabel control={<Switch checked={isMemo} onChange={e => setIsMemo(e.target.checked)} />} label="Vendor Memo" />
-            </Grid>
-            {isMemo && (
-              <Grid item xs={12} sm={4}>
-                <TextField label="Memo Due Date" type="date" value={memoDueDate} onChange={e => setMemoDueDate(e.target.value)} fullWidth size="small" InputLabelProps={{ shrink: true }} />
-              </Grid>
-            )}
-            <Grid item xs={12}>
+            {/* Left column: item details */}
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <TextField label="Short Description" value={shortDesc} onChange={e => setShortDesc(e.target.value)} size="small" sx={{ flex: 2 }} />
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Category</InputLabel>
+                  <Select value={categoryId} onChange={e => handleCategoryChange(e.target.value)} label="Category">
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {categories.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Box>
+              <TextField label="Long Description" value={longDesc} onChange={e => setLongDesc(e.target.value)} fullWidth multiline minRows={2} size="small" />
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Condition</InputLabel>
+                  <Select value={condition} onChange={e => setCondition(e.target.value)} label="Condition">
+                    <MenuItem value=""><em>Not specified</em></MenuItem>
+                    {CONDITION_OPTIONS.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Location</InputLabel>
+                  <Select value={itemLocation} onChange={e => setItemLocation(e.target.value)} label="Location">
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {storageLocations.map(loc => <MenuItem key={loc.location_id} value={loc.location}>{loc.location}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <TextField label="Part Number" value={partNumber} onChange={e => setPartNumber(e.target.value)} size="small" sx={{ flex: 1 }} />
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Source</InputLabel>
+                  <Select value={source} onChange={e => setSource(e.target.value)} label="Source">
+                    <MenuItem value=""><em>Not specified</em></MenuItem>
+                    {SOURCE_OPTIONS.map(s => <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+                <FormControlLabel control={<Switch checked={isMemo} onChange={e => setIsMemo(e.target.checked)} />} label="Vendor Memo" />
+                {isMemo && (
+                  <TextField label="Memo Due Date" type="date" value={memoDueDate} onChange={e => setMemoDueDate(e.target.value)} size="small" InputLabelProps={{ shrink: true }} sx={{ flex: 1 }} />
+                )}
+              </Box>
               <TextField label="Notes" value={notes} onChange={e => setNotes(e.target.value)} fullWidth multiline minRows={2} size="small" />
-            </Grid>
+            </Box>
 
-            {/* Mode & Pricing */}
-            <Grid item xs={12}><Divider><Typography variant="caption" color="text.secondary">Mode &amp; Pricing</Typography></Divider></Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Mode</InputLabel>
-                <Select value={mode} onChange={e => setMode(e.target.value)} label="Mode">
-                  {modes.map(m => <MenuItem key={m.code} value={m.code}>{m.label}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField label="Cost Price" type="number" inputProps={{ min: 0, step: 0.01 }} value={costPrice} onChange={e => setCostPrice(e.target.value)} fullWidth size="small" />
-            </Grid>
-            {mode !== 'BUCKET' && (
-              <Grid item xs={12} sm={4}>
-                <TextField label="Retail Price" type="number" inputProps={{ min: 0, step: 0.01 }} value={retailPrice} onChange={e => setRetailPrice(e.target.value)} fullWidth size="small" />
-              </Grid>
-            )}
-            {mode === 'UNIT' && (
-              <Grid item xs={12} sm={6}>
-                <TextField label="Serial Number" value={serialNumber} onChange={e => setSerialNumber(e.target.value)} fullWidth size="small" />
-              </Grid>
-            )}
-            {mode === 'STOCK' && (
-              <Grid item xs={12} sm={4}>
-                <TextField label="Quantity on Hand" type="number" inputProps={{ min: 0, step: 1 }} value={quantity} onChange={e => setQuantity(e.target.value)} fullWidth size="small" />
-              </Grid>
-            )}
-            {mode === 'BUCKET' && (
-              <Grid item xs={12} sm={4}>
-                <TextField label="Bucket Value" type="number" inputProps={{ min: 0, step: 0.01 }} value={bucketValue} onChange={e => setBucketValue(e.target.value)} fullWidth size="small" helperText="Total value of the mixed lot" />
-              </Grid>
-            )}
+            <Divider orientation="vertical" flexItem />
 
-            {/* Processing */}
-            <Grid item xs={12}><Divider><Typography variant="caption" color="text.secondary">Processing</Typography></Divider></Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Item Status</InputLabel>
-                <Select value={status} onChange={e => setStatus(e.target.value)} label="Item Status">
-                  {inventoryStatuses.map(s => <MenuItem key={s.status_code} value={s.status_code}>{s.status_name}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Sellable Status</InputLabel>
-                <Select value={sellableStatus} onChange={e => setSellableStatus(e.target.value)} label="Sellable Status">
-                  <MenuItem value="SELLABLE"><Chip label="Sellable" color="success" size="small" sx={{ pointerEvents: 'none' }} /></MenuItem>
-                  <MenuItem value="NOT_SELLABLE"><Chip label="Not Sellable" color="default" size="small" sx={{ pointerEvents: 'none' }} /></MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Processing Status</InputLabel>
-                <Select value={processingStatus} onChange={e => setProcessingStatus(e.target.value)} label="Processing Status">
-                  {processingStatuses.map(s => (
-                    <MenuItem key={s.code} value={s.code}>
-                      <Chip label={s.label} color={s.ui_color || 'default'} size="small" sx={{ pointerEvents: 'none' }} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField label="Processing Queue" value={processingQueue} onChange={e => setProcessingQueue(e.target.value)} fullWidth size="small" placeholder="e.g. ELECTRONICS, REPAIRS" />
-            </Grid>
-            <Grid item xs={12} sm={8}>
+            {/* Right column: mode/pricing + processing */}
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Mode &amp; Pricing
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Mode</InputLabel>
+                  <Select value={mode} onChange={e => setMode(e.target.value)} label="Mode">
+                    {modes.map(m => <MenuItem key={m.code} value={m.code}>{m.label}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <TextField label="Cost Price" type="number" inputProps={{ min: 0, step: 0.01 }} value={costPrice} onChange={e => setCostPrice(e.target.value)} size="small" sx={{ flex: 1 }} />
+                {mode !== 'BUCKET' && (
+                  <TextField label="Retail Price" type="number" inputProps={{ min: 0, step: 0.01 }} value={retailPrice} onChange={e => setRetailPrice(e.target.value)} size="small" sx={{ flex: 1 }} />
+                )}
+              </Box>
+              {mode === 'UNIT' && (
+                <TextField label="Serial Number" value={serialNumber} onChange={e => setSerialNumber(e.target.value)} size="small" fullWidth />
+              )}
+              {mode === 'STOCK' && (
+                <TextField label="Quantity on Hand" type="number" inputProps={{ min: 0, step: 1 }} value={quantity} onChange={e => setQuantity(e.target.value)} size="small" fullWidth />
+              )}
+              {mode === 'BUCKET' && (
+                <TextField label="Bucket Value" type="number" inputProps={{ min: 0, step: 0.01 }} value={bucketValue} onChange={e => setBucketValue(e.target.value)} size="small" fullWidth helperText="Total value of the mixed lot" />
+              )}
+
+              <Divider />
+
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Processing
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Item Status</InputLabel>
+                  <Select value={status} onChange={e => setStatus(e.target.value)} label="Item Status">
+                    {inventoryStatuses.map(s => <MenuItem key={s.status_code} value={s.status_code}>{s.status_name}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Sellable Status</InputLabel>
+                  <Select value={sellableStatus} onChange={e => setSellableStatus(e.target.value)} label="Sellable Status">
+                    <MenuItem value="SELLABLE"><Chip label="Sellable" color="success" size="small" sx={{ pointerEvents: 'none' }} /></MenuItem>
+                    <MenuItem value="NOT_SELLABLE"><Chip label="Not Sellable" color="default" size="small" sx={{ pointerEvents: 'none' }} /></MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Processing Status</InputLabel>
+                  <Select value={processingStatus} onChange={e => setProcessingStatus(e.target.value)} label="Processing Status">
+                    {processingStatuses.map(s => (
+                      <MenuItem key={s.code} value={s.code}>
+                        <Chip label={s.label} color={s.ui_color || 'default'} size="small" sx={{ pointerEvents: 'none' }} />
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <TextField label="Processing Queue" value={processingQueue} onChange={e => setProcessingQueue(e.target.value)} size="small" sx={{ flex: 1 }} placeholder="e.g. ELECTRONICS" />
+              </Box>
               <TextField label="Blocking Reason" value={blockingReason} onChange={e => setBlockingReason(e.target.value)} fullWidth size="small" placeholder="Required when status is EXCEPTION" />
-            </Grid>
-            <Grid item xs={12}>
               <TextField label="Next Action" value={nextAction} onChange={e => setNextAction(e.target.value)} fullWidth size="small" placeholder="What needs to happen next" />
-            </Grid>
 
-          </Grid>
+            </Box>
+          </Box>
         </TabPanel>
 
         {/* ── Tab 1: Attributes ── */}
@@ -578,13 +543,13 @@ function HardgoodsEdit() {
               <Typography variant="subtitle2" color="text.secondary" gutterBottom>
                 Category Fields
               </Typography>
-              <Grid container spacing={2}>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
                 {categoryFields.map(field => (
-                  <Grid item xs={12} sm={6} key={field.field_key}>
+                  <Box key={field.field_key} sx={{ flex: '1 1 calc(50% - 8px)', minWidth: 200 }}>
                     {renderCategoryField(field)}
-                  </Grid>
+                  </Box>
                 ))}
-              </Grid>
+              </Box>
               <Divider sx={{ mt: 2, mb: 2 }} />
             </Box>
           )}
