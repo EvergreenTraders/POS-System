@@ -1320,12 +1320,18 @@ function Checkout() {
                   itemId = item.item_id;
                 }
 
+                // Pass inventory_type when known; backend will auto-detect from DB if null
+                const invType = item.fromEstimator === 'hardgoods' ? 'HG'
+                  : item.fromEstimator === 'jewelry' || item.sourceEstimator === 'jewelry' ? 'JW'
+                  : null;
+
                 await axios.post(
                   `${config.apiUrl}/sale-ticket`,
                   {
                     sale_ticket_id: saleTicketId,
                     transaction_id: realTransactionId,
-                    item_id: itemId
+                    item_id: itemId,
+                    inventory_type: invType
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }
@@ -1549,23 +1555,21 @@ function Checkout() {
             // Only update status for sale transactions with inventory items
             if (transactionType === 'sale' && item.item_id && item.fromInventory) {
               try {
-                // Calculate total price including protection plan (tax already included in price)
                 const basePrice = parseFloat(item.price) || 0;
                 const protectionPlanAmount = item.protectionPlan ? basePrice * 0.15 : 0;
                 const totalItemPrice = basePrice + protectionPlanAmount;
 
-                const response = await axios.put(
-                  `${config.apiUrl}/jewelry/${item.item_id}/status`,
-                  {
-                    status: 'SOLD',
-                    item_price: totalItemPrice
-                  },
+                const endpoint = item.fromHardgoodsInventory
+                  ? `${config.apiUrl}/hardgoods/${item.item_id}/status`
+                  : `${config.apiUrl}/jewelry/${item.item_id}/status`;
+
+                await axios.put(
+                  endpoint,
+                  { status: 'SOLD', item_price: totalItemPrice },
                   { headers: { Authorization: `Bearer ${token}` } }
                 );
               } catch (updateError) {
                 console.error(`Error updating item ${item.item_id} status:`, updateError);
-                console.error('Error details:', updateError.response?.data);
-                // Continue with checkout even if status update fails
               }
             }
           }
@@ -2358,7 +2362,11 @@ function Checkout() {
                           <TableCell>
                             {item.images && item.images.length > 0 ? (
                               <Avatar
-                                src={item.images.find(img => img.isPrimary)?.url || item.images[0]?.url}
+                                src={(() => {
+                                  const raw = item.images.find(img => img.isPrimary)?.url || item.images[0]?.url;
+                                  if (!raw) return undefined;
+                                  return raw.startsWith('/uploads') ? config.apiUrl.replace('/api', '') + raw : raw;
+                                })()}
                                 alt="Item"
                                 variant="rounded"
                                 sx={{ width: 50, height: 50, objectFit: 'cover' }}

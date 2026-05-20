@@ -382,6 +382,13 @@ pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS images JSONB NOT NULL
   .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_hardgoods_images ON hardgoods USING GIN (images)`))
   .catch(err => console.error('hardgoods images migration:', err.message));
 
+pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'HOLD'`)
+  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_hardgoods_status ON hardgoods(status)`))
+  .catch(err => console.error('hardgoods status migration:', err.message));
+
+pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS item_price NUMERIC(10,2)`)
+  .catch(err => console.error('hardgoods item_price migration:', err.message));
+
 // Fix unique_active_connection: replace table constraint with partial index
 // Allows multiple historical (is_active = FALSE) rows per employee/session
 pool.query(`ALTER TABLE drawer_session_connections DROP CONSTRAINT IF EXISTS unique_active_connection`)
@@ -7510,7 +7517,7 @@ app.get('/api/sale-ticket', async (req, res) => {
 app.post('/api/sale-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { sale_ticket_id, transaction_id, item_id, quantity } = req.body;
+    const { sale_ticket_id, transaction_id, item_id, quantity, inventory_type } = req.body;
 
     // Validate required fields
     if (!sale_ticket_id) {
@@ -7519,10 +7526,22 @@ app.post('/api/sale-ticket', async (req, res) => {
 
     await client.query('BEGIN');
 
+    // Auto-detect inventory_type by looking up item_id in both tables if not provided
+    let resolvedInventoryType = inventory_type || null;
+    if (!resolvedInventoryType && item_id) {
+      const jwCheck = await client.query('SELECT 1 FROM jewelry WHERE item_id = $1 LIMIT 1', [item_id]);
+      if (jwCheck.rows.length > 0) {
+        resolvedInventoryType = 'JW';
+      } else {
+        const hgCheck = await client.query('SELECT 1 FROM hardgoods WHERE item_id = $1 LIMIT 1', [item_id]);
+        if (hgCheck.rows.length > 0) resolvedInventoryType = 'HG';
+      }
+    }
+
     // Insert new sale_ticket record
     const insertQuery = `
-      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity, inventory_type)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING *
     `;
 
@@ -7530,7 +7549,8 @@ app.post('/api/sale-ticket', async (req, res) => {
       sale_ticket_id,
       transaction_id || null,
       item_id || null,
-      quantity || 1
+      quantity || 1,
+      resolvedInventoryType
     ]);
 
     await client.query('COMMIT');
@@ -14141,19 +14161,34 @@ app.delete('/api/hardgoods/:id/images/:imageIndex', async (req, res) => {
 // PUT /api/hardgoods/:id/status  — lightweight status-only update
 app.put('/api/hardgoods/:id/status', async (req, res) => {
   try {
-    const { status, processing_status, sellable_status, blocking_reason, next_action } = req.body;
-    const result = await pool.query(
-      `UPDATE hardgoods SET
-         status            = COALESCE($1, status),
-         processing_status = COALESCE($2, processing_status),
-         sellable_status   = COALESCE($3, sellable_status),
-         blocking_reason   = COALESCE($4, blocking_reason),
-         next_action       = COALESCE($5, next_action),
-         updated_at        = CURRENT_TIMESTAMP
-       WHERE item_id = $6
-       RETURNING item_id, status, processing_status, sellable_status, blocking_reason, next_action`,
-      [status, processing_status, sellable_status, blocking_reason, next_action, req.params.id]
-    );
+    const { status, processing_status, sellable_status, blocking_reason, next_action, item_price } = req.body;
+
+    let updateQuery, queryParams;
+    if (status === 'SOLD') {
+      updateQuery = `
+        UPDATE hardgoods SET
+          status          = 'SOLD',
+          sellable_status = 'NOT_SELLABLE',
+          item_price      = COALESCE($1, item_price),
+          updated_at      = CURRENT_TIMESTAMP
+        WHERE item_id = $2
+        RETURNING item_id, status, item_price, processing_status, sellable_status, blocking_reason, next_action`;
+      queryParams = [item_price ?? null, req.params.id];
+    } else {
+      updateQuery = `
+        UPDATE hardgoods SET
+          status            = COALESCE($1, status),
+          processing_status = COALESCE($2, processing_status),
+          sellable_status   = COALESCE($3, sellable_status),
+          blocking_reason   = COALESCE($4, blocking_reason),
+          next_action       = COALESCE($5, next_action),
+          updated_at        = CURRENT_TIMESTAMP
+        WHERE item_id = $6
+        RETURNING item_id, status, processing_status, sellable_status, blocking_reason, next_action`;
+      queryParams = [status, processing_status, sellable_status, blocking_reason, next_action, req.params.id];
+    }
+
+    const result = await pool.query(updateQuery, queryParams);
     if (!result.rows.length) return res.status(404).json({ error: 'Item not found' });
     res.json(result.rows[0]);
   } catch (err) {
