@@ -64,6 +64,7 @@ function HardgoodsEdit() {
   const [processingStatuses, setProcessingStatuses] = useState([]);
   const [inventoryStatuses, setInventoryStatuses] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [storageLocations, setStorageLocations] = useState([]);
 
   // Read-only display (edit mode only)
   const [originalIntakeDesc, setOriginalIntakeDesc] = useState('');
@@ -118,17 +119,19 @@ function HardgoodsEdit() {
   const loadAll = async () => {
     try {
       setLoading(true);
-      const [itemRes, modesRes, procRes, statusRes, divsRes] = await Promise.all([
+      const [itemRes, modesRes, procRes, statusRes, divsRes, locRes] = await Promise.all([
         axios.get(`${API_BASE_URL}/hardgoods/${itemId}`),
         axios.get(`${API_BASE_URL}/inventory-modes`),
         axios.get(`${API_BASE_URL}/processing-statuses`),
         axios.get(`${API_BASE_URL}/inventory-status`),
         axios.get(`${API_BASE_URL}/divisions`),
+        axios.get(`${API_BASE_URL}/storage-locations`),
       ]);
 
       setModes(modesRes.data);
       setProcessingStatuses(procRes.data);
       setInventoryStatuses(statusRes.data);
+      setStorageLocations(locRes.data);
 
       const hg = divsRes.data.find(d => d.code === 'HG');
       if (hg) {
@@ -261,7 +264,7 @@ function HardgoodsEdit() {
         .map(f => f.label_override || f.label || f.field_key)
         .join(', ');
       enqueueSnackbar(`Required fields missing: ${keys}`, { variant: 'warning' });
-      setTab(3);
+      setTab(1);
       return;
     }
 
@@ -405,7 +408,7 @@ function HardgoodsEdit() {
       </Paper>
 
       {/* ── Original intake description (edit mode, locked) ── */}
-      {!isCreate && originalIntakeDesc && (
+      {originalIntakeDesc && (
         <Box sx={{ px: 3, pt: 1.5, pb: 0.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, bgcolor: 'grey.50', p: 1.5, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
             <Tooltip title="Original intake description — cannot be changed">
@@ -423,201 +426,112 @@ function HardgoodsEdit() {
       <Box sx={{ flex: 1, overflow: 'auto', px: 3, pb: 3 }}>
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
           <Tab label="Details" />
-          <Tab label="Mode & Pricing" />
-          <Tab label="Processing" />
           <Tab label={`Attributes (${categoryFields.length + freeFormAttrs.length})`} />
         </Tabs>
 
-        {/* ── Tab 0: Details ── */}
+        {/* ── Tab 0: Details (description + mode/pricing + processing) ── */}
         <TabPanel value={tab} index={0}>
           <Grid container spacing={2}>
+
+            {/* Description & identity */}
             <Grid item xs={12} sm={8}>
-              <TextField
-                label="Short Description"
-                value={shortDesc}
-                onChange={e => setShortDesc(e.target.value)}
-                fullWidth size="small"
-              />
+              <TextField label="Short Description" value={shortDesc} onChange={e => setShortDesc(e.target.value)} fullWidth size="small" />
             </Grid>
             <Grid item xs={12} sm={4}>
               <FormControl fullWidth size="small">
                 <InputLabel>Category</InputLabel>
                 <Select value={categoryId} onChange={e => handleCategoryChange(e.target.value)} label="Category">
                   <MenuItem value=""><em>None</em></MenuItem>
-                  {categories.map(c => (
-                    <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
-                  ))}
+                  {categories.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12}>
-              <TextField
-                label="Long Description"
-                value={longDesc}
-                onChange={e => setLongDesc(e.target.value)}
-                fullWidth multiline minRows={3} size="small"
-              />
+              <TextField label="Long Description" value={longDesc} onChange={e => setLongDesc(e.target.value)} fullWidth multiline minRows={3} size="small" />
             </Grid>
             <Grid item xs={12} sm={4}>
               <FormControl fullWidth size="small">
                 <InputLabel>Condition</InputLabel>
                 <Select value={condition} onChange={e => setCondition(e.target.value)} label="Condition">
                   <MenuItem value=""><em>Not specified</em></MenuItem>
-                  {CONDITION_OPTIONS.map(c => (
-                    <MenuItem key={c} value={c}>{c}</MenuItem>
-                  ))}
+                  {CONDITION_OPTIONS.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={4}>
-              <TextField
-                label="Location"
-                value={itemLocation}
-                onChange={e => setItemLocation(e.target.value)}
-                fullWidth size="small"
-                placeholder="e.g. Showcase 3, Shelf B"
-              />
+              <FormControl fullWidth size="small">
+                <InputLabel>Location</InputLabel>
+                <Select value={itemLocation} onChange={e => setItemLocation(e.target.value)} label="Location">
+                  <MenuItem value=""><em>None</em></MenuItem>
+                  {storageLocations.map(loc => <MenuItem key={loc.location_id} value={loc.location}>{loc.location}</MenuItem>)}
+                </Select>
+              </FormControl>
             </Grid>
             <Grid item xs={12} sm={4}>
-              <TextField
-                label="Part Number"
-                value={partNumber}
-                onChange={e => setPartNumber(e.target.value)}
-                fullWidth size="small"
-              />
+              <TextField label="Part Number" value={partNumber} onChange={e => setPartNumber(e.target.value)} fullWidth size="small" />
             </Grid>
             <Grid item xs={12} sm={4}>
               <FormControl fullWidth size="small">
                 <InputLabel>Source</InputLabel>
                 <Select value={source} onChange={e => setSource(e.target.value)} label="Source">
                   <MenuItem value=""><em>Not specified</em></MenuItem>
-                  {SOURCE_OPTIONS.map(s => (
-                    <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
-                  ))}
+                  {SOURCE_OPTIONS.map(s => <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>)}
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={4} sx={{ display: 'flex', alignItems: 'center' }}>
-              <FormControlLabel
-                control={<Switch checked={isMemo} onChange={e => setIsMemo(e.target.checked)} />}
-                label="Vendor Memo"
-              />
+              <FormControlLabel control={<Switch checked={isMemo} onChange={e => setIsMemo(e.target.checked)} />} label="Vendor Memo" />
             </Grid>
             {isMemo && (
               <Grid item xs={12} sm={4}>
-                <TextField
-                  label="Memo Due Date"
-                  type="date"
-                  value={memoDueDate}
-                  onChange={e => setMemoDueDate(e.target.value)}
-                  fullWidth size="small"
-                  InputLabelProps={{ shrink: true }}
-                />
+                <TextField label="Memo Due Date" type="date" value={memoDueDate} onChange={e => setMemoDueDate(e.target.value)} fullWidth size="small" InputLabelProps={{ shrink: true }} />
               </Grid>
             )}
             <Grid item xs={12}>
-              <TextField
-                label="Notes"
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                fullWidth multiline minRows={2} size="small"
-              />
+              <TextField label="Notes" value={notes} onChange={e => setNotes(e.target.value)} fullWidth multiline minRows={2} size="small" />
             </Grid>
-          </Grid>
-        </TabPanel>
 
-        {/* ── Tab 1: Mode & Pricing ── */}
-        <TabPanel value={tab} index={1}>
-          <Grid container spacing={2}>
+            {/* Mode & Pricing */}
+            <Grid item xs={12}><Divider><Typography variant="caption" color="text.secondary">Mode &amp; Pricing</Typography></Divider></Grid>
             <Grid item xs={12} sm={4}>
               <FormControl fullWidth size="small">
                 <InputLabel>Mode</InputLabel>
                 <Select value={mode} onChange={e => setMode(e.target.value)} label="Mode">
-                  {modes.map(m => (
-                    <MenuItem key={m.code} value={m.code}>{m.label}</MenuItem>
-                  ))}
+                  {modes.map(m => <MenuItem key={m.code} value={m.code}>{m.label}</MenuItem>)}
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={4}>
-              <TextField
-                label="Cost Price"
-                type="number"
-                inputProps={{ min: 0, step: 0.01 }}
-                value={costPrice}
-                onChange={e => setCostPrice(e.target.value)}
-                fullWidth size="small"
-              />
+              <TextField label="Cost Price" type="number" inputProps={{ min: 0, step: 0.01 }} value={costPrice} onChange={e => setCostPrice(e.target.value)} fullWidth size="small" />
             </Grid>
             {mode !== 'BUCKET' && (
               <Grid item xs={12} sm={4}>
-                <TextField
-                  label="Retail Price"
-                  type="number"
-                  inputProps={{ min: 0, step: 0.01 }}
-                  value={retailPrice}
-                  onChange={e => setRetailPrice(e.target.value)}
-                  fullWidth size="small"
-                />
+                <TextField label="Retail Price" type="number" inputProps={{ min: 0, step: 0.01 }} value={retailPrice} onChange={e => setRetailPrice(e.target.value)} fullWidth size="small" />
               </Grid>
             )}
-
             {mode === 'UNIT' && (
               <Grid item xs={12} sm={6}>
-                <TextField
-                  label="Serial Number"
-                  value={serialNumber}
-                  onChange={e => setSerialNumber(e.target.value)}
-                  fullWidth size="small"
-                />
+                <TextField label="Serial Number" value={serialNumber} onChange={e => setSerialNumber(e.target.value)} fullWidth size="small" />
               </Grid>
             )}
             {mode === 'STOCK' && (
               <Grid item xs={12} sm={4}>
-                <TextField
-                  label="Quantity on Hand"
-                  type="number"
-                  inputProps={{ min: 0, step: 1 }}
-                  value={quantity}
-                  onChange={e => setQuantity(e.target.value)}
-                  fullWidth size="small"
-                />
+                <TextField label="Quantity on Hand" type="number" inputProps={{ min: 0, step: 1 }} value={quantity} onChange={e => setQuantity(e.target.value)} fullWidth size="small" />
               </Grid>
             )}
             {mode === 'BUCKET' && (
               <Grid item xs={12} sm={4}>
-                <TextField
-                  label="Bucket Value"
-                  type="number"
-                  inputProps={{ min: 0, step: 0.01 }}
-                  value={bucketValue}
-                  onChange={e => setBucketValue(e.target.value)}
-                  fullWidth size="small"
-                  helperText="Total value of the mixed lot"
-                />
+                <TextField label="Bucket Value" type="number" inputProps={{ min: 0, step: 0.01 }} value={bucketValue} onChange={e => setBucketValue(e.target.value)} fullWidth size="small" helperText="Total value of the mixed lot" />
               </Grid>
             )}
 
-            {mode === 'PIECE' && (
-              <Grid item xs={12}>
-                <Typography variant="caption" color="text.secondary">
-                  PIECE mode — unique one-off item. No serial, quantity, or bucket fields apply.
-                </Typography>
-              </Grid>
-            )}
-          </Grid>
-        </TabPanel>
-
-        {/* ── Tab 2: Processing ── */}
-        <TabPanel value={tab} index={2}>
-          <Grid container spacing={2}>
+            {/* Processing */}
+            <Grid item xs={12}><Divider><Typography variant="caption" color="text.secondary">Processing</Typography></Divider></Grid>
             <Grid item xs={12} sm={4}>
               <FormControl fullWidth size="small">
                 <InputLabel>Item Status</InputLabel>
                 <Select value={status} onChange={e => setStatus(e.target.value)} label="Item Status">
-                  {inventoryStatuses.map(s => (
-                    <MenuItem key={s.status_code} value={s.status_code}>{s.status_name}</MenuItem>
-                  ))}
+                  {inventoryStatuses.map(s => <MenuItem key={s.status_code} value={s.status_code}>{s.status_name}</MenuItem>)}
                 </Select>
               </FormControl>
             </Grid>
@@ -625,12 +539,8 @@ function HardgoodsEdit() {
               <FormControl fullWidth size="small">
                 <InputLabel>Sellable Status</InputLabel>
                 <Select value={sellableStatus} onChange={e => setSellableStatus(e.target.value)} label="Sellable Status">
-                  <MenuItem value="SELLABLE">
-                    <Chip label="Sellable" color="success" size="small" sx={{ pointerEvents: 'none' }} />
-                  </MenuItem>
-                  <MenuItem value="NOT_SELLABLE">
-                    <Chip label="Not Sellable" color="default" size="small" sx={{ pointerEvents: 'none' }} />
-                  </MenuItem>
+                  <MenuItem value="SELLABLE"><Chip label="Sellable" color="success" size="small" sx={{ pointerEvents: 'none' }} /></MenuItem>
+                  <MenuItem value="NOT_SELLABLE"><Chip label="Not Sellable" color="default" size="small" sx={{ pointerEvents: 'none' }} /></MenuItem>
                 </Select>
               </FormControl>
             </Grid>
@@ -640,46 +550,27 @@ function HardgoodsEdit() {
                 <Select value={processingStatus} onChange={e => setProcessingStatus(e.target.value)} label="Processing Status">
                   {processingStatuses.map(s => (
                     <MenuItem key={s.code} value={s.code}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Chip label={s.label} color={s.ui_color || 'default'} size="small" sx={{ pointerEvents: 'none' }} />
-                      </Box>
+                      <Chip label={s.label} color={s.ui_color || 'default'} size="small" sx={{ pointerEvents: 'none' }} />
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={4}>
-              <TextField
-                label="Processing Queue"
-                value={processingQueue}
-                onChange={e => setProcessingQueue(e.target.value)}
-                fullWidth size="small"
-                placeholder="e.g. ELECTRONICS, REPAIRS"
-              />
+              <TextField label="Processing Queue" value={processingQueue} onChange={e => setProcessingQueue(e.target.value)} fullWidth size="small" placeholder="e.g. ELECTRONICS, REPAIRS" />
             </Grid>
             <Grid item xs={12} sm={8}>
-              <TextField
-                label="Blocking Reason"
-                value={blockingReason}
-                onChange={e => setBlockingReason(e.target.value)}
-                fullWidth size="small"
-                placeholder="Required when status is EXCEPTION"
-              />
+              <TextField label="Blocking Reason" value={blockingReason} onChange={e => setBlockingReason(e.target.value)} fullWidth size="small" placeholder="Required when status is EXCEPTION" />
             </Grid>
             <Grid item xs={12}>
-              <TextField
-                label="Next Action"
-                value={nextAction}
-                onChange={e => setNextAction(e.target.value)}
-                fullWidth size="small"
-                placeholder="What needs to happen next"
-              />
+              <TextField label="Next Action" value={nextAction} onChange={e => setNextAction(e.target.value)} fullWidth size="small" placeholder="What needs to happen next" />
             </Grid>
+
           </Grid>
         </TabPanel>
 
-        {/* ── Tab 3: Attributes ── */}
-        <TabPanel value={tab} index={3}>
+        {/* ── Tab 1: Attributes ── */}
+        <TabPanel value={tab} index={1}>
 
           {/* Schema-defined category fields */}
           {categoryFields.length > 0 && (
