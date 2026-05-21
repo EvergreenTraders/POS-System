@@ -73,12 +73,12 @@ function Hardgoods() {
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [itemIdQuery, setItemIdQuery] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('SELLABLE');
+  const [selectedStatus, setSelectedStatus] = useState('ALL');
   const [selectedMode, setSelectedMode] = useState('');
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('');
 
-  const showProcessingCols = selectedStatus !== 'SELLABLE';
+  const showProcessingCols = true;
 
   // Lookup helpers derived from API data
   const getMode = (code) => modes.find(m => m.code === code) || FALLBACK_MODE;

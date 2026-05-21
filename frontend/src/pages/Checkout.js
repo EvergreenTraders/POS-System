@@ -194,7 +194,7 @@ function Checkout() {
       });
 
       // Handle from generic estimator or specific estimators like coinsbullions
-      if (fromSource === 'jewelry' || fromSource === 'coinsbullions') {
+      if (fromSource === 'jewelry' || fromSource === 'coinsbullions' || fromSource === 'hardgoods') {
         // Don't add items to cart - they should only be displayed in checkout, not in cart icon
         // Just set checkoutItems for display
         setCheckoutItems(itemsToCheckout);
@@ -775,6 +775,7 @@ function Checkout() {
 
         // Declare variables outside try block so they're accessible in catch block for rollback
         let createdJewelryItems;
+        let createdHardgoodsItems;
         let realTransactionId;
 
         try {
@@ -862,7 +863,13 @@ function Checkout() {
           } else if (hasJewelryItems) {
             // If coming from estimator, create new jewelry items (only if we have jewelry items)
             // Filter out items from inventory as they already exist in the database
-            const newJewelryItems = checkoutItems.filter(item => !item.fromInventory);
+            // Pre-assign item IDs following BT-XXXXXXXX-XX format (same as hardgoods)
+            const ticketCounters = {};
+            const newJewelryItems = checkoutItems.filter(item => !item.fromInventory).map(item => {
+              if (!item.buyTicketId) return item;
+              ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
+              return { ...item, item_id: `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}` };
+            });
 
 
             // Convert any blob URLs to File objects before uploading
@@ -1090,6 +1097,54 @@ function Checkout() {
             }
           }
 
+          // Step 1b: Create hardgoods items (from Hardgoods estimator)
+          const hasHardgoodsItems = checkoutItems.some(item => item.fromEstimator === 'hardgoods');
+          if (hasHardgoodsItems) {
+            const hardgoodsItems = checkoutItems.filter(item => item.fromEstimator === 'hardgoods');
+            createdHardgoodsItems = [];
+            for (let i = 0; i < hardgoodsItems.length; i++) {
+              const item = hardgoodsItems[i];
+              const itemId = `${item.buyTicketId}-${String(i + 1).padStart(2, '0')}`;
+              try {
+                const res = await axios.post(`${config.apiUrl}/hardgoods`, {
+                  item_id: itemId,
+                  short_desc: item.short_desc || item.description || null,
+                  long_desc: item.long_desc || null,
+                  category_id: item.category_id || null,
+                  condition: item.condition || null,
+                  source: item.source || 'CUSTOMER_PURCHASE',
+                  part_number: item.part_number || null,
+                  cost_price: item.buy_price || item.price || null,
+                  retail_price: item.retail_price || null,
+                  notes: item.notes || null,
+                  mode: 'PIECE',
+                  status: 'HOLD',
+                  processing_status: 'INTAKE_PENDING',
+                  sellable_status: 'NOT_SELLABLE',
+                }, { headers: { Authorization: `Bearer ${token}` } });
+                createdHardgoodsItems.push(res.data);
+
+                // Upload any photos captured during estimation
+                const imageFiles = (item.images || [])
+                  .filter(img => img.file instanceof File)
+                  .map(img => img.file);
+                if (imageFiles.length > 0) {
+                  try {
+                    const formData = new FormData();
+                    imageFiles.forEach(f => formData.append('images', f));
+                    await axios.put(`${config.apiUrl}/hardgoods/${itemId}/images`, formData, {
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                  } catch (imgErr) {
+                    console.error('Error uploading hardgoods images:', imgErr);
+                  }
+                }
+              } catch (err) {
+                console.error('Error creating hardgoods item:', err);
+              }
+            }
+          }
+
           // Step 2: Create transaction with PENDING status
           // For jewelry items: use createdJewelryItems
           // For non-jewelry items: use cartItems directly (no item_id needed)
@@ -1128,6 +1183,23 @@ function Checkout() {
                 transaction_type_id: transactionTypes[type],
                 price: item.price,
                 description: item.description
+              };
+            });
+          } else if (createdHardgoodsItems && createdHardgoodsItems.length > 0) {
+            // Map by position in the hardgoods subset so 01, 02, 03 align correctly
+            const hgCheckoutIndices = checkoutItems
+              .map((ci, idx) => ({ ci, idx }))
+              .filter(({ ci }) => ci.fromEstimator === 'hardgoods')
+              .map(({ idx }) => idx);
+            transactionPayload.cartItems = checkoutItems.map((item, idx) => {
+              const type = item.transaction_type?.toLowerCase() || 'buy';
+              const hgPos = hgCheckoutIndices.indexOf(idx);
+              const createdItem = hgPos >= 0 ? createdHardgoodsItems[hgPos] : null;
+              return {
+                item_id: createdItem?.item_id || null,
+                transaction_type_id: transactionTypes[type],
+                price: item.price,
+                description: item.description || item.short_desc || 'Hardgoods Item'
               };
             });
           } else {
@@ -1192,21 +1264,34 @@ function Checkout() {
             // Post a buy_ticket record for each item with this ticket
             for (const item of itemsForTicket) {
               try {
-                // Get item_id from createdJewelryItems if it's a jewelry item
+                // Get item_id from created items
                 let itemId = null;
                 if (createdJewelryItems && createdJewelryItems.length > 0 && createdJewelryItems[item.index]) {
                   itemId = createdJewelryItems[item.index].item_id;
+                } else if (item.fromEstimator === 'hardgoods' && createdHardgoodsItems && createdHardgoodsItems.length > 0) {
+                  // Map by position within the hardgoods subset (preserves 01, 02, 03 order)
+                  const hgIndices = checkoutItems
+                    .map((ci, idx) => ({ ci, idx }))
+                    .filter(({ ci }) => ci.fromEstimator === 'hardgoods')
+                    .map(({ idx }) => idx);
+                  const hgPos = hgIndices.indexOf(item.index);
+                  if (hgPos >= 0 && createdHardgoodsItems[hgPos]) itemId = createdHardgoodsItems[hgPos].item_id;
                 } else if (item.item_id) {
-                  // Use item_id from the item itself if available
                   itemId = item.item_id;
                 }
+
+                // Pass inventory_type when known; backend will auto-detect from DB if null
+                const invType = item.fromEstimator === 'hardgoods' ? 'HG'
+                  : item.fromEstimator === 'jewelry' || item.sourceEstimator === 'jewelry' ? 'JW'
+                  : null;
 
                 await axios.post(
                   `${config.apiUrl}/buy-ticket`,
                   {
                     buy_ticket_id: buyTicketId,
                     transaction_id: realTransactionId,
-                    item_id: itemId
+                    item_id: itemId,
+                    inventory_type: invType
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }
@@ -1241,12 +1326,18 @@ function Checkout() {
                   itemId = item.item_id;
                 }
 
+                // Pass inventory_type when known; backend will auto-detect from DB if null
+                const invType = item.fromEstimator === 'hardgoods' ? 'HG'
+                  : item.fromEstimator === 'jewelry' || item.sourceEstimator === 'jewelry' ? 'JW'
+                  : null;
+
                 await axios.post(
                   `${config.apiUrl}/sale-ticket`,
                   {
                     sale_ticket_id: saleTicketId,
                     transaction_id: realTransactionId,
-                    item_id: itemId
+                    item_id: itemId,
+                    inventory_type: invType
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }
@@ -1470,23 +1561,21 @@ function Checkout() {
             // Only update status for sale transactions with inventory items
             if (transactionType === 'sale' && item.item_id && item.fromInventory) {
               try {
-                // Calculate total price including protection plan (tax already included in price)
                 const basePrice = parseFloat(item.price) || 0;
                 const protectionPlanAmount = item.protectionPlan ? basePrice * 0.15 : 0;
                 const totalItemPrice = basePrice + protectionPlanAmount;
 
-                const response = await axios.put(
-                  `${config.apiUrl}/jewelry/${item.item_id}/status`,
-                  {
-                    status: 'SOLD',
-                    item_price: totalItemPrice
-                  },
+                const endpoint = (item.fromHardgoodsInventory || item._type === 'hardgoods')
+                  ? `${config.apiUrl}/hardgoods/${item.item_id}/status`
+                  : `${config.apiUrl}/jewelry/${item.item_id}/status`;
+
+                await axios.put(
+                  endpoint,
+                  { status: 'SOLD', item_price: totalItemPrice },
                   { headers: { Authorization: `Bearer ${token}` } }
                 );
               } catch (updateError) {
                 console.error(`Error updating item ${item.item_id} status:`, updateError);
-                console.error('Error details:', updateError.response?.data);
-                // Continue with checkout even if status update fails
               }
             }
           }
@@ -1659,7 +1748,7 @@ function Checkout() {
           } else {
             // Navigate after a brief delay to show success message
             setTimeout(() => {
-              navigate('/');
+              navigate('/', { replace: true });
             }, 1000);
           }
 
@@ -2279,7 +2368,11 @@ function Checkout() {
                           <TableCell>
                             {item.images && item.images.length > 0 ? (
                               <Avatar
-                                src={item.images.find(img => img.isPrimary)?.url || item.images[0]?.url}
+                                src={(() => {
+                                  const raw = item.images.find(img => img.isPrimary)?.url || item.images[0]?.url;
+                                  if (!raw) return undefined;
+                                  return raw.startsWith('/uploads') ? config.apiUrl.replace('/api', '') + raw : raw;
+                                })()}
                                 alt="Item"
                                 variant="rounded"
                                 sx={{ width: 50, height: 50, objectFit: 'cover' }}
@@ -2353,16 +2446,6 @@ function Checkout() {
                 <Typography variant="h6">
                   Payment Details
                 </Typography>
-                <Button
-                  variant="outlined"
-                  onClick={handleBackToEstimation}
-                  startIcon={<ArrowBackIcon />}
-                  size="small"
-                >
-                  {location.state?.quoteId ? 'Back to Quotes' : 
-                   location.state?.from === 'cart' ? 'Customer Ticket' : 
-                   location.state?.from === 'coinsbullions' ? 'Bullion Est.' : 'Jewelry Est.'}
-                </Button>
               </Box>
               <Typography variant="h6" gutterBottom sx={{
                 color: remainingAmount >= 0 ? 'success.main' : 'error.main'
@@ -2457,7 +2540,7 @@ function Checkout() {
         onClose={() => {
           setLocationDialogOpen(false);
           setSelectedItemsForRedeem([]);
-          navigate('/');
+          navigate('/', { replace: true });
         }}
         maxWidth="md"
         fullWidth
@@ -2516,7 +2599,7 @@ function Checkout() {
             onClick={() => {
               setLocationDialogOpen(false);
               setSelectedItemsForRedeem([]);
-              navigate('/');
+              navigate('/', { replace: true });
             }}
             variant="outlined"
           >
@@ -2802,7 +2885,7 @@ function Checkout() {
 
                 setLocationDialogOpen(false);
                 setSelectedItemsForRedeem([]);
-                navigate('/');
+                navigate('/', { replace: true });
               } catch (error) {
                 console.error('Error updating items:', error);
                 setSnackbar({

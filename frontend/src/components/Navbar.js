@@ -30,6 +30,8 @@ import {
   Logout as LogoutIcon,
   AccessTime as ClockIcon,
   WarningAmber as WarningIcon,
+  ArrowBack as ArrowBackIcon,
+  ArrowForward as ArrowForwardIcon,
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -401,6 +403,11 @@ function Navbar() {
     <>
       <StyledAppBar position="fixed">
         <Toolbar>
+          <Tooltip title="Go back">
+            <IconButton color="inherit" size="small" onClick={() => navigate(-1)} sx={{ mr: 1 }}>
+              <ArrowBackIcon />
+            </IconButton>
+          </Tooltip>
           <Typography
             variant="h6"
             sx={{
@@ -533,6 +540,13 @@ function Navbar() {
             >
               {formatTime()}
             </Typography>
+
+            {/* Forward navigation */}
+            <Tooltip title="Go forward">
+              <IconButton color="inherit" size="small" onClick={() => navigate(1)}>
+                <ArrowForwardIcon />
+              </IconButton>
+            </Tooltip>
 
             {/* Working Date Indicator */}
             {isWorkingDateEnabled && (

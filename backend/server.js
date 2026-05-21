@@ -52,6 +52,12 @@ const uploadJewelryImages = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10 MB limit per file
 }).array('images', 10); // Allow up to 10 images
 
+// Configure multer for hardgoods image uploads (multiple images)
+const uploadHardgoodsImages = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }
+}).array('images', 10);
+
 // Configure multer for single file uploads (business logo, etc.)
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -67,6 +73,11 @@ if (!fs.existsSync(uploadDir)) {
 const jewelryUploadDir = 'uploads/jewelry/';
 if (!fs.existsSync(jewelryUploadDir)) {
   fs.mkdirSync(jewelryUploadDir, { recursive: true });
+}
+
+const hardgoodsUploadDir = 'uploads/hardgoods/';
+if (!fs.existsSync(hardgoodsUploadDir)) {
+  fs.mkdirSync(hardgoodsUploadDir, { recursive: true });
 }
 
 const scrapUploadDir = 'uploads/scrap/';
@@ -162,40 +173,6 @@ async function generateTransactionId() {
   }
 }
 
-// Function to generate unique item ID
-async function generateItemId(metalCategory, client, usedIds = new Set()) {
-  try {
-    // Get first 4 letters of metal category, uppercase and padded with X if needed
-    const prefix = (metalCategory || 'METL').toUpperCase().slice(0, 4).padEnd(4, 'X');
-    
-    // Get all existing IDs for this prefix
-    const existingIds = await client.query(
-      'SELECT item_id FROM jewelry WHERE item_id LIKE $1 FOR UPDATE',
-      [prefix + '%']
-    );
-    
-    // Create a set of used sequence numbers from both database and current transaction
-    const allUsedIds = new Set([...existingIds.rows.map(r => r.item_id), ...usedIds]);
-    
-    // Find the first available number
-    let nextNumber = 1;
-    let newItemId;
-    
-    while (nextNumber <= 999) {
-      newItemId = `${prefix}${nextNumber.toString().padStart(3, '0')}`;
-      
-      if (!allUsedIds.has(newItemId)) {
-        return newItemId;
-      }
-      nextNumber++;
-    }
-    
-    throw new Error(`No available sequence numbers for prefix ${prefix}`);
-  } catch (error) {
-    console.error('Error in generateItemId:', error);
-    throw error;
-  }
-}
 
 // Schedule daily update of quote days remaining and inventory hold status (runs at midnight)
 setInterval(() => {
@@ -366,6 +343,22 @@ pool.query(`
   ALTER TABLE transactions ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
 `).catch(err => console.error('transactions store_id migration:', err.message));
 
+
+pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'`)
+  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_hardgoods_images ON hardgoods USING GIN (images)`))
+  .catch(err => console.error('hardgoods images migration:', err.message));
+
+pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'HOLD'`)
+  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_hardgoods_status ON hardgoods(status)`))
+  .catch(err => console.error('hardgoods status migration:', err.message));
+
+pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS item_price NUMERIC(10,2)`)
+  .catch(err => console.error('hardgoods item_price migration:', err.message));
+
+pool.query(`ALTER TABLE jewelry ALTER COLUMN item_id TYPE VARCHAR(30)`)
+  .catch(err => console.error('jewelry item_id length migration:', err.message));
+pool.query(`ALTER TABLE jewelry_secondary_gems ALTER COLUMN item_id TYPE VARCHAR(30)`)
+  .catch(err => console.error('jewelry_secondary_gems item_id length migration:', err.message));
 
 // Fix unique_active_connection: replace table constraint with partial index
 // Allows multiple historical (is_active = FALSE) rows per employee/session
@@ -6725,22 +6718,28 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
     // Process each item sequentially
     let itemCounter = 1;
     let globalImageIndex = 0; // Track global image index across all items
+    const ticketCounters = {};
 
     for (let itemIdx = 0; itemIdx < cartItems.length; itemIdx++) {
       const item = cartItems[itemIdx];
 
-      // Use quote_id as item_id if provided, otherwise generate a new one
+      // Use provided item_id, or quote_id-based, or BT-XXXXXXXX-XX from buyTicketId
       let item_id, status;
-      if (quote_id) {
+      const isPawn = item.transaction_type && item.transaction_type.toLowerCase() === 'pawn';
+      if (item.item_id) {
+        item_id = item.item_id;
+        status = isPawn ? 'PAWN' : 'HOLD';
+      } else if (quote_id) {
         const sequentialNumber = itemCounter.toString().padStart(2, '0');
         item_id = `${quote_id}-${sequentialNumber}`;
         itemCounter++;
         status = 'QUOTED';
+      } else if (item.buyTicketId) {
+        ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
+        item_id = `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`;
+        status = isPawn ? 'PAWN' : 'HOLD';
       } else {
-        const usedIds = new Set();
-        item_id = await generateItemId(item.metal_category, client, usedIds);
-        // Check if this is a pawn transaction
-        status = (item.transaction_type && item.transaction_type.toLowerCase() === 'pawn') ? 'PAWN' : 'HOLD';
+        throw new Error('item_id or buyTicketId is required for jewelry item');
       }
 
       // Now save images with meaningful filenames using item_id
@@ -6927,7 +6926,8 @@ app.post('/api/jewelry', async (req, res) => {
     const results = [];
     
     // Process each item sequentially
-    let itemCounter = 1; // Counter for sequential numbers
+    let itemCounter = 1;
+    const ticketCounters = {};
     
     // Process cart items to ensure proper format for PostgreSQL
     const processedCartItems = cartItems.map(item => {
@@ -6965,20 +6965,23 @@ app.post('/api/jewelry', async (req, res) => {
     });
     
     for (const item of processedCartItems) {
-      // Use quote_id as item_id if provided, otherwise generate a new one
+      // Use provided item_id, or quote_id-based, or BT-XXXXXXXX-XX from buyTicketId
       let item_id, status;
-      if (quote_id) {
-        // Add sequential number to quote_id (e.g., QT001-01)
+      const isPawn = item.transaction_type && item.transaction_type.toLowerCase() === 'pawn';
+      if (item.item_id) {
+        item_id = item.item_id;
+        status = isPawn ? 'PAWN' : 'HOLD';
+      } else if (quote_id) {
         const sequentialNumber = itemCounter.toString().padStart(2, '0');
         item_id = `${quote_id}-${sequentialNumber}`;
         itemCounter++;
         status = 'QUOTED';
+      } else if (item.buyTicketId) {
+        ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
+        item_id = `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`;
+        status = isPawn ? 'PAWN' : 'HOLD';
       } else {
-        // Generate unique item ID for non-quote items
-        const usedIds = new Set();
-        item_id = await generateItemId(item.metal_category, client, usedIds);
-        // Check if this is a pawn transaction
-        status = (item.transaction_type && item.transaction_type.toLowerCase() === 'pawn') ? 'PAWN' : 'HOLD';
+        throw new Error('item_id or buyTicketId is required for jewelry item');
       }
       // Insert jewelry record
       const jewelryQuery = `
@@ -7419,7 +7422,7 @@ app.get('/api/buy-ticket', async (req, res) => {
 app.post('/api/buy-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { buy_ticket_id, transaction_id, item_id } = req.body;
+    const { buy_ticket_id, transaction_id, item_id, inventory_type } = req.body;
 
     // Validate required fields
     if (!buy_ticket_id) {
@@ -7428,17 +7431,30 @@ app.post('/api/buy-ticket', async (req, res) => {
 
     await client.query('BEGIN');
 
+    // Auto-detect inventory_type by looking up item_id in both tables if not provided
+    let resolvedInventoryType = inventory_type || null;
+    if (!resolvedInventoryType && item_id) {
+      const jwCheck = await client.query('SELECT 1 FROM jewelry WHERE item_id = $1 LIMIT 1', [item_id]);
+      if (jwCheck.rows.length > 0) {
+        resolvedInventoryType = 'JW';
+      } else {
+        const hgCheck = await client.query('SELECT 1 FROM hardgoods WHERE item_id = $1 LIMIT 1', [item_id]);
+        if (hgCheck.rows.length > 0) resolvedInventoryType = 'HG';
+      }
+    }
+
     // Insert new buy_ticket record
     const insertQuery = `
-      INSERT INTO buy_ticket (buy_ticket_id, transaction_id, item_id)
-      VALUES ($1, $2, $3)
+      INSERT INTO buy_ticket (buy_ticket_id, transaction_id, item_id, inventory_type)
+      VALUES ($1, $2, $3, $4)
       RETURNING *
     `;
 
     const result = await client.query(insertQuery, [
       buy_ticket_id,
       transaction_id || null,
-      item_id || null
+      item_id || null,
+      resolvedInventoryType
     ]);
 
     await client.query('COMMIT');
@@ -7482,7 +7498,7 @@ app.get('/api/sale-ticket', async (req, res) => {
 app.post('/api/sale-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { sale_ticket_id, transaction_id, item_id, quantity } = req.body;
+    const { sale_ticket_id, transaction_id, item_id, quantity, inventory_type } = req.body;
 
     // Validate required fields
     if (!sale_ticket_id) {
@@ -7491,10 +7507,22 @@ app.post('/api/sale-ticket', async (req, res) => {
 
     await client.query('BEGIN');
 
+    // Auto-detect inventory_type by looking up item_id in both tables if not provided
+    let resolvedInventoryType = inventory_type || null;
+    if (!resolvedInventoryType && item_id) {
+      const jwCheck = await client.query('SELECT 1 FROM jewelry WHERE item_id = $1 LIMIT 1', [item_id]);
+      if (jwCheck.rows.length > 0) {
+        resolvedInventoryType = 'JW';
+      } else {
+        const hgCheck = await client.query('SELECT 1 FROM hardgoods WHERE item_id = $1 LIMIT 1', [item_id]);
+        if (hgCheck.rows.length > 0) resolvedInventoryType = 'HG';
+      }
+    }
+
     // Insert new sale_ticket record
     const insertQuery = `
-      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity, inventory_type)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING *
     `;
 
@@ -7502,7 +7530,8 @@ app.post('/api/sale-ticket', async (req, res) => {
       sale_ticket_id,
       transaction_id || null,
       item_id || null,
-      quantity || 1
+      quantity || 1,
+      resolvedInventoryType
     ]);
 
     await client.query('COMMIT');
@@ -9297,6 +9326,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
       };
     } else {
       // Fallback: Get items from buy_ticket, sale_ticket, and pawn_ticket tables (union of all)
+      // JOINs both jewelry (JW) and hardgoods (HG); uses stored inventory_type or auto-detects
       const ticketQuery = `
         WITH item_list AS (
           -- Get buy ticket items
@@ -9306,11 +9336,15 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             bt.item_id,
             bt.buy_ticket_id as ticket_id,
             bt.created_at,
-            j.updated_at,
+            COALESCE(j.updated_at, hg.updated_at) as updated_at,
             'buy' as transaction_type,
+            COALESCE(bt.inventory_type,
+              CASE WHEN j.item_id IS NOT NULL THEN 'JW'
+                   WHEN hg.item_id IS NOT NULL THEN 'HG'
+              END) as inventory_type,
             j.item_id as jewelry_item_id,
-            j.long_desc,
-            j.short_desc,
+            COALESCE(j.long_desc, hg.long_desc) as long_desc,
+            COALESCE(j.short_desc, hg.short_desc) as short_desc,
             j.category,
             j.metal_weight,
             j.precious_metal_type,
@@ -9320,9 +9354,9 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.jewelry_color,
             j.metal_spot_price,
             j.est_metal_value,
-            j.item_price,
-            j.images,
-            j.status as item_status,
+            COALESCE(j.item_price, hg.cost_price) as item_price,
+            COALESCE(j.images, hg.images) as images,
+            COALESCE(j.status, hg.status) as item_status,
             j.primary_gem_type,
             j.primary_gem_category,
             j.primary_gem_size,
@@ -9337,11 +9371,14 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.primary_gem_authentic,
             j.primary_gem_value,
             EXISTS (
-              SELECT * FROM jewelry_secondary_gems jsg
+              SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = bt.item_id
             ) as has_secondary_gems
           FROM buy_ticket bt
           LEFT JOIN jewelry j ON bt.item_id = j.item_id
+            AND COALESCE(bt.inventory_type, 'JW') = 'JW'
+          LEFT JOIN hardgoods hg ON bt.item_id = hg.item_id
+            AND bt.inventory_type = 'HG'
           WHERE bt.transaction_id = $1
 
           UNION ALL
@@ -9353,11 +9390,15 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             st.item_id,
             st.sale_ticket_id as ticket_id,
             st.created_at,
-            j.updated_at,
+            COALESCE(j.updated_at, hg.updated_at) as updated_at,
             'sale' as transaction_type,
+            COALESCE(st.inventory_type,
+              CASE WHEN j.item_id IS NOT NULL THEN 'JW'
+                   WHEN hg.item_id IS NOT NULL THEN 'HG'
+              END) as inventory_type,
             j.item_id as jewelry_item_id,
-            j.long_desc,
-            j.short_desc,
+            COALESCE(j.long_desc, hg.long_desc) as long_desc,
+            COALESCE(j.short_desc, hg.short_desc) as short_desc,
             j.category,
             j.metal_weight,
             j.precious_metal_type,
@@ -9367,9 +9408,9 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.jewelry_color,
             j.metal_spot_price,
             j.est_metal_value,
-            j.item_price,
-            j.images,
-            j.status as item_status,
+            COALESCE(j.item_price, hg.cost_price) as item_price,
+            COALESCE(j.images, hg.images) as images,
+            COALESCE(j.status, hg.status) as item_status,
             j.primary_gem_type,
             j.primary_gem_category,
             j.primary_gem_size,
@@ -9384,16 +9425,19 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.primary_gem_authentic,
             j.primary_gem_value,
             EXISTS (
-              SELECT * FROM jewelry_secondary_gems jsg
+              SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = st.item_id
             ) as has_secondary_gems
           FROM sale_ticket st
           LEFT JOIN jewelry j ON st.item_id = j.item_id
+            AND COALESCE(st.inventory_type, 'JW') = 'JW'
+          LEFT JOIN hardgoods hg ON st.item_id = hg.item_id
+            AND st.inventory_type = 'HG'
           WHERE st.transaction_id = $1
 
           UNION ALL
 
-          -- Get pawn ticket items
+          -- Get pawn ticket items (pawn is always jewelry/JW)
           SELECT
             pt.id,
             pt.transaction_id,
@@ -9402,6 +9446,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             pt.created_at,
             j.updated_at,
             'pawn' as transaction_type,
+            COALESCE(pt.inventory_type, 'JW') as inventory_type,
             j.item_id as jewelry_item_id,
             j.long_desc,
             j.short_desc,
@@ -9431,7 +9476,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.primary_gem_authentic,
             j.primary_gem_value,
             EXISTS (
-              SELECT * FROM jewelry_secondary_gems jsg
+              SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = pt.item_id
             ) as has_secondary_gems
           FROM pawn_ticket pt
@@ -13987,27 +14032,180 @@ app.put('/api/hardgoods/:id', async (req, res) => {
   }
 });
 
+// PUT /api/hardgoods/:id/images  — upload/add images
+app.put('/api/hardgoods/:id/images', uploadHardgoodsImages, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+
+    const checkResult = await client.query('SELECT item_id, images FROM hardgoods WHERE item_id = $1', [id]);
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Hardgoods item not found' });
+    }
+
+    const uploadedFiles = req.files || [];
+    let existingImages = [];
+    try {
+      if (checkResult.rows[0].images) {
+        existingImages = typeof checkResult.rows[0].images === 'string'
+          ? JSON.parse(checkResult.rows[0].images)
+          : checkResult.rows[0].images;
+      }
+    } catch (e) { console.error('Error parsing existing images:', e); }
+
+    const processedImages = [];
+    for (let i = 0; i < uploadedFiles.length; i++) {
+      const file = uploadedFiles[i];
+      const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+      const imageNumber = existingImages.length + i + 1;
+      const filename = `${id}-${imageNumber}${ext}`;
+      const filepath = path.join(hardgoodsUploadDir, filename);
+      await fs.promises.writeFile(filepath, file.buffer);
+      processedImages.push({
+        url: `/uploads/hardgoods/${filename}`,
+        isPrimary: existingImages.length === 0 && i === 0
+      });
+    }
+
+    const allImages = [...existingImages, ...processedImages];
+    const result = await client.query(
+      'UPDATE hardgoods SET images = $1, updated_at = CURRENT_TIMESTAMP WHERE item_id = $2 RETURNING *',
+      [JSON.stringify(allImages), id]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, item: result.rows[0], message: `Added ${processedImages.length} image(s)` });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error updating hardgoods images:', err);
+    res.status(500).json({ error: 'Failed to update hardgoods images', details: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/hardgoods/:id/images/:imageIndex  — remove a single image
+app.delete('/api/hardgoods/:id/images/:imageIndex', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id, imageIndex } = req.params;
+    const idx = parseInt(imageIndex, 10);
+    await client.query('BEGIN');
+
+    const checkResult = await client.query('SELECT item_id, images FROM hardgoods WHERE item_id = $1', [id]);
+    if (checkResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Hardgoods item not found' });
+    }
+
+    let existingImages = [];
+    try {
+      if (checkResult.rows[0].images) {
+        existingImages = typeof checkResult.rows[0].images === 'string'
+          ? JSON.parse(checkResult.rows[0].images)
+          : checkResult.rows[0].images;
+      }
+    } catch (e) {}
+
+    if (idx < 0 || idx >= existingImages.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Invalid image index' });
+    }
+
+    const imgUrl = existingImages[idx].url;
+    if (imgUrl && imgUrl.startsWith('/uploads/hardgoods/')) {
+      const filepath = path.join(hardgoodsUploadDir, path.basename(imgUrl));
+      try { await fs.promises.unlink(filepath); } catch (e) {}
+    }
+
+    const updatedImages = existingImages.filter((_, i) => i !== idx);
+    if (existingImages[idx].isPrimary && updatedImages.length > 0) {
+      updatedImages[0].isPrimary = true;
+    }
+
+    const result = await client.query(
+      'UPDATE hardgoods SET images = $1, updated_at = CURRENT_TIMESTAMP WHERE item_id = $2 RETURNING *',
+      [JSON.stringify(updatedImages), id]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, item: result.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting hardgoods image:', err);
+    res.status(500).json({ error: 'Failed to delete image', details: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // PUT /api/hardgoods/:id/status  — lightweight status-only update
 app.put('/api/hardgoods/:id/status', async (req, res) => {
   try {
-    const { status, processing_status, sellable_status, blocking_reason, next_action } = req.body;
-    const result = await pool.query(
-      `UPDATE hardgoods SET
-         status            = COALESCE($1, status),
-         processing_status = COALESCE($2, processing_status),
-         sellable_status   = COALESCE($3, sellable_status),
-         blocking_reason   = COALESCE($4, blocking_reason),
-         next_action       = COALESCE($5, next_action),
-         updated_at        = CURRENT_TIMESTAMP
-       WHERE item_id = $6
-       RETURNING item_id, status, processing_status, sellable_status, blocking_reason, next_action`,
-      [status, processing_status, sellable_status, blocking_reason, next_action, req.params.id]
-    );
+    const { status, processing_status, sellable_status, blocking_reason, next_action, item_price } = req.body;
+
+    let updateQuery, queryParams;
+    if (status === 'SOLD') {
+      updateQuery = `
+        UPDATE hardgoods SET
+          status          = 'SOLD',
+          sellable_status = 'NOT_SELLABLE',
+          item_price      = COALESCE($1, item_price),
+          updated_at      = CURRENT_TIMESTAMP
+        WHERE item_id = $2
+        RETURNING item_id, status, item_price, processing_status, sellable_status, blocking_reason, next_action`;
+      queryParams = [item_price ?? null, req.params.id];
+    } else {
+      updateQuery = `
+        UPDATE hardgoods SET
+          status            = COALESCE($1, status),
+          processing_status = COALESCE($2, processing_status),
+          sellable_status   = COALESCE($3, sellable_status),
+          blocking_reason   = COALESCE($4, blocking_reason),
+          next_action       = COALESCE($5, next_action),
+          updated_at        = CURRENT_TIMESTAMP
+        WHERE item_id = $6
+        RETURNING item_id, status, processing_status, sellable_status, blocking_reason, next_action`;
+      queryParams = [status, processing_status, sellable_status, blocking_reason, next_action, req.params.id];
+    }
+
+    const result = await pool.query(updateQuery, queryParams);
     if (!result.rows.length) return res.status(404).json({ error: 'Item not found' });
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error updating hardgoods status:', err);
     res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
+// POST /api/hardgoods/:id/move-to-scrap
+app.post('/api/hardgoods/:id/move-to-scrap', async (req, res) => {
+  const { id } = req.params;
+  const { moved_by, bucket_id } = req.body;
+  if (!moved_by) return res.status(400).json({ error: 'Employee ID (moved_by) is required' });
+  if (!bucket_id) return res.status(400).json({ error: 'Bucket ID is required' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('SELECT item_id FROM hardgoods WHERE item_id = $1', [id]);
+    if (!rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Item not found' }); }
+
+    await client.query(
+      `UPDATE hardgoods SET status = 'SCRAP', sellable_status = 'NOT_SELLABLE', updated_at = CURRENT_TIMESTAMP WHERE item_id = $1`,
+      [id]
+    );
+    await client.query(
+      `UPDATE scrap SET item_id = item_id || $1::jsonb, updated_at = CURRENT_TIMESTAMP, updated_by = $2::integer WHERE bucket_id = $3::integer AND NOT item_id @> $1::jsonb`,
+      [JSON.stringify([id]), moved_by, bucket_id]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Item moved to scrap successfully', item_id: id, bucket_id });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error moving hardgoods to scrap:', err);
+    res.status(500).json({ error: 'Failed to move item to scrap', details: err.message });
+  } finally {
+    client.release();
   }
 });
 

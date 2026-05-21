@@ -10,7 +10,6 @@ import {
   FormControl,
   FormControlLabel,
   FormHelperText,
-  Grid,
   IconButton,
   InputLabel,
   MenuItem,
@@ -20,14 +19,12 @@ import {
   Tab,
   Tabs,
   TextField,
-  Tooltip,
   Typography,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
-import LockIcon from '@mui/icons-material/Lock';
 import { useSnackbar } from 'notistack';
 import config from '../config';
 
@@ -64,6 +61,7 @@ function HardgoodsEdit() {
   const [processingStatuses, setProcessingStatuses] = useState([]);
   const [inventoryStatuses, setInventoryStatuses] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [storageLocations, setStorageLocations] = useState([]);
 
   // Read-only display (edit mode only)
   const [originalIntakeDesc, setOriginalIntakeDesc] = useState('');
@@ -97,6 +95,10 @@ function HardgoodsEdit() {
   const [blockingReason, setBlockingReason] = useState('');
   const [nextAction, setNextAction] = useState('');
 
+  // Images
+  const [images, setImages] = useState([]);
+  const [pendingImages, setPendingImages] = useState([]);
+
   // Tab 3: Attributes
   const [attributes, setAttributes] = useState([]);
   const [newAttrKey, setNewAttrKey] = useState('');
@@ -106,6 +108,12 @@ function HardgoodsEdit() {
   const [categoryFields, setCategoryFields] = useState([]);
   const [categoryFieldValues, setCategoryFieldValues] = useState({});
 
+  const makeAbsoluteUrl = (url) => {
+    if (!url) return '';
+    if (url.startsWith('http')) return url;
+    return `${API_BASE_URL.replace('/api', '')}${url}`;
+  };
+
   useEffect(() => {
     if (!itemId) {
       navigate('/inventory/hardgoods');
@@ -114,21 +122,27 @@ function HardgoodsEdit() {
     loadAll();
   }, [itemId]);
 
+  useEffect(() => {
+    return () => { pendingImages.forEach(f => { if (f._preview) URL.revokeObjectURL(f._preview); }); };
+  }, [pendingImages]);
+
   // ── Full load (edit mode) ───────────────────────────────────────────────────
   const loadAll = async () => {
     try {
       setLoading(true);
-      const [itemRes, modesRes, procRes, statusRes, divsRes] = await Promise.all([
+      const [itemRes, modesRes, procRes, statusRes, divsRes, locRes] = await Promise.all([
         axios.get(`${API_BASE_URL}/hardgoods/${itemId}`),
         axios.get(`${API_BASE_URL}/inventory-modes`),
         axios.get(`${API_BASE_URL}/processing-statuses`),
         axios.get(`${API_BASE_URL}/inventory-status`),
         axios.get(`${API_BASE_URL}/divisions`),
+        axios.get(`${API_BASE_URL}/storage-locations`),
       ]);
 
       setModes(modesRes.data);
       setProcessingStatuses(procRes.data);
       setInventoryStatuses(statusRes.data);
+      setStorageLocations(locRes.data);
 
       const hg = divsRes.data.find(d => d.code === 'HG');
       if (hg) {
@@ -210,6 +224,14 @@ function HardgoodsEdit() {
     setNextAction(item.next_action || '');
 
     setAttributes(item.attributes || []);
+
+    let imgs = [];
+    try {
+      imgs = item.images
+        ? (typeof item.images === 'string' ? JSON.parse(item.images) : item.images)
+        : [];
+    } catch (e) {}
+    setImages(Array.isArray(imgs) ? imgs : []);
   };
 
   // ── Build payload (shared by POST and PUT) ─────────────────────────────────
@@ -261,12 +283,27 @@ function HardgoodsEdit() {
         .map(f => f.label_override || f.label || f.field_key)
         .join(', ');
       enqueueSnackbar(`Required fields missing: ${keys}`, { variant: 'warning' });
-      setTab(3);
+      setTab(1);
       return;
     }
 
     try {
       setSaving(true);
+
+      if (pendingImages.length > 0) {
+        const formData = new FormData();
+        pendingImages.forEach(f => formData.append('images', f));
+        const imgRes = await axios.put(`${API_BASE_URL}/hardgoods/${itemId}/images`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        if (imgRes.data.success) {
+          let updatedImgs = imgRes.data.item.images;
+          if (typeof updatedImgs === 'string') updatedImgs = JSON.parse(updatedImgs);
+          setImages(Array.isArray(updatedImgs) ? updatedImgs : []);
+          setPendingImages([]);
+        }
+      }
+
       await axios.put(`${API_BASE_URL}/hardgoods/${itemId}`, buildPayload());
       enqueueSnackbar('Item saved', { variant: 'success' });
     } catch (err) {
@@ -295,6 +332,20 @@ function HardgoodsEdit() {
 
   const handleRemoveAttr = (index) => {
     setAttributes(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleDeleteImage = async (index) => {
+    try {
+      const res = await axios.delete(`${API_BASE_URL}/hardgoods/${itemId}/images/${index}`);
+      if (res.data.success) {
+        let updatedImgs = res.data.item.images;
+        if (typeof updatedImgs === 'string') updatedImgs = JSON.parse(updatedImgs);
+        setImages(Array.isArray(updatedImgs) ? updatedImgs : []);
+        enqueueSnackbar('Image removed', { variant: 'success' });
+      }
+    } catch (err) {
+      enqueueSnackbar('Failed to remove image', { variant: 'error' });
+    }
   };
 
   // ── Typed input renderer for schema fields ─────────────────────────────────
@@ -379,12 +430,12 @@ function HardgoodsEdit() {
 
       {/* ── Header bar ── */}
       <Paper elevation={1} sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-        <IconButton onClick={() => navigate('/inventory/hardgoods')} size="small">
+        <IconButton onClick={() => navigate(-1)} size="small">
           <ArrowBackIcon />
         </IconButton>
         <Box sx={{ flex: 1 }}>
           <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
-            Edit Hardgoods Item
+            {originalIntakeDesc || 'Hardgoods Item'}
           </Typography>
           <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'text.secondary' }}>
             {itemId}
@@ -404,282 +455,190 @@ function HardgoodsEdit() {
         </Button>
       </Paper>
 
-      {/* ── Original intake description (edit mode, locked) ── */}
-      {!isCreate && originalIntakeDesc && (
-        <Box sx={{ px: 3, pt: 1.5, pb: 0.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, bgcolor: 'grey.50', p: 1.5, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-            <Tooltip title="Original intake description — cannot be changed">
-              <LockIcon fontSize="small" sx={{ mt: 0.2, color: 'text.disabled' }} />
-            </Tooltip>
-            <Box>
-              <Typography variant="caption" color="text.secondary">Original Intake Description</Typography>
-              <Typography variant="body2">{originalIntakeDesc}</Typography>
-            </Box>
+
+      {/* ── Photo strip ── */}
+      <Box sx={{ px: 3, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: 1, borderColor: 'divider', flexShrink: 0, flexWrap: 'wrap' }}>
+        {images.map((img, idx) => (
+          <Box key={idx} sx={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
+            <img
+              src={makeAbsoluteUrl(img.url || img.image_url || img)}
+              alt={`item-${idx + 1}`}
+              style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: img.isPrimary ? '2px solid #1976d2' : '1px solid #ddd' }}
+            />
+            <IconButton
+              size="small"
+              color="error"
+              sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
+              onClick={() => handleDeleteImage(idx)}
+            >
+              <DeleteIcon sx={{ fontSize: 14 }} />
+            </IconButton>
           </Box>
-        </Box>
-      )}
+        ))}
+        {pendingImages.map((file, idx) => (
+          <Box key={`p-${idx}`} sx={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
+            <img
+              src={URL.createObjectURL(file)}
+              alt={`pending-${idx + 1}`}
+              style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: '2px dashed #1976d2', opacity: 0.75 }}
+            />
+            <IconButton
+              size="small"
+              color="error"
+              sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
+              onClick={() => setPendingImages(prev => prev.filter((_, i) => i !== idx))}
+            >
+              <DeleteIcon sx={{ fontSize: 14 }} />
+            </IconButton>
+          </Box>
+        ))}
+        <Button variant="outlined" size="small" component="label" startIcon={<AddIcon />} sx={{ height: 80, minWidth: 100, flexShrink: 0 }}>
+          Add Photos
+          <input type="file" hidden multiple accept="image/*" onChange={e => {
+            const files = Array.from(e.target.files);
+            if (files.length) {
+              setPendingImages(prev => [...prev, ...files]);
+              enqueueSnackbar(`${files.length} photo(s) selected — click Save to upload`, { variant: 'info' });
+            }
+            e.target.value = '';
+          }} />
+        </Button>
+        {pendingImages.length > 0 && (
+          <Typography variant="caption" color="primary">{pendingImages.length} pending save</Typography>
+        )}
+      </Box>
 
       {/* ── Tabs ── */}
       <Box sx={{ flex: 1, overflow: 'auto', px: 3, pb: 3 }}>
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
           <Tab label="Details" />
-          <Tab label="Mode & Pricing" />
-          <Tab label="Processing" />
           <Tab label={`Attributes (${categoryFields.length + freeFormAttrs.length})`} />
         </Tabs>
 
-        {/* ── Tab 0: Details ── */}
+        {/* ── Tab 0: Details (description + mode/pricing + processing) ── */}
         <TabPanel value={tab} index={0}>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={8}>
-              <TextField
-                label="Short Description"
-                value={shortDesc}
-                onChange={e => setShortDesc(e.target.value)}
-                fullWidth size="small"
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Category</InputLabel>
-                <Select value={categoryId} onChange={e => handleCategoryChange(e.target.value)} label="Category">
-                  <MenuItem value=""><em>None</em></MenuItem>
-                  {categories.map(c => (
-                    <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                label="Long Description"
-                value={longDesc}
-                onChange={e => setLongDesc(e.target.value)}
-                fullWidth multiline minRows={3} size="small"
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Condition</InputLabel>
-                <Select value={condition} onChange={e => setCondition(e.target.value)} label="Condition">
-                  <MenuItem value=""><em>Not specified</em></MenuItem>
-                  {CONDITION_OPTIONS.map(c => (
-                    <MenuItem key={c} value={c}>{c}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField
-                label="Location"
-                value={itemLocation}
-                onChange={e => setItemLocation(e.target.value)}
-                fullWidth size="small"
-                placeholder="e.g. Showcase 3, Shelf B"
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField
-                label="Part Number"
-                value={partNumber}
-                onChange={e => setPartNumber(e.target.value)}
-                fullWidth size="small"
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Source</InputLabel>
-                <Select value={source} onChange={e => setSource(e.target.value)} label="Source">
-                  <MenuItem value=""><em>Not specified</em></MenuItem>
-                  {SOURCE_OPTIONS.map(s => (
-                    <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4} sx={{ display: 'flex', alignItems: 'center' }}>
-              <FormControlLabel
-                control={<Switch checked={isMemo} onChange={e => setIsMemo(e.target.checked)} />}
-                label="Vendor Memo"
-              />
-            </Grid>
-            {isMemo && (
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  label="Memo Due Date"
-                  type="date"
-                  value={memoDueDate}
-                  onChange={e => setMemoDueDate(e.target.value)}
-                  fullWidth size="small"
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-            )}
-            <Grid item xs={12}>
-              <TextField
-                label="Notes"
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                fullWidth multiline minRows={2} size="small"
-              />
-            </Grid>
-          </Grid>
-        </TabPanel>
+          <Box sx={{ display: 'flex', gap: 2 }}>
 
-        {/* ── Tab 1: Mode & Pricing ── */}
-        <TabPanel value={tab} index={1}>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Mode</InputLabel>
-                <Select value={mode} onChange={e => setMode(e.target.value)} label="Mode">
-                  {modes.map(m => (
-                    <MenuItem key={m.code} value={m.code}>{m.label}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField
-                label="Cost Price"
-                type="number"
-                inputProps={{ min: 0, step: 0.01 }}
-                value={costPrice}
-                onChange={e => setCostPrice(e.target.value)}
-                fullWidth size="small"
-              />
-            </Grid>
-            {mode !== 'BUCKET' && (
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  label="Retail Price"
-                  type="number"
-                  inputProps={{ min: 0, step: 0.01 }}
-                  value={retailPrice}
-                  onChange={e => setRetailPrice(e.target.value)}
-                  fullWidth size="small"
-                />
-              </Grid>
-            )}
+            {/* Left column: item details */}
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <TextField label="Short Description" value={shortDesc} onChange={e => setShortDesc(e.target.value)} size="small" sx={{ flex: 2 }} />
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Category</InputLabel>
+                  <Select value={categoryId} onChange={e => handleCategoryChange(e.target.value)} label="Category">
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {categories.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Box>
+              <TextField label="Long Description" value={longDesc} onChange={e => setLongDesc(e.target.value)} fullWidth multiline minRows={2} size="small" />
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Condition</InputLabel>
+                  <Select value={condition} onChange={e => setCondition(e.target.value)} label="Condition">
+                    <MenuItem value=""><em>Not specified</em></MenuItem>
+                    {CONDITION_OPTIONS.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Location</InputLabel>
+                  <Select value={itemLocation} onChange={e => setItemLocation(e.target.value)} label="Location">
+                    <MenuItem value=""><em>None</em></MenuItem>
+                    {storageLocations.map(loc => <MenuItem key={loc.location_id} value={loc.location}>{loc.location}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <TextField label="Part Number" value={partNumber} onChange={e => setPartNumber(e.target.value)} size="small" sx={{ flex: 1 }} />
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Source</InputLabel>
+                  <Select value={source} onChange={e => setSource(e.target.value)} label="Source">
+                    <MenuItem value=""><em>Not specified</em></MenuItem>
+                    {SOURCE_OPTIONS.map(s => <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+                <FormControlLabel control={<Switch checked={isMemo} onChange={e => setIsMemo(e.target.checked)} />} label="Vendor Memo" />
+                {isMemo && (
+                  <TextField label="Memo Due Date" type="date" value={memoDueDate} onChange={e => setMemoDueDate(e.target.value)} size="small" InputLabelProps={{ shrink: true }} sx={{ flex: 1 }} />
+                )}
+              </Box>
+              <TextField label="Notes" value={notes} onChange={e => setNotes(e.target.value)} fullWidth multiline minRows={2} size="small" />
+            </Box>
 
-            {mode === 'UNIT' && (
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  label="Serial Number"
-                  value={serialNumber}
-                  onChange={e => setSerialNumber(e.target.value)}
-                  fullWidth size="small"
-                />
-              </Grid>
-            )}
-            {mode === 'STOCK' && (
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  label="Quantity on Hand"
-                  type="number"
-                  inputProps={{ min: 0, step: 1 }}
-                  value={quantity}
-                  onChange={e => setQuantity(e.target.value)}
-                  fullWidth size="small"
-                />
-              </Grid>
-            )}
-            {mode === 'BUCKET' && (
-              <Grid item xs={12} sm={4}>
-                <TextField
-                  label="Bucket Value"
-                  type="number"
-                  inputProps={{ min: 0, step: 0.01 }}
-                  value={bucketValue}
-                  onChange={e => setBucketValue(e.target.value)}
-                  fullWidth size="small"
-                  helperText="Total value of the mixed lot"
-                />
-              </Grid>
-            )}
+            <Divider orientation="vertical" flexItem />
 
-            {mode === 'PIECE' && (
-              <Grid item xs={12}>
-                <Typography variant="caption" color="text.secondary">
-                  PIECE mode — unique one-off item. No serial, quantity, or bucket fields apply.
-                </Typography>
-              </Grid>
-            )}
-          </Grid>
-        </TabPanel>
+            {/* Right column: mode/pricing + processing */}
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
 
-        {/* ── Tab 2: Processing ── */}
-        <TabPanel value={tab} index={2}>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Item Status</InputLabel>
-                <Select value={status} onChange={e => setStatus(e.target.value)} label="Item Status">
-                  {inventoryStatuses.map(s => (
-                    <MenuItem key={s.status_code} value={s.status_code}>{s.status_name}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Sellable Status</InputLabel>
-                <Select value={sellableStatus} onChange={e => setSellableStatus(e.target.value)} label="Sellable Status">
-                  <MenuItem value="SELLABLE">
-                    <Chip label="Sellable" color="success" size="small" sx={{ pointerEvents: 'none' }} />
-                  </MenuItem>
-                  <MenuItem value="NOT_SELLABLE">
-                    <Chip label="Not Sellable" color="default" size="small" sx={{ pointerEvents: 'none' }} />
-                  </MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Processing Status</InputLabel>
-                <Select value={processingStatus} onChange={e => setProcessingStatus(e.target.value)} label="Processing Status">
-                  {processingStatuses.map(s => (
-                    <MenuItem key={s.code} value={s.code}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Mode &amp; Pricing
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Mode</InputLabel>
+                  <Select value={mode} onChange={e => setMode(e.target.value)} label="Mode">
+                    {modes.map(m => <MenuItem key={m.code} value={m.code}>{m.label}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <TextField label="Cost Price" type="number" inputProps={{ min: 0, step: 0.01 }} value={costPrice} onChange={e => setCostPrice(e.target.value)} size="small" sx={{ flex: 1 }} />
+                {mode !== 'BUCKET' && (
+                  <TextField label="Retail Price" type="number" inputProps={{ min: 0, step: 0.01 }} value={retailPrice} onChange={e => setRetailPrice(e.target.value)} size="small" sx={{ flex: 1 }} />
+                )}
+              </Box>
+              {mode === 'UNIT' && (
+                <TextField label="Serial Number" value={serialNumber} onChange={e => setSerialNumber(e.target.value)} size="small" fullWidth />
+              )}
+              {mode === 'STOCK' && (
+                <TextField label="Quantity on Hand" type="number" inputProps={{ min: 0, step: 1 }} value={quantity} onChange={e => setQuantity(e.target.value)} size="small" fullWidth />
+              )}
+              {mode === 'BUCKET' && (
+                <TextField label="Bucket Value" type="number" inputProps={{ min: 0, step: 0.01 }} value={bucketValue} onChange={e => setBucketValue(e.target.value)} size="small" fullWidth helperText="Total value of the mixed lot" />
+              )}
+
+              <Divider />
+
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Processing
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Item Status</InputLabel>
+                  <Select value={status} onChange={e => setStatus(e.target.value)} label="Item Status">
+                    {inventoryStatuses.map(s => <MenuItem key={s.status_code} value={s.status_code}>{s.status_name}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Sellable Status</InputLabel>
+                  <Select value={sellableStatus} onChange={e => setSellableStatus(e.target.value)} label="Sellable Status">
+                    <MenuItem value="SELLABLE"><Chip label="Sellable" color="success" size="small" sx={{ pointerEvents: 'none' }} /></MenuItem>
+                    <MenuItem value="NOT_SELLABLE"><Chip label="Not Sellable" color="default" size="small" sx={{ pointerEvents: 'none' }} /></MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel>Processing Status</InputLabel>
+                  <Select value={processingStatus} onChange={e => setProcessingStatus(e.target.value)} label="Processing Status">
+                    {processingStatuses.map(s => (
+                      <MenuItem key={s.code} value={s.code}>
                         <Chip label={s.label} color={s.ui_color || 'default'} size="small" sx={{ pointerEvents: 'none' }} />
-                      </Box>
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField
-                label="Processing Queue"
-                value={processingQueue}
-                onChange={e => setProcessingQueue(e.target.value)}
-                fullWidth size="small"
-                placeholder="e.g. ELECTRONICS, REPAIRS"
-              />
-            </Grid>
-            <Grid item xs={12} sm={8}>
-              <TextField
-                label="Blocking Reason"
-                value={blockingReason}
-                onChange={e => setBlockingReason(e.target.value)}
-                fullWidth size="small"
-                placeholder="Required when status is EXCEPTION"
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                label="Next Action"
-                value={nextAction}
-                onChange={e => setNextAction(e.target.value)}
-                fullWidth size="small"
-                placeholder="What needs to happen next"
-              />
-            </Grid>
-          </Grid>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <TextField label="Processing Queue" value={processingQueue} onChange={e => setProcessingQueue(e.target.value)} size="small" sx={{ flex: 1 }} placeholder="e.g. ELECTRONICS" />
+              </Box>
+              <TextField label="Blocking Reason" value={blockingReason} onChange={e => setBlockingReason(e.target.value)} fullWidth size="small" placeholder="Required when status is EXCEPTION" />
+              <TextField label="Next Action" value={nextAction} onChange={e => setNextAction(e.target.value)} fullWidth size="small" placeholder="What needs to happen next" />
+
+            </Box>
+          </Box>
         </TabPanel>
 
-        {/* ── Tab 3: Attributes ── */}
-        <TabPanel value={tab} index={3}>
+        {/* ── Tab 1: Attributes ── */}
+        <TabPanel value={tab} index={1}>
 
           {/* Schema-defined category fields */}
           {categoryFields.length > 0 && (
@@ -687,13 +646,13 @@ function HardgoodsEdit() {
               <Typography variant="subtitle2" color="text.secondary" gutterBottom>
                 Category Fields
               </Typography>
-              <Grid container spacing={2}>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
                 {categoryFields.map(field => (
-                  <Grid item xs={12} sm={6} key={field.field_key}>
+                  <Box key={field.field_key} sx={{ flex: '1 1 calc(50% - 8px)', minWidth: 200 }}>
                     {renderCategoryField(field)}
-                  </Grid>
+                  </Box>
                 ))}
-              </Grid>
+              </Box>
               <Divider sx={{ mt: 2, mb: 2 }} />
             </Box>
           )}

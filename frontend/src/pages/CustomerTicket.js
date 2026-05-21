@@ -2258,6 +2258,14 @@ const CustomerTicket = () => {
   });
   const [selectedCategory, setSelectedCategory] = React.useState(null);
 
+  // Hardgoods inventory dialog state
+  const [hardgoodsCategoryDialog, setHardgoodsCategoryDialog] = React.useState({ open: false });
+  const [hardgoodsInventoryDialog, setHardgoodsInventoryDialog] = React.useState({ open: false });
+  const [hardgoodsInventoryItems, setHardgoodsInventoryItems] = React.useState([]);
+  const [selectedHardgoodsCategory, setSelectedHardgoodsCategory] = React.useState(null);
+  const [hardgoodsCategories, setHardgoodsCategories] = React.useState([]);
+  const [hardgoodsCategoriesLoaded, setHardgoodsCategoriesLoaded] = React.useState(false);
+
   const handleJewelryEstimatorClick = async (itemId, transactionType) => {
     // For Sale tab, open category selector first
     if (transactionType === 'sale') {
@@ -2379,6 +2387,72 @@ const CustomerTicket = () => {
     }
 
     setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null });
+  };
+
+  const handleHardgoodsClick = async () => {
+    if (!hardgoodsCategoriesLoaded) {
+      try {
+        const divsRes = await fetch(`${config.apiUrl}/divisions`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        });
+        const divs = await divsRes.json();
+        const hg = divs.find(d => d.code === 'HG');
+        if (hg) {
+          const catRes = await fetch(`${config.apiUrl}/categories?division_id=${hg.id}`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          });
+          const cats = await catRes.json();
+          setHardgoodsCategories(cats);
+          setHardgoodsCategoriesLoaded(true);
+        }
+      } catch (err) {
+        console.error('Error loading hardgoods categories:', err);
+        showSnackbar('Error loading categories', 'error');
+        return;
+      }
+    }
+    setHardgoodsCategoryDialog({ open: true });
+  };
+
+  const handleHardgoodsCategorySelect = async (category) => {
+    setSelectedHardgoodsCategory(category);
+    try {
+      const res = await fetch(
+        `${config.apiUrl}/hardgoods?category_id=${category.id}&sellable_status=SELLABLE`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      const items = await res.json();
+      setHardgoodsInventoryItems(items);
+      setHardgoodsCategoryDialog({ open: false });
+      setHardgoodsInventoryDialog({ open: true });
+    } catch (err) {
+      console.error('Error fetching hardgoods:', err);
+      showSnackbar('Error loading items', 'error');
+    }
+  };
+
+  const handleSelectHardgoodsItem = (item) => {
+    const hasEmptySaleItems = saleItems.length === 1 && !saleItems[0].description;
+    const newSaleItem = {
+      id: item.item_id,
+      description: item.short_desc || item.long_desc || item.item_id,
+      category: item.category_name,
+      price: item.retail_price || item.cost_price || 0,
+      retail_price: item.retail_price,
+      item_id: item.item_id,
+      images: item.images || [],
+      fromInventory: true,
+      fromHardgoodsInventory: true,
+      transaction_type: 'sale',
+      protectionPlan: false,
+    };
+    setSaleItems(prev => {
+      const newItems = hasEmptySaleItems ? [newSaleItem] : [...prev, newSaleItem];
+      saveTicketItems('sale', newItems);
+      return newItems;
+    });
+    setHardgoodsInventoryDialog({ open: false });
+    showSnackbar('Item added to sale ticket', 'success');
   };
 
   const buildJewelryDescription = (item) => {
@@ -2948,9 +3022,6 @@ const CustomerTicket = () => {
     navigate('/bullion-estimator', { state: { customer } });
   };
   
-  const handleMiscEstimatorClick = () => {
-    navigate('/misc-estimator', { state: { customer } });
-  };
   
   // Handlers for action buttons
   const [totals, setTotals] = React.useState({
@@ -4434,8 +4505,8 @@ return (
                                         <MonetizationOnIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
-                                    <Tooltip title="Misc Estimator">
-                                      <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
+                                    <Tooltip title="Hardgoods Estimator">
+                                      <IconButton size="small" color="success" onClick={handleHardgoodsClick}>
                                         <WatchIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -4584,8 +4655,8 @@ return (
                                         <MonetizationOnIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
-                                    <Tooltip title="Misc Estimator">
-                                      <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
+                                    <Tooltip title="Hardgoods Estimator">
+                                      <IconButton size="small" color="success" onClick={handleHardgoodsClick}>
                                         <WatchIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -4718,8 +4789,8 @@ return (
                                         <MonetizationOnIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
-                                    <Tooltip title="Misc Estimator">
-                                      <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
+                                    <Tooltip title="Hardgoods Estimator">
+                                      <IconButton size="small" color="success" onClick={handleHardgoodsClick}>
                                         <WatchIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -4859,8 +4930,8 @@ return (
                                           <MonetizationOnIcon fontSize="small" />
                                         </IconButton>
                                       </Tooltip>
-                                      <Tooltip title="Misc Estimator">
-                                        <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
+                                      <Tooltip title="Hardgoods Estimator">
+                                        <IconButton size="small" color="success" onClick={handleHardgoodsClick}>
                                           <WatchIcon fontSize="small" />
                                         </IconButton>
                                       </Tooltip>
@@ -5056,8 +5127,8 @@ return (
                                         <MonetizationOnIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
-                                    <Tooltip title="Misc Estimator">
-                                      <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
+                                    <Tooltip title="Hardgoods Estimator">
+                                      <IconButton size="small" color="success" onClick={handleHardgoodsClick}>
                                         <WatchIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -5392,8 +5463,8 @@ return (
                                         <MonetizationOnIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
-                                    <Tooltip title="Misc Estimator">
-                                      <IconButton size="small" color="success" onClick={handleMiscEstimatorClick}>
+                                    <Tooltip title="Hardgoods Estimator">
+                                      <IconButton size="small" color="success" onClick={handleHardgoodsClick}>
                                         <WatchIcon fontSize="small" />
                                       </IconButton>
                                     </Tooltip>
@@ -6066,6 +6137,113 @@ return (
           <Button onClick={() => setJewelryInventoryDialog({ open: false, itemId: null, transactionType: null })}>
             Cancel
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Hardgoods Category Selection Dialog */}
+      <Dialog
+        open={hardgoodsCategoryDialog.open}
+        onClose={() => setHardgoodsCategoryDialog({ open: false })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Select Hardgoods Category</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            {hardgoodsCategories.map((cat) => (
+              <Grid item xs={6} sm={4} key={cat.id}>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => handleHardgoodsCategorySelect(cat)}
+                  sx={{
+                    py: 2,
+                    textTransform: 'none',
+                    fontSize: '1rem',
+                    '&:hover': { bgcolor: 'warning.light', color: 'white' }
+                  }}
+                >
+                  {cat.name}
+                </Button>
+              </Grid>
+            ))}
+            {hardgoodsCategories.length === 0 && (
+              <Grid item xs={12}>
+                <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+                  No categories found
+                </Typography>
+              </Grid>
+            )}
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setHardgoodsCategoryDialog({ open: false })}>Cancel</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Hardgoods Inventory Selection Dialog */}
+      <Dialog
+        open={hardgoodsInventoryDialog.open}
+        onClose={() => setHardgoodsInventoryDialog({ open: false })}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          Select Hardgoods Item
+          {selectedHardgoodsCategory && (
+            <Typography variant="subtitle2" color="text.secondary">
+              Category: {selectedHardgoodsCategory.name}
+            </Typography>
+          )}
+        </DialogTitle>
+        <DialogContent>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Item ID</TableCell>
+                  <TableCell>Description</TableCell>
+                  <TableCell>Condition</TableCell>
+                  <TableCell>Location</TableCell>
+                  <TableCell>Retail Price</TableCell>
+                  <TableCell>Action</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {hardgoodsInventoryItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center">
+                      <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+                        No sellable items in this category
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : hardgoodsInventoryItems.map((item) => (
+                  <TableRow key={item.item_id} hover>
+                    <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>{item.item_id}</TableCell>
+                    <TableCell>{item.short_desc || item.long_desc || '—'}</TableCell>
+                    <TableCell>{item.condition || '—'}</TableCell>
+                    <TableCell>{item.location || '—'}</TableCell>
+                    <TableCell>${(parseFloat(item.retail_price) || parseFloat(item.cost_price) || 0).toFixed(2)}</TableCell>
+                    <TableCell>
+                      <Button size="small" variant="contained" onClick={() => handleSelectHardgoodsItem(item)}>
+                        Select
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setHardgoodsInventoryDialog({ open: false });
+            setHardgoodsCategoryDialog({ open: true });
+          }}>
+            Back
+          </Button>
+          <Button onClick={() => setHardgoodsInventoryDialog({ open: false })}>Cancel</Button>
         </DialogActions>
       </Dialog>
 

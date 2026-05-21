@@ -4,10 +4,13 @@ import axios from 'axios';
 import {
   Box,
   Button,
+  Divider,
   FormControl,
-  Grid,
   IconButton,
   InputLabel,
+  List,
+  ListItem,
+  ListItemText,
   MenuItem,
   Paper,
   Select,
@@ -16,6 +19,8 @@ import {
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useSnackbar } from 'notistack';
 import config from '../config';
 
@@ -33,11 +38,49 @@ const SOURCE_OPTIONS = [
 
 const CONDITION_OPTIONS = ['New', 'Like New', 'Good', 'Fair', 'Poor', 'Damaged'];
 
+const EMPTY_FORM = {
+  shortDesc: '',
+  longDesc: '',
+  categoryId: '',
+  condition: '',
+  source: 'CUSTOMER_PURCHASE',
+  partNumber: '',
+  notes: '',
+  pawnPrice: '',
+  buyPrice: '',
+  retailPrice: '',
+  images: [],
+};
+
 function generateTicketId() {
   let last = parseInt(localStorage.getItem('lastBuySaleTicketNumber') || '0');
   last += 1;
   localStorage.setItem('lastBuySaleTicketNumber', last.toString());
   return `BT-${last.toString().padStart(8, '0')}`;
+}
+
+function PriceRow({ label, value, onChange, borderBottom = true }) {
+  return (
+    <Box sx={{
+      display: 'flex',
+      alignItems: 'center',
+      p: 1.5,
+      ...(borderBottom && { borderBottom: '1px solid', borderColor: 'divider' }),
+    }}>
+      <Typography variant="subtitle1" sx={{ flex: 1, color: 'text.secondary' }}>
+        {label}: $
+      </Typography>
+      <TextField
+        size="small"
+        type="number"
+        value={value}
+        variant="standard"
+        onChange={e => onChange(e.target.value)}
+        inputProps={{ min: 0, step: 0.01, inputMode: 'decimal', style: { width: '80px' } }}
+        sx={{ ml: 1, '& .MuiInputBase-root': { ml: 0, pl: 0 } }}
+      />
+    </Box>
+  );
 }
 
 function HardgoodsEstimator() {
@@ -46,16 +89,8 @@ function HardgoodsEstimator() {
   const { enqueueSnackbar } = useSnackbar();
 
   const [categories, setCategories] = useState([]);
-
-  const [shortDesc, setShortDesc]     = useState('');
-  const [longDesc, setLongDesc]       = useState('');
-  const [categoryId, setCategoryId]   = useState('');
-  const [condition, setCondition]     = useState('');
-  const [source, setSource]           = useState('CUSTOMER_PURCHASE');
-  const [partNumber, setPartNumber]   = useState('');
-  const [buyPrice, setBuyPrice]       = useState('');
-  const [retailPrice, setRetailPrice] = useState('');
-  const [notes, setNotes]             = useState('');
+  const [estimatedItems, setEstimatedItems] = useState([]);
+  const [form, setForm] = useState(EMPTY_FORM);
 
   useEffect(() => {
     loadCategories();
@@ -74,40 +109,64 @@ function HardgoodsEstimator() {
     }
   };
 
+  const setField = (key, val) => setForm(prev => ({ ...prev, [key]: val }));
+
+  const buildItem = () => {
+    const categoryName = categories.find(c => c.id === form.categoryId)?.name || '';
+    return {
+      transaction_type: 'buy',
+      price: parseFloat(form.buyPrice),
+      description: form.shortDesc,
+      short_desc: form.shortDesc,
+      long_desc: form.longDesc || null,
+      category_id: form.categoryId || null,
+      category_name: categoryName,
+      condition: form.condition || null,
+      source: form.source || null,
+      part_number: form.partNumber || null,
+      pawn_price: form.pawnPrice ? parseFloat(form.pawnPrice) : null,
+      buy_price: parseFloat(form.buyPrice),
+      retail_price: form.retailPrice ? parseFloat(form.retailPrice) : null,
+      notes: form.notes || null,
+      fromEstimator: 'hardgoods',
+      images: form.images.map((img, idx) => ({
+        url: img.url,
+        file: img.file,
+        isPrimary: idx === 0,
+      })),
+    };
+  };
+
+  const handleRemoveItem = (index) => {
+    setEstimatedItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleRemoveFormImage = (index) => {
+    setField('images', form.images.filter((_, i) => i !== index));
+  };
+
   const handleProceedToCheckout = () => {
-    if (!shortDesc.trim()) {
-      enqueueSnackbar('Description is required', { variant: 'warning' });
-      return;
+    let items = [...estimatedItems];
+    if (form.shortDesc.trim()) {
+      if (!form.buyPrice || parseFloat(form.buyPrice) <= 0) {
+        enqueueSnackbar('Buy price is required for the current item', { variant: 'warning' });
+        return;
+      }
+      items = [...items, buildItem()];
     }
-    if (!buyPrice || parseFloat(buyPrice) <= 0) {
-      enqueueSnackbar('Buy price is required', { variant: 'warning' });
+
+    if (items.length === 0) {
+      enqueueSnackbar('Add at least one item before proceeding', { variant: 'warning' });
       return;
     }
 
     const ticketId = generateTicketId();
-    const categoryName = categories.find(c => c.id === categoryId)?.name || '';
-
-    const item = {
-      transaction_type: 'buy',
-      price: parseFloat(buyPrice),
-      description: shortDesc,
-      short_desc: shortDesc,
-      long_desc: longDesc || null,
-      category_id: categoryId || null,
-      category_name: categoryName,
-      condition: condition || null,
-      source: source || null,
-      part_number: partNumber || null,
-      retail_price: retailPrice ? parseFloat(retailPrice) : null,
-      notes: notes || null,
-      fromEstimator: 'hardgoods',
-      buyTicketId: ticketId,
-    };
+    const itemsWithTicket = items.map(item => ({ ...item, buyTicketId: ticketId }));
 
     navigate('/checkout', {
       state: {
         customer: location.state?.customer || null,
-        items: [item],
+        items: itemsWithTicket,
         from: 'hardgoods',
       },
     });
@@ -117,7 +176,7 @@ function HardgoodsEstimator() {
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* Header */}
-      <Paper elevation={1} sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+      <Paper elevation={1} sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, zIndex: 1 }}>
         <IconButton onClick={() => navigate(-1)} size="small">
           <ArrowBackIcon />
         </IconButton>
@@ -130,112 +189,187 @@ function HardgoodsEstimator() {
           onClick={handleProceedToCheckout}
           sx={{ minWidth: 180 }}
         >
-          Proceed to Checkout
+          Proceed to Checkout{estimatedItems.length > 0 ? ` (${estimatedItems.length})` : ''}
         </Button>
       </Paper>
 
-      {/* Form */}
-      <Box sx={{ flex: 1, overflow: 'auto', px: 3, py: 3 }}>
-        <Grid container spacing={2} sx={{ maxWidth: 800 }}>
+      {/* Body */}
+      <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
 
-          <Grid item xs={12} sm={8}>
-            <TextField
-              label="Description *"
-              value={shortDesc}
-              onChange={e => setShortDesc(e.target.value)}
-              fullWidth size="small"
-              placeholder="What is the item?"
-            />
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Category</InputLabel>
-              <Select value={categoryId} onChange={e => setCategoryId(e.target.value)} label="Category">
-                <MenuItem value=""><em>None</em></MenuItem>
-                {categories.map(c => (
-                  <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
+        {/* Left: intake form */}
+        <Box sx={{ flex: 1, overflow: 'auto', px: 3, py: 3 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 700 }}>
 
-          <Grid item xs={12}>
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <TextField
+                label="Description *"
+                value={form.shortDesc}
+                onChange={e => setField('shortDesc', e.target.value)}
+                fullWidth size="small"
+                placeholder="What is the item?"
+                sx={{ flex: 2 }}
+              />
+              <FormControl size="small" sx={{ flex: 1 }}>
+                <InputLabel>Category</InputLabel>
+                <Select value={form.categoryId} onChange={e => setField('categoryId', e.target.value)} label="Category">
+                  <MenuItem value=""><em>None</em></MenuItem>
+                  {categories.map(c => (
+                    <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+
             <TextField
               label="Additional Details"
-              value={longDesc}
-              onChange={e => setLongDesc(e.target.value)}
+              value={form.longDesc}
+              onChange={e => setField('longDesc', e.target.value)}
               fullWidth multiline minRows={2} size="small"
               placeholder="Brand, model, serial number, colour, accessories included…"
             />
-          </Grid>
 
-          <Grid item xs={12} sm={4}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Condition</InputLabel>
-              <Select value={condition} onChange={e => setCondition(e.target.value)} label="Condition">
-                <MenuItem value=""><em>Not specified</em></MenuItem>
-                {CONDITION_OPTIONS.map(c => (
-                  <MenuItem key={c} value={c}>{c}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Source</InputLabel>
-              <Select value={source} onChange={e => setSource(e.target.value)} label="Source">
-                {SOURCE_OPTIONS.map(s => (
-                  <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <TextField
-              label="Part / Model Number"
-              value={partNumber}
-              onChange={e => setPartNumber(e.target.value)}
-              fullWidth size="small"
-            />
-          </Grid>
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Condition</InputLabel>
+                <Select value={form.condition} onChange={e => setField('condition', e.target.value)} label="Condition">
+                  <MenuItem value=""><em>Not specified</em></MenuItem>
+                  {CONDITION_OPTIONS.map(c => (
+                    <MenuItem key={c} value={c}>{c}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small">
+                <InputLabel>Source</InputLabel>
+                <Select value={form.source} onChange={e => setField('source', e.target.value)} label="Source">
+                  {SOURCE_OPTIONS.map(s => (
+                    <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <TextField
+                label="Part / Model Number"
+                value={form.partNumber}
+                onChange={e => setField('partNumber', e.target.value)}
+                fullWidth size="small"
+              />
+            </Box>
 
-          <Grid item xs={12}>
-            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1, mt: 1 }}>
-              Pricing
-            </Typography>
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <TextField
-              label="Buy Price (offer to customer) *"
-              type="number"
-              inputProps={{ min: 0, step: 0.01 }}
-              value={buyPrice}
-              onChange={e => setBuyPrice(e.target.value)}
-              fullWidth size="small"
-            />
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <TextField
-              label="Retail Price (optional)"
-              type="number"
-              inputProps={{ min: 0, step: 0.01 }}
-              value={retailPrice}
-              onChange={e => setRetailPrice(e.target.value)}
-              fullWidth size="small"
-              helperText="Can be set later in Edit"
-            />
-          </Grid>
-
-          <Grid item xs={12}>
             <TextField
               label="Notes"
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
+              value={form.notes}
+              onChange={e => setField('notes', e.target.value)}
               fullWidth multiline minRows={2} size="small"
             />
-          </Grid>
 
-        </Grid>
+          </Box>
+        </Box>
+
+        <Divider orientation="vertical" flexItem />
+
+        {/* Middle: Photos */}
+        <Box sx={{ width: 190, flexShrink: 0, overflow: 'auto', px: 2, py: 3, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Photos</Typography>
+
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {form.images.map((img, idx) => (
+              <Box key={idx} sx={{ position: 'relative', width: 72, height: 72 }}>
+                <img
+                  src={img.url}
+                  alt={`photo-${idx + 1}`}
+                  style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 4, border: '1px solid #ddd' }}
+                />
+                <IconButton
+                  size="small"
+                  color="error"
+                  sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
+                  onClick={() => handleRemoveFormImage(idx)}
+                >
+                  <DeleteIcon sx={{ fontSize: 14 }} />
+                </IconButton>
+              </Box>
+            ))}
+          </Box>
+
+          <Button variant="outlined" size="small" component="label" startIcon={<AddIcon />}>
+            Add Photos
+            <input
+              type="file"
+              hidden
+              multiple
+              accept="image/*"
+              onChange={e => {
+                const files = Array.from(e.target.files);
+                if (files.length) {
+                  const newImgs = files.map((file, i) => ({
+                    url: URL.createObjectURL(file),
+                    file,
+                    isPrimary: form.images.length === 0 && i === 0,
+                  }));
+                  setField('images', [...form.images, ...newImgs]);
+                }
+                e.target.value = '';
+              }}
+            />
+          </Button>
+
+          {form.images.length > 0 && (
+            <Typography variant="caption" color="text.secondary">
+              {form.images.length} photo{form.images.length > 1 ? 's' : ''} — uploaded on checkout
+            </Typography>
+          )}
+        </Box>
+
+        <Divider orientation="vertical" flexItem />
+
+        {/* Right: price estimates + items added */}
+        <Box sx={{ width: 260, flexShrink: 0, overflow: 'auto', px: 2, py: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+
+          {/* Price Estimates for current item */}
+          <Box>
+            <Typography variant="h6" sx={{ mb: 1.5 }}>Price Estimates</Typography>
+            <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
+              <PriceRow label="Pawn Value"   value={form.pawnPrice}   onChange={v => setField('pawnPrice', v)} />
+              <PriceRow label="Buy Value"    value={form.buyPrice}    onChange={v => setField('buyPrice', v)} />
+              <PriceRow label="Retail Value" value={form.retailPrice} onChange={v => setField('retailPrice', v)} borderBottom={false} />
+            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+              Buy Value is the amount offered to the customer.
+            </Typography>
+          </Box>
+
+          {/* Items added this session */}
+          {estimatedItems.length > 0 && (
+            <Box>
+              <Divider sx={{ mb: 2 }} />
+              <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+                Items Added ({estimatedItems.length})
+              </Typography>
+              <List dense disablePadding>
+                {estimatedItems.map((item, idx) => (
+                  <ListItem
+                    key={idx}
+                    disablePadding
+                    secondaryAction={
+                      <IconButton edge="end" size="small" onClick={() => handleRemoveItem(idx)}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    }
+                    sx={{ pr: 4 }}
+                  >
+                    <ListItemText
+                      primary={`${String(idx + 1).padStart(2, '0')}. ${item.short_desc}`}
+                      secondary={`Buy: $${item.buy_price?.toFixed(2)}`}
+                      primaryTypographyProps={{ variant: 'body2', noWrap: true }}
+                      secondaryTypographyProps={{ variant: 'caption' }}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
+          )}
+
+        </Box>
+
       </Box>
     </Box>
   );
