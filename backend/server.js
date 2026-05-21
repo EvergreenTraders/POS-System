@@ -173,40 +173,6 @@ async function generateTransactionId() {
   }
 }
 
-// Function to generate unique item ID
-async function generateItemId(metalCategory, client, usedIds = new Set()) {
-  try {
-    // Get first 4 letters of metal category, uppercase and padded with X if needed
-    const prefix = (metalCategory || 'METL').toUpperCase().slice(0, 4).padEnd(4, 'X');
-    
-    // Get all existing IDs for this prefix
-    const existingIds = await client.query(
-      'SELECT item_id FROM jewelry WHERE item_id LIKE $1 FOR UPDATE',
-      [prefix + '%']
-    );
-    
-    // Create a set of used sequence numbers from both database and current transaction
-    const allUsedIds = new Set([...existingIds.rows.map(r => r.item_id), ...usedIds]);
-    
-    // Find the first available number
-    let nextNumber = 1;
-    let newItemId;
-    
-    while (nextNumber <= 999) {
-      newItemId = `${prefix}${nextNumber.toString().padStart(3, '0')}`;
-      
-      if (!allUsedIds.has(newItemId)) {
-        return newItemId;
-      }
-      nextNumber++;
-    }
-    
-    throw new Error(`No available sequence numbers for prefix ${prefix}`);
-  } catch (error) {
-    console.error('Error in generateItemId:', error);
-    throw error;
-  }
-}
 
 // Schedule daily update of quote days remaining and inventory hold status (runs at midnight)
 setInterval(() => {
@@ -388,6 +354,11 @@ pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS status VARCHAR(20) NO
 
 pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS item_price NUMERIC(10,2)`)
   .catch(err => console.error('hardgoods item_price migration:', err.message));
+
+pool.query(`ALTER TABLE jewelry ALTER COLUMN item_id TYPE VARCHAR(30)`)
+  .catch(err => console.error('jewelry item_id length migration:', err.message));
+pool.query(`ALTER TABLE jewelry_secondary_gems ALTER COLUMN item_id TYPE VARCHAR(30)`)
+  .catch(err => console.error('jewelry_secondary_gems item_id length migration:', err.message));
 
 // Fix unique_active_connection: replace table constraint with partial index
 // Allows multiple historical (is_active = FALSE) rows per employee/session
@@ -6747,22 +6718,28 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
     // Process each item sequentially
     let itemCounter = 1;
     let globalImageIndex = 0; // Track global image index across all items
+    const ticketCounters = {};
 
     for (let itemIdx = 0; itemIdx < cartItems.length; itemIdx++) {
       const item = cartItems[itemIdx];
 
-      // Use quote_id as item_id if provided, otherwise generate a new one
+      // Use provided item_id, or quote_id-based, or BT-XXXXXXXX-XX from buyTicketId
       let item_id, status;
-      if (quote_id) {
+      const isPawn = item.transaction_type && item.transaction_type.toLowerCase() === 'pawn';
+      if (item.item_id) {
+        item_id = item.item_id;
+        status = isPawn ? 'PAWN' : 'HOLD';
+      } else if (quote_id) {
         const sequentialNumber = itemCounter.toString().padStart(2, '0');
         item_id = `${quote_id}-${sequentialNumber}`;
         itemCounter++;
         status = 'QUOTED';
+      } else if (item.buyTicketId) {
+        ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
+        item_id = `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`;
+        status = isPawn ? 'PAWN' : 'HOLD';
       } else {
-        const usedIds = new Set();
-        item_id = await generateItemId(item.metal_category, client, usedIds);
-        // Check if this is a pawn transaction
-        status = (item.transaction_type && item.transaction_type.toLowerCase() === 'pawn') ? 'PAWN' : 'HOLD';
+        throw new Error('item_id or buyTicketId is required for jewelry item');
       }
 
       // Now save images with meaningful filenames using item_id
@@ -6949,7 +6926,8 @@ app.post('/api/jewelry', async (req, res) => {
     const results = [];
     
     // Process each item sequentially
-    let itemCounter = 1; // Counter for sequential numbers
+    let itemCounter = 1;
+    const ticketCounters = {};
     
     // Process cart items to ensure proper format for PostgreSQL
     const processedCartItems = cartItems.map(item => {
@@ -6987,20 +6965,23 @@ app.post('/api/jewelry', async (req, res) => {
     });
     
     for (const item of processedCartItems) {
-      // Use quote_id as item_id if provided, otherwise generate a new one
+      // Use provided item_id, or quote_id-based, or BT-XXXXXXXX-XX from buyTicketId
       let item_id, status;
-      if (quote_id) {
-        // Add sequential number to quote_id (e.g., QT001-01)
+      const isPawn = item.transaction_type && item.transaction_type.toLowerCase() === 'pawn';
+      if (item.item_id) {
+        item_id = item.item_id;
+        status = isPawn ? 'PAWN' : 'HOLD';
+      } else if (quote_id) {
         const sequentialNumber = itemCounter.toString().padStart(2, '0');
         item_id = `${quote_id}-${sequentialNumber}`;
         itemCounter++;
         status = 'QUOTED';
+      } else if (item.buyTicketId) {
+        ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
+        item_id = `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`;
+        status = isPawn ? 'PAWN' : 'HOLD';
       } else {
-        // Generate unique item ID for non-quote items
-        const usedIds = new Set();
-        item_id = await generateItemId(item.metal_category, client, usedIds);
-        // Check if this is a pawn transaction
-        status = (item.transaction_type && item.transaction_type.toLowerCase() === 'pawn') ? 'PAWN' : 'HOLD';
+        throw new Error('item_id or buyTicketId is required for jewelry item');
       }
       // Insert jewelry record
       const jewelryQuery = `

@@ -863,7 +863,13 @@ function Checkout() {
           } else if (hasJewelryItems) {
             // If coming from estimator, create new jewelry items (only if we have jewelry items)
             // Filter out items from inventory as they already exist in the database
-            const newJewelryItems = checkoutItems.filter(item => !item.fromInventory);
+            // Pre-assign item IDs following BT-XXXXXXXX-XX format (same as hardgoods)
+            const ticketCounters = {};
+            const newJewelryItems = checkoutItems.filter(item => !item.fromInventory).map(item => {
+              if (!item.buyTicketId) return item;
+              ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
+              return { ...item, item_id: `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}` };
+            });
 
 
             // Convert any blob URLs to File objects before uploading
