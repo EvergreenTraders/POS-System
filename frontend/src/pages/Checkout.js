@@ -1742,7 +1742,7 @@ function Checkout() {
           } else {
             // Navigate after a brief delay to show success message
             setTimeout(() => {
-              navigate('/');
+              navigate('/', { replace: true });
             }, 1000);
           }
 
@@ -2544,7 +2544,7 @@ function Checkout() {
         onClose={() => {
           setLocationDialogOpen(false);
           setSelectedItemsForRedeem([]);
-          navigate('/');
+          navigate('/', { replace: true });
         }}
         maxWidth="md"
         fullWidth
@@ -2603,7 +2603,7 @@ function Checkout() {
             onClick={() => {
               setLocationDialogOpen(false);
               setSelectedItemsForRedeem([]);
-              navigate('/');
+              navigate('/', { replace: true });
             }}
             variant="outlined"
           >
@@ -2889,7 +2889,7 @@ function Checkout() {
 
                 setLocationDialogOpen(false);
                 setSelectedItemsForRedeem([]);
-                navigate('/');
+                navigate('/', { replace: true });
               } catch (error) {
                 console.error('Error updating items:', error);
                 setSnackbar({

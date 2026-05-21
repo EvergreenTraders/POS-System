@@ -430,7 +430,7 @@ function HardgoodsEdit() {
 
       {/* ── Header bar ── */}
       <Paper elevation={1} sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-        <IconButton onClick={() => navigate('/inventory/hardgoods')} size="small">
+        <IconButton onClick={() => navigate(-1)} size="small">
           <ArrowBackIcon />
         </IconButton>
         <Box sx={{ flex: 1 }}>

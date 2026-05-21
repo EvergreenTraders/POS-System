@@ -1954,7 +1954,7 @@ function JewelryEdit() {
 
   // Handlers
   const handleBackToInventory = () => {
-    navigate('/inventory');
+    navigate(-1);
   };
 
   const handleProcessItem = async () => {
