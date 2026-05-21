@@ -190,7 +190,10 @@ function Inventory() {
       return;
     }
     try {
-      await axios.post(`${API_BASE_URL}/jewelry/${itemToScrap.item_id}/move-to-scrap`, {
+      const endpoint = itemToScrap._type === 'hardgoods'
+        ? `${API_BASE_URL}/hardgoods/${itemToScrap.item_id}/move-to-scrap`
+        : `${API_BASE_URL}/jewelry/${itemToScrap.item_id}/move-to-scrap`;
+      await axios.post(endpoint, {
         moved_by: currentUser?.id || 1,
         bucket_id: selectedBucket,
       });
@@ -342,8 +345,7 @@ function Inventory() {
           )}
         </Paper>
 
-        {((isJewelry && (item.status || item.inventory_status) === 'IN_PROCESS') ||
-          (isHardgoods && (item.status || item.inventory_status) !== 'SOLD')) && (
+        {(item.status || item.inventory_status) === 'IN_PROCESS' && (
           <Button
             variant="contained"
             fullWidth
@@ -468,56 +470,41 @@ function Inventory() {
                       </TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1 }}>
-                          {item._type === 'jewelry' ? (
-                            <>
-                              {status === 'IN_PROCESS' && (
-                                <Button
-                                  variant="contained" color="primary" size="small"
-                                  disabled={isStoreClosed}
-                                  onClick={e => { e.stopPropagation(); handleEditClick(item); }}
-                                  sx={{ minWidth: 60, height: 28, fontSize: '0.75rem', px: 1 }}
-                                >
-                                  Edit
-                                </Button>
-                              )}
-                              {status === 'ACTIVE' && (
-                                <Button
-                                  variant="contained" color="success" size="small"
-                                  disabled={isStoreClosed}
-                                  startIcon={<ShoppingCartIcon />}
-                                  onClick={e => { e.stopPropagation(); handleAddToTicket(item); }}
-                                  sx={{ minWidth: 120, height: 28, fontSize: '0.7rem', px: 1 }}
-                                >
-                                  Add to Ticket
-                                </Button>
-                              )}
-                              {status !== 'SCRAP PROCESS' && status !== 'SOLD TO REFINER' && status !== 'SOLD' && (
-                                <Button
-                                  variant="outlined" color="error" size="small"
-                                  disabled={isStoreClosed}
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setItemToScrap(item);
-                                    setScrapDialogOpen(true);
-                                    fetchScrapBuckets();
-                                  }}
-                                  sx={{ minWidth: 85, height: 28, fontSize: '0.7rem' }}
-                                >
-                                  To Scrap
-                                </Button>
-                              )}
-                            </>
-                          ) : (
-                            status !== 'SOLD' && (
-                              <Button
-                                variant="contained" size="small"
-                                disabled={isStoreClosed}
-                                onClick={e => { e.stopPropagation(); handleEditClick(item); }}
-                                sx={{ fontSize: '0.72rem', py: 0.4, px: 1 }}
-                              >
-                                Edit
-                              </Button>
-                            )
+                          {status === 'IN_PROCESS' && (
+                            <Button
+                              variant="contained" color="primary" size="small"
+                              disabled={isStoreClosed}
+                              onClick={e => { e.stopPropagation(); handleEditClick(item); }}
+                              sx={{ minWidth: 60, height: 28, fontSize: '0.75rem', px: 1 }}
+                            >
+                              Edit
+                            </Button>
+                          )}
+                          {status === 'ACTIVE' && (
+                            <Button
+                              variant="contained" color="success" size="small"
+                              disabled={isStoreClosed}
+                              startIcon={<ShoppingCartIcon />}
+                              onClick={e => { e.stopPropagation(); handleAddToTicket(item); }}
+                              sx={{ minWidth: 120, height: 28, fontSize: '0.7rem', px: 1, whiteSpace: 'nowrap' }}
+                            >
+                              Add to Ticket
+                            </Button>
+                          )}
+                          {status !== 'SCRAP PROCESS' && status !== 'SCRAP' && status !== 'SOLD TO REFINER' && status !== 'SOLD' && (
+                            <Button
+                              variant="outlined" color="error" size="small"
+                              disabled={isStoreClosed}
+                              onClick={e => {
+                                e.stopPropagation();
+                                setItemToScrap(item);
+                                setScrapDialogOpen(true);
+                                fetchScrapBuckets();
+                              }}
+                              sx={{ minWidth: 85, height: 28, fontSize: '0.7rem' }}
+                            >
+                              To Scrap
+                            </Button>
                           )}
                         </Box>
                       </TableCell>

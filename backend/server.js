@@ -14197,6 +14197,37 @@ app.put('/api/hardgoods/:id/status', async (req, res) => {
   }
 });
 
+// POST /api/hardgoods/:id/move-to-scrap
+app.post('/api/hardgoods/:id/move-to-scrap', async (req, res) => {
+  const { id } = req.params;
+  const { moved_by, bucket_id } = req.body;
+  if (!moved_by) return res.status(400).json({ error: 'Employee ID (moved_by) is required' });
+  if (!bucket_id) return res.status(400).json({ error: 'Bucket ID is required' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('SELECT item_id FROM hardgoods WHERE item_id = $1', [id]);
+    if (!rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Item not found' }); }
+
+    await client.query(
+      `UPDATE hardgoods SET status = 'SCRAP', sellable_status = 'NOT_SELLABLE', updated_at = CURRENT_TIMESTAMP WHERE item_id = $1`,
+      [id]
+    );
+    await client.query(
+      `UPDATE scrap SET item_id = item_id || $1::jsonb, updated_at = CURRENT_TIMESTAMP, updated_by = $2::integer WHERE bucket_id = $3::integer AND NOT item_id @> $1::jsonb`,
+      [JSON.stringify([id]), moved_by, bucket_id]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Item moved to scrap successfully', item_id: id, bucket_id });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error moving hardgoods to scrap:', err);
+    res.status(500).json({ error: 'Failed to move item to scrap', details: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // DELETE /api/hardgoods/:id
 app.delete('/api/hardgoods/:id', async (req, res) => {
   try {
