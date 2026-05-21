@@ -2440,16 +2440,6 @@ function Checkout() {
                 <Typography variant="h6">
                   Payment Details
                 </Typography>
-                <Button
-                  variant="outlined"
-                  onClick={handleBackToEstimation}
-                  startIcon={<ArrowBackIcon />}
-                  size="small"
-                >
-                  {location.state?.quoteId ? 'Back to Quotes' : 
-                   location.state?.from === 'cart' ? 'Customer Ticket' : 
-                   location.state?.from === 'coinsbullions' ? 'Bullion Est.' : 'Jewelry Est.'}
-                </Button>
               </Box>
               <Typography variant="h6" gutterBottom sx={{
                 color: remainingAmount >= 0 ? 'success.main' : 'error.main'

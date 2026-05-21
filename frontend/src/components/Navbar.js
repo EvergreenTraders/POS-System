@@ -31,6 +31,7 @@ import {
   AccessTime as ClockIcon,
   WarningAmber as WarningIcon,
   ArrowBack as ArrowBackIcon,
+  ArrowForward as ArrowForwardIcon,
 } from '@mui/icons-material';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -539,6 +540,13 @@ function Navbar() {
             >
               {formatTime()}
             </Typography>
+
+            {/* Forward navigation */}
+            <Tooltip title="Go forward">
+              <IconButton color="inherit" size="small" onClick={() => navigate(1)}>
+                <ArrowForwardIcon />
+              </IconButton>
+            </Tooltip>
 
             {/* Working Date Indicator */}
             {isWorkingDateEnabled && (
