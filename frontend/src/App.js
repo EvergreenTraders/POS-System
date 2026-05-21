@@ -19,6 +19,7 @@ import Dashboard from './pages/Dashboard';
 import Home from './pages/Home';
 import Scrap from './pages/Scrap';
 import TransactionJournals from './pages/TransactionJournals';
+import Inventory from './pages/Inventory';
 import Jewelry from './pages/Jewelry';
 import CoinsBullions from './pages/CoinsBullions';
 import Hardgoods from './pages/Hardgoods';
@@ -455,7 +456,7 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AuthenticatedLayout>
-                      <Jewelry />
+                      <Inventory />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

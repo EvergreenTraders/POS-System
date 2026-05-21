@@ -69,16 +69,11 @@ const StyledLink = styled(Link)({
 });
 
 function Sidebar() {
-  const [inventoryOpen, setInventoryOpen] = useState(false);
   const [systemConfigOpen, setSystemConfigOpen] = useState(false);
   const [customersOpen, setCustomersOpen] = useState(false);
   const [layawayOpen, setLayawayOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(true);
   const location = useLocation();
-
-  const handleInventoryClick = () => {
-    setInventoryOpen(!inventoryOpen);
-  };
 
   const handleSystemConfigClick = () => {
     setSystemConfigOpen(!systemConfigOpen);
@@ -204,37 +199,14 @@ function Sidebar() {
           </List>
         </Collapse>
 
-        <ListItem button onClick={handleInventoryClick}>
-          <ListItemIcon sx={{ color: 'white', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
-            <InventoryIcon />
-          </ListItemIcon>
-          {isOpen && (
-            <>
-              <ListItemText primary="Inventory" />
-              {inventoryOpen ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
-            </>
-          )}
-        </ListItem>
-
-        <Collapse in={inventoryOpen && isOpen} timeout="auto" unmountOnExit>
-          <List component="div" disablePadding>
-            <StyledLink to="/inventory/jewelry">
-              <StyledListItem active={isActive('/inventory/jewelry')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="Jewelry" />}
-              </StyledListItem>
-            </StyledLink>
-            <StyledLink to="/inventory/hardgoods">
-              <StyledListItem active={isActive('/inventory/hardgoods')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="Hardgoods" />}
-              </StyledListItem>
-            </StyledLink>
-            <StyledLink to="/inventory/coins-bullions">
-              <StyledListItem active={isActive('/inventory/coins-bullions')} sx={{ pl: 4 }}>
-                {isOpen && <ListItemText primary="Coins & Bullions" />}
-              </StyledListItem>
-            </StyledLink>
-          </List>
-        </Collapse>
+        <StyledLink to="/inventory">
+          <StyledListItem active={location.pathname.startsWith('/inventory')}>
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+              <InventoryIcon />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Inventory" />}
+          </StyledListItem>
+        </StyledLink>
 
         <ListItem
           button
