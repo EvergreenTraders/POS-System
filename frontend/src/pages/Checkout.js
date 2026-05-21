@@ -1559,7 +1559,7 @@ function Checkout() {
                 const protectionPlanAmount = item.protectionPlan ? basePrice * 0.15 : 0;
                 const totalItemPrice = basePrice + protectionPlanAmount;
 
-                const endpoint = item.fromHardgoodsInventory
+                const endpoint = (item.fromHardgoodsInventory || item._type === 'hardgoods')
                   ? `${config.apiUrl}/hardgoods/${item.item_id}/status`
                   : `${config.apiUrl}/jewelry/${item.item_id}/status`;
 
