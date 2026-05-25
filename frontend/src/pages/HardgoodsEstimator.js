@@ -5,14 +5,15 @@ import {
   Box,
   Button,
   Chip,
+  Container,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   FormControl,
   FormControlLabel,
   FormHelperText,
+  Grid,
   IconButton,
   InputAdornment,
   InputLabel,
@@ -29,7 +30,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import KeyboardBackspaceIcon from '@mui/icons-material/KeyboardBackspace';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -85,11 +86,11 @@ function PriceRow({ label, value, onChange, borderBottom = true }) {
       </Typography>
       <TextField
         size="small"
-        type="number"
+        type="decimal"
         value={value}
         variant="standard"
         onChange={e => onChange(e.target.value)}
-        inputProps={{ min: 0, step: 0.01, inputMode: 'decimal', style: { width: '80px' } }}
+        inputProps={{ min: 0, inputMode: 'decimal', pattern: '[0-9]*\\.?[0-9]*', style: { width: '70px' } }}
         sx={{ ml: 1, '& .MuiInputBase-root': { ml: 0, pl: 0 } }}
       />
     </Box>
@@ -106,6 +107,8 @@ function HardgoodsEstimator() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [categoryFields, setCategoryFields] = useState([]);
   const [categoryFieldValues, setCategoryFieldValues] = useState({});
+  const [pendingItems, setPendingItems] = useState([]);   // staged in Summary before Finish
+  const [estValue, setEstValue] = useState('');            // Est. Item Value field
   const [openDetailsDialog, setOpenDetailsDialog] = useState(false);
   const [selectedItemIndex, setSelectedItemIndex] = useState(null);
   const [itemDetails, setItemDetails] = useState({ notes: '', condition: '', longDesc: '' });
@@ -240,6 +243,7 @@ function HardgoodsEstimator() {
       pawn_price: form.pawnPrice ? parseFloat(form.pawnPrice) : null,
       buy_price: parseFloat(form.buyPrice),
       retail_price: form.retailPrice ? parseFloat(form.retailPrice) : null,
+      estimated_value: estValue ? parseFloat(estValue) : null,
       notes: form.notes || null,
       fromEstimator: 'hardgoods',
       attributes,
@@ -259,42 +263,8 @@ function HardgoodsEstimator() {
     setField('images', form.images.filter((_, i) => i !== index));
   };
 
-  const handleProceedToCheckout = () => {
-    let items = [...estimatedItems];
-    if (form.shortDesc.trim()) {
-      if (!form.buyPrice || parseFloat(form.buyPrice) <= 0) {
-        enqueueSnackbar('Buy price is required for the current item', { variant: 'warning' });
-        return;
-      }
-      // Validate required category fields on the current unsaved item
-      const missing = categoryFields.filter(
-        f => f.required_for_inventory && !categoryFieldValues[f.field_key]
-      );
-      if (missing.length > 0) {
-        enqueueSnackbar(`Required fields missing: ${missing.map(f => f.label_override || f.label || f.field_key).join(', ')}`, { variant: 'warning' });
-        return;
-      }
-      items = [...items, buildItem()];
-    }
-
-    if (items.length === 0) {
-      enqueueSnackbar('Add at least one item before proceeding', { variant: 'warning' });
-      return;
-    }
-
-    const ticketId = generateTicketId();
-    const itemsWithTicket = items.map(item => ({ ...item, buyTicketId: ticketId }));
-
-    navigate('/checkout', {
-      state: {
-        customer: location.state?.customer || null,
-        items: itemsWithTicket,
-        from: 'hardgoods',
-      },
-    });
-  };
-
-  const handleAddAnother = () => {
+  // Add Item — validates form, stages item as a Summary card, resets form
+  const handleAddItem = () => {
     if (!form.shortDesc.trim()) {
       enqueueSnackbar('Description is required', { variant: 'warning' });
       return;
@@ -307,14 +277,53 @@ function HardgoodsEstimator() {
       f => f.required_for_inventory && !categoryFieldValues[f.field_key]
     );
     if (missing.length > 0) {
-      enqueueSnackbar(`Required fields missing: ${missing.map(f => f.label_override || f.label || f.field_key).join(', ')}`, { variant: 'warning' });
+      enqueueSnackbar(
+        `Required fields missing: ${missing.map(f => f.label_override || f.label || f.field_key).join(', ')}`,
+        { variant: 'warning' }
+      );
       return;
     }
-    setEstimatedItems(prev => [...prev, buildItem()]);
+    setPendingItems(prev => [...prev, buildItem()]);
     setForm(EMPTY_FORM);
     setCategoryFields([]);
     setCategoryFieldValues({});
-    enqueueSnackbar('Item added — fill in the next item', { variant: 'success' });
+    enqueueSnackbar('Item added to summary', { variant: 'success' });
+  };
+
+  // Finish — moves all staged Summary items to the Estimated Items table
+  const handleFinish = () => {
+    if (pendingItems.length === 0) {
+      enqueueSnackbar('Add at least one item to the summary first', { variant: 'warning' });
+      return;
+    }
+    setEstimatedItems(prev => [...prev, ...pendingItems]);
+    setPendingItems([]);
+    setEstValue('');
+    enqueueSnackbar(
+      `${pendingItems.length} item${pendingItems.length > 1 ? 's' : ''} moved to Estimated Items`,
+      { variant: 'success' }
+    );
+  };
+
+  // Delete a staged item from the Summary before Finish
+  const handleDeletePending = (index) => {
+    setPendingItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleProceedToCheckout = () => {
+    if (estimatedItems.length === 0) {
+      enqueueSnackbar('Add at least one item before proceeding', { variant: 'warning' });
+      return;
+    }
+    const ticketId = generateTicketId();
+    const itemsWithTicket = estimatedItems.map(item => ({ ...item, buyTicketId: ticketId }));
+    navigate('/checkout', {
+      state: {
+        customer: location.state?.customer || null,
+        items: itemsWithTicket,
+        from: 'hardgoods',
+      },
+    });
   };
 
   const handleTransactionTypeChange = (index, newType) => {
@@ -369,7 +378,7 @@ function HardgoodsEstimator() {
   const handleAddToTicket = () => {
     navigate('/customer-ticket', {
       state: {
-        items: estimatedItems,
+        estimatedItems,
         customer: location.state?.customer || null,
         from: 'hardgoods',
       },
@@ -383,36 +392,23 @@ function HardgoodsEstimator() {
     return item.buy_price || 0;
   };
 
+  // Category name for the dynamic fields label
+  const currentCategoryName = categories.find(c => c.id === form.categoryId)?.name || '';
+
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <Container maxWidth="lg" sx={{ pt: 4, pb: 4 }}>
 
-      {/* Header */}
-      <Paper elevation={1} sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, zIndex: 1 }}>
-        <IconButton onClick={() => navigate(-1)} size="small">
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h6" sx={{ fontWeight: 600, flex: 1 }}>
-          New Hardgoods Item — Intake
-        </Typography>
-        <Button
-          variant="contained"
-          endIcon={<ArrowForwardIcon />}
-          onClick={handleProceedToCheckout}
-          sx={{ minWidth: 180 }}
-        >
-          Proceed to Checkout{estimatedItems.length > 0 ? ` (${estimatedItems.length})` : ''}
-        </Button>
-      </Paper>
+  
 
-      {/* Scrollable body */}
-      <Box sx={{ flex: 1, overflow: 'auto' }}>
+      {/* ── Main 3-column grid ── */}
+      <Grid container spacing={3} sx={{ mb: 3, alignItems: 'stretch' }}>
 
-        {/* 3-panel row */}
-        <Box sx={{ display: 'flex', borderBottom: '1px solid', borderColor: 'divider' }}>
+        {/* LEFT — Item Details */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
+            <Typography variant="h6" sx={{ mb: 2 }}>Item Details</Typography>
 
-          {/* Left: intake form */}
-          <Box sx={{ flex: 1, px: 3, py: 3 }}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 700 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
 
               <Box sx={{ display: 'flex', gap: 2 }}>
                 <TextField
@@ -440,8 +436,8 @@ function HardgoodsEstimator() {
 
               {/* Dynamic category fields */}
               {categoryFields.length > 0 && (
-                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 1.5 }}>
-                  {categoryFields.map(field => renderCategoryField(field))}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 1.5 }}>
+                    {categoryFields.map(field => renderCategoryField(field))}
                 </Box>
               )}
 
@@ -449,7 +445,7 @@ function HardgoodsEstimator() {
                 label="Additional Details"
                 value={form.longDesc}
                 onChange={e => setField('longDesc', e.target.value)}
-                fullWidth multiline minRows={2} size="small"
+                fullWidth multiline minRows={3} size="small"
                 placeholder="Brand, model, serial number, colour, accessories included…"
               />
 
@@ -471,13 +467,14 @@ function HardgoodsEstimator() {
                     ))}
                   </Select>
                 </FormControl>
-                <TextField
-                  label="Part / Model Number"
-                  value={form.partNumber}
-                  onChange={e => setField('partNumber', e.target.value)}
-                  fullWidth size="small"
-                />
               </Box>
+
+              <TextField
+                label="Part / Model Number"
+                value={form.partNumber}
+                onChange={e => setField('partNumber', e.target.value)}
+                fullWidth size="small"
+              />
 
               <TextField
                 label="Notes"
@@ -486,36 +483,44 @@ function HardgoodsEstimator() {
                 fullWidth multiline minRows={2} size="small"
               />
 
+              {/* Add Item button */}
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleAddItem}
+                fullWidth
+                sx={{ mt: 1 }}
+                disabled={!form.shortDesc.trim() || !form.buyPrice || parseFloat(form.buyPrice) <= 0}
+              >
+                Add Item
+              </Button>
+
+              {/* Est. Item Value */}
+              <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', mr: 0 }}>
+                  Est. Item Value: $
+                </Typography>
+                <TextField
+                  size="small"
+                  type="number"
+                  value={estValue}
+                  variant="standard"
+                  onChange={e => setEstValue(e.target.value)}
+                  inputProps={{ min: 0, style: { width: '100px' } }}
+                  sx={{ ml: 1, '& .MuiInputBase-root': { ml: 0, pl: 0 } }}
+                />
+              </Box>
+
             </Box>
-          </Box>
+          </Paper>
+        </Grid>
 
-          <Divider orientation="vertical" flexItem />
+        {/* MIDDLE — Photos */}
+        <Grid item xs={12} md={3}>
+          <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
+            <Typography variant="h6" sx={{ mb: 2 }}>Photos</Typography>
 
-          {/* Middle: Photos */}
-          <Box sx={{ width: 190, flexShrink: 0, px: 2, py: 3, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Photos</Typography>
-
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {form.images.map((img, idx) => (
-                <Box key={idx} sx={{ position: 'relative', width: 72, height: 72 }}>
-                  <img
-                    src={img.url}
-                    alt={`photo-${idx + 1}`}
-                    style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 4, border: '1px solid #ddd' }}
-                  />
-                  <IconButton
-                    size="small"
-                    color="error"
-                    sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
-                    onClick={() => handleRemoveFormImage(idx)}
-                  >
-                    <DeleteIcon sx={{ fontSize: 14 }} />
-                  </IconButton>
-                </Box>
-              ))}
-            </Box>
-
-            <Button variant="outlined" size="small" component="label" startIcon={<AddIcon />}>
+            <Button variant="outlined" component="label" startIcon={<AddIcon />} fullWidth sx={{ mb: 2 }}>
               Add Photos
               <input
                 type="file"
@@ -538,202 +543,277 @@ function HardgoodsEstimator() {
             </Button>
 
             {form.images.length > 0 && (
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
                 {form.images.length} photo{form.images.length > 1 ? 's' : ''} — uploaded on checkout
               </Typography>
             )}
-          </Box>
 
-          <Divider orientation="vertical" flexItem />
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              {form.images.map((img, idx) => (
+                <Box key={idx} sx={{ position: 'relative', width: 80, height: 80 }}>
+                  <img
+                    src={img.url}
+                    alt={`photo-${idx + 1}`}
+                    style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 4, border: '1px solid #ddd' }}
+                  />
+                  <IconButton
+                    size="small"
+                    color="error"
+                    sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.85)', p: 0.25 }}
+                    onClick={() => handleRemoveFormImage(idx)}
+                  >
+                    <DeleteIcon sx={{ fontSize: 14 }} />
+                  </IconButton>
+                </Box>
+              ))}
+            </Box>
+          </Paper>
+        </Grid>
 
-          {/* Right: price estimates + add another */}
-          <Box sx={{ width: 260, flexShrink: 0, px: 2, py: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {/* RIGHT — Summary */}
+        <Grid item xs={12} md={3}>
+          <Paper sx={{ p: 2, height: '80vh', overflow: 'auto' }}>
 
-            <Box>
-              <Typography variant="h6" sx={{ mb: 1.5 }}>Price Estimates</Typography>
-              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
-                <PriceRow label="Pawn Value"   value={form.pawnPrice}   onChange={v => setField('pawnPrice', v)} />
-                <PriceRow label="Buy Value"    value={form.buyPrice}    onChange={v => setField('buyPrice', v)} />
-                <PriceRow label="Retail Value" value={form.retailPrice} onChange={v => setField('retailPrice', v)} borderBottom={false} />
-              </Box>
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                Buy Value is the amount offered to the customer.
-              </Typography>
+            {/* Price Estimates */}
+            <Typography variant="h6" sx={{ mb: 0 }}>Price Estimates</Typography>
+            <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
+              <PriceRow label="Pawn Value"   value={form.pawnPrice}   onChange={v => setField('pawnPrice', v)} />
+              <PriceRow label="Buy Value"    value={form.buyPrice}    onChange={v => setField('buyPrice', v)} />
+              <PriceRow label="Retail Value" value={form.retailPrice} onChange={v => setField('retailPrice', v)} borderBottom={false} />
             </Box>
 
-            <Button
-              variant="outlined"
-              startIcon={<AddIcon />}
-              onClick={handleAddAnother}
-              fullWidth
-            >
-              Add Another Item
-            </Button>
+            {/* SUMMARY — staged items as cards */}
+            <Typography variant="h6" sx={{ mt: 2 }}>SUMMARY</Typography>
 
-          </Box>
-
-        </Box>
-
-        {/* Estimated Items Table */}
-        <Paper elevation={3} sx={{ p: 2, m: 2 }}>
-          <Typography variant="h6" gutterBottom>
-            Estimated Items
-          </Typography>
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 600, py: 1.5 }}>Image</TableCell>
-                  <TableCell sx={{ fontWeight: 600, py: 1.5 }}>Description</TableCell>
-                  <TableCell sx={{ fontWeight: 600, py: 1.5 }}>Transaction Type</TableCell>
-                  <TableCell sx={{ fontWeight: 600, py: 1.5 }}>Price</TableCell>
-                  <TableCell sx={{ fontWeight: 600, py: 1.5 }}>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {estimatedItems.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                      No items added yet — fill in the form above and click "Add Another Item" or "Proceed to Checkout".
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  estimatedItems.map((item, index) => (
-                    <TableRow
-                      key={index}
-                      sx={{
-                        transition: 'all 0.2s',
-                        '&:hover': {
-                          bgcolor: 'action.hover',
-                          '& .action-buttons': { opacity: 1 },
-                        },
-                      }}
-                    >
-                      <TableCell>
-                        <img
-                          src={item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url || ''}
-                          alt="item"
-                          style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid #ddd' }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                          {item.short_desc}{item.category_name ? ` · ${item.category_name}` : ''}
+            <Grid container spacing={2}>
+              {pendingItems.length === 0 ? (
+                <Grid item xs={12}>
+                  <Typography variant="body2" color="text.secondary">
+                    Click "Add Item" to stage items here before finishing.
+                  </Typography>
+                </Grid>
+              ) : (
+                pendingItems.map((item, idx) => (
+                  <Grid item xs={12} key={idx}>
+                    <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative' }}>
+                      <Typography variant="subtitle2">Item {idx + 1}</Typography>
+                      <Typography variant="body2">Description: {item.short_desc}</Typography>
+                      {item.category_name && (
+                        <Typography variant="body2">Category: {item.category_name}</Typography>
+                      )}
+                      {item.condition && (
+                        <Typography variant="body2">Condition: {item.condition}</Typography>
+                      )}
+                      {item.part_number && (
+                        <Typography variant="body2">Part / Model: {item.part_number}</Typography>
+                      )}
+                      {item.attributes?.map(a => (
+                        <Typography key={a.field_key} variant="body2">
+                          {a.field_key}: {String(a.field_value)}
                         </Typography>
-                        {item.condition && (
-                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                            Condition: {item.condition}
-                          </Typography>
-                        )}
-                        {item.notes && (
-                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                            {item.notes}
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell onClick={e => e.stopPropagation()}>
-                        <Select
-                          value={item.transaction_type || 'buy'}
-                          onChange={e => handleTransactionTypeChange(index, e.target.value)}
-                          size="small"
-                          sx={{ minWidth: 140 }}
-                        >
-                          <MenuItem value="buy">
-                            <Box>
-                              <Typography variant="body2">Buy</Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                ${(item.buy_price || 0).toFixed(2)}
-                              </Typography>
-                            </Box>
-                          </MenuItem>
-                          <MenuItem value="pawn">
-                            <Box>
-                              <Typography variant="body2">Pawn</Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                ${(item.pawn_price || 0).toFixed(2)}
-                              </Typography>
-                            </Box>
-                          </MenuItem>
-                          <MenuItem value="retail">
-                            <Box>
-                              <Typography variant="body2">Retail</Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                ${(item.retail_price || 0).toFixed(2)}
-                              </Typography>
-                            </Box>
-                          </MenuItem>
-                        </Select>
-                      </TableCell>
-                      <TableCell onClick={e => e.stopPropagation()}>
-                        <TextField
-                          type="number"
-                          value={getItemPrice(item).toFixed(2)}
-                          onChange={e => handlePriceChange(index, e.target.value)}
-                          InputProps={{
-                            startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                          }}
-                          size="small"
-                          sx={{ width: 130 }}
-                          inputProps={{ min: 0, step: 0.01 }}
-                        />
-                      </TableCell>
-                      <TableCell onClick={e => e.stopPropagation()}>
-                        <Box
-                          className="action-buttons"
-                          sx={{ opacity: 0.7, transition: 'opacity 0.2s', display: 'flex', gap: 1 }}
-                        >
-                          <IconButton
-                            onClick={e => { e.stopPropagation(); handleOpenDetails(index); }}
-                            size="small"
-                            sx={{ color: 'primary.main' }}
-                          >
-                            <EditIcon />
-                          </IconButton>
-                          <IconButton
-                            onClick={e => { e.stopPropagation(); handleRemoveItem(index); }}
-                            size="small"
-                            sx={{ color: 'error.main' }}
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        </Box>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                      ))}
+                      <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }}>
+                        Buy: ${(item.buy_price || 0).toFixed(2)}
+                        {item.pawn_price ? `  ·  Pawn: $${item.pawn_price.toFixed(2)}` : ''}
+                        {item.retail_price ? `  ·  Retail: $${item.retail_price.toFixed(2)}` : ''}
+                      </Typography>
+                      <IconButton
+                        onClick={() => handleDeletePending(idx)}
+                        sx={{ position: 'absolute', top: 8, right: 8 }}
+                        size="small"
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </Paper>
+                  </Grid>
+                ))
+              )}
+            </Grid>
 
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-            <Typography variant="h6">
-              Total: ${estimatedItems.reduce((sum, item) => sum + getItemPrice(item), 0).toFixed(2)}
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button
-                variant="outlined"
-                color="primary"
-                onClick={handleAddToTicket}
-                disabled={estimatedItems.length === 0}
-              >
-                Add to Ticket
-              </Button>
+            {/* Finish — moves staged Summary items to Estimated Items table */}
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
               <Button
                 variant="contained"
                 color="primary"
-                onClick={handleProceedToCheckout}
-                disabled={estimatedItems.length === 0}
-                startIcon={<ArrowForwardIcon />}
+                size="large"
+                onClick={handleFinish}
+                disabled={pendingItems.length === 0}
+                fullWidth
               >
-                Proceed to Checkout
+                Finish
               </Button>
             </Box>
-          </Box>
-        </Paper>
 
-      </Box>
+          </Paper>
+        </Grid>
 
-      {/* Item Details Dialog */}
+      </Grid>
+
+      {/* ── Estimated Items Table ── */}
+      <Grid container spacing={0} sx={{ mt: 0 }}>
+        <Grid item xs={12}>
+          <Paper elevation={3} sx={{ p: 2, mt: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Estimated Items
+            </Typography>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Image</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Description</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Transaction Type</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Price</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {estimatedItems.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                        No items added yet — fill in the form above and click Finish.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    estimatedItems.map((item, index) => (
+                      <TableRow
+                        key={index}
+                        sx={{
+                          transition: 'all 0.2s',
+                          '&:hover': {
+                            bgcolor: 'action.hover',
+                            '& .action-buttons': { opacity: 1 },
+                          },
+                        }}
+                      >
+                        <TableCell>
+                          <img
+                            src={item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url || ''}
+                            alt="item"
+                            style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid #ddd' }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                            {item.short_desc}{item.category_name ? ` · ${item.category_name}` : ''}
+                          </Typography>
+                          {item.condition && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                              Condition: {item.condition}
+                            </Typography>
+                          )}
+                          {item.notes && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                              {item.notes}
+                            </Typography>
+                          )}
+                        </TableCell>
+                        <TableCell onClick={e => e.stopPropagation()}>
+                          <Select
+                            value={item.transaction_type || 'buy'}
+                            onChange={e => handleTransactionTypeChange(index, e.target.value)}
+                            size="small"
+                            sx={{ minWidth: 150, '& .MuiSelect-select': { py: 1 } }}
+                          >
+                            <MenuItem value="buy">
+                              <Box>
+                                <Typography variant="body2">Buy</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ${(item.buy_price || 0).toFixed(2)}
+                                </Typography>
+                              </Box>
+                            </MenuItem>
+                            <MenuItem value="pawn">
+                              <Box>
+                                <Typography variant="body2">Pawn</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ${(item.pawn_price || 0).toFixed(2)}
+                                </Typography>
+                              </Box>
+                            </MenuItem>
+                            <MenuItem value="retail">
+                              <Box>
+                                <Typography variant="body2">Retail</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ${(item.retail_price || 0).toFixed(2)}
+                                </Typography>
+                              </Box>
+                            </MenuItem>
+                          </Select>
+                        </TableCell>
+                        <TableCell onClick={e => e.stopPropagation()}>
+                          <TextField
+                            type="number"
+                            value={getItemPrice(item).toFixed(2)}
+                            onChange={e => handlePriceChange(index, e.target.value)}
+                            InputProps={{
+                              startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                              sx: { '& input': { py: 1 } },
+                            }}
+                            size="small"
+                            sx={{ width: 150 }}
+                            inputProps={{ min: 0, step: 0.01 }}
+                          />
+                        </TableCell>
+                        <TableCell onClick={e => e.stopPropagation()}>
+                          <Box
+                            className="action-buttons"
+                            sx={{ opacity: 0.7, transition: 'opacity 0.2s', display: 'flex', gap: 1 }}
+                          >
+                            <IconButton
+                              onClick={e => { e.stopPropagation(); handleOpenDetails(index); }}
+                              size="small"
+                              sx={{ color: 'primary.main' }}
+                            >
+                              <EditIcon />
+                            </IconButton>
+                            <IconButton
+                              onClick={e => { e.stopPropagation(); handleRemoveItem(index); }}
+                              size="small"
+                              sx={{ color: 'error.main' }}
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
+              <Typography variant="h6">
+                Total Price: ${estimatedItems.reduce((sum, item) => sum + getItemPrice(item), 0).toFixed(2)}
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  onClick={handleAddToTicket}
+                  disabled={estimatedItems.length === 0}
+                >
+                  Add to Ticket
+                </Button>
+                {(
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleProceedToCheckout}
+                    disabled={estimatedItems.length === 0}
+                    startIcon={<ArrowForwardIcon />}
+                  >
+                    Proceed to Checkout
+                  </Button>
+                )}
+              </Box>
+            </Box>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      {/* ── Item Details Dialog ── */}
       <Dialog
         open={openDetailsDialog}
         onClose={() => { setOpenDetailsDialog(false); setSelectedItemIndex(null); }}
@@ -785,7 +865,7 @@ function HardgoodsEstimator() {
         </DialogActions>
       </Dialog>
 
-    </Box>
+    </Container>
   );
 }
 
