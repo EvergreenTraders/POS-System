@@ -1114,7 +1114,79 @@ const CustomerTicket = () => {
       // Clear the location state to prevent reprocessing on navigation
       window.history.replaceState({}, document.title);
     }
-    
+
+    // If we have estimated items from the Hardgoods Estimator
+    else if (estimatedItems.length > 0 && from === 'hardgoodsEstimator') {
+      const stateHash = JSON.stringify({ estimatedItems, from });
+      if (processedStateRef.current === stateHash) {
+        return;
+      }
+      processedStateRef.current = stateHash;
+
+      const hasEmptyPawnItems = pawnItems.length === 1 && !pawnItems[0].description;
+      const hasEmptyBuyItems  = buyItems.length  === 1 && !buyItems[0].description;
+      const hasEmptySaleItems = saleItems.length === 1 && !saleItems[0].description;
+
+      const pawn = [];
+      const buy  = [];
+      const sale = [];
+
+      estimatedItems.forEach((item, index) => {
+        const baseItem = {
+          id: Date.now() + index,
+          description: item.short_desc || item.description || '',
+          category: item.category || 'Hardgoods',
+          originalData: { ...item },
+          sourceEstimator: 'hardgoods',
+          images: item.images || [],
+          image: item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url || null,
+        };
+
+        switch (item.transaction_type) {
+          case 'pawn':
+            pawn.push({ ...baseItem, value: item.price_estimates?.pawn || 0 });
+            break;
+          case 'retail':
+            sale.push({ ...baseItem, price: item.price_estimates?.retail || 0, paymentMethod: '' });
+            break;
+          case 'buy':
+          default:
+            buy.push({ ...baseItem, price: item.price_estimates?.buy || 0 });
+            break;
+        }
+      });
+
+      if (pawn.length > 0) {
+        const timestamp = Date.now();
+        const newItems = pawn.map((it, i) => ({ ...it, id: timestamp + i }));
+        const updated = hasEmptyPawnItems ? newItems : [...pawnItems, ...newItems];
+        setPawnItems(updated);
+        saveTicketItems('pawn', updated);
+        setActiveTab(0);
+      }
+
+      if (buy.length > 0) {
+        const timestamp = Date.now() + 1000;
+        const newItems = buy.map((it, i) => ({ ...it, id: timestamp + i }));
+        const updated = hasEmptyBuyItems ? newItems : [...buyItems, ...newItems];
+        setBuyItems(updated);
+        saveTicketItems('buy', updated);
+        setActiveTab(1);
+      }
+
+      if (sale.length > 0) {
+        const timestamp = Date.now() + 2000;
+        const newItems = sale.map((it, i) => ({ ...it, id: timestamp + i }));
+        const updated = hasEmptySaleItems ? newItems : [...saleItems, ...newItems];
+        setSaleItems(updated);
+        saveTicketItems('sale', updated);
+        setActiveTab(3);
+      }
+
+      showSnackbar(`${estimatedItems.length} hardgoods item${estimatedItems.length > 1 ? 's' : ''} added to ticket`, 'success');
+      window.history.replaceState({}, document.title);
+    }
+
     // Handle edit item coming from Cart
     else if (location.state?.editItem && location.state?.fromCart) {
       // Skip if we've already processed this state
