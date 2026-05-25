@@ -362,11 +362,39 @@ function HardgoodsEstimator() {
   };
 
   const handleAddToTicket = () => {
+    if (estimatedItems.length === 0) {
+      enqueueSnackbar('Add at least one item before adding to ticket', { variant: 'warning' });
+      return;
+    }
+
+    // Normalise items so CustomerTicket can read them the same way
+    // it reads jewel-estimator items (price_estimates + short_desc)
+    const processedItems = estimatedItems.map((item) => {
+      const images = Array.isArray(item.images) && item.images.length > 0
+        ? item.images
+        : [{ url: 'https://via.placeholder.com/150', isPrimary: true }];
+
+      return {
+        ...item,
+        // price_estimates map so CustomerTicket's existing handler can read it
+        price_estimates: {
+          pawn:   item.pawn_price   || 0,
+          buy:    item.buy_price    || 0,
+          retail: item.retail_price || 0,
+        },
+        price: item.buy_price || item.pawn_price || item.retail_price || 0,
+        // normalise description + category fields
+        short_desc:  item.short_desc  || item.description || '',
+        category:    item.category_name || item.category   || 'Hardgoods',
+        images,
+      };
+    });
+
     navigate('/customer-ticket', {
       state: {
-        estimatedItems,
+        estimatedItems: processedItems,
         customer: location.state?.customer || null,
-        from: 'hardgoods',
+        from: 'hardgoodsEstimator',
       },
     });
   };
