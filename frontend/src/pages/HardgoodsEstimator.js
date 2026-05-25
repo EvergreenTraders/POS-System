@@ -227,7 +227,11 @@ function HardgoodsEstimator() {
   const buildItem = () => {
     const categoryName = categories.find(c => c.id === form.categoryId)?.name || '';
     const attributes = categoryFields
-      .map(f => ({ field_key: f.field_key, field_value: categoryFieldValues[f.field_key] ?? null }))
+      .map(f => ({
+        field_key:   f.field_key,
+        field_label: f.label_override || f.label || f.field_key,
+        field_value: categoryFieldValues[f.field_key] ?? null,
+      }))
       .filter(a => a.field_value !== null && a.field_value !== '');
     return {
       transaction_type: 'buy',
@@ -265,24 +269,6 @@ function HardgoodsEstimator() {
 
   // Add Item — validates form, stages item as a Summary card, resets form
   const handleAddItem = () => {
-    if (!form.shortDesc.trim()) {
-      enqueueSnackbar('Description is required', { variant: 'warning' });
-      return;
-    }
-    if (!form.buyPrice || parseFloat(form.buyPrice) <= 0) {
-      enqueueSnackbar('Buy price is required', { variant: 'warning' });
-      return;
-    }
-    const missing = categoryFields.filter(
-      f => f.required_for_inventory && !categoryFieldValues[f.field_key]
-    );
-    if (missing.length > 0) {
-      enqueueSnackbar(
-        `Required fields missing: ${missing.map(f => f.label_override || f.label || f.field_key).join(', ')}`,
-        { variant: 'warning' }
-      );
-      return;
-    }
     setPendingItems(prev => [...prev, buildItem()]);
     setForm(EMPTY_FORM);
     setCategoryFields([]);
@@ -412,14 +398,15 @@ function HardgoodsEstimator() {
 
               <Box sx={{ display: 'flex', gap: 2 }}>
                 <TextField
-                  label="Description *"
+                  label="Description"
+                  required
                   value={form.shortDesc}
                   onChange={e => setField('shortDesc', e.target.value)}
                   fullWidth size="small"
                   placeholder="What is the item?"
                   sx={{ flex: 2 }}
                 />
-                <FormControl size="small" sx={{ flex: 1 }}>
+                <FormControl size="small" required sx={{ flex: 1 }}>
                   <InputLabel>Category</InputLabel>
                   <Select
                     value={form.categoryId}
@@ -483,14 +470,18 @@ function HardgoodsEstimator() {
                 fullWidth multiline minRows={2} size="small"
               />
 
-              {/* Add Item button */}
+              {/* Add Item button — enabled only when all required fields are filled */}
               <Button
                 variant="contained"
                 color="primary"
                 onClick={handleAddItem}
                 fullWidth
                 sx={{ mt: 1 }}
-                disabled={!form.shortDesc.trim() || !form.buyPrice || parseFloat(form.buyPrice) <= 0}
+                disabled={
+                  !form.shortDesc.trim() ||
+                  !form.categoryId ||
+                  categoryFields.some(f => f.required_for_inventory && !categoryFieldValues[f.field_key])
+                }
               >
                 Add Item
               </Button>
@@ -596,27 +587,60 @@ function HardgoodsEstimator() {
                 pendingItems.map((item, idx) => (
                   <Grid item xs={12} key={idx}>
                     <Paper sx={{ p: 2, border: '1px solid black', borderRadius: 1, position: 'relative' }}>
-                      <Typography variant="subtitle2">Item {idx + 1}</Typography>
+
+                      {/* Thumbnail */}
+                      {item.images?.length > 0 && (
+                        <img
+                          src={item.images[0].url}
+                          alt=""
+                          style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 4, marginBottom: 6, border: '1px solid #ddd' }}
+                        />
+                      )}
+
+                      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Item {idx + 1}</Typography>
+
                       <Typography variant="body2">Description: {item.short_desc}</Typography>
+
                       {item.category_name && (
                         <Typography variant="body2">Category: {item.category_name}</Typography>
                       )}
                       {item.condition && (
                         <Typography variant="body2">Condition: {item.condition}</Typography>
                       )}
+                      {item.source && (
+                        <Typography variant="body2">
+                          Source: {SOURCE_OPTIONS.find(s => s.value === item.source)?.label || item.source}
+                        </Typography>
+                      )}
                       {item.part_number && (
                         <Typography variant="body2">Part / Model: {item.part_number}</Typography>
                       )}
+                      {item.long_desc && (
+                        <Typography variant="body2">Details: {item.long_desc}</Typography>
+                      )}
+                      {item.notes && (
+                        <Typography variant="body2">Notes: {item.notes}</Typography>
+                      )}
+
+                      {/* Dynamic category attributes with readable labels */}
                       {item.attributes?.map(a => (
                         <Typography key={a.field_key} variant="body2">
-                          {a.field_key}: {String(a.field_value)}
+                          {a.field_label || a.field_key}: {String(a.field_value)}
                         </Typography>
                       ))}
+
+                      {item.estimated_value != null && (
+                        <Typography variant="body2">
+                          Est. Value: ${Number(item.estimated_value).toFixed(2)}
+                        </Typography>
+                      )}
+
                       <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }}>
                         Buy: ${(item.buy_price || 0).toFixed(2)}
                         {item.pawn_price ? `  ·  Pawn: $${item.pawn_price.toFixed(2)}` : ''}
                         {item.retail_price ? `  ·  Retail: $${item.retail_price.toFixed(2)}` : ''}
                       </Typography>
+
                       <IconButton
                         onClick={() => handleDeletePending(idx)}
                         sx={{ position: 'absolute', top: 8, right: 8 }}
