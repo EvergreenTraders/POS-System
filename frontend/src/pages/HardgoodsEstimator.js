@@ -4,8 +4,11 @@ import axios from 'axios';
 import {
   Box,
   Button,
+  Chip,
   Divider,
   FormControl,
+  FormControlLabel,
+  FormHelperText,
   IconButton,
   InputLabel,
   List,
@@ -14,6 +17,7 @@ import {
   MenuItem,
   Paper,
   Select,
+  Switch,
   TextField,
   Typography,
 } from '@mui/material';
@@ -91,6 +95,8 @@ function HardgoodsEstimator() {
   const [categories, setCategories] = useState([]);
   const [estimatedItems, setEstimatedItems] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [categoryFields, setCategoryFields] = useState([]);
+  const [categoryFieldValues, setCategoryFieldValues] = useState({});
 
   useEffect(() => {
     loadCategories();
@@ -111,8 +117,103 @@ function HardgoodsEstimator() {
 
   const setField = (key, val) => setForm(prev => ({ ...prev, [key]: val }));
 
+  const handleCategoryChange = async (catId) => {
+    setField('categoryId', catId);
+    if (!catId) {
+      setCategoryFields([]);
+      setCategoryFieldValues({});
+      return;
+    }
+    try {
+      const res = await axios.get(`${API_BASE_URL}/category-field-rules/${catId}`);
+      setCategoryFields(res.data);
+      const valMap = {};
+      for (const f of res.data) {
+        valMap[f.field_key] = f.data_type === 'BOOLEAN'
+          ? (f.default_value ?? 'false')
+          : (f.default_value ?? '');
+      }
+      setCategoryFieldValues(valMap);
+    } catch (err) {
+      console.error('Error loading category fields:', err);
+      setCategoryFields([]);
+      setCategoryFieldValues({});
+    }
+  };
+
+  const renderCategoryField = (field) => {
+    const label = field.label_override || field.label || field.field_key;
+    const val   = categoryFieldValues[field.field_key] ?? '';
+    const isRequired = field.required_for_inventory;
+    const onChange = (newVal) =>
+      setCategoryFieldValues(prev => ({ ...prev, [field.field_key]: newVal }));
+
+    switch (field.data_type) {
+      case 'NUMBER':
+        return (
+          <TextField
+            key={field.field_key}
+            label={label} type="number" value={val}
+            onChange={e => onChange(e.target.value)}
+            size="small" fullWidth required={isRequired}
+            helperText={field.help_text || undefined}
+          />
+        );
+      case 'ENUM': {
+        const opts = Array.isArray(field.allowed_values) ? field.allowed_values : [];
+        return (
+          <FormControl key={field.field_key} fullWidth size="small" required={isRequired}>
+            <InputLabel>{label}</InputLabel>
+            <Select value={val} onChange={e => onChange(e.target.value)} label={label}>
+              <MenuItem value=""><em>Not specified</em></MenuItem>
+              {opts.map(v => <MenuItem key={v} value={v}>{v}</MenuItem>)}
+            </Select>
+            {field.help_text && <FormHelperText>{field.help_text}</FormHelperText>}
+          </FormControl>
+        );
+      }
+      case 'BOOLEAN':
+        return (
+          <FormControlLabel
+            key={field.field_key}
+            control={
+              <Switch
+                checked={val === 'true' || val === true}
+                onChange={e => onChange(e.target.checked ? 'true' : 'false')}
+              />
+            }
+            label={label}
+          />
+        );
+      case 'DATE':
+        return (
+          <TextField
+            key={field.field_key}
+            label={label} type="date" value={val}
+            onChange={e => onChange(e.target.value)}
+            size="small" fullWidth required={isRequired}
+            InputLabelProps={{ shrink: true }}
+            helperText={field.help_text || undefined}
+          />
+        );
+      default:
+        return (
+          <TextField
+            key={field.field_key}
+            label={label} value={val}
+            onChange={e => onChange(e.target.value)}
+            size="small" fullWidth required={isRequired}
+            helperText={field.help_text || undefined}
+          />
+        );
+    }
+  };
+
   const buildItem = () => {
     const categoryName = categories.find(c => c.id === form.categoryId)?.name || '';
+    const attributes = categoryFields
+      .map(f => ({ field_key: f.field_key, field_value: categoryFieldValues[f.field_key] ?? null }))
+      .filter(a => a.field_value !== null && a.field_value !== '');
     return {
       transaction_type: 'buy',
       price: parseFloat(form.buyPrice),
@@ -129,6 +230,7 @@ function HardgoodsEstimator() {
       retail_price: form.retailPrice ? parseFloat(form.retailPrice) : null,
       notes: form.notes || null,
       fromEstimator: 'hardgoods',
+      attributes,
       images: form.images.map((img, idx) => ({
         url: img.url,
         file: img.file,
@@ -150,6 +252,14 @@ function HardgoodsEstimator() {
     if (form.shortDesc.trim()) {
       if (!form.buyPrice || parseFloat(form.buyPrice) <= 0) {
         enqueueSnackbar('Buy price is required for the current item', { variant: 'warning' });
+        return;
+      }
+      // Validate required category fields on the current unsaved item
+      const missing = categoryFields.filter(
+        f => f.required_for_inventory && !categoryFieldValues[f.field_key]
+      );
+      if (missing.length > 0) {
+        enqueueSnackbar(`Required fields missing: ${missing.map(f => f.label_override || f.label || f.field_key).join(', ')}`, { variant: 'warning' });
         return;
       }
       items = [...items, buildItem()];
@@ -211,7 +321,11 @@ function HardgoodsEstimator() {
               />
               <FormControl size="small" sx={{ flex: 1 }}>
                 <InputLabel>Category</InputLabel>
-                <Select value={form.categoryId} onChange={e => setField('categoryId', e.target.value)} label="Category">
+                <Select
+                  value={form.categoryId}
+                  onChange={e => handleCategoryChange(e.target.value)}
+                  label="Category"
+                >
                   <MenuItem value=""><em>None</em></MenuItem>
                   {categories.map(c => (
                     <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
@@ -219,6 +333,13 @@ function HardgoodsEstimator() {
                 </Select>
               </FormControl>
             </Box>
+
+            {/* Dynamic category fields */}
+            {categoryFields.length > 0 && (
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 1.5 }}>
+                  {categoryFields.map(field => renderCategoryField(field))}
+                </Box>
+            )}
 
             <TextField
               label="Additional Details"
