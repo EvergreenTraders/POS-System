@@ -947,6 +947,44 @@ app.put('/api/employee-sessions/:id', async (req, res) => {
   }
 });
 
+// DELETE /api/employee-sessions/:id - Delete a session (manager edit)
+app.delete('/api/employee-sessions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'DELETE FROM employee_sessions WHERE session_id = $1 RETURNING session_id',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting employee session:', error);
+    res.status(500).json({ error: 'Failed to delete session' });
+  }
+});
+
+// POST /api/employee-sessions/manual - Manually add a time entry (manager edit)
+app.post('/api/employee-sessions/manual', async (req, res) => {
+  try {
+    const { employee_id, clock_in_time, clock_out_time } = req.body;
+    if (!employee_id || !clock_in_time) {
+      return res.status(400).json({ error: 'employee_id and clock_in_time are required' });
+    }
+    const status = clock_out_time ? 'clocked_out' : 'clocked_in';
+    const result = await pool.query(`
+      INSERT INTO employee_sessions (employee_id, clock_in_time, clock_out_time, status)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [employee_id, clock_in_time, clock_out_time || null, status]);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error adding manual employee session:', error);
+    res.status(500).json({ error: 'Failed to add time entry' });
+  }
+});
+
 // ============================================================================
 // Cash Drawer API Routes
 // ============================================================================
