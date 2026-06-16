@@ -39,6 +39,7 @@ import { CloudUpload as UploadIcon, Delete as DeleteIcon, Store as StoreIcon, Ed
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
 import config from '../config';
+import { useAuth } from '../context/AuthContext';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -89,6 +90,8 @@ function TabPanel({ children, value, index }) {
 }
 
 function SystemConfig() {
+  const { user } = useAuth();
+  const isManagerOrOwner = user?.role === 'Store Manager' || user?.role === 'Store Owner';
   const [activeTab, setActiveTab] = useState(0);
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -2629,7 +2632,7 @@ function SystemConfig() {
           <Tab label="Pricing Calculator" />
           <Tab label="Account Authorization" />
           <Tab label="Item Attributes" />
-          <Tab label="Employee Configuration" />
+          {isManagerOrOwner && <Tab label="Employee Configuration" />}
         </Tabs>
       </Box>
 
@@ -4954,7 +4957,7 @@ function SystemConfig() {
         </StyledPaper>
       </TabPanel>
 
-      <TabPanel value={activeTab} index={6}>
+      {isManagerOrOwner && <TabPanel value={activeTab} index={6}>
         <StyledPaper elevation={2}>
           <ConfigSection>
             {employeePermissionsLoading ? (
@@ -5139,7 +5142,7 @@ function SystemConfig() {
             )}
           </ConfigSection>
         </StyledPaper>
-      </TabPanel>
+      </TabPanel>}
 
       {/* Add/Edit Tender Type Dialog */}
       <Dialog
