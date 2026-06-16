@@ -119,6 +119,7 @@ function CashDrawer() {
   const [quickReportTxnDetail, setQuickReportTxnDetail] = useState(null);
   const [quickReportTxnLoading, setQuickReportTxnLoading] = useState(false);
   const [clockInWarningOpen, setClockInWarningOpen] = useState(false);
+  const [clockInLoading, setClockInLoading] = useState(false);
 
   // Transaction Journal states
   const [journalEntries, setJournalEntries] = useState([]);
@@ -7307,25 +7308,44 @@ function CashDrawer() {
             You must be clocked in before opening a drawer.
           </Alert>
           <Typography variant="body1">
-            Please go to the Time Clock to clock in first.
+            Would you like to clock in now?
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button
-            onClick={() => setClockInWarningOpen(false)}
-            color="inherit"
-          >
+          <Button onClick={() => setClockInWarningOpen(false)} color="inherit">
             Cancel
           </Button>
           <Button
-            onClick={() => {
-              setClockInWarningOpen(false);
-              navigate('/time-clock');
-            }}
             variant="contained"
             color="primary"
+            disabled={clockInLoading}
+            onClick={async () => {
+              const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+              setClockInLoading(true);
+              try {
+                const response = await fetch(`${config.apiUrl}/employee-sessions/clock-in`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ employee_id: currentUser.id }),
+                });
+                if (response.ok) {
+                  window.dispatchEvent(new CustomEvent('clockStatusChanged'));
+                  setClockInWarningOpen(false);
+                  showSnackbar('Clocked in successfully', 'success');
+                  // Small delay so state settles before re-triggering open
+                  setTimeout(() => handleOpenDrawer(), 300);
+                } else {
+                  const err = await response.json();
+                  showSnackbar(err.error || 'Failed to clock in', 'error');
+                }
+              } catch (e) {
+                showSnackbar('Failed to clock in', 'error');
+              } finally {
+                setClockInLoading(false);
+              }
+            }}
           >
-            Go to Time Clock
+            {clockInLoading ? 'Clocking In...' : 'Clock In Now'}
           </Button>
         </DialogActions>
       </Dialog>
