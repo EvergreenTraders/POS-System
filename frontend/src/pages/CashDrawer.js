@@ -1385,8 +1385,8 @@ function CashDrawer() {
     }
 
     // Require clock-in for hourly employees (salary employees are exempt)
-    const isSalary = currentUser.employment_type === 'salary';
-    if (currentUser.track_hours !== false && !isSalary) {
+    const isSalary = currentEmployee?.employment_type === 'salary';
+    if (!isSalary) {
       try {
         const clockResponse = await fetch(`${config.apiUrl}/employee-sessions/clocked-in`);
         if (clockResponse.ok) {
@@ -1960,8 +1960,8 @@ function CashDrawer() {
     const employeeId = selectedEmployee || currentUser.id;
 
     // Require clock-in for hourly employees (salary employees are exempt)
-    const isSalary = currentUser.employment_type === 'salary';
-    if (currentUser.track_hours !== false && !isSalary) {
+    const isSalary = currentEmployee?.employment_type === 'salary';
+    if (!isSalary) {
       try {
         const clockResponse = await fetch(`${config.apiUrl}/employee-sessions/clocked-in`);
         if (clockResponse.ok) {

@@ -461,31 +461,8 @@ app.get('/', (req, res) => {
 app.get('/api/employees', async (req, res) => {
   try {
     const query = `
-      SELECT
-        employee_id,
-        username,
-        first_name,
-        last_name,
-        email,
-        phone,
-        role,
-        hire_date,
-        salary,
-        status,
-        discrepancy_threshold,
-        track_hours,
-        can_open_store,
-        can_open_drawer,
-        can_view_drawer,
-        can_view_safe,
-        transfer_allowed_drawer,
-        transfer_allowed_safe,
-        transfer_allowed_bank,
-        transfer_allowed_store,
-        transfer_limit,
-        can_petty_cash,
-        petty_cash_limit
-      FROM employees
+      SELECT * FROM employees
+
       WHERE store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY employee_id ASC
     `;
