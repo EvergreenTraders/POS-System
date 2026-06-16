@@ -618,18 +618,7 @@ function TimeClock() {
                         });
 
                         if (day.sessions.length === 0) {
-                          rows.push(
-                            <TableRow key={`${emp.employee_id}-${day.date}`} sx={{ bgcolor: empBg }}>
-                              <TableCell>{isFirstRow ? emp.employee_name : ''}</TableCell>
-                              <TableCell>{dateLabel}</TableCell>
-                              <TableCell>{emp.store_code}</TableCell>
-                              <TableCell>{'\u2014'}</TableCell>
-                              <TableCell>{'\u2014'}</TableCell>
-                              <TableCell>{'\u2014'}</TableCell>
-                              {isAuthorized && <TableCell />}
-                            </TableRow>
-                          );
-                          isFirstRow = false;
+                          // skip days with no activity
                         } else {
                           const dayHrs = calculateDayHours(day.sessions);
                           const dayLunchMinutes = dayHrs ? Math.round((dayHrs.raw - dayHrs.net) * 60) : 0;
