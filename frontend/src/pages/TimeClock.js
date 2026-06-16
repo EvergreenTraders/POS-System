@@ -85,6 +85,7 @@ function TimeClock() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [authorizedUser, setAuthorizedUser] = useState(null); // { id, role } of whoever enabled edit mode
 
   // Force clock state
   const [forceDialogOpen, setForceDialogOpen] = useState(false);
@@ -334,6 +335,7 @@ function TimeClock() {
     // Auto-authorize if the current user is a Store Manager or Store Owner
     if (user?.role === 'Store Manager' || user?.role === 'Store Owner') {
       setIsAuthorized(true);
+      setAuthorizedUser({ id: user.id, role: user.role });
       setSnackbar({ open: true, message: 'Edit mode enabled', severity: 'success' });
       return;
     }
@@ -370,6 +372,7 @@ function TimeClock() {
       }
 
       setIsAuthorized(true);
+      setAuthorizedUser({ id: data.user.id, role: data.user.role });
       setAuthDialogOpen(false);
       setManagerUsername('');
       setManagerPassword('');
@@ -399,13 +402,29 @@ function TimeClock() {
     setEditDialogOpen(true);
   };
 
+  const isTargetOwner = (employeeId) => {
+    const target = allEmployees.find(e => e.employee_id === employeeId);
+    return target?.role === 'Store Owner';
+  };
+
+  const canEditTarget = (employeeId) => {
+    if (authorizedUser?.role === 'Store Owner') return true;
+    if (authorizedUser?.role === 'Store Manager' && isTargetOwner(employeeId)) return false;
+    return true;
+  };
+
   const handleSaveEdit = async () => {
     if (!editSession) return;
+    if (!canEditTarget(editSession.employee_id)) {
+      setSnackbar({ open: true, message: 'Store Managers cannot edit Store Owner time entries', severity: 'error' });
+      return;
+    }
     setEditSaving(true);
     try {
       const body = {};
       if (editClockIn) body.clock_in_time = new Date(editClockIn).toISOString();
       if (editClockOut) body.clock_out_time = new Date(editClockOut).toISOString();
+      body.performer_id = authorizedUser?.id;
 
       const response = await fetch(`${config.apiUrl}/employee-sessions/${editSession.session_id}`, {
         method: 'PUT',
@@ -431,10 +450,16 @@ function TimeClock() {
 
   const handleDeleteSession = async () => {
     if (!editSession) return;
+    if (!canEditTarget(editSession.employee_id)) {
+      setSnackbar({ open: true, message: 'Store Managers cannot delete Store Owner time entries', severity: 'error' });
+      return;
+    }
     setEditSaving(true);
     try {
       const response = await fetch(`${config.apiUrl}/employee-sessions/${editSession.session_id}`, {
         method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ performer_id: authorizedUser?.id }),
       });
       if (response.ok) {
         setSnackbar({ open: true, message: 'Time entry deleted', severity: 'success' });
@@ -454,6 +479,10 @@ function TimeClock() {
 
   const handleAddEntry = async () => {
     if (!addTarget || !addClockIn) return;
+    if (!canEditTarget(addTarget.employee_id)) {
+      setSnackbar({ open: true, message: 'Store Managers cannot add time entries for Store Owners', severity: 'error' });
+      return;
+    }
     setAddSaving(true);
     try {
       const response = await fetch(`${config.apiUrl}/employee-sessions/manual`, {
@@ -463,6 +492,7 @@ function TimeClock() {
           employee_id: addTarget.employee_id,
           clock_in_time: new Date(addClockIn).toISOString(),
           clock_out_time: addClockOut ? new Date(addClockOut).toISOString() : null,
+          performer_id: authorizedUser?.id,
         }),
       });
       if (response.ok) {
@@ -630,7 +660,7 @@ function TimeClock() {
                   Edit
                 </Button>
               ) : (
-                <Chip label="Edit Mode" color="warning" size="small" onDelete={() => setIsAuthorized(false)} />
+                <Chip label="Edit Mode" color="warning" size="small" onDelete={() => { setIsAuthorized(false); setAuthorizedUser(null); }} />
               )}
             </>
           )}
@@ -670,6 +700,8 @@ function TimeClock() {
                       const empTotal = calculateEmployeeTotal(emp.sessions);
                       const empBg = empIdx % 2 === 0 ? '#f5f5f5' : 'white';
                       const colCount = isAuthorized ? 7 : 6;
+                      const empRole = allEmployees.find(e => e.employee_id === emp.employee_id)?.role;
+                      const hideActions = empRole === 'Store Owner' && authorizedUser?.role === 'Store Manager';
 
                       const rows = [];
                       let isFirstRow = true;
@@ -714,57 +746,59 @@ function TimeClock() {
                                 </TableCell>
                                 {isAuthorized && (
                                   <TableCell sx={{ py: 0 }}>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                      <Button
-                                        size="small"
-                                        startIcon={<EditIcon />}
-                                        onClick={() => openEditDialog(emp.employee_name, session)}
-                                        sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
-                                      >
-                                        Edit
-                                      </Button>
-                                      {isFirstRow && (
-                                        <>
-                                          {clockedInEmployeeIds.has(emp.employee_id) ? (
+                                    {!hideActions && (
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                        <Button
+                                          size="small"
+                                          startIcon={<EditIcon />}
+                                          onClick={() => openEditDialog(emp.employee_name, session)}
+                                          sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
+                                        >
+                                          Edit
+                                        </Button>
+                                        {isFirstRow && (
+                                          <>
+                                            {clockedInEmployeeIds.has(emp.employee_id) ? (
+                                              <Button
+                                                size="small"
+                                                variant="outlined"
+                                                color="error"
+                                                startIcon={<ForceIcon />}
+                                                onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'out')}
+                                                sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
+                                              >
+                                                Force OUT
+                                              </Button>
+                                            ) : (
+                                              <Button
+                                                size="small"
+                                                variant="outlined"
+                                                color="success"
+                                                startIcon={<ForceIcon />}
+                                                onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'in')}
+                                                sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
+                                              >
+                                                Force IN
+                                              </Button>
+                                            )}
                                             <Button
                                               size="small"
                                               variant="outlined"
-                                              color="error"
-                                              startIcon={<ForceIcon />}
-                                              onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'out')}
+                                              startIcon={<AddIcon />}
+                                              onClick={() => {
+                                                setAddTarget({ employee_id: emp.employee_id, employee_name: emp.employee_name });
+                                                setAddClockIn('');
+                                                setAddClockOut('');
+                                                setAddDialogOpen(true);
+                                              }}
                                               sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
                                             >
-                                              Force OUT
+                                              Add
                                             </Button>
-                                          ) : (
-                                            <Button
-                                              size="small"
-                                              variant="outlined"
-                                              color="success"
-                                              startIcon={<ForceIcon />}
-                                              onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'in')}
-                                              sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
-                                            >
-                                              Force IN
-                                            </Button>
-                                          )}
-                                          <Button
-                                            size="small"
-                                            variant="outlined"
-                                            startIcon={<AddIcon />}
-                                            onClick={() => {
-                                              setAddTarget({ employee_id: emp.employee_id, employee_name: emp.employee_name });
-                                              setAddClockIn('');
-                                              setAddClockOut('');
-                                              setAddDialogOpen(true);
-                                            }}
-                                            sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
-                                          >
-                                            Add
-                                          </Button>
-                                        </>
-                                      )}
-                                    </Box>
+                                          </>
+                                        )}
+                                      </Box>
+                                    )}
                                   </TableCell>
                                 )}
                               </TableRow>

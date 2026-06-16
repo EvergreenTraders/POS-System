@@ -869,7 +869,7 @@ app.get('/api/employee-sessions/report', async (req, res) => {
       empParams.push(empIdFilter);
     }
     const employeesResult = await pool.query(`
-      SELECT employee_id, first_name, last_name, username, status
+      SELECT employee_id, first_name, last_name, username, status, role
       FROM employees
       WHERE status = 'Active'
         AND ($1::int IS NULL OR store_id = $1)
@@ -906,6 +906,7 @@ app.get('/api/employee-sessions/report', async (req, res) => {
       return {
         employee_id: emp.employee_id,
         employee_name: `${emp.first_name} ${emp.last_name}`,
+        role: emp.role,
         store_code: currentStore.store_code,
         store_name: currentStore.store_name,
         sessions: empSessions
@@ -922,11 +923,32 @@ app.get('/api/employee-sessions/report', async (req, res) => {
   }
 });
 
+// Helper: returns 403 if a Store Manager is trying to act on a Store Owner's session
+async function checkEditPermission(performerId, targetEmployeeId, res) {
+  if (!performerId) return false;
+  const [perfResult, targetResult] = await Promise.all([
+    pool.query('SELECT role FROM employees WHERE employee_id = $1', [performerId]),
+    pool.query('SELECT role FROM employees WHERE employee_id = $1', [targetEmployeeId]),
+  ]);
+  const performerRole = perfResult.rows[0]?.role;
+  const targetRole = targetResult.rows[0]?.role;
+  if (performerRole === 'Store Manager' && targetRole === 'Store Owner') {
+    res.status(403).json({ error: 'Store Managers cannot edit Store Owner time entries' });
+    return true;
+  }
+  return false;
+}
+
 // PUT /api/employee-sessions/:id - Update a session (manager edit)
 app.put('/api/employee-sessions/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { clock_in_time, clock_out_time } = req.body;
+    const { clock_in_time, clock_out_time, performer_id } = req.body;
+
+    // Look up whose session this is
+    const sessionCheck = await pool.query('SELECT employee_id FROM employee_sessions WHERE session_id = $1', [id]);
+    if (sessionCheck.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+    if (await checkEditPermission(performer_id, sessionCheck.rows[0].employee_id, res)) return;
 
     const result = await pool.query(`
       UPDATE employee_sessions
@@ -935,10 +957,6 @@ app.put('/api/employee-sessions/:id', async (req, res) => {
       WHERE session_id = $3
       RETURNING *
     `, [clock_in_time || null, clock_out_time || null, id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
 
     res.json(result.rows[0]);
   } catch (error) {
@@ -951,13 +969,13 @@ app.put('/api/employee-sessions/:id', async (req, res) => {
 app.delete('/api/employee-sessions/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query(
-      'DELETE FROM employee_sessions WHERE session_id = $1 RETURNING session_id',
-      [id]
-    );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
+    const { performer_id } = req.body || {};
+
+    const sessionCheck = await pool.query('SELECT employee_id FROM employee_sessions WHERE session_id = $1', [id]);
+    if (sessionCheck.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+    if (await checkEditPermission(performer_id, sessionCheck.rows[0].employee_id, res)) return;
+
+    await pool.query('DELETE FROM employee_sessions WHERE session_id = $1', [id]);
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting employee session:', error);
@@ -968,10 +986,11 @@ app.delete('/api/employee-sessions/:id', async (req, res) => {
 // POST /api/employee-sessions/manual - Manually add a time entry (manager edit)
 app.post('/api/employee-sessions/manual', async (req, res) => {
   try {
-    const { employee_id, clock_in_time, clock_out_time } = req.body;
+    const { employee_id, clock_in_time, clock_out_time, performer_id } = req.body;
     if (!employee_id || !clock_in_time) {
       return res.status(400).json({ error: 'employee_id and clock_in_time are required' });
     }
+    if (await checkEditPermission(performer_id, employee_id, res)) return;
     const status = clock_out_time ? 'clocked_out' : 'clocked_in';
     const result = await pool.query(`
       INSERT INTO employee_sessions (employee_id, clock_in_time, clock_out_time, status)
