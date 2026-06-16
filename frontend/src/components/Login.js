@@ -114,6 +114,26 @@ const Login = () => {
     const [overrideError, setOverrideError] = useState('');
     const [overrideLoading, setOverrideLoading] = useState(false);
 
+    // Forgot password dialog state
+    const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
+    const [forgotIdentifier, setForgotIdentifier] = useState('');
+    const [forgotLoading, setForgotLoading] = useState(false);
+    const [forgotError, setForgotError] = useState('');
+    const [forgotTempPassword, setForgotTempPassword] = useState('');
+
+    // Reset password dialog state
+    const [resetPasswordOpen, setResetPasswordOpen] = useState(false);
+    const [resetIsTempMode, setResetIsTempMode] = useState(false);
+    const [resetEmployeeId, setResetEmployeeId] = useState('');
+    const [resetOldPassword, setResetOldPassword] = useState('');
+    const [resetNewPassword, setResetNewPassword] = useState('');
+    const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+    const [showResetOldPw, setShowResetOldPw] = useState(false);
+    const [showResetNewPw, setShowResetNewPw] = useState(false);
+    const [resetError, setResetError] = useState('');
+    const [resetLoading, setResetLoading] = useState(false);
+    const [resetSuccess, setResetSuccess] = useState(false);
+
     const navigate = useNavigate();
     const { setUser } = useAuth();
     const { setWorkingDate, setIsWorkingDateEnabled } = useWorkingDate();
@@ -317,6 +337,95 @@ const Login = () => {
         } catch (err) {
             setOverrideError(err.response?.data?.error || 'Override failed. Check credentials and try again.');
             setOverrideLoading(false);
+        }
+    };
+
+    const handleForgotPasswordSubmit = async () => {
+        if (!forgotIdentifier.trim()) {
+            setForgotError('Please enter your username or email');
+            return;
+        }
+        setForgotLoading(true);
+        setForgotError('');
+        try {
+            const response = await axios.post(`${API_BASE_URL}/auth/forgot-password`, { identifier: forgotIdentifier });
+            setForgotTempPassword(response.data.tempPassword);
+        } catch (err) {
+            setForgotError(err.response?.data?.error || 'Failed to generate temporary password');
+        } finally {
+            setForgotLoading(false);
+        }
+    };
+
+    const handleForgotPasswordContinue = () => {
+        const savedIdentifier = forgotIdentifier;
+        const savedTemp = forgotTempPassword;
+        setForgotPasswordOpen(false);
+        setForgotIdentifier('');
+        setForgotTempPassword('');
+        setForgotError('');
+        // Open reset dialog pre-filled with temp password
+        setResetIsTempMode(true);
+        setResetEmployeeId(savedIdentifier);
+        setResetOldPassword(savedTemp);
+        setResetNewPassword('');
+        setResetConfirmPassword('');
+        setResetError('');
+        setResetSuccess(false);
+        setShowResetOldPw(false);
+        setShowResetNewPw(false);
+        setResetPasswordOpen(true);
+    };
+
+    const handleResetPasswordOpen = () => {
+        setResetIsTempMode(false);
+        setResetEmployeeId(identifier.trim());
+        setResetOldPassword('');
+        setResetNewPassword('');
+        setResetConfirmPassword('');
+        setResetError('');
+        setResetSuccess(false);
+        setShowResetOldPw(false);
+        setShowResetNewPw(false);
+        setResetPasswordOpen(true);
+    };
+
+    const handleResetPasswordClose = () => {
+        setResetPasswordOpen(false);
+        setResetLoading(false);
+        setResetSuccess(false);
+    };
+
+    const handleResetPasswordSubmit = async () => {
+        if (!resetEmployeeId.trim()) {
+            setResetError('Please enter your username or email');
+            return;
+        }
+        if (!resetOldPassword) {
+            setResetError('Please enter your current password');
+            return;
+        }
+        if (!resetNewPassword) {
+            setResetError('Please enter a new password');
+            return;
+        }
+        if (resetNewPassword !== resetConfirmPassword) {
+            setResetError('Passwords do not match');
+            return;
+        }
+        setResetLoading(true);
+        setResetError('');
+        try {
+            await axios.post(`${API_BASE_URL}/auth/reset-password`, {
+                employeeIdentifier: resetEmployeeId,
+                oldPassword: resetOldPassword,
+                newPassword: resetNewPassword,
+            });
+            setResetSuccess(true);
+        } catch (err) {
+            setResetError(err.response?.data?.error || 'Failed to reset password');
+        } finally {
+            setResetLoading(false);
         }
     };
 
@@ -560,6 +669,19 @@ const Login = () => {
                         }}
                     />
 
+                    {!isLocked && (
+                        <Box sx={{ textAlign: 'right', mt: -1, mb: 1 }}>
+                            <Button
+                                variant="text"
+                                size="small"
+                                onClick={() => { setForgotIdentifier(identifier.trim()); setForgotError(''); setForgotPasswordOpen(true); }}
+                                sx={{ fontSize: '0.75rem', color: 'text.secondary', p: 0, minWidth: 0, textTransform: 'none' }}
+                            >
+                                Forgot password?
+                            </Button>
+                        </Box>
+                    )}
+
                     {!isLocked && stores.length > 1 && (
                         <FormControl fullWidth sx={{ mb: 2 }}>
                             <InputLabel id="store-select-label">Store Location</InputLabel>
@@ -626,20 +748,30 @@ const Login = () => {
                     </Grid>
 
                     {!isLocked && (
-                        <Button
-                            fullWidth
-                            variant="outlined"
-                            onClick={handleManagerOverrideOpen}
-                            startIcon={<ManagerIcon />}
-                            sx={{
-                                mt: 1,
-                                borderColor: 'warning.main',
-                                color: 'warning.main',
-                                '&:hover': { borderColor: 'warning.dark', bgcolor: 'rgba(237,108,2,0.04)' },
-                            }}
-                        >
-                            Manager Override
-                        </Button>
+                        <>
+                            <Button
+                                fullWidth
+                                variant="outlined"
+                                onClick={handleManagerOverrideOpen}
+                                startIcon={<ManagerIcon />}
+                                sx={{
+                                    mt: 1,
+                                    borderColor: 'warning.main',
+                                    color: 'warning.main',
+                                    '&:hover': { borderColor: 'warning.dark', bgcolor: 'rgba(237,108,2,0.04)' },
+                                }}
+                            >
+                                Manager Override
+                            </Button>
+                            <Button
+                                fullWidth
+                                variant="text"
+                                onClick={handleResetPasswordOpen}
+                                sx={{ mt: 0.5, color: 'text.secondary', fontSize: '0.8rem' }}
+                            >
+                                Reset Employee Password
+                            </Button>
+                        </>
                     )}
 
                     {isLocked && (
@@ -664,6 +796,181 @@ const Login = () => {
                     </Typography>
                 </Box>
             </LoginPaper>
+
+            {/* Forgot Password Dialog */}
+            <Dialog open={forgotPasswordOpen} onClose={() => { setForgotPasswordOpen(false); setForgotError(''); setForgotTempPassword(''); }} maxWidth="xs" fullWidth>
+                <DialogTitle>Forgot Password</DialogTitle>
+                <DialogContent>
+                    {forgotTempPassword ? (
+                        <>
+                            <Alert severity="info" sx={{ mt: 1, mb: 2 }}>
+                                Your temporary password has been generated. Write it down, then click Continue to set a new password.
+                            </Alert>
+                            <Box sx={{ bgcolor: 'grey.100', borderRadius: 1, p: 2, textAlign: 'center' }}>
+                                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                                    Temporary Password
+                                </Typography>
+                                <Typography variant="h6" fontFamily="monospace" letterSpacing={2} fontWeight={700}>
+                                    {forgotTempPassword}
+                                </Typography>
+                            </Box>
+                        </>
+                    ) : (
+                        <>
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 2, mt: 1 }}>
+                                Enter your username or email to generate a temporary password.
+                            </Typography>
+                            {forgotError && (
+                                <Alert severity="error" sx={{ mb: 2 }} onClose={() => setForgotError('')}>
+                                    {forgotError}
+                                </Alert>
+                            )}
+                            <TextField
+                                fullWidth
+                                label="Username or Email"
+                                value={forgotIdentifier}
+                                onChange={(e) => setForgotIdentifier(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleForgotPasswordSubmit()}
+                                autoFocus
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <PersonIcon color="primary" />
+                                        </InputAdornment>
+                                    ),
+                                }}
+                            />
+                        </>
+                    )}
+                </DialogContent>
+                <DialogActions sx={{ px: 3, pb: 2 }}>
+                    <Button onClick={() => { setForgotPasswordOpen(false); setForgotError(''); setForgotTempPassword(''); }}>
+                        Cancel
+                    </Button>
+                    {forgotTempPassword ? (
+                        <Button variant="contained" onClick={handleForgotPasswordContinue}>
+                            Continue to Reset
+                        </Button>
+                    ) : (
+                        <Button
+                            variant="contained"
+                            onClick={handleForgotPasswordSubmit}
+                            disabled={forgotLoading}
+                            startIcon={forgotLoading ? <CircularProgress size={16} color="inherit" /> : null}
+                        >
+                            {forgotLoading ? 'Generating...' : 'Generate Temporary Password'}
+                        </Button>
+                    )}
+                </DialogActions>
+            </Dialog>
+
+            {/* Reset Password Dialog */}
+            <Dialog open={resetPasswordOpen} onClose={handleResetPasswordClose} maxWidth="xs" fullWidth>
+                <DialogTitle>{resetIsTempMode ? 'Set New Password' : 'Reset Password'}</DialogTitle>
+                <DialogContent>
+                    {resetSuccess ? (
+                        <Alert severity="success" sx={{ mt: 1 }}>
+                            Password has been reset. You can now sign in with your new password.
+                        </Alert>
+                    ) : (
+                        <>
+                            {resetError && (
+                                <Alert severity="error" sx={{ mb: 2, mt: 1 }} onClose={() => setResetError('')}>
+                                    {resetError}
+                                </Alert>
+                            )}
+                            <TextField
+                                fullWidth
+                                label="Username or Email"
+                                value={resetEmployeeId}
+                                onChange={(e) => setResetEmployeeId(e.target.value)}
+                                sx={{ mt: 1, mb: 2 }}
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <PersonIcon color="primary" />
+                                        </InputAdornment>
+                                    ),
+                                }}
+                            />
+                            <TextField
+                                fullWidth
+                                label={resetIsTempMode ? 'Temporary Password' : 'Current Password'}
+                                type={showResetOldPw ? 'text' : 'password'}
+                                value={resetOldPassword}
+                                onChange={(e) => setResetOldPassword(e.target.value)}
+                                sx={{ mb: 2 }}
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <LockIcon color="primary" />
+                                        </InputAdornment>
+                                    ),
+                                    endAdornment: (
+                                        <InputAdornment position="end">
+                                            <IconButton onClick={() => setShowResetOldPw(p => !p)} edge="end">
+                                                {showResetOldPw ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                                            </IconButton>
+                                        </InputAdornment>
+                                    ),
+                                }}
+                            />
+                            <TextField
+                                fullWidth
+                                label="New Password"
+                                type={showResetNewPw ? 'text' : 'password'}
+                                value={resetNewPassword}
+                                onChange={(e) => setResetNewPassword(e.target.value)}
+                                sx={{ mb: 2 }}
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <LockIcon color="primary" />
+                                        </InputAdornment>
+                                    ),
+                                    endAdornment: (
+                                        <InputAdornment position="end">
+                                            <IconButton onClick={() => setShowResetNewPw(p => !p)} edge="end">
+                                                {showResetNewPw ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                                            </IconButton>
+                                        </InputAdornment>
+                                    ),
+                                }}
+                            />
+                            <TextField
+                                fullWidth
+                                label="Confirm New Password"
+                                type={showResetNewPw ? 'text' : 'password'}
+                                value={resetConfirmPassword}
+                                onChange={(e) => setResetConfirmPassword(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleResetPasswordSubmit()}
+                                InputProps={{
+                                    startAdornment: (
+                                        <InputAdornment position="start">
+                                            <LockIcon color="primary" />
+                                        </InputAdornment>
+                                    ),
+                                }}
+                            />
+                        </>
+                    )}
+                </DialogContent>
+                <DialogActions sx={{ px: 3, pb: 2 }}>
+                    <Button onClick={handleResetPasswordClose}>
+                        {resetSuccess ? 'Close' : 'Cancel'}
+                    </Button>
+                    {!resetSuccess && (
+                        <Button
+                            variant="contained"
+                            onClick={handleResetPasswordSubmit}
+                            disabled={resetLoading}
+                            startIcon={resetLoading ? <CircularProgress size={16} color="inherit" /> : null}
+                        >
+                            {resetLoading ? 'Resetting...' : 'Reset Password'}
+                        </Button>
+                    )}
+                </DialogActions>
+            </Dialog>
 
             {/* Manager Override Dialog */}
             <Dialog open={managerOverrideOpen} onClose={handleManagerOverrideClose} maxWidth="xs" fullWidth>

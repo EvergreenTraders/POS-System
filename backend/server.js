@@ -5,6 +5,24 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
+
+const emailTransporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST,
+  port: parseInt(process.env.EMAIL_PORT) || 587,
+  secure: false,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+function generateTempPassword() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let pw = '';
+  for (let i = 0; i < 16; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+  return pw;
+}
 
 const app = express();
 
@@ -648,6 +666,55 @@ app.put('/api/employees/:id', async (req, res) => {
   } catch (err) {
     console.error('Error updating employee:', err);
     res.status(500).json({ error: 'Failed to update employee' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { employeeIdentifier, oldPassword, newPassword } = req.body;
+    if (!newPassword || newPassword.trim() === '') {
+      return res.status(400).json({ error: 'New password cannot be empty' });
+    }
+    const result = await pool.query(
+      'SELECT employee_id, password FROM employees WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)',
+      [employeeIdentifier]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    if (result.rows[0].password !== oldPassword) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    await pool.query(
+      'UPDATE employees SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE employee_id = $2',
+      [newPassword, result.rows[0].employee_id]
+    );
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error('Error resetting password:', err);
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { identifier } = req.body;
+    const result = await pool.query(
+      'SELECT employee_id, first_name FROM employees WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)',
+      [identifier]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No account found with that username or email' });
+    }
+    const tempPassword = generateTempPassword();
+    await pool.query(
+      'UPDATE employees SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE employee_id = $2',
+      [tempPassword, result.rows[0].employee_id]
+    );
+    res.json({ tempPassword });
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({ error: 'Failed to generate temporary password' });
   }
 });
 
