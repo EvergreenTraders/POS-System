@@ -30,6 +30,7 @@ import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import ClearIcon from '@mui/icons-material/Clear';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import SecurityIcon from '@mui/icons-material/Security';
+import SaveIcon from '@mui/icons-material/Save';
 
 // Helper function to convert buffer to data URL for image preview
 function bufferToDataUrl(bufferObj) {
@@ -3829,6 +3830,74 @@ const CustomerTicket = () => {
     }
   };
   
+  const handleSaveAsQuote = async () => {
+    if (!customer) {
+      showSnackbar('Please select a customer before saving as quote', 'error');
+      return;
+    }
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+    const employeeId = JSON.parse(atob(token.split('.')[1])).id;
+
+    // Collect all valid items (same logic as handleCheckout)
+    const allItems = [];
+    pawnItems.filter(i => i.description || i.value).forEach(i => allItems.push({ ...i, transaction_type: 'pawn' }));
+    buyItems.filter(i => i.description || i.price).forEach(i => allItems.push({ ...i, transaction_type: 'buy' }));
+    tradeItems.filter(i => i.tradeItem || i.storeItem).forEach(i => allItems.push({ ...i, transaction_type: 'trade' }));
+    saleItems.filter(i => i.description || i.price).forEach(i => allItems.push({ ...i, transaction_type: 'sale' }));
+    repairItems.filter(i => i.description || i.fee).forEach(i => allItems.push({ ...i, transaction_type: 'repair' }));
+
+    if (allItems.length === 0) {
+      showSnackbar('No valid items to save as quote', 'warning');
+      return;
+    }
+
+    // Calculate total
+    const total = allItems.reduce((sum, item) => {
+      const val = parseFloat(item.value || item.price || item.fee || item.priceDiff || 0);
+      const qty = parseFloat(item.quantity || 1);
+      return sum + val * qty;
+    }, 0);
+
+    try {
+      const response = await fetch(`${config.apiUrl}/quotes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          items: allItems,
+          customer_id: customer.id,
+          employee_id: employeeId,
+          total_amount: total,
+          created_at: new Date().toISOString(),
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to save quote');
+      const data = await response.json();
+      showSnackbar(`Quote ${data.quote_id} saved successfully. Valid for ${data.expires_in} days.`, 'success');
+
+      // Clear all tabs that were saved
+      const prefix = customer?.id ? `ticket_${customer.id}` : `ticket_global`;
+      setPawnItems([createEmptyPawnItem()]);
+      localStorage.removeItem(`${prefix}_pawn`);
+      setBuyItems([createEmptyBuyItem()]);
+      localStorage.removeItem(`${prefix}_buy`);
+      setTradeItems([createEmptyTradeItem()]);
+      localStorage.removeItem(`${prefix}_trade`);
+      setSaleItems([createEmptySaleItem()]);
+      localStorage.removeItem(`${prefix}_sale`);
+      setRepairItems([createEmptyRepairItem()]);
+      localStorage.removeItem(`${prefix}_repair`);
+    } catch (err) {
+      console.error('Error saving quote:', err);
+      showSnackbar('Error saving quote. Please try again.', 'error');
+    }
+  };
+
   const handleCheckout = () => {
     // Validate customer is selected
     if (!customer) {
@@ -5783,6 +5852,14 @@ return (
                     disabled={!customer}
                   >
                     Clear Tab
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    onClick={handleSaveAsQuote}
+                    startIcon={<SaveIcon />}
+                    disabled={!customer || isStoreClosed}
+                  >
+                    Save as Quote
                   </Button>
                   <Button
                     variant="contained"

@@ -48,7 +48,6 @@ import {
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PaymentIcon from '@mui/icons-material/Payment';
-import SaveIcon from '@mui/icons-material/Save';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import CreditCardIcon from '@mui/icons-material/CreditCard';
 
@@ -1798,134 +1797,7 @@ function Checkout() {
     }
   };
 
-  const handleSaveQuote = async () => {
-    if (!selectedCustomer?.name) {
-      setSnackbar({
-        open: true,
-        message: 'Please select a customer first',
-        severity: 'warning'
-      });
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        sessionStorage.setItem('redirectAfterLogin', '/checkout');
-        navigate('/login');
-        return;
-      }
-
-      // Get employee ID from token
-      const employeeId = JSON.parse(atob(token.split('.')[1])).id;
-
-      const response = await axios.post(
-        `${config.apiUrl}/quotes`,
-        {
-          items: cartItems,
-          customer_id: selectedCustomer.id,
-          employee_id: employeeId,
-          total_amount: calculateTotal(),
-          created_at: new Date().toISOString(),
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          }
-        }
-      );
-
-      if (response.status === 201 && response.data) {
-        const expiresIn = response.data.expires_in || 30;
-        setSnackbar({
-          open: true,
-          message: `Quote ${response.data.quote_id} saved successfully. Valid for ${expiresIn} days.`,
-          severity: 'success'
-        });
-
-        // Check if any items have actual file objects
-        const hasImageFiles = cartItems.some(item =>
-          item.images && Array.isArray(item.images) &&
-          item.images.some(img => img.file instanceof File)
-        );
-
-        if (hasImageFiles) {
-          // Use FormData for file uploads
-          const formData = new FormData();
-
-          // Collect all image files from all items
-          cartItems.forEach(item => {
-            if (item.images && Array.isArray(item.images)) {
-              item.images.forEach(img => {
-                if (img.file instanceof File) {
-                  formData.append('images', img.file);
-                }
-              });
-            }
-          });
-
-          // Process cart items to remove file objects
-          const processedItems = cartItems.map(item => {
-            const { images, ...itemWithoutImages } = item;
-            return {
-              ...itemWithoutImages,
-              transaction_type_id: transactionTypes[item.transaction_type],
-            };
-          });
-
-          formData.append('cartItems', JSON.stringify(processedItems));
-          formData.append('quote_id', response.data.quote_id);
-
-          await axios.post(
-            `${config.apiUrl}/jewelry/with-images`,
-            formData,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'multipart/form-data'
-              }
-            }
-          );
-        } else {
-          // No files, use regular JSON approach
-          await axios.post(
-            `${config.apiUrl}/jewelry`,
-            {
-              cartItems: cartItems.map(item => ({
-                ...item,
-                transaction_type_id: transactionTypes[item.transaction_type],
-              })),
-              quote_id: response.data.quote_id
-            },
-            {
-              headers: { Authorization: `Bearer ${token}` }
-            }
-          );
-        }
-
-        clearCart();
-        setTimeout(() => {
-          navigate('/jewel-estimator');
-        }, 2000); // Show message for 2 seconds before navigating
-      } else {
-        throw new Error('Failed to save quote');
-      }
-      
-    } catch (error) {
-      console.error('Error saving quote:', error);
-      setSnackbar({
-        open: true,
-        message: `Error saving quote: ${error.message}`,
-        severity: 'error'
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleBackToEstimation = () => {
+const handleBackToEstimation = () => {
     // If we came from a quote, go back to quote manager
     if (location.state?.quoteId) {
       clearCart();
@@ -2484,16 +2356,8 @@ function Checkout() {
               </FormControl>
 
               {/* Action Buttons */}
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<SaveIcon />}
-                  onClick={handleSaveQuote}
-                  disabled={loading || isStoreClosed}
-                >
-                  {loading ? 'Saving...' : 'Save as Quote'}
-                </Button>
-                <Button
+              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 3 }}>
+<Button
                   variant="contained"
                   startIcon={<PaymentIcon />}
                   onClick={() => handleSubmit()}
