@@ -25,6 +25,7 @@ import {
     InputLabel,
     Select,
     MenuItem,
+    CircularProgress,
 } from '@mui/material';
 import {
     Person as PersonIcon,
@@ -33,6 +34,7 @@ import {
     VisibilityOff as VisibilityOffIcon,
     AccessTime as ClockIcon,
     Store as StoreIcon,
+    AdminPanelSettings as ManagerIcon,
 } from '@mui/icons-material';
 
 const API_BASE_URL = config.apiUrl;
@@ -103,6 +105,14 @@ const Login = () => {
     const [businessLogo, setBusinessLogo] = useState(null);
     const [stores, setStores] = useState([]);
     const [selectedStore, setSelectedStore] = useState('');
+
+    // Manager override dialog state
+    const [managerOverrideOpen, setManagerOverrideOpen] = useState(false);
+    const [overrideManagerId, setOverrideManagerId] = useState('');
+    const [overrideManagerPassword, setOverrideManagerPassword] = useState('');
+    const [showOverridePassword, setShowOverridePassword] = useState(false);
+    const [overrideError, setOverrideError] = useState('');
+    const [overrideLoading, setOverrideLoading] = useState(false);
 
     const navigate = useNavigate();
     const { setUser } = useAuth();
@@ -243,6 +253,71 @@ const Login = () => {
         setLockedUser(null);
         setIdentifier('');
         setPassword('');
+    };
+
+    const handleManagerOverrideOpen = () => {
+        if (!identifier.trim()) {
+            setError('Please enter the employee username or email first');
+            return;
+        }
+        setOverrideManagerId('');
+        setOverrideManagerPassword('');
+        setOverrideError('');
+        setShowOverridePassword(false);
+        setManagerOverrideOpen(true);
+    };
+
+    const handleManagerOverrideClose = () => {
+        setManagerOverrideOpen(false);
+        setOverrideManagerId('');
+        setOverrideManagerPassword('');
+        setOverrideError('');
+        setOverrideLoading(false);
+        setShowOverridePassword(false);
+    };
+
+    const handleManagerOverrideSubmit = async () => {
+        if (!overrideManagerId || !overrideManagerPassword) {
+            setOverrideError('Please enter both username and password');
+            return;
+        }
+        setOverrideLoading(true);
+        setOverrideError('');
+        try {
+            const response = await axios.post(`${API_BASE_URL}/auth/manager-override`, {
+                employeeIdentifier: identifier,
+                managerIdentifier: overrideManagerId,
+                managerPassword: overrideManagerPassword,
+                store_id: selectedStore || undefined,
+            });
+
+            if (selectedStore) {
+                try {
+                    await axios.post(`${API_BASE_URL}/stores/${selectedStore}/set-current`);
+                } catch (storeErr) {
+                    console.error('Failed to set current store:', storeErr);
+                }
+            }
+
+            localStorage.setItem('token', response.data.token);
+            localStorage.setItem('user', JSON.stringify(response.data.user));
+            localStorage.removeItem('lockedSession');
+            setUser(response.data.user);
+            setWorkingDate(tempWorkingDate);
+            setIsWorkingDateEnabled(tempDateEnabled);
+            handleManagerOverrideClose();
+
+            const redirectPath = sessionStorage.getItem('redirectAfterLogin');
+            if (redirectPath) {
+                sessionStorage.removeItem('redirectAfterLogin');
+                navigate(redirectPath);
+            } else {
+                navigate('/');
+            }
+        } catch (err) {
+            setOverrideError(err.response?.data?.error || 'Override failed. Check credentials and try again.');
+            setOverrideLoading(false);
+        }
     };
 
     // Update time every second when Time Clock dialog is open
@@ -550,6 +625,23 @@ const Login = () => {
                         </Grid>
                     </Grid>
 
+                    {!isLocked && (
+                        <Button
+                            fullWidth
+                            variant="outlined"
+                            onClick={handleManagerOverrideOpen}
+                            startIcon={<ManagerIcon />}
+                            sx={{
+                                mt: 1,
+                                borderColor: 'warning.main',
+                                color: 'warning.main',
+                                '&:hover': { borderColor: 'warning.dark', bgcolor: 'rgba(237,108,2,0.04)' },
+                            }}
+                        >
+                            Manager Override
+                        </Button>
+                    )}
+
                     {isLocked && (
                         <Button
                             fullWidth
@@ -572,6 +664,75 @@ const Login = () => {
                     </Typography>
                 </Box>
             </LoginPaper>
+
+            {/* Manager Override Dialog */}
+            <Dialog open={managerOverrideOpen} onClose={handleManagerOverrideClose} maxWidth="xs" fullWidth>
+                <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <ManagerIcon color="warning" />
+                    Manager Override
+                </DialogTitle>
+                <DialogContent>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        A Store Manager or Store Owner must enter their credentials to sign in as{' '}
+                        <strong>{identifier}</strong>.
+                    </Typography>
+                    {overrideError && (
+                        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setOverrideError('')}>
+                            {overrideError}
+                        </Alert>
+                    )}
+                    <TextField
+                        fullWidth
+                        label="Manager Username or Email"
+                        value={overrideManagerId}
+                        onChange={(e) => setOverrideManagerId(e.target.value)}
+                        sx={{ mb: 2 }}
+                        InputProps={{
+                            startAdornment: (
+                                <InputAdornment position="start">
+                                    <PersonIcon color="primary" />
+                                </InputAdornment>
+                            ),
+                        }}
+                    />
+                    <TextField
+                        fullWidth
+                        label="Manager Password"
+                        type={showOverridePassword ? 'text' : 'password'}
+                        value={overrideManagerPassword}
+                        onChange={(e) => setOverrideManagerPassword(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleManagerOverrideSubmit()}
+                        InputProps={{
+                            startAdornment: (
+                                <InputAdornment position="start">
+                                    <LockIcon color="primary" />
+                                </InputAdornment>
+                            ),
+                            endAdornment: (
+                                <InputAdornment position="end">
+                                    <IconButton onClick={() => setShowOverridePassword(p => !p)} edge="end">
+                                        {showOverridePassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                                    </IconButton>
+                                </InputAdornment>
+                            ),
+                        }}
+                    />
+                </DialogContent>
+                <DialogActions sx={{ px: 3, pb: 2 }}>
+                    <Button onClick={handleManagerOverrideClose} disabled={overrideLoading}>
+                        Cancel
+                    </Button>
+                    <Button
+                        variant="contained"
+                        color="warning"
+                        onClick={handleManagerOverrideSubmit}
+                        disabled={overrideLoading}
+                        startIcon={overrideLoading ? <CircularProgress size={16} color="inherit" /> : <ManagerIcon />}
+                    >
+                        {overrideLoading ? 'Verifying...' : 'Approve & Sign In'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
 
             {/* Time Clock Dialog */}
             <Dialog

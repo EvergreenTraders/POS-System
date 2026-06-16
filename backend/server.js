@@ -452,6 +452,80 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+app.post('/api/auth/manager-override', async (req, res) => {
+  try {
+    const { employeeIdentifier, managerIdentifier, managerPassword, store_id } = req.body;
+
+    // Verify manager credentials
+    const managerQuery = await pool.query(
+      'SELECT * FROM employees WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)',
+      [managerIdentifier]
+    );
+    if (managerQuery.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid manager credentials' });
+    }
+    const manager = managerQuery.rows[0];
+    if (manager.password !== managerPassword) {
+      return res.status(401).json({ error: 'Invalid manager credentials' });
+    }
+    if (manager.role !== 'Store Manager' && manager.role !== 'Store Owner') {
+      return res.status(403).json({ error: 'Only Store Managers or Store Owners can perform an override' });
+    }
+
+    // Find target employee
+    const employeeQuery = await pool.query(
+      'SELECT * FROM employees WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)',
+      [employeeIdentifier]
+    );
+    if (employeeQuery.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    const employee = employeeQuery.rows[0];
+
+    if (store_id && employee.store_id && employee.store_id !== parseInt(store_id)) {
+      return res.status(403).json({ error: 'Employee is not assigned to this store' });
+    }
+
+    const token = jwt.sign(
+      { id: employee.employee_id, role: employee.role, username: employee.username },
+      process.env.JWT_SECRET || 'evergreen_jwt_secret_2024',
+      { expiresIn: '24h' }
+    );
+
+    const imageBase64 = employee.image ? employee.image.toString('base64') : null;
+
+    return res.json({
+      token,
+      user: {
+        id: employee.employee_id,
+        username: employee.username,
+        email: employee.email,
+        role: employee.role,
+        firstName: employee.first_name,
+        lastName: employee.last_name,
+        image: imageBase64,
+        track_hours: employee.track_hours !== false,
+        can_open_store: employee.can_open_store !== false,
+        can_open_drawer: employee.can_open_drawer !== false,
+        can_view_drawer: employee.can_view_drawer !== false,
+        can_view_safe: employee.can_view_safe !== false,
+        transfer_allowed_drawer: employee.transfer_allowed_drawer !== false,
+        transfer_allowed_safe: employee.transfer_allowed_safe !== false,
+        transfer_allowed_bank: employee.transfer_allowed_bank !== false,
+        transfer_allowed_store: employee.transfer_allowed_store !== false,
+        transfer_limit: employee.transfer_limit != null ? parseFloat(employee.transfer_limit) : null,
+        can_petty_cash: employee.can_petty_cash !== false,
+        petty_cash_limit: employee.petty_cash_limit != null ? parseFloat(employee.petty_cash_limit) : null,
+        discrepancy_threshold: employee.discrepancy_threshold != null ? parseFloat(employee.discrepancy_threshold) : null,
+        employment_type: employee.employment_type || 'hourly'
+      }
+    });
+  } catch (err) {
+    console.error('Manager override error:', err);
+    return res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
 // Basic routes
 app.get('/', (req, res) => {
   res.json({ message: 'Welcome to POS System API' });
