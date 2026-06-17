@@ -245,6 +245,7 @@ function SystemConfig() {
   // Opening drawer mode (Individual Denominations vs Drawer Total)
   const [isIndividualDenominationsDrawers, setIsIndividualDenominationsDrawers] = useState(false);
   const [isIndividualDenominationsSafe, setIsIndividualDenominationsSafe] = useState(false);
+  const [isIndividualDenominationsMasterSafe, setIsIndividualDenominationsMasterSafe] = useState(false);
   const [isElectronicBlindCountDrawers, setIsElectronicBlindCountDrawers] = useState(false);
   const [isElectronicBlindCountSafe, setIsElectronicBlindCountSafe] = useState(false);
   const [minClose, setMinClose] = useState(0); // For physical drawers
@@ -369,20 +370,23 @@ function SystemConfig() {
       const drawerConfigRes = await axios.get(`${API_BASE_URL}/drawer-type-config`);
       const physicalConfig = drawerConfigRes.data.find(c => c.drawer_type === 'physical');
       const safeConfig = drawerConfigRes.data.find(c => c.drawer_type === 'safe');
+      const masterSafeConfig = drawerConfigRes.data.find(c => c.drawer_type === 'master_safe');
       setIsBlindCountDrawers(physicalConfig ? physicalConfig.blind_count : true);
       setIsBlindCountSafe(safeConfig ? safeConfig.blind_count : true);
       setIsIndividualDenominationsDrawers(physicalConfig ? physicalConfig.individual_denominations : false);
       setIsIndividualDenominationsSafe(safeConfig ? safeConfig.individual_denominations : false);
+      setIsIndividualDenominationsMasterSafe(masterSafeConfig ? masterSafeConfig.individual_denominations : false);
       setIsElectronicBlindCountDrawers(physicalConfig ? physicalConfig.electronic_blind_count : false);
       setIsElectronicBlindCountSafe(safeConfig ? safeConfig.electronic_blind_count : false);
     } catch (error) {
       console.error('Error fetching drawer mode preferences:', error);
-      setIsBlindCountDrawers(true); // Default to blind count
-      setIsBlindCountSafe(true); // Default to blind count
-      setIsIndividualDenominationsDrawers(false); // Default to drawer total
-      setIsIndividualDenominationsSafe(false); // Default to drawer total
-      setIsElectronicBlindCountDrawers(false); // Default to open count
-      setIsElectronicBlindCountSafe(false); // Default to open count
+      setIsBlindCountDrawers(true);
+      setIsBlindCountSafe(true);
+      setIsIndividualDenominationsDrawers(false);
+      setIsIndividualDenominationsSafe(false);
+      setIsIndividualDenominationsMasterSafe(false);
+      setIsElectronicBlindCountDrawers(false);
+      setIsElectronicBlindCountSafe(false);
     }
   };
 
@@ -1924,6 +1928,29 @@ const handleTabChange = (event, newValue) => {
       setSnackbar({
         open: true,
         message: 'Failed to update opening mode settings for safe',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleIndividualDenominationsMasterSafeToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsIndividualDenominationsMasterSafe(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/drawer-type-config/master_safe`, {
+        individual_denominations: newValue
+      });
+      setSnackbar({
+        open: true,
+        message: `Master Safe tracking set to ${newValue ? 'Individual Denominations' : 'Total Cash Balance'}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating individual denominations preference for master safe:', error);
+      setIsIndividualDenominationsMasterSafe(!newValue);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update tracking settings for master safe',
         severity: 'error'
       });
     }
@@ -3775,6 +3802,24 @@ const handleTabChange = (event, newValue) => {
                               color="primary"
                             />
                             <Typography variant="body2" color={isIndividualDenominationsSafe ? 'primary' : 'text.secondary'} fontWeight={isIndividualDenominationsSafe ? 'bold' : 'normal'}>
+                              Individual Denominations
+                            </Typography>
+                          </Box>
+                        </Box>
+                        <Box sx={{ flex: '1 1 200px' }}>
+                          <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                            Master Safe
+                          </Typography>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <Typography variant="body2" color={!isIndividualDenominationsMasterSafe ? 'primary' : 'text.secondary'} fontWeight={!isIndividualDenominationsMasterSafe ? 'bold' : 'normal'}>
+                              Total Cash Balance
+                            </Typography>
+                            <Switch
+                              checked={isIndividualDenominationsMasterSafe}
+                              onChange={handleIndividualDenominationsMasterSafeToggle}
+                              color="primary"
+                            />
+                            <Typography variant="body2" color={isIndividualDenominationsMasterSafe ? 'primary' : 'text.secondary'} fontWeight={isIndividualDenominationsMasterSafe ? 'bold' : 'normal'}>
                               Individual Denominations
                             </Typography>
                           </Box>

@@ -239,6 +239,10 @@ function CashDrawer() {
   const [bankWithdrawalAmount, setBankWithdrawalAmount] = useState('');
   const [bankWithdrawalReference, setBankWithdrawalReference] = useState('');
   const [bankWithdrawalNotes, setBankWithdrawalNotes] = useState('');
+  const [bankWithdrawalDenominations, setBankWithdrawalDenominations] = useState({
+    bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+    coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+  });
 
   // Petty cash payout dialog states
   const [pettyCashDialog, setPettyCashDialog] = useState(false);
@@ -356,7 +360,11 @@ function CashDrawer() {
     if (activeSession && activeSession.drawer_type && drawerBlindCountPrefs.drawers !== undefined) {
       const isSafe = activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe';
       setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
-      setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
+      setIsIndividualDenominations(
+        activeSession.drawer_type === 'master_safe' ? drawerIndividualDenominationsPrefs.master_safe :
+        activeSession.drawer_type === 'safe' ? drawerIndividualDenominationsPrefs.safe :
+        drawerIndividualDenominationsPrefs.drawers
+      );
       setIsElectronicBlindCount(isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers);
       setSelectedDrawerType(activeSession.drawer_type);
     }
@@ -403,7 +411,10 @@ function CashDrawer() {
       }
       
       // Set opening mode (individual denominations) based on drawer type filter
-      if (drawerTypeFilter === 'safe' || drawerTypeFilter === 'master_safe') {
+      if (drawerTypeFilter === 'master_safe') {
+        setIsIndividualDenominations(drawerIndividualDenominationsPrefs.master_safe);
+        setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
+      } else if (drawerTypeFilter === 'safe') {
         setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
         setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
       } else if (drawerTypeFilter === 'physical') {
@@ -811,21 +822,23 @@ function CashDrawer() {
       const drawerConfigRes = await axios.get(`${API_BASE_URL}/drawer-type-config`);
       const physicalConfig = drawerConfigRes.data.find(c => c.drawer_type === 'physical');
       const safeConfig = drawerConfigRes.data.find(c => c.drawer_type === 'safe');
+      const masterSafeConfig = drawerConfigRes.data.find(c => c.drawer_type === 'master_safe');
       const blindCountDrawers = physicalConfig ? physicalConfig.blind_count : true;
       const blindCountSafe = safeConfig ? safeConfig.blind_count : true;
       const individualDenominationsDrawers = physicalConfig ? physicalConfig.individual_denominations : false;
       const individualDenominationsSafe = safeConfig ? safeConfig.individual_denominations : false;
+      const individualDenominationsMasterSafe = masterSafeConfig ? masterSafeConfig.individual_denominations : false;
       const electronicBlindCountDrawers = physicalConfig ? physicalConfig.electronic_blind_count : false;
       const electronicBlindCountSafe = safeConfig ? safeConfig.electronic_blind_count : false;
 
-      // Store both preference sets
       setDrawerBlindCountPrefs({
         drawers: blindCountDrawers,
         safe: blindCountSafe
       });
       setDrawerIndividualDenominationsPrefs({
         drawers: individualDenominationsDrawers,
-        safe: individualDenominationsSafe
+        safe: individualDenominationsSafe,
+        master_safe: individualDenominationsMasterSafe
       });
       setDrawerElectronicBlindCountPrefs({
         drawers: electronicBlindCountDrawers,
@@ -834,12 +847,17 @@ function CashDrawer() {
 
       // Set initial modes based on current selection or default to drawers
       if (selectedDrawerType) {
-        const isSafe = selectedDrawerType === 'safe' || selectedDrawerType === 'master_safe';
-        setIsBlindCount(isSafe ? blindCountSafe : blindCountDrawers);
-        setIsIndividualDenominations(isSafe ? individualDenominationsSafe : individualDenominationsDrawers);
-        setIsElectronicBlindCount(isSafe ? electronicBlindCountSafe : electronicBlindCountDrawers);
+        const isMasterSafe = selectedDrawerType === 'master_safe';
+        const isSafe = selectedDrawerType === 'safe';
+        setIsBlindCount(isSafe || isMasterSafe ? blindCountSafe : blindCountDrawers);
+        setIsIndividualDenominations(
+          isMasterSafe ? individualDenominationsMasterSafe :
+          isSafe ? individualDenominationsSafe :
+          individualDenominationsDrawers
+        );
+        setIsElectronicBlindCount(isSafe || isMasterSafe ? electronicBlindCountSafe : electronicBlindCountDrawers);
       } else {
-        setIsBlindCount(blindCountDrawers); // Default to drawers preference
+        setIsBlindCount(blindCountDrawers);
         setIsIndividualDenominations(individualDenominationsDrawers);
         setIsElectronicBlindCount(electronicBlindCountDrawers);
       }
@@ -2221,6 +2239,10 @@ function CashDrawer() {
     setBankWithdrawalAmount('');
     setBankWithdrawalReference('');
     setBankWithdrawalNotes('');
+    setBankWithdrawalDenominations({
+      bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+      coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+    });
     // Keep selected bank as default
     const defaultBank = banks.find(b => b.is_default);
     if (defaultBank) {
@@ -2241,7 +2263,10 @@ function CashDrawer() {
       return;
     }
 
-    const withdrawalTotal = parseFloat(bankWithdrawalAmount) || 0;
+    const usesDenominations = drawerIndividualDenominationsPrefs.master_safe;
+    const withdrawalTotal = usesDenominations
+      ? calculateDenominationTotal(bankWithdrawalDenominations)
+      : parseFloat(bankWithdrawalAmount) || 0;
 
     if (withdrawalTotal <= 0) {
       showSnackbar('Please enter a valid withdrawal amount', 'error');
@@ -2278,7 +2303,8 @@ function CashDrawer() {
           amount: withdrawalTotal,
           withdrawal_reference: bankWithdrawalReference || null,
           notes: bankWithdrawalNotes || null,
-          performed_by: currentUser.id
+          performed_by: currentUser.id,
+          denominations: usesDenominations ? bankWithdrawalDenominations : null
         }
       );
 
@@ -2342,7 +2368,8 @@ function CashDrawer() {
     // Check if denominations are required
     const sourceDrawerType = pettyCashSourceSession.drawer_type;
     const usesDenominations = sourceDrawerType === 'physical' ||
-      ((sourceDrawerType === 'safe' || sourceDrawerType === 'master_safe') && drawerIndividualDenominationsPrefs.safe);
+      (sourceDrawerType === 'safe' && drawerIndividualDenominationsPrefs.safe) ||
+      (sourceDrawerType === 'master_safe' && drawerIndividualDenominationsPrefs.master_safe);
 
     let payoutTotal;
     if (usesDenominations) {
@@ -2614,9 +2641,8 @@ function CashDrawer() {
   // Check if drawer uses denominations (physical drawers always do, safes based on preference)
   const drawerUsesDenominations = (drawerType) => {
     if (drawerType === 'physical') return true;
-    if (drawerType === 'safe' || drawerType === 'master_safe') {
-      return drawerIndividualDenominationsPrefs.safe;
-    }
+    if (drawerType === 'master_safe') return drawerIndividualDenominationsPrefs.master_safe;
+    if (drawerType === 'safe') return drawerIndividualDenominationsPrefs.safe;
     return false;
   };
 
@@ -3040,7 +3066,7 @@ function CashDrawer() {
                               setSelectedSessionType('master_safe');
                               setActiveSession(masterSafeSession);
                               setIsBlindCount(drawerBlindCountPrefs.safe);
-                              setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
+                              setIsIndividualDenominations(drawerIndividualDenominationsPrefs.master_safe);
                               setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
                             }
                           }}
@@ -3234,8 +3260,8 @@ function CashDrawer() {
                       </Menu>
                       </>
                       )}
-                      {/* Show Bank Deposit and Withdrawal when master safe session exists */}
-                      {(activeSession.drawer_type === 'master_safe' || allActiveSessions.some(s => s.drawer_type === 'master_safe')) && (
+                      {/* Bank Deposit and Withdrawal only available from the master safe */}
+                      {activeSession.drawer_type === 'master_safe' && (
                         <>
                           <Button
                             variant="outlined"
@@ -3426,22 +3452,6 @@ function CashDrawer() {
                       <ListItemText>Petty Cash Payout</ListItemText>
                     </MenuItem>
                   </Menu>
-                  <Button
-                    variant="outlined"
-                    startIcon={<AccountBalanceIcon />}
-                    disabled={isStoreClosed}
-                    onClick={openBankDepositDialog}
-                  >
-                    Bank Deposit
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    startIcon={<AccountBalanceIcon />}
-                    disabled={isStoreClosed}
-                    onClick={openBankWithdrawalDialog}
-                  >
-                    Bank Withdrawal
-                  </Button>
                 </Box>
               )}
             </Paper>
@@ -4720,7 +4730,11 @@ function CashDrawer() {
                     setSelectedDrawerType(drawer.drawer_type);
                     const isSafe = drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe';
                     setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
-                    setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
+                    setIsIndividualDenominations(
+                      drawer.drawer_type === 'master_safe' ? drawerIndividualDenominationsPrefs.master_safe :
+                      drawer.drawer_type === 'safe' ? drawerIndividualDenominationsPrefs.safe :
+                      drawerIndividualDenominationsPrefs.drawers
+                    );
                     setIsElectronicBlindCount(isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers);
                     // Check if sharing mode is required for this drawer
                     const needsSharingMode = drawer.drawer_type === 'physical' && drawer.is_shared === null;
@@ -6261,7 +6275,7 @@ function CashDrawer() {
           setBankWithdrawalDialog(false);
           resetBankWithdrawalForm();
         }}
-        maxWidth="sm"
+        maxWidth={drawerIndividualDenominationsPrefs.master_safe ? 'md' : 'sm'}
         fullWidth
       >
         <DialogTitle>
@@ -6288,17 +6302,76 @@ function CashDrawer() {
               </Select>
             </FormControl>
 
-            {/* Withdrawal Amount */}
-            <TextField
-              fullWidth
-              label="Withdrawal Amount"
-              type="number"
-              value={bankWithdrawalAmount}
-              onChange={(e) => setBankWithdrawalAmount(e.target.value)}
-              inputProps={{ min: 0, step: '0.01' }}
-              sx={{ mb: 2 }}
-              required
-            />
+            {/* Withdrawal Amount - denominations or simple input based on master safe config */}
+            {drawerIndividualDenominationsPrefs.master_safe ? (
+              <>
+                <Typography variant="subtitle1" gutterBottom>
+                  Enter Withdrawal Amount by Denomination
+                </Typography>
+                <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Denomination</TableCell>
+                        <TableCell align="center">Count</TableCell>
+                        <TableCell align="right">Subtotal</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {[
+                        { label: '$100', field: 'bill_100', value: 100 },
+                        { label: '$50', field: 'bill_50', value: 50 },
+                        { label: '$20', field: 'bill_20', value: 20 },
+                        { label: '$10', field: 'bill_10', value: 10 },
+                        { label: '$5', field: 'bill_5', value: 5 },
+                        { label: '$2', field: 'coin_2', value: 2 },
+                        { label: '$1', field: 'coin_1', value: 1 },
+                        { label: '25¢', field: 'coin_0_25', value: 0.25 },
+                        { label: '10¢', field: 'coin_0_10', value: 0.10 },
+                        { label: '5¢', field: 'coin_0_05', value: 0.05 },
+                      ].map((item) => (
+                        <TableRow key={item.field}>
+                          <TableCell>{item.label}</TableCell>
+                          <TableCell align="center">
+                            <TextField
+                              type="number"
+                              size="small"
+                              inputProps={{ min: 0, style: { textAlign: 'center' } }}
+                              sx={{ width: 80 }}
+                              value={bankWithdrawalDenominations[item.field] || 0}
+                              onChange={(e) => {
+                                const val = Math.max(0, parseInt(e.target.value) || 0);
+                                setBankWithdrawalDenominations(prev => ({ ...prev, [item.field]: val }));
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            {formatCurrency((bankWithdrawalDenominations[item.field] || 0) * item.value)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow>
+                        <TableCell colSpan={2}><strong>Total Withdrawal</strong></TableCell>
+                        <TableCell align="right">
+                          <strong>{formatCurrency(calculateDenominationTotal(bankWithdrawalDenominations))}</strong>
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </>
+            ) : (
+              <TextField
+                fullWidth
+                label="Withdrawal Amount"
+                type="number"
+                value={bankWithdrawalAmount}
+                onChange={(e) => setBankWithdrawalAmount(e.target.value)}
+                inputProps={{ min: 0, step: '0.01' }}
+                sx={{ mb: 2 }}
+                required
+              />
+            )}
 
             {/* Reference Number */}
             <TextField
@@ -6331,7 +6404,13 @@ function CashDrawer() {
             onClick={handleBankWithdrawal}
             variant="contained"
             color="primary"
-            disabled={!selectedWithdrawalBank || !bankWithdrawalAmount || parseFloat(bankWithdrawalAmount) <= 0 || isStoreClosed}
+            disabled={
+              !selectedWithdrawalBank ||
+              (drawerIndividualDenominationsPrefs.master_safe
+                ? calculateDenominationTotal(bankWithdrawalDenominations) <= 0
+                : !bankWithdrawalAmount || parseFloat(bankWithdrawalAmount) <= 0) ||
+              isStoreClosed
+            }
           >
             Complete Withdrawal
           </Button>
@@ -6399,7 +6478,8 @@ function CashDrawer() {
             {/* Amount Entry - denominations or simple input based on drawer type */}
             {pettyCashSourceSession && (
               (pettyCashSourceSession.drawer_type === 'physical' ||
-               ((pettyCashSourceSession.drawer_type === 'safe' || pettyCashSourceSession.drawer_type === 'master_safe') && drawerIndividualDenominationsPrefs.safe)) ? (
+               (pettyCashSourceSession.drawer_type === 'safe' && drawerIndividualDenominationsPrefs.safe) ||
+               (pettyCashSourceSession.drawer_type === 'master_safe' && drawerIndividualDenominationsPrefs.master_safe)) ? (
                 <>
                   <Typography variant="subtitle1" gutterBottom>
                     Enter Payout Amount by Denomination
@@ -6509,7 +6589,8 @@ function CashDrawer() {
               isStoreClosed ||
               (pettyCashSourceSession && (
                 (pettyCashSourceSession.drawer_type === 'physical' ||
-                 ((pettyCashSourceSession.drawer_type === 'safe' || pettyCashSourceSession.drawer_type === 'master_safe') && drawerIndividualDenominationsPrefs.safe))
+                 (pettyCashSourceSession.drawer_type === 'safe' && drawerIndividualDenominationsPrefs.safe) ||
+                 (pettyCashSourceSession.drawer_type === 'master_safe' && drawerIndividualDenominationsPrefs.master_safe))
                   ? calculateDenominationTotal(pettyCashDenominations) <= 0
                   : (!pettyCashAmount || parseFloat(pettyCashAmount) <= 0)
               ))

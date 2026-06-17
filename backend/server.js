@@ -3067,7 +3067,7 @@ app.get('/api/bank-deposits', async (req, res) => {
 // POST /api/cash-drawer/:sessionId/bank-withdrawal - Withdraw cash from bank to master safe
 app.post('/api/cash-drawer/:sessionId/bank-withdrawal', async (req, res) => {
   const { sessionId } = req.params;
-  const { bank_id, amount, withdrawal_reference, notes, performed_by } = req.body;
+  const { bank_id, amount, withdrawal_reference, notes, performed_by, denominations } = req.body;
 
   // Validation
   if (!bank_id || !amount || !performed_by) {
@@ -3146,6 +3146,20 @@ app.post('/api/cash-drawer/:sessionId/bank-withdrawal', async (req, res) => {
     `, [sessionId, withdrawalAmount, `Bank withdrawal from ${bankName}${notes ? ': ' + notes : ''}`, performed_by]);
 
     const adjustmentId = adjustmentResult.rows[0].adjustment_id;
+
+    // Store denominations if provided
+    if (denominations) {
+      const d = denominations;
+      await client.query(`
+        INSERT INTO adjustment_denominations
+          (adjustment_id, bill_100, bill_50, bill_20, bill_10, bill_5, coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [
+        adjustmentId,
+        d.bill_100 || 0, d.bill_50 || 0, d.bill_20 || 0, d.bill_10 || 0, d.bill_5 || 0,
+        d.coin_2 || 0, d.coin_1 || 0, d.coin_0_25 || 0, d.coin_0_10 || 0, d.coin_0_05 || 0
+      ]);
+    }
 
     // Create bank withdrawal record (reuse bank_deposits table with negative indicator or create separate tracking)
     // For simplicity, we'll track in bank_deposits with a note indicating withdrawal
@@ -5696,7 +5710,6 @@ app.get('/api/drawer-type-config', async (req, res) => {
   try {
     // Get drawer type config - prioritize drawers with non-zero values
     // If all drawers have zero values, return the first drawer's values
-    // Note: master_safe uses the same values as safe, so we only return physical and safe
     const result = await pool.query(`
       WITH ranked_drawers AS (
         SELECT
@@ -5713,7 +5726,7 @@ app.get('/api/drawer-type-config', async (req, res) => {
               drawer_id
           ) as rn
         FROM drawers
-        WHERE drawer_type IN ('physical', 'safe')
+        WHERE drawer_type IN ('physical', 'safe', 'master_safe')
       )
       SELECT drawer_type, min_close, max_close, blind_count, individual_denominations, electronic_blind_count
       FROM ranked_drawers
@@ -5763,13 +5776,8 @@ app.put('/api/drawer-type-config/:drawerType', async (req, res) => {
     const { drawerType } = req.params;
     const { min_close, max_close, blind_count, individual_denominations, electronic_blind_count } = req.body;
 
-    // Determine which drawer types to update
-    let drawerTypes = [drawerType];
-
-    // If updating safe, also update master_safe to keep them in sync
-    if (drawerType === 'safe') {
-      drawerTypes = ['safe', 'master_safe'];
-    }
+    // Each drawer type is updated independently
+    const drawerTypes = [drawerType];
 
     // Build dynamic SET clause based on provided fields
     const setClauses = ['updated_at = CURRENT_TIMESTAMP'];
