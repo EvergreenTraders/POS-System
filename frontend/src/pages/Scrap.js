@@ -293,7 +293,10 @@ const Scrap = () => {
   // Fetch buckets on component mount
   useEffect(() => {
     const initialize = async () => {
-      const buckets = await fetchScrapBuckets();
+      const [buckets] = await Promise.all([
+        fetchScrapBuckets(),
+        fetchCustomers(),
+      ]);
 
       // Select the first bucket by default (most recently created)
       if (buckets && buckets.length > 0) {
@@ -1501,30 +1504,74 @@ const Scrap = () => {
   };
 
   return (
-    <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
+    <Container maxWidth="xl" sx={{ mt: 2, mb: 2 }}>
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 1 }}>
           {error}
         </Alert>
       )}
-      
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Scrap Buckets
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+
+      {/* Title + Stats + Search/Button — single row */}
+      <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 1.5, mb: 1.5 }}>
+
+        <Paper sx={{ px: 1.5, py: 1, bgcolor: 'primary.main', color: 'white', minWidth: 130 }}>
+          <Typography variant="caption" sx={{ opacity: 0.9, display: 'block' }}>
+            Total Scrap
+          </Typography>
+          <Typography variant="h6" fontWeight="bold" lineHeight={1.2}>
+            {formatCurrency(
+              Object.values(bucketTotalCosts).reduce((sum, cost) => sum + cost, 0)
+            )}
+          </Typography>
+          <Typography variant="caption" sx={{ opacity: 0.75 }}>All Buckets</Typography>
+        </Paper>
+
+        <Paper sx={{ px: 1.5, py: 1, bgcolor: 'warning.main', color: 'white', minWidth: 130 }}>
+          <Typography variant="caption" sx={{ opacity: 0.9, display: 'block' }}>
+            In Processing
+          </Typography>
+          <Typography variant="h6" fontWeight="bold" lineHeight={1.2}>
+            {formatCurrency(
+              scrapBuckets
+                .filter(b => b.status === 'PROCESSING')
+                .reduce((sum, b) => sum + (bucketTotalCosts[b.bucket_id] || 0), 0)
+            )}
+          </Typography>
+          <Typography variant="caption" sx={{ opacity: 0.75 }}>
+            {scrapBuckets.filter(b => b.status === 'PROCESSING').length} Bucket(s)
+          </Typography>
+        </Paper>
+
+        <Paper sx={{ px: 1.5, py: 1, bgcolor: 'info.main', color: 'white', minWidth: 160 }}>
+          <Typography variant="caption" sx={{ opacity: 0.9, display: 'block' }}>
+            In Transit / Awaiting Settlement
+          </Typography>
+          <Typography variant="h6" fontWeight="bold" lineHeight={1.2}>
+            {formatCurrency(
+              scrapBuckets
+                .filter(b => b.status === 'SHIPPED')
+                .reduce((sum, b) => sum + (bucketTotalCosts[b.bucket_id] || 0), 0)
+            )}
+          </Typography>
+          <Typography variant="caption" sx={{ opacity: 0.75 }}>
+            {scrapBuckets.filter(b => b.status === 'SHIPPED').length} Bucket(s)
+          </Typography>
+        </Paper>
+
+        <Box sx={{ flex: 1 }} />
+
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           <TextField
             variant="outlined"
             placeholder="Search buckets..."
             value={searchTerm}
             onChange={handleSearch}
             size="small"
-            sx={{ width: 300 }}
+            sx={{ width: 200 }}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
-                  <SearchIcon />
+                  <SearchIcon fontSize="small" />
                 </InputAdornment>
               ),
             }}
@@ -1532,6 +1579,7 @@ const Scrap = () => {
           <Button
             variant="contained"
             color="primary"
+            size="small"
             startIcon={<AddIcon />}
             onClick={handleNewScrap}
             disabled={isStoreClosed}
@@ -1541,66 +1589,17 @@ const Scrap = () => {
         </Box>
       </Box>
 
-      {/* Dashboard Statistics */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-        <Paper sx={{ flex: 1, p: 2, bgcolor: 'primary.main', color: 'white' }}>
-          <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>
-            Total Scrap
-          </Typography>
-          <Typography variant="h5" fontWeight="bold">
-            {formatCurrency(
-              Object.values(bucketTotalCosts).reduce((sum, cost) => sum + cost, 0)
-            )}
-          </Typography>
-          <Typography variant="caption" sx={{ opacity: 0.8 }}>
-            All Buckets
-          </Typography>
-        </Paper>
-
-        <Paper sx={{ flex: 1, p: 2, bgcolor: 'warning.main', color: 'white' }}>
-          <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>
-            In Processing
-          </Typography>
-          <Typography variant="h5" fontWeight="bold">
-            {formatCurrency(
-              scrapBuckets
-                .filter(bucket => bucket.status === 'PROCESSING')
-                .reduce((sum, bucket) => sum + (bucketTotalCosts[bucket.bucket_id] || 0), 0)
-            )}
-          </Typography>
-          <Typography variant="caption" sx={{ opacity: 0.8 }}>
-            {scrapBuckets.filter(bucket => bucket.status === 'PROCESSING').length} Bucket(s)
-          </Typography>
-        </Paper>
-
-        <Paper sx={{ flex: 1, p: 2, bgcolor: 'info.main', color: 'white' }}>
-          <Typography variant="subtitle2" sx={{ opacity: 0.9 }}>
-            In Transit / Awaiting Settlement
-          </Typography>
-          <Typography variant="h5" fontWeight="bold">
-            {formatCurrency(
-              scrapBuckets
-                .filter(bucket => bucket.status === 'SHIPPED')
-                .reduce((sum, bucket) => sum + (bucketTotalCosts[bucket.bucket_id] || 0), 0)
-            )}
-          </Typography>
-          <Typography variant="caption" sx={{ opacity: 0.8 }}>
-            {scrapBuckets.filter(bucket => bucket.status === 'SHIPPED').length} Bucket(s)
-          </Typography>
-        </Paper>
-      </Box>
-
       {loading ? (
-        <Box display="flex" justifyContent="center" my={4}>
+        <Box display="flex" justifyContent="center" my={2}>
           <CircularProgress />
         </Box>
       ) : (
         <>
-          <Box sx={{ display: 'flex', gap: 3, mt: 3 }}>
+          <Box sx={{ display: 'flex', gap: 2, mt: 1 }}>
         {/* Bucket List */}
-        <Paper sx={{ width: '30%', p: 2, maxHeight: '70vh', overflow: 'auto' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6">Buckets</Typography>
+        <Paper sx={{ width: '30%', p: 1.5, maxHeight: '72vh', overflow: 'auto' }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+            <Typography variant="subtitle1" fontWeight="bold">Buckets</Typography>
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <InputLabel id="status-filter-label">Status</InputLabel>
               <Select
@@ -1618,22 +1617,21 @@ const Scrap = () => {
               </Select>
             </FormControl>
           </Box>
-          <List>
+          <List disablePadding>
             {paginatedBuckets.length > 0 ? (
               paginatedBuckets.map((bucket) => (
-                <ListItem 
+                <ListItem
                   key={bucket.bucket_id}
-                  button 
+                  button
                   selected={selectedBucket?.bucket_id === bucket.bucket_id}
                   onClick={() => handleBucketSelect(bucket)}
                   sx={{
-                    mb: 1,
+                    mb: 0.5,
+                    py: 0.75,
                     borderRadius: 1,
                     '&.Mui-selected': {
                       backgroundColor: '#c8e6c9',
-                      '&:hover': {
-                        backgroundColor: '#c8e6c9',
-                      },
+                      '&:hover': { backgroundColor: '#c8e6c9' },
                     },
                   }}
                 >
@@ -1641,16 +1639,17 @@ const Scrap = () => {
                     primary={bucket.bucket_name}
                     secondary={
                       <>
-                        <Typography component="span" variant="body2" color="textSecondary">
+                        <Typography component="span" variant="caption" color="textSecondary">
                           Items: {bucket.item_id?.length || 0}
                         </Typography>
-                        <br />
-                        <Typography component="span" variant="body2" fontWeight="bold" color="primary">
-                          Total: {formatCurrency(bucketTotalCosts[bucket.bucket_id] || 0)}
+                        {' · '}
+                        <Typography component="span" variant="caption" fontWeight="bold" color="primary">
+                          {formatCurrency(bucketTotalCosts[bucket.bucket_id] || 0)}
                         </Typography>
                       </>
                     }
                     primaryTypographyProps={{
+                      variant: 'body2',
                       fontWeight: selectedBucket?.bucket_id === bucket.bucket_id ? 'bold' : 'normal',
                     }}
                   />
@@ -1676,12 +1675,12 @@ const Scrap = () => {
           </List>
         </Paper>
         {/* Bucket Items */}
-        <Paper sx={{ flex: 1, p: 2, maxHeight: '70vh', overflow: 'auto' }}>
+        <Paper sx={{ flex: 1, p: 1.5, maxHeight: '72vh', overflow: 'auto' }}>
           {selectedBucket ? (
             <>
               {/* Bucket Header with Info */}
-              <Box sx={{ mb: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={{ mb: 1 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                   <Typography variant="h6">
                     {selectedBucket.bucket_name}
                   </Typography>
@@ -1767,29 +1766,27 @@ const Scrap = () => {
                     >
                       Add Item
                     </Button>
+
+                    {/* Print Packing List — inline with other action buttons */}
+                    {selectedBucket.status !== 'ACTIVE' && (
+                      <Button
+                        variant="outlined"
+                        color="primary"
+                        size="small"
+                        startIcon={<PrintIcon />}
+                        onClick={handlePrintPackingList}
+                      >
+                         Packing List
+                      </Button>
+                    )}
                   </Box>
                 </Box>
-
-                {/* Action Buttons Row - Below header */}
-                {selectedBucket.status !== 'ACTIVE' && (
-                  <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                    <Button
-                      variant="outlined"
-                      color="primary"
-                      size="small"
-                      startIcon={<PrintIcon />}
-                      onClick={handlePrintPackingList}
-                    >
-                      Print Packing List
-                    </Button>
-                  </Box>
-                )}
 
                 {/* Bucket Details - Header Information */}
                 <Box sx={{
                   display: 'flex',
-                  gap: 2,
-                  p: 1.5,
+                  gap: 1.5,
+                  p: 1,
                   bgcolor: 'background.default',
                   borderRadius: 1,
                   border: '1px solid',
@@ -1900,6 +1897,88 @@ const Scrap = () => {
                   )}
                 </Box>
               </Box>
+
+              {/* Step-specific details — columns side by side, fields stacked vertically */}
+              {(() => {
+                const statusIndex = STATUS_FLOW.indexOf(selectedBucket.status);
+                if (statusIndex < STATUS_FLOW.indexOf('SHIPPED')) return null;
+
+                const refiner = customers.find(c => c.id === selectedBucket.refiner_customer_id);
+                const refinerName = refiner
+                  ? `${refiner.first_name} ${refiner.last_name}`.trim()
+                  : selectedBucket.refiner_customer_id || '—';
+
+                const fieldBox = (label, value) => (
+                  <Box sx={{ minWidth: 110 }}>
+                    <Typography variant="caption" color="textSecondary" display="block">
+                      {label}
+                    </Typography>
+                    <Typography variant="body2" fontWeight="medium">
+                      {value || '—'}
+                    </Typography>
+                  </Box>
+                );
+
+                const badge = (label, bgcolor) => (
+                  <Box sx={{
+                    px: 1,
+                    py: 0.25,
+                    borderRadius: 1,
+                    bgcolor,
+                    color: '#fff',
+                    fontSize: '0.65rem',
+                    fontWeight: 'bold',
+                    letterSpacing: '0.05em',
+                    whiteSpace: 'nowrap',
+                    alignSelf: 'center',
+                  }}>
+                    {label}
+                  </Box>
+                );
+
+                const rowSx = {
+                  display: 'flex',
+                  flexDirection: 'row',
+                  alignItems: 'flex-start',
+                  gap: 2,
+                  p: 1,
+                  bgcolor: 'background.default',
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                };
+
+                return (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1.5 }}>
+                    {statusIndex >= STATUS_FLOW.indexOf('SHIPPED') && (
+                      <Box sx={rowSx}>
+                        {badge('SHIPPED', 'primary.light')}
+                        {fieldBox('Refiner', refinerName)}
+                        {fieldBox('Carrier', selectedBucket.shipper)}
+                        {fieldBox('Tracking #', selectedBucket.tracking_number)}
+                      </Box>
+                    )}
+                    {statusIndex >= STATUS_FLOW.indexOf('PROCESSING') && (
+                      <Box sx={rowSx}>
+                        {badge('PROCESSING', 'warning.main')}
+                        {fieldBox('Date Received', selectedBucket.date_received ? new Date(selectedBucket.date_received).toLocaleDateString() : null)}
+                        {fieldBox('Weight Received', selectedBucket.weight_received ? `${selectedBucket.weight_received} g` : null)}
+                        {fieldBox('Spot Price', selectedBucket.locked_spot_price ? `${formatCurrency(selectedBucket.locked_spot_price)}/oz` : null)}
+                        {fieldBox('Advance Paid', selectedBucket.payment_advance ? formatCurrency(selectedBucket.payment_advance) : null)}
+                      </Box>
+                    )}
+                    {statusIndex >= STATUS_FLOW.indexOf('COMPLETE') && (
+                      <Box sx={rowSx}>
+                        {badge('COMPLETE', 'info.main')}
+                        {fieldBox('Final Weight', selectedBucket.final_weight ? `${selectedBucket.final_weight} g` : null)}
+                        {fieldBox('Assay', selectedBucket.assay ? `${selectedBucket.assay}%` : null)}
+                        {fieldBox('Settlement', selectedBucket.total_settlement_amount ? formatCurrency(selectedBucket.total_settlement_amount) : null)}
+                        {fieldBox('Final Payment', selectedBucket.final_payment_amount ? formatCurrency(selectedBucket.final_payment_amount) : null)}
+                      </Box>
+                    )}
+                  </Box>
+                );
+              })()}
 
               {/* History Log Section */}
               <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
