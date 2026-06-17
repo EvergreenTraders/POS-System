@@ -5,17 +5,37 @@ const StoreStatusContext = createContext();
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+function getStoreTime(timezone) {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone || 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(now);
+  const get = (type) => parseInt(parts.find(p => p.type === type)?.value || '0', 10);
+  const hour = get('hour') % 24;
+  const minute = get('minute');
+  const dayOfWeek = new Date(get('year'), get('month') - 1, get('day')).getDay();
+  return { hour, minute, dayOfWeek };
+}
+
 export function StoreStatusProvider({ children }) {
   const [storeStatus, setStoreStatus] = useState('closed');
   const [storeSession, setStoreSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [businessHours, setBusinessHours] = useState([]);
+  const [storeTimezone, setStoreTimezone] = useState('UTC');
 
   const fetchStoreStatus = useCallback(async () => {
     try {
-      const [statusRes, hoursRes] = await Promise.all([
+      const [statusRes, hoursRes, bizRes] = await Promise.all([
         fetch(`${config.apiUrl}/store-status`),
         fetch(`${config.apiUrl}/store-hours`),
+        fetch(`${config.apiUrl}/business-info`),
       ]);
       if (statusRes.ok) {
         const data = await statusRes.json();
@@ -24,6 +44,10 @@ export function StoreStatusProvider({ children }) {
       }
       if (hoursRes.ok) {
         setBusinessHours(await hoursRes.json());
+      }
+      if (bizRes.ok) {
+        const bizData = await bizRes.json();
+        setStoreTimezone(bizData.timezone || 'UTC');
       }
     } catch (error) {
       console.error('Failed to fetch store status:', error);
@@ -54,26 +78,24 @@ export function StoreStatusProvider({ children }) {
   // Check if current time is past today's closing time while store is open
   const isPastBusinessHours = useMemo(() => {
     if (!isStoreOpen || !businessHours.length) return false;
-    const now = new Date();
-    const todayHours = businessHours.find(h => h.day_of_week === now.getDay());
-    if (!todayHours || todayHours.is_closed || !todayHours.close_time) return false;
-    const [closeHour, closeMin] = todayHours.close_time.substring(0, 5).split(':').map(Number);
-    const closeDate = new Date();
-    closeDate.setHours(closeHour, closeMin, 0, 0);
-    return now > closeDate;
-  }, [isStoreOpen, businessHours]);
+    const { hour, minute, dayOfWeek } = getStoreTime(storeTimezone);
+    const todayH = businessHours.find(h => h.day_of_week === dayOfWeek);
+    if (!todayH || todayH.is_closed || !todayH.close_time) return false;
+    const [closeHour, closeMin] = todayH.close_time.substring(0, 5).split(':').map(Number);
+    return (hour * 60 + minute) > (closeHour * 60 + closeMin);
+  }, [isStoreOpen, businessHours, storeTimezone]);
 
   // Get today's hours for display
   const todayHours = useMemo(() => {
     if (!businessHours.length) return null;
-    const now = new Date();
-    const h = businessHours.find(h => h.day_of_week === now.getDay());
+    const { dayOfWeek } = getStoreTime(storeTimezone);
+    const h = businessHours.find(h => h.day_of_week === dayOfWeek);
     if (!h) return null;
     return {
       ...h,
-      day_name: DAY_NAMES[now.getDay()],
+      day_name: DAY_NAMES[dayOfWeek],
     };
-  }, [businessHours]);
+  }, [businessHours, storeTimezone]);
 
   const value = {
     storeStatus,
@@ -85,6 +107,7 @@ export function StoreStatusProvider({ children }) {
     businessHours,
     isPastBusinessHours,
     todayHours,
+    storeTimezone,
   };
 
   return (
