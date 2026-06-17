@@ -122,6 +122,14 @@ function CashDrawer() {
   const [viewBalanceApprovalLoading, setViewBalanceApprovalLoading] = useState(false);
   const [viewBalanceDialog, setViewBalanceDialog] = useState(false);
   const [viewBalanceDenominations, setViewBalanceDenominations] = useState(null);
+  const [managerCloseDialog, setManagerCloseDialog] = useState(false);
+  const [managerCloseTarget, setManagerCloseTarget] = useState(null);
+  const [managerCloseAmount, setManagerCloseAmount] = useState('');
+  const [managerCloseNotes, setManagerCloseNotes] = useState('');
+  const [managerCloseUsername, setManagerCloseUsername] = useState('');
+  const [managerClosePassword, setManagerClosePassword] = useState('');
+  const [managerCloseError, setManagerCloseError] = useState('');
+  const [managerCloseLoading, setManagerCloseLoading] = useState(false);
   const [quickReportDialog, setQuickReportDialog] = useState(false);
   const [quickReportTxnDetail, setQuickReportTxnDetail] = useState(null);
   const [quickReportTxnLoading, setQuickReportTxnLoading] = useState(false);
@@ -2741,6 +2749,49 @@ function CashDrawer() {
     }
   };
 
+  const handleManagerCloseDrawer = async () => {
+    if (!managerCloseUsername || !managerClosePassword) {
+      setManagerCloseError('Please enter both username and password');
+      return;
+    }
+    const closingAmount = parseFloat(managerCloseAmount);
+    if (isNaN(closingAmount) || closingAmount < 0) {
+      setManagerCloseError('Please enter a valid closing balance');
+      return;
+    }
+    setManagerCloseLoading(true);
+    setManagerCloseError('');
+    try {
+      const authRes = await axios.post(`${API_BASE_URL}/auth/login`, {
+        identifier: managerCloseUsername,
+        password: managerClosePassword
+      });
+      const user = authRes.data.user;
+      if (user.role !== 'Store Manager' && user.role !== 'Store Owner') {
+        setManagerCloseError('Only Store Managers or Store Owners can close another employee\'s drawer');
+        setManagerCloseLoading(false);
+        return;
+      }
+      await axios.put(`${API_BASE_URL}/cash-drawer/${managerCloseTarget.session_id}/close`, {
+        actual_balance: closingAmount,
+        closing_notes: managerCloseNotes || `Force closed by manager: ${user.first_name} ${user.last_name}`,
+        employee_id: user.id
+      });
+      showSnackbar(`${managerCloseTarget.drawer_name} closed by ${user.first_name} ${user.last_name}`, 'success');
+      setManagerCloseDialog(false);
+      setManagerCloseTarget(null);
+      setManagerCloseAmount('');
+      setManagerCloseNotes('');
+      setManagerCloseUsername('');
+      setManagerClosePassword('');
+      setManagerCloseError('');
+      await Promise.all([fetchOverview(), fetchAllActiveSessions(), checkActiveSession()]);
+    } catch (err) {
+      setManagerCloseError(err.response?.data?.error || err.response?.data?.message || 'Failed to close drawer');
+      setManagerCloseLoading(false);
+    }
+  };
+
   const showSnackbar = (message, severity = 'success') => {
     setSnackbar({ open: true, message, severity });
   };
@@ -2939,6 +2990,7 @@ function CashDrawer() {
                     <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>SAFE</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
+                    {isManager && <TableCell sx={{ color: 'white', fontWeight: 'bold' }}></TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -2959,6 +3011,17 @@ function CashDrawer() {
                             : '—')
                           : '***'}
                       </TableCell>
+                      {isManager && (
+                        <TableCell>
+                          {safe.status === 'OPEN' && safe.session_id && (
+                            <Button size="small" color="error" variant="outlined"
+                              onClick={() => { setManagerCloseTarget(safe); setManagerCloseAmount(''); setManagerCloseNotes(''); setManagerCloseUsername(''); setManagerClosePassword(''); setManagerCloseError(''); setManagerCloseDialog(true); }}
+                            >
+                              Close
+                            </Button>
+                          )}
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -2977,6 +3040,7 @@ function CashDrawer() {
                     <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Type</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Balance</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Connected Employees</TableCell>
+                    {isManager && <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}></TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -2999,6 +3063,17 @@ function CashDrawer() {
                           : '***'}
                       </TableCell>
                       <TableCell>{drawer.connected_employees || '—'}</TableCell>
+                      {isManager && (
+                        <TableCell>
+                          {drawer.status === 'OPEN' && drawer.session_id && (
+                            <Button size="small" color="error" variant="outlined"
+                              onClick={() => { setManagerCloseTarget(drawer); setManagerCloseAmount(''); setManagerCloseNotes(''); setManagerCloseUsername(''); setManagerClosePassword(''); setManagerCloseError(''); setManagerCloseDialog(true); }}
+                            >
+                              Close
+                            </Button>
+                          )}
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -5788,6 +5863,86 @@ function CashDrawer() {
             disabled={managerApprovalLoading || isStoreClosed}
           >
             {managerApprovalLoading ? 'Verifying...' : 'Approve & Close'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Manager Close Other Drawer Dialog */}
+      <Dialog
+        open={managerCloseDialog}
+        onClose={() => setManagerCloseDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarningIcon color="error" />
+            <Typography variant="h6">Close Drawer — Manager Override</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="warning">
+              You are closing <strong>{managerCloseTarget?.drawer_name}</strong> on behalf of another employee. This action requires manager credentials.
+            </Alert>
+            {managerCloseTarget && (
+              <Box sx={{ p: 1.5, bgcolor: 'grey.100', borderRadius: 1 }}>
+                <Typography variant="body2"><strong>Drawer:</strong> {managerCloseTarget.drawer_name}</Typography>
+                {managerCloseTarget.connected_employees && (
+                  <Typography variant="body2"><strong>Employee(s):</strong> {managerCloseTarget.connected_employees}</Typography>
+                )}
+                <Typography variant="body2">
+                  <strong>Current Balance:</strong> {managerCloseTarget.balance !== null
+                    ? `$${parseFloat(managerCloseTarget.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : '—'}
+                </Typography>
+              </Box>
+            )}
+            <TextField
+              label="Closing Balance ($)"
+              type="number"
+              fullWidth
+              value={managerCloseAmount}
+              onChange={(e) => setManagerCloseAmount(e.target.value)}
+              inputProps={{ min: 0, step: '0.01' }}
+            />
+            <TextField
+              label="Closing Notes (optional)"
+              fullWidth
+              multiline
+              rows={2}
+              value={managerCloseNotes}
+              onChange={(e) => setManagerCloseNotes(e.target.value)}
+            />
+            <Divider />
+            <TextField
+              label="Manager Username"
+              fullWidth
+              value={managerCloseUsername}
+              onChange={(e) => setManagerCloseUsername(e.target.value)}
+              autoComplete="off"
+            />
+            <TextField
+              label="Manager Password"
+              type="password"
+              fullWidth
+              value={managerClosePassword}
+              onChange={(e) => setManagerClosePassword(e.target.value)}
+              autoComplete="off"
+              onKeyPress={(e) => { if (e.key === 'Enter') handleManagerCloseDrawer(); }}
+            />
+            {managerCloseError && <Alert severity="error">{managerCloseError}</Alert>}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setManagerCloseDialog(false)}>Cancel</Button>
+          <Button
+            onClick={handleManagerCloseDrawer}
+            variant="contained"
+            color="error"
+            disabled={managerCloseLoading}
+          >
+            {managerCloseLoading ? 'Closing...' : 'Close Drawer'}
           </Button>
         </DialogActions>
       </Dialog>
