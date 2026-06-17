@@ -247,23 +247,19 @@ const CustomerTicket = () => {
 
   // Handle customer selection from search results
   const handleSelectCustomer = (customerData) => {
-    // Format the selected customer for the ticket
     const selectedCustomer = {
       ...customerData,
       name: `${customerData.first_name || ''} ${customerData.last_name || ''}`.trim(),
       image: customerData.image && typeof customerData.image === 'object' && customerData.image.type === 'Buffer' ? bufferToDataUrl(customerData.image) : customerData.image
     };
-    
-    // Update the customer state and save to session storage
+
     setCustomer(selectedCustomer);
     sessionStorage.setItem('selectedCustomer', JSON.stringify(selectedCustomer));
-    
-    // Close dialogs and clear search form
+
     setShowLookupForm(false);
     setOpenSearchDialog(false);
     setSearchForm({ name: '', id_number: '', phone: '' });
-    
-    // Show success message
+
     showSnackbar(`Customer ${selectedCustomer.name} selected`, 'success');
   };
   
@@ -622,59 +618,51 @@ const CustomerTicket = () => {
   // Store buyTicketId when editing from cart to preserve ticket grouping
   const [preservedBuyTicketId, setPreservedBuyTicketId] = React.useState(null);
   
-  // Helper function to save ticket items in localStorage with timestamp
-  const saveTicketItems = (type, items) => {
+  const TICKET_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+  const TAB_TYPES = ['pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund', 'redeem'];
+
+  const saveItemsForId = (customerId, type, items) => {
     try {
-      // Save with customer ID if available, otherwise save globally
-      const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
-      const data = {
-        items: items,
-        timestamp: Date.now()
-      };
-      localStorage.setItem(key, JSON.stringify(data));
-    } catch (error) {
-      console.error(`Error saving ${type} items to localStorage:`, error);
+      const key = customerId ? `ticket_${customerId}_${type}` : `ticket_global_${type}`;
+      localStorage.setItem(key, JSON.stringify({ items, timestamp: Date.now() }));
+    } catch (e) {
+      console.error(`Error saving ${type} items:`, e);
     }
   };
 
-  // Helper function to load ticket items from localStorage (checks 24hr expiry)
-  const loadTicketItems = (type) => {
+  const loadItemsForId = (customerId, type) => {
     try {
-      // Load with customer ID if available, otherwise load globally
-      const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
-      const savedData = localStorage.getItem(key);
-
-      if (!savedData) return null;
-
-      const parsed = JSON.parse(savedData);
-
-      // Check if data has new format with timestamp
-      if (parsed && typeof parsed === 'object' && parsed.timestamp) {
-        const now = Date.now();
-        const age = now - parsed.timestamp;
-        const twentyFourHours = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-
-        // If data is older than 24 hours, remove it and return null
-        if (age > twentyFourHours) {
+      const key = customerId ? `ticket_${customerId}_${type}` : `ticket_global_${type}`;
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.timestamp) {
+        if (Date.now() - parsed.timestamp > TICKET_EXPIRY_MS) {
           localStorage.removeItem(key);
           return null;
         }
-
         return parsed.items;
       }
-
-      // Handle old format (data without timestamp) - return as is for backward compatibility
-      // But it will be re-saved with timestamp on next save
       return Array.isArray(parsed) ? parsed : null;
-    } catch (error) {
-      console.error(`Error loading ${type} items from localStorage:`, error);
+    } catch (e) {
+      console.error(`Error loading ${type} items:`, e);
       return null;
     }
   };
 
+  // Helper function to save ticket items in localStorage with timestamp
+  const saveTicketItems = (type, items) => {
+    saveItemsForId(customer?.id, type, items);
+  };
+
+  // Helper function to load ticket items from localStorage (checks 8hr expiry)
+  const loadTicketItems = (type) => {
+    return loadItemsForId(customer?.id, type);
+  };
+
   // Helper function to clear ticket items from localStorage
   const clearTicketItems = (type) => {
-    const key = customer && customer.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
+    const key = customer?.id ? `ticket_${customer.id}_${type}` : `ticket_global_${type}`;
     localStorage.removeItem(key);
   };
 
@@ -1615,126 +1603,93 @@ const CustomerTicket = () => {
   const initialLoadCompleteRef = React.useRef(false);
   const customerIdRef = React.useRef(customer?.id);
 
-  // Load ticket items from localStorage when component mounts or customer changes
+  // Refs to always hold the latest item values so the customer-change effect can save them
+  const pawnItemsRef = React.useRef(pawnItems);
+  const buyItemsRef = React.useRef(buyItems);
+  const tradeItemsRef = React.useRef(tradeItems);
+  const saleItemsRef = React.useRef(saleItems);
+  const repairItemsRef = React.useRef(repairItems);
+  const paymentItemsRef = React.useRef(paymentItems);
+  const refundItemsRef = React.useRef(refundItems);
+  const redeemItemsRef = React.useRef(redeemItems);
+
+  // Load ticket items from localStorage on mount and when customer changes
   React.useEffect(() => {
-    // Load on first mount or when customer changes
-    const customerChanged = customerIdRef.current !== customer?.id;
+    const prevId = customerIdRef.current;
+    const newId = customer?.id;
+    const customerChanged = prevId !== newId;
+
     if (!initialLoadCompleteRef.current || customerChanged) {
-      // Skip loading if we're coming from an estimator or have location state with items
       const hasEstimatorData = location.state?.updatedItem || location.state?.estimatedItems || location.state?.editItem || location.state?.selectedInventoryItem || location.state?.addedItems;
 
       if (!hasEstimatorData) {
-        // Helper function to merge current items with saved items
-        const mergeItems = (currentItems, savedItems, defaultItem) => {
-          if (!savedItems || savedItems.length === 0) {
-            // No saved items - keep current items
-            return currentItems;
-          }
+        if (customerChanged && prevId) {
+          // Save the previous customer's current items before switching
+          saveItemsForId(prevId, 'pawn', pawnItemsRef.current);
+          saveItemsForId(prevId, 'buy', buyItemsRef.current);
+          saveItemsForId(prevId, 'trade', tradeItemsRef.current);
+          saveItemsForId(prevId, 'sale', saleItemsRef.current);
+          saveItemsForId(prevId, 'repair', repairItemsRef.current);
+          saveItemsForId(prevId, 'payment', paymentItemsRef.current);
+          saveItemsForId(prevId, 'refund', refundItemsRef.current);
+          saveItemsForId(prevId, 'redeem', redeemItemsRef.current);
+        }
 
-          // Check if current items have actual data (not just empty placeholders)
-          const hasCurrentData = currentItems.some(item => {
-            // Check if any field has a value (excluding id)
-            return Object.keys(item).some(key => {
-              if (key === 'id') return false;
-              const value = item[key];
-              return value !== null && value !== undefined && value !== '';
-            });
-          });
-
-          if (!hasCurrentData) {
-            // Current items are empty - use saved items
-            return savedItems;
-          }
-
-          // Both have data - merge them
-          // Remove empty placeholder from saved items if it exists
-          const filteredSaved = savedItems.filter(item => {
-            return Object.keys(item).some(key => {
-              if (key === 'id') return false;
-              const value = item[key];
-              return value !== null && value !== undefined && value !== '';
-            });
-          });
-
-          // Combine current items with saved items, removing duplicates by id
-          const itemMap = new Map();
-          [...currentItems, ...filteredSaved].forEach(item => {
-            itemMap.set(item.id, item);
-          });
-
-          const merged = Array.from(itemMap.values());
-          return merged.length > 0 ? merged : [defaultItem];
-        };
-
-        // Load saved items (will use customer ID if available, otherwise load global)
-        const savedPawn = loadTicketItems('pawn');
-        const savedBuy = loadTicketItems('buy');
-        const savedTrade = loadTicketItems('trade');
-        const savedSale = loadTicketItems('sale');
-        const savedRepair = loadTicketItems('repair');
-        const savedPayment = loadTicketItems('payment');
-        const savedRefund = loadTicketItems('refund');
-
-        // Merge current items with saved items
-        setPawnItems(mergeItems(pawnItems, savedPawn, { id: 1, description: '', category: '', value: '' }));
-        setBuyItems(mergeItems(buyItems, savedBuy, { id: 1, description: '', category: '', price: '' }));
-        setTradeItems(mergeItems(tradeItems, savedTrade, { id: 1, tradeItem: '', tradeValue: '', storeItem: '', priceDiff: '' }));
-        setSaleItems(mergeItems(saleItems, savedSale, { id: 1, description: '', category: '', price: '', paymentMethod: '' }));
-        setRepairItems(mergeItems(repairItems, savedRepair, { id: 1, description: '', issue: '', fee: '', completion: '' }));
-        setPaymentItems(mergeItems(paymentItems, savedPayment, { id: 1, pawnTicketId: '', description: '', principal: '', days: '', term: '', date: '', interest: '', fee: '', amount: '', images: [] }));
-        setRefundItems(mergeItems(refundItems, savedRefund, { id: 1, amount: '', method: '', reference: '', reason: '' }));
+        // Load saved items for the new customer
+        setPawnItems(loadItemsForId(newId, 'pawn') || [createEmptyPawnItem()]);
+        setBuyItems(loadItemsForId(newId, 'buy') || [createEmptyBuyItem()]);
+        setTradeItems(loadItemsForId(newId, 'trade') || [createEmptyTradeItem()]);
+        setSaleItems(loadItemsForId(newId, 'sale') || [createEmptySaleItem()]);
+        setRepairItems(loadItemsForId(newId, 'repair') || [createEmptyRepairItem()]);
+        setPaymentItems(loadItemsForId(newId, 'payment') || [createEmptyPaymentItem()]);
+        setRefundItems(loadItemsForId(newId, 'refund') || [createEmptyRefundItem()]);
+        setRedeemItems(loadItemsForId(newId, 'redeem') || [createEmptyRedeemItem()]);
       }
 
-      // Mark initial load as complete after a short delay to ensure state updates are processed
-      setTimeout(() => {
-        initialLoadCompleteRef.current = true;
-        customerIdRef.current = customer?.id;
-      }, 100);
+      customerIdRef.current = newId;
+      initialLoadCompleteRef.current = true;
     }
-  }, [customer, location.state, pawnItems, buyItems, tradeItems, saleItems, repairItems, paymentItems, refundItems]);
+  }, [customer?.id, location.state]);
 
-  // Auto-save ticket items to localStorage whenever they change (only after initial load)
+  // Keep item refs in sync and auto-save to localStorage on change
   React.useEffect(() => {
-    if (initialLoadCompleteRef.current) {
-      saveTicketItems('pawn', pawnItems);
-    }
+    pawnItemsRef.current = pawnItems;
+    if (initialLoadCompleteRef.current) saveTicketItems('pawn', pawnItems);
   }, [pawnItems, customer]);
 
   React.useEffect(() => {
-    if (initialLoadCompleteRef.current) {
-      saveTicketItems('buy', buyItems);
-    }
+    buyItemsRef.current = buyItems;
+    if (initialLoadCompleteRef.current) saveTicketItems('buy', buyItems);
   }, [buyItems, customer]);
 
   React.useEffect(() => {
-    if (initialLoadCompleteRef.current) {
-      saveTicketItems('trade', tradeItems);
-    }
+    tradeItemsRef.current = tradeItems;
+    if (initialLoadCompleteRef.current) saveTicketItems('trade', tradeItems);
   }, [tradeItems, customer]);
 
   React.useEffect(() => {
-    if (initialLoadCompleteRef.current) {
-      saveTicketItems('sale', saleItems);
-    }
+    saleItemsRef.current = saleItems;
+    if (initialLoadCompleteRef.current) saveTicketItems('sale', saleItems);
   }, [saleItems, customer]);
 
   React.useEffect(() => {
-    if (initialLoadCompleteRef.current) {
-      saveTicketItems('repair', repairItems);
-    }
+    repairItemsRef.current = repairItems;
+    if (initialLoadCompleteRef.current) saveTicketItems('repair', repairItems);
   }, [repairItems, customer]);
 
   React.useEffect(() => {
-    if (initialLoadCompleteRef.current) {
-      saveTicketItems('payment', paymentItems);
-    }
+    paymentItemsRef.current = paymentItems;
+    if (initialLoadCompleteRef.current) saveTicketItems('payment', paymentItems);
   }, [paymentItems, customer]);
 
   React.useEffect(() => {
-    if (initialLoadCompleteRef.current) {
-      saveTicketItems('refund', refundItems);
-    }
+    refundItemsRef.current = refundItems;
+    if (initialLoadCompleteRef.current) saveTicketItems('refund', refundItems);
   }, [refundItems, customer]);
+
+  React.useEffect(() => {
+    redeemItemsRef.current = redeemItems;
+  }, [redeemItems]);
 
   // Recalculate totals whenever any item array changes
   // Note: These are SUBTOTALS (before tax). Tax is added in display functions.
