@@ -115,6 +115,13 @@ function CashDrawer() {
   const [transferMinMaxWarningData, setTransferMinMaxWarningData] = useState(null); // { resultingBalance, minClose, maxClose, drawerName, transferAmount }
   const [physicalTenderWarningDialog, setPhysicalTenderWarningDialog] = useState(false);
   const [showManagerOverrideView, setShowManagerOverrideView] = useState(false); // For showing expected values
+  const [viewBalanceApprovalDialog, setViewBalanceApprovalDialog] = useState(false);
+  const [viewBalanceApprovalUsername, setViewBalanceApprovalUsername] = useState('');
+  const [viewBalanceApprovalPassword, setViewBalanceApprovalPassword] = useState('');
+  const [viewBalanceApprovalError, setViewBalanceApprovalError] = useState('');
+  const [viewBalanceApprovalLoading, setViewBalanceApprovalLoading] = useState(false);
+  const [viewBalanceDialog, setViewBalanceDialog] = useState(false);
+  const [viewBalanceDenominations, setViewBalanceDenominations] = useState(null);
   const [quickReportDialog, setQuickReportDialog] = useState(false);
   const [quickReportTxnDetail, setQuickReportTxnDetail] = useState(null);
   const [quickReportTxnLoading, setQuickReportTxnLoading] = useState(false);
@@ -2693,6 +2700,47 @@ function CashDrawer() {
     }
   };
 
+  const handleViewBalanceApproval = async () => {
+    if (!viewBalanceApprovalUsername || !viewBalanceApprovalPassword) {
+      setViewBalanceApprovalError('Please enter both username and password');
+      return;
+    }
+    setViewBalanceApprovalLoading(true);
+    setViewBalanceApprovalError('');
+    try {
+      const response = await axios.post(`${API_BASE_URL}/auth/login`, {
+        identifier: viewBalanceApprovalUsername,
+        password: viewBalanceApprovalPassword
+      });
+      const user = response.data.user;
+      if (user.role !== 'Store Manager' && user.role !== 'Store Owner') {
+        setViewBalanceApprovalError('Only Store Managers or Store Owners can view this information');
+        setViewBalanceApprovalLoading(false);
+        return;
+      }
+      if (drawerUsesDenominations(activeSession?.drawer_type)) {
+        try {
+          const denomRes = await axios.get(`${API_BASE_URL}/cash-drawer/${activeSession.session_id}/denominations/current`);
+          setViewBalanceDenominations(denomRes.data);
+        } catch {
+          setViewBalanceDenominations(null);
+        }
+      } else {
+        setViewBalanceDenominations(null);
+      }
+      setViewBalanceApprovalDialog(false);
+      setViewBalanceApprovalUsername('');
+      setViewBalanceApprovalPassword('');
+      setViewBalanceApprovalError('');
+      setViewBalanceApprovalLoading(false);
+      setViewBalanceDialog(true);
+      showSnackbar(`Balance viewed — approved by ${user.first_name} ${user.last_name} (${user.role})`, 'info');
+    } catch (err) {
+      setViewBalanceApprovalError(err.response?.data?.error || 'Invalid credentials');
+      setViewBalanceApprovalLoading(false);
+    }
+  };
+
   const showSnackbar = (message, severity = 'success') => {
     setSnackbar({ open: true, message, severity });
   };
@@ -3197,6 +3245,13 @@ function CashDrawer() {
                         {activeSession.connection_id && !activeSession.is_opener
                           ? 'Disconnect'
                           : `Close ${activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe' ? 'Safe' : 'Drawer'}`}
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        startIcon={<ViewIcon />}
+                        onClick={() => setViewBalanceApprovalDialog(true)}
+                      >
+                        View Balance
                       </Button>
                       {/* Show Transfer/Bank buttons only if employee opened a drawer or is a manager */}
                       {(isManager || activeSessions.some(s => s.is_opener)) && (
@@ -5733,6 +5788,166 @@ function CashDrawer() {
             disabled={managerApprovalLoading || isStoreClosed}
           >
             {managerApprovalLoading ? 'Verifying...' : 'Approve & Close'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* View Balance Approval Dialog */}
+      <Dialog
+        open={viewBalanceApprovalDialog}
+        onClose={() => {
+          setViewBalanceApprovalDialog(false);
+          setViewBalanceApprovalUsername('');
+          setViewBalanceApprovalPassword('');
+          setViewBalanceApprovalError('');
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <ViewIcon color="primary" />
+            <Typography variant="h6">Manager Approval Required</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="info">
+              A Store Manager or Store Owner must approve viewing the current balance and denominations for <strong>{activeSession?.drawer_name}</strong>.
+            </Alert>
+            <TextField
+              label="Manager Username"
+              fullWidth
+              value={viewBalanceApprovalUsername}
+              onChange={(e) => setViewBalanceApprovalUsername(e.target.value)}
+              autoFocus
+              autoComplete="off"
+            />
+            <TextField
+              label="Manager Password"
+              type="password"
+              fullWidth
+              value={viewBalanceApprovalPassword}
+              onChange={(e) => setViewBalanceApprovalPassword(e.target.value)}
+              autoComplete="off"
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') handleViewBalanceApproval();
+              }}
+            />
+            {viewBalanceApprovalError && (
+              <Alert severity="error">{viewBalanceApprovalError}</Alert>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setViewBalanceApprovalDialog(false);
+            setViewBalanceApprovalUsername('');
+            setViewBalanceApprovalPassword('');
+            setViewBalanceApprovalError('');
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleViewBalanceApproval}
+            variant="contained"
+            color="primary"
+            disabled={viewBalanceApprovalLoading}
+          >
+            {viewBalanceApprovalLoading ? 'Verifying...' : 'View Balance'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* View Balance Display Dialog */}
+      <Dialog
+        open={viewBalanceDialog}
+        onClose={() => { setViewBalanceDialog(false); setViewBalanceDenominations(null); }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <ViewIcon color="primary" />
+            <Typography variant="h6">Current Balance — {activeSession?.drawer_name}</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Box sx={{ p: 2, bgcolor: 'primary.light', borderRadius: 1, color: 'primary.contrastText' }}>
+              <Typography variant="body2" sx={{ opacity: 0.85 }}>Current Expected Balance</Typography>
+              <Typography variant="h4" fontWeight="bold">
+                {formatCurrency(activeSession?.current_expected_balance)}
+              </Typography>
+            </Box>
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="text.secondary">Opening Balance</Typography>
+                <Typography variant="body1">{formatCurrency(activeSession?.opening_balance)}</Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="text.secondary">Transaction Count</Typography>
+                <Typography variant="body1">{activeSession?.transaction_count || 0}</Typography>
+              </Grid>
+            </Grid>
+            {viewBalanceDenominations && (
+              <>
+                <Divider />
+                <Typography variant="subtitle1" fontWeight="bold">Denomination Breakdown</Typography>
+                <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', '& td, & th': { p: '4px 8px', fontSize: '0.9rem' } }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid #ddd' }}>
+                      <th style={{ textAlign: 'left' }}>Denomination</th>
+                      <th style={{ textAlign: 'center' }}>Count</th>
+                      <th style={{ textAlign: 'right' }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { label: '$100', field: 'bill_100', value: 100 },
+                      { label: '$50',  field: 'bill_50',  value: 50 },
+                      { label: '$20',  field: 'bill_20',  value: 20 },
+                      { label: '$10',  field: 'bill_10',  value: 10 },
+                      { label: '$5',   field: 'bill_5',   value: 5 },
+                      { label: '$2',   field: 'coin_2',   value: 2 },
+                      { label: '$1',   field: 'coin_1',   value: 1 },
+                      { label: '$0.25', field: 'coin_0_25', value: 0.25 },
+                      { label: '$0.10', field: 'coin_0_10', value: 0.10 },
+                      { label: '$0.05', field: 'coin_0_05', value: 0.05 },
+                    ].map(item => {
+                      const qty = Math.round(viewBalanceDenominations[item.field] || 0);
+                      if (qty === 0) return null;
+                      return (
+                        <tr key={item.field}>
+                          <td>{item.label}</td>
+                          <td style={{ textAlign: 'center' }}>{qty}</td>
+                          <td style={{ textAlign: 'right' }}>{formatCurrency(qty * item.value)}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{ borderTop: '2px solid #ccc', fontWeight: 'bold' }}>
+                      <td colSpan={2}>Total</td>
+                      <td style={{ textAlign: 'right' }}>
+                        {formatCurrency(
+                          [
+                            { field: 'bill_100', value: 100 }, { field: 'bill_50', value: 50 },
+                            { field: 'bill_20', value: 20 },   { field: 'bill_10', value: 10 },
+                            { field: 'bill_5', value: 5 },     { field: 'coin_2', value: 2 },
+                            { field: 'coin_1', value: 1 },     { field: 'coin_0_25', value: 0.25 },
+                            { field: 'coin_0_10', value: 0.10 }, { field: 'coin_0_05', value: 0.05 },
+                          ].reduce((sum, d) => sum + Math.round(viewBalanceDenominations[d.field] || 0) * d.value, 0)
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </Box>
+              </>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setViewBalanceDialog(false); setViewBalanceDenominations(null); }} variant="contained">
+            Close
           </Button>
         </DialogActions>
       </Dialog>

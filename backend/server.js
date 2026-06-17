@@ -4342,6 +4342,43 @@ app.post('/api/cash-drawer/:sessionId/denominations', async (req, res) => {
   }
 });
 
+// GET /api/cash-drawer/:sessionId/denominations/current - Compute running denomination totals
+app.get('/api/cash-drawer/:sessionId/denominations/current', async (req, res) => {
+  const { sessionId } = req.params;
+  const denomKeys = ['bill_100', 'bill_50', 'bill_20', 'bill_10', 'bill_5', 'coin_2', 'coin_1', 'coin_0_25', 'coin_0_10', 'coin_0_05'];
+  try {
+    // Start with opening denominations
+    const openingResult = await pool.query(
+      'SELECT * FROM cash_denominations WHERE session_id = $1 AND denomination_type = $2 LIMIT 1',
+      [sessionId, 'opening']
+    );
+    const current = {};
+    for (const key of denomKeys) {
+      current[key] = parseFloat(openingResult.rows[0]?.[key] || 0);
+    }
+
+    // Apply all adjustment denominations (positive amount = money in, negative = money out)
+    const adjResult = await pool.query(`
+      SELECT ad.*, cda.amount
+      FROM adjustment_denominations ad
+      JOIN cash_drawer_adjustments cda ON ad.adjustment_id = cda.adjustment_id
+      WHERE cda.session_id = $1
+    `, [sessionId]);
+
+    for (const adj of adjResult.rows) {
+      const isDebit = parseFloat(adj.amount) < 0;
+      for (const key of denomKeys) {
+        current[key] += isDebit ? -parseFloat(adj[key] || 0) : parseFloat(adj[key] || 0);
+      }
+    }
+
+    res.json(current);
+  } catch (error) {
+    console.error('Error computing current denominations:', error);
+    res.status(500).json({ error: 'Failed to compute current denominations' });
+  }
+});
+
 // GET /api/cash-drawer/:sessionId/denominations/:type - Get denominations for a session
 app.get('/api/cash-drawer/:sessionId/denominations/:type', async (req, res) => {
   const { sessionId, type } = req.params;
