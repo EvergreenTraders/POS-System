@@ -75,7 +75,7 @@ function CashDrawer() {
   const API_BASE_URL = config.apiUrl;
   const location = useLocation();
   const navigate = useNavigate();
-  const { isStoreClosed, isPastBusinessHours, todayHours } = useStoreStatus();
+  const { isStoreClosed, isPastBusinessHours, todayHours, storeTimezone } = useStoreStatus();
   const { user: currentUser } = useAuth();
 
   const [activeSession, setActiveSession] = useState(null);
@@ -1403,27 +1403,31 @@ function CashDrawer() {
       }
     }
 
-    // Check business hours
+    // Check business hours using store's configured timezone
     if (todayHours) {
       if (todayHours.is_closed) {
         showSnackbar('Cannot open drawer: the store is closed today', 'error');
         return;
       }
-      const now = new Date();
+      const timeParts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: storeTimezone || 'UTC',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).formatToParts(new Date());
+      const nowHour = parseInt(timeParts.find(p => p.type === 'hour')?.value || '0', 10) % 24;
+      const nowMin = parseInt(timeParts.find(p => p.type === 'minute')?.value || '0', 10);
+      const nowMinutes = nowHour * 60 + nowMin;
       if (todayHours.open_time) {
         const [openHour, openMin] = todayHours.open_time.substring(0, 5).split(':').map(Number);
-        const openDate = new Date();
-        openDate.setHours(openHour, openMin, 0, 0);
-        if (now < openDate) {
+        if (nowMinutes < openHour * 60 + openMin) {
           showSnackbar(`Cannot open drawer: store doesn't open until ${todayHours.open_time.substring(0, 5)}`, 'error');
           return;
         }
       }
       if (todayHours.close_time) {
         const [closeHour, closeMin] = todayHours.close_time.substring(0, 5).split(':').map(Number);
-        const closeDate = new Date();
-        closeDate.setHours(closeHour, closeMin, 0, 0);
-        if (now > closeDate) {
+        if (nowMinutes > closeHour * 60 + closeMin) {
           showSnackbar(`Cannot open drawer: store closed at ${todayHours.close_time.substring(0, 5)}`, 'error');
           return;
         }
@@ -5780,18 +5784,17 @@ function CashDrawer() {
                       const activeType = activeSession?.drawer_type;
                       const otherType = session.drawer_type;
 
-                      // Allowed sources (who can send TO this drawer type)
+                      // Any drawer/safe type can transfer to any other drawer/safe type
+                      const allTypes = ['physical', 'safe', 'master_safe'];
                       const allowedSources = {
-                        'physical': ['physical', 'safe'],
-                        'safe': ['physical', 'master_safe'],
-                        'master_safe': ['safe']
+                        'physical': allTypes,
+                        'safe': allTypes,
+                        'master_safe': allTypes
                       };
-
-                      // Allowed targets (who this drawer type can send TO)
                       const allowedTargets = {
-                        'physical': ['physical', 'safe'],
-                        'safe': ['physical', 'master_safe'],
-                        'master_safe': ['safe']
+                        'physical': allTypes,
+                        'safe': allTypes,
+                        'master_safe': allTypes
                       };
 
                       if (adjustmentType === 'transfer_from') {
@@ -5929,12 +5932,7 @@ function CashDrawer() {
                         if (transferSource && session.session_id === transferSource.session_id) return false;
                         // Apply transfer rules
                         if (transferSource) {
-                          const allowedTargets = {
-                            'physical': ['physical', 'safe'],
-                            'safe': ['physical', 'master_safe'],
-                            'master_safe': ['safe']
-                          };
-                          return allowedTargets[transferSource.drawer_type]?.includes(session.drawer_type) || false;
+                          return true; // Any combination is allowed
                         }
                         return true;
                       })
@@ -5954,9 +5952,7 @@ function CashDrawer() {
             {transferSource && (
               <Alert severity="info" sx={{ mb: 2 }}>
                 <Typography variant="body2">
-                  {transferSource.drawer_type === 'physical' && 'Physical drawers can transfer to: Physical Drawers, Safe'}
-                  {transferSource.drawer_type === 'safe' && 'Safe can transfer to: Physical Drawers, Master Safe'}
-                  {transferSource.drawer_type === 'master_safe' && 'Master Safe can transfer to: Safe'}
+                  Any drawer or safe can transfer to any other drawer or safe.
                 </Typography>
               </Alert>
             )}
