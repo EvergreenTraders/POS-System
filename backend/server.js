@@ -1156,7 +1156,8 @@ app.post('/api/employee-sessions/manual', async (req, res) => {
 app.get('/api/cash-drawer/active', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT ads.* FROM active_drawer_sessions ads
+      SELECT ads.*, d.individual_denominations, d.blind_count, d.electronic_blind_count
+      FROM active_drawer_sessions ads
       JOIN drawers d ON ads.drawer_id = d.drawer_id
       WHERE d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY ads.opened_at DESC
@@ -1318,6 +1319,9 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
         d.drawer_type,
         d.drawer_name,
         d.is_shared,
+        d.individual_denominations,
+        d.blind_count,
+        d.electronic_blind_count,
         calculate_expected_balance(s.session_id) AS current_expected_balance,
         (SELECT COUNT(*) FROM transactions WHERE session_id = s.session_id) AS transaction_count,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
