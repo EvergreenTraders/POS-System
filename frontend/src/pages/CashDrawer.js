@@ -1728,8 +1728,8 @@ function CashDrawer() {
     // Calculate balance from denomination counts (close dialog always uses denomination counting)
     const calculatedBalance = calculateDenominationTotal(closingDenominations);
 
-    // Validation - denomination total must be entered
-    if (calculatedBalance === 0) {
+    // Validation - denomination total must be entered (skip for force close — $0 is valid when manager approved)
+    if (calculatedBalance === 0 && !forceClose) {
       showSnackbar('Please enter denomination counts', 'error');
       return;
     }
