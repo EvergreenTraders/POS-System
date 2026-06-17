@@ -751,11 +751,13 @@ const Scrap = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      // Filter items that are not in 'SCRAP' or 'SCRAP PROCESS' or 'SOLD TO REFINER' status
+      // Filter items that are not in 'SCRAP' or 'SCRAP PROCESS' or 'SOLD TO REFINER' status,
+      // and only include items with precious metal content
       const availableItems = response.data.filter(item =>
         item.status !== 'SCRAP' &&
         item.status !== 'SCRAP PROCESS' &&
-        item.status !== 'SOLD TO REFINER'
+        item.status !== 'SOLD TO REFINER' &&
+        ['Gold', 'Silver', 'Platinum', 'Palladium'].includes(item.precious_metal_type)
       );
 
       setAddItemDialog({

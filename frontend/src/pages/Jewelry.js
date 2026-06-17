@@ -1141,34 +1141,42 @@ function Jewelry() {
                               Add to Ticket
                             </Button>
                           )}
-                          {item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER' && (
-                            <Button
-                              variant="outlined"
-                              color="error"
-                              size="small"
-                              disabled={isStoreClosed}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setItemToScrap(item);
-                                setScrapDialogOpen(true);
-                                fetchScrapBuckets().catch((error) => {
-                                  console.error('Error fetching scrap buckets:', error);
-                                });
-                              }}
-                              sx={{
-                                minWidth: '85px',
-                                height: '28px',
-                                fontSize: '0.7rem',
-                                '& .MuiButton-label': {
-                                  lineHeight: 1.1,
-                                  whiteSpace: 'nowrap',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis'
-                                }
-                              }}
-                            >
-                              To Scrap
-                            </Button>
+                          {item.status !== 'SCRAP PROCESS' && item.status !== 'SOLD TO REFINER' && (() => {
+                            const noPreciousMetal = !['Gold', 'Silver', 'Platinum', 'Palladium'].includes(item.precious_metal_type);
+                            return (
+                              <Tooltip title={noPreciousMetal ? 'No precious metal content — cannot send to scrap' : ''} arrow>
+                                <span>
+                                  <Button
+                                    variant="outlined"
+                                    color="error"
+                                    size="small"
+                                    disabled={isStoreClosed || noPreciousMetal}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setItemToScrap(item);
+                                      setScrapDialogOpen(true);
+                                      fetchScrapBuckets().catch((error) => {
+                                        console.error('Error fetching scrap buckets:', error);
+                                      });
+                                    }}
+                                    sx={{
+                                      minWidth: '85px',
+                                      height: '28px',
+                                      fontSize: '0.7rem',
+                                      '& .MuiButton-label': {
+                                        lineHeight: 1.1,
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis'
+                                      }
+                                    }}
+                                  >
+                                    To Scrap
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            );
+                          })()}
                           )}
                         </Box>
                       </TableCell>
