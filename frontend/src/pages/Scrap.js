@@ -130,7 +130,8 @@ const Scrap = () => {
     refiner_customer_id: '',
     shipper: '',
     tracking_number: '',
-    loading: false
+    loading: false,
+    pendingStatus: null
   });
 
   const [processingDialog, setProcessingDialog] = useState({
@@ -139,7 +140,8 @@ const Scrap = () => {
     weight_received: '',
     locked_spot_price: '',
     payment_advance: '',
-    loading: false
+    loading: false,
+    pendingStatus: null
   });
 
   const [completedDialog, setCompletedDialog] = useState({
@@ -148,7 +150,8 @@ const Scrap = () => {
     assay: '',
     total_settlement_amount: '',
     final_payment_amount: '',
-    loading: false
+    loading: false,
+    pendingStatus: null
   });
 
   const [customers, setCustomers] = useState([]);
@@ -898,6 +901,52 @@ const Scrap = () => {
     const nextStatus = getNextStatus(selectedBucket.status);
     if (!nextStatus) return;
 
+    // For SHIPPED, PROCESSING, COMPLETE — open info dialog first; status changes only on save
+    if (nextStatus === 'SHIPPED') {
+      await fetchCustomers();
+      setShippingDialog({
+        open: true,
+        refiner_customer_id: selectedBucket?.refiner_customer_id || '',
+        shipper: selectedBucket?.shipper || '',
+        tracking_number: selectedBucket?.tracking_number || '',
+        loading: false,
+        pendingStatus: 'SHIPPED'
+      });
+      return;
+    }
+
+    if (nextStatus === 'PROCESSING') {
+      const today = getCurrentDate();
+      let dateReceived = today;
+      if (selectedBucket?.date_received) {
+        const dbDate = new Date(selectedBucket.date_received);
+        dateReceived = dbDate.toISOString().split('T')[0];
+      }
+      setProcessingDialog({
+        open: true,
+        date_received: dateReceived,
+        weight_received: selectedBucket?.weight_received || '',
+        locked_spot_price: selectedBucket?.locked_spot_price || '',
+        payment_advance: selectedBucket?.payment_advance || '',
+        loading: false,
+        pendingStatus: 'PROCESSING'
+      });
+      return;
+    }
+
+    if (nextStatus === 'COMPLETE') {
+      setCompletedDialog({
+        open: true,
+        final_weight: selectedBucket?.final_weight || '',
+        assay: selectedBucket?.assay || '',
+        total_settlement_amount: selectedBucket?.total_settlement_amount || '',
+        final_payment_amount: selectedBucket?.final_payment_amount || '',
+        loading: false,
+        pendingStatus: 'COMPLETE'
+      });
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       if (!token) {
@@ -1116,7 +1165,8 @@ const Scrap = () => {
       refiner_customer_id: '',
       shipper: '',
       tracking_number: '',
-      loading: false
+      loading: false,
+      pendingStatus: null
     });
   };
 
@@ -1139,7 +1189,8 @@ const Scrap = () => {
           refiner_customer_id: shippingDialog.refiner_customer_id,
           shipper: shippingDialog.shipper,
           tracking_number: shippingDialog.tracking_number,
-          updated_by: currentUser?.employee_id
+          updated_by: currentUser?.employee_id,
+          ...(shippingDialog.pendingStatus ? { status: shippingDialog.pendingStatus } : {})
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -1190,7 +1241,8 @@ const Scrap = () => {
       weight_received: '',
       locked_spot_price: '',
       payment_advance: '',
-      loading: false
+      loading: false,
+      pendingStatus: null
     });
   };
 
@@ -1214,7 +1266,8 @@ const Scrap = () => {
           weight_received: parseFloat(processingDialog.weight_received),
           locked_spot_price: parseFloat(processingDialog.locked_spot_price),
           payment_advance: processingDialog.payment_advance ? parseFloat(processingDialog.payment_advance) : null,
-          updated_by: currentUser?.employee_id
+          updated_by: currentUser?.employee_id,
+          ...(processingDialog.pendingStatus ? { status: processingDialog.pendingStatus } : {})
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -1255,7 +1308,8 @@ const Scrap = () => {
       assay: '',
       total_settlement_amount: '',
       final_payment_amount: '',
-      loading: false
+      loading: false,
+      pendingStatus: null
     });
   };
 
@@ -1279,7 +1333,8 @@ const Scrap = () => {
           assay: parseFloat(completedDialog.assay),
           total_settlement_amount: parseFloat(completedDialog.total_settlement_amount),
           final_payment_amount: parseFloat(completedDialog.final_payment_amount),
-          updated_by: currentUser?.employee_id
+          updated_by: currentUser?.employee_id,
+          ...(completedDialog.pendingStatus ? { status: completedDialog.pendingStatus } : {})
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -1720,39 +1775,6 @@ const Scrap = () => {
                     >
                       Print Packing List
                     </Button>
-
-                    {selectedBucket.status === 'SHIPPED' && (
-                      <Button
-                        variant="outlined"
-                        color="primary"
-                        size="small"
-                        onClick={handleOpenShippingDialog}
-                      >
-                        Enter Shipping Info
-                      </Button>
-                    )}
-
-                    {selectedBucket.status === 'PROCESSING' && (
-                      <Button
-                        variant="outlined"
-                        color="primary"
-                        size="small"
-                        onClick={handleOpenProcessingDialog}
-                      >
-                        Enter Processing Info
-                      </Button>
-                    )}
-
-                    {selectedBucket.status === 'COMPLETE' && (
-                      <Button
-                        variant="outlined"
-                        color="primary"
-                        size="small"
-                        onClick={handleOpenCompletedDialog}
-                      >
-                        Enter Completion Info
-                      </Button>
-                    )}
                   </Box>
                 )}
 
