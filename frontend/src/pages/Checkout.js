@@ -458,12 +458,8 @@ function Checkout() {
         ) === index;
 
         if (isFirstItemInTicket) {
-          // Use totalRedemptionAmount for the first item
+          // totalRedemptionAmount already includes principal + interest
           itemValue = parseFloat(item.totalRedemptionAmount || item.principal || 0);
-          // Add interest if available
-          if (item.interest) {
-            itemValue += parseFloat(item.interest || 0);
-          }
         } else {
           // Skip other items in the same redeem ticket
           itemValue = 0;
@@ -2192,12 +2188,8 @@ const handleBackToEstimation = () => {
                         ) === index;
 
                         if (isFirstItemInTicket) {
-                          // Use totalRedemptionAmount for the first item
+                          // totalRedemptionAmount already includes principal + interest
                           price = parseFloat(item.totalRedemptionAmount || item.principal || 0);
-                          // Add interest if available
-                          if (item.interest) {
-                            price += parseFloat(item.interest || 0);
-                          }
                         } else {
                           // For other items in the same redeem ticket, price is 0
                           price = 0;

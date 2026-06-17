@@ -3142,13 +3142,12 @@ const CustomerTicket = () => {
       return 0;
     }
 
-    // Only sale, repair, and redeem transactions are taxable (money coming IN)
+    // Only sale and repair transactions are taxable
     const currentTotal = getCurrentTabTotal();
 
     switch(activeTab) {
       case 3: // Sale
       case 4: // Repair
-      case 7: // Redeem
         return Math.abs(currentTotal) * taxRate;
       default:
         return 0;
@@ -3173,14 +3172,13 @@ const CustomerTicket = () => {
     const isTaxExempt = customer?.tax_exempt || false;
 
     // Non-taxable items (use subtotal as-is)
-    const nonTaxableTotal = totals.pawn + totals.buy + totals.trade + totals.payment + totals.refund;
+    const nonTaxableTotal = totals.pawn + totals.buy + totals.trade + totals.payment + totals.refund + totals.redeem;
 
     // Taxable items (add tax unless customer is tax exempt)
     const saleTotalWithTax = isTaxExempt ? totals.sale : totals.sale * (1 + taxRate);
     const repairTotalWithTax = isTaxExempt ? totals.repair : totals.repair * (1 + taxRate);
-    const redeemTotalWithTax = isTaxExempt ? totals.redeem : totals.redeem * (1 + taxRate);
 
-    return nonTaxableTotal + saleTotalWithTax + repairTotalWithTax + redeemTotalWithTax;
+    return nonTaxableTotal + saleTotalWithTax + repairTotalWithTax;
   };
 
   // Fetch required fields for each transaction type on component mount
