@@ -348,6 +348,9 @@ pool.query(`
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS employment_type VARCHAR(20) NOT NULL DEFAULT 'hourly'
 `).catch(err => console.error('employment_type migration:', err.message));
+pool.query(`
+  ALTER TABLE quote_expiration ADD COLUMN IF NOT EXISTS auto_delete BOOLEAN NOT NULL DEFAULT FALSE
+`).catch(err => console.error('quote_expiration auto_delete migration:', err.message));
 
 // Bank account migrations
 pool.query(`
@@ -5956,6 +5959,28 @@ app.put('/api/carat-conversion', async (req, res) => {
 
 // Quote Management API Endpoints
 
+app.delete('/api/quotes/expired', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const expired = await client.query(`SELECT id, quote_id FROM quotes WHERE days_remaining <= 0`);
+    const intIds = expired.rows.map(r => r.id);
+    const strIds = expired.rows.map(r => r.quote_id);
+    if (strIds.length > 0) {
+      await client.query(`DELETE FROM quote_items WHERE quote_id = ANY($1)`, [strIds]);
+      await client.query(`DELETE FROM quotes WHERE id = ANY($1)`, [intIds]);
+    }
+    await client.query('COMMIT');
+    res.json({ deleted: intIds.length });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting expired quotes:', err);
+    res.status(500).json({ error: 'Failed to delete expired quotes' });
+  } finally {
+    client.release();
+  }
+});
+
 // Get all quotes with customer and employee details
 app.get('/api/quotes', async (req, res) => {
   try {
@@ -7987,45 +8012,40 @@ app.get('/api/quote-expiration/config', async (req, res) => {
 app.put('/api/quote-expiration/config', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { days } = req.body;
-    
+    const { days, auto_delete } = req.body;
+
     if (!days || days < 1) {
       return res.status(400).json({ error: 'Days must be a positive number' });
     }
 
     await client.query('BEGIN');
 
-    // Update configuration or insert if none exists
     const updateResult = await client.query(`
       UPDATE quote_expiration
-      SET days = $1, updated_at = CURRENT_TIMESTAMP
-      RETURNING days, created_at, updated_at
-    `, [days]);
+      SET days = $1, auto_delete = $2, updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `, [days, auto_delete !== undefined ? auto_delete : false]);
 
-    // If no rows were updated, insert new configuration
     let result;
     if (updateResult.rowCount === 0) {
       result = await client.query(`
-        INSERT INTO quote_expiration (days)
-        VALUES ($1)
-        RETURNING id, days, created_at, updated_at
-      `, [days]);
+        INSERT INTO quote_expiration (days, auto_delete)
+        VALUES ($1, $2)
+        RETURNING *
+      `, [days, auto_delete !== undefined ? auto_delete : false]);
     } else {
       result = updateResult;
     }
-
-    // Note: We no longer update existing quotes' expires_in value
-    // New quotes will use this configuration when created
 
     await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error creating quote expiration config:', err);
-    res.status(500).json({ error: 'Failed to create quote expiration configuration' });
-    } finally {
-        client.release();
-    }
+    console.error('Error updating quote expiration config:', err);
+    res.status(500).json({ error: 'Failed to update quote expiration configuration' });
+  } finally {
+    client.release();
+  }
 });
 
 // Inventory Hold Period Configuration API Endpoints
