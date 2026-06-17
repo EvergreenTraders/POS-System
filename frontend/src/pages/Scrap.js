@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Button,
@@ -54,6 +54,9 @@ import { injectPDFScript } from '../utils/printUtils';
 import { useAuth } from '../context/AuthContext';
 import { useWorkingDate } from '../context/WorkingDateContext';
 import { useStoreStatus } from '../context/StoreStatusContext';
+
+const PLACEHOLDER_IMAGE = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150' viewBox='0 0 150 150'%3E%3Crect width='150' height='150' fill='%23e0e0e0'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.35em' fill='%23999' font-size='12' font-family='sans-serif'%3ENo Image%3C/text%3E%3C/svg%3E";
+const PLACEHOLDER_IMAGE_SMALL = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='50' height='50' viewBox='0 0 50 50'%3E%3Crect width='50' height='50' fill='%23e0e0e0'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.35em' fill='%23999' font-size='7' font-family='sans-serif'%3ENo Image%3C/text%3E%3C/svg%3E";
 
 const Scrap = () => {
   const { getCurrentDate } = useWorkingDate();
@@ -160,6 +163,9 @@ const Scrap = () => {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
+  // Tracks which bucket's items are expected — stale fetches are ignored
+  const currentBucketIdRef = useRef(null);
+
   // Fetch scrap buckets from API
   const fetchScrapBuckets = async () => {
     try {
@@ -222,12 +228,13 @@ const Scrap = () => {
 
   // Fetch items for a specific bucket
   const fetchBucketItems = async (bucket) => {
+    const targetBucketId = bucket.bucket_id;
     try {
-      setItemsLoading(true);      
+      setItemsLoading(true);
       // If bucket has item_ids array, fetch the actual items
       if (bucket.item_id && bucket.item_id.length > 0) {
         // Fetch each item individually
-        const itemPromises = bucket.item_id.map(id => 
+        const itemPromises = bucket.item_id.map(id =>
           axios.get(`${API_BASE_URL}/jewelry/${id}`)
             .then(res => res.data)
             .catch(err => {
@@ -235,22 +242,28 @@ const Scrap = () => {
               return null; // Return null for failed requests
             })
         );
-        
+
         // Wait for all requests to complete
         const items = await Promise.all(itemPromises);
+        // Discard results if the user has already switched to a different bucket
+        if (currentBucketIdRef.current !== targetBucketId) return;
         // Filter out any null values from failed requests
         const validItems = items.filter(item => item !== null);
         setBucketItems(validItems);
       } else {
-        // If no items, set empty array
+        if (currentBucketIdRef.current !== targetBucketId) return;
         setBucketItems([]);
       }
     } catch (err) {
       console.error('Error fetching bucket items:', err);
-      setError('Failed to load bucket items. Please try again.');
-      setBucketItems([]);
+      if (currentBucketIdRef.current === targetBucketId) {
+        setError('Failed to load bucket items. Please try again.');
+        setBucketItems([]);
+      }
     } finally {
-      setItemsLoading(false);
+      if (currentBucketIdRef.current === targetBucketId) {
+        setItemsLoading(false);
+      }
     }
   };
 
@@ -270,9 +283,10 @@ const Scrap = () => {
 
   // Handle bucket selection
   const handleBucketSelect = (bucket) => {
+    currentBucketIdRef.current = bucket.bucket_id;
     setSelectedBucket(bucket);
+    setBucketItems([]);
     fetchBucketItems(bucket);
-    // Clear history when switching buckets
     setBucketHistory([]);
   };
 
@@ -301,13 +315,6 @@ const Scrap = () => {
     }
   }, [weightPhotoDialog.cameraMode, weightPhotoDialog.stream]);
 
-  // Update selected bucket when scrapBuckets changes
-  useEffect(() => {
-    if (scrapBuckets.length > 0 && !selectedBucket) {
-      // Select the first bucket (most recently created)
-      handleBucketSelect(scrapBuckets[0]);
-    }
-  }, [scrapBuckets]);
 
   const handleNewScrap = () => {
     setOpenCreateDialog(true);
@@ -420,7 +427,7 @@ const Scrap = () => {
 
   // Helper function to get proper image URL
   const getImageUrl = (images) => {
-    const placeholderImage = 'https://via.placeholder.com/150';
+    const placeholderImage = PLACEHOLDER_IMAGE;
 
     const makeAbsoluteUrl = (url) => {
       if (!url) return placeholderImage;
@@ -1874,13 +1881,13 @@ const Scrap = () => {
                           }}
                           onError={(e) => {
                             e.target.onerror = null;
-                            e.target.src = 'https://via.placeholder.com/150?text=No+Photo';
+                            e.target.src = PLACEHOLDER_IMAGE;
                           }}
                         />
                       ) : (
                         <Box
                           component="img"
-                          src="https://via.placeholder.com/150?text=No+Photo"
+                          src={PLACEHOLDER_IMAGE}
                           alt="No photo"
                           sx={{
                             width: '100%',
@@ -2044,7 +2051,7 @@ const Scrap = () => {
                     </TableHead>
                     <TableBody>
                       {bucketItems.map((item) => (
-                        <TableRow key={item.id}>
+                        <TableRow key={item.item_id}>
                           <TableCell>{item.item_id || 'N/A'}</TableCell>
 
                           <TableCell>
@@ -2062,8 +2069,8 @@ const Scrap = () => {
                                 borderColor: 'divider'
                               }}
                               onError={(e) => {
-                                e.target.onerror = null; // Prevent infinite loop
-                                e.target.src = `https://via.placeholder.com/50?text=No+Image`;
+                                e.target.onerror = null;
+                                e.target.src = PLACEHOLDER_IMAGE_SMALL;
                               }}
                             />
                           </TableCell>
