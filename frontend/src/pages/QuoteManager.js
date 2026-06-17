@@ -556,83 +556,80 @@ function QuoteManager() {
         <Table stickyHeader>
           <TableHead sx={{ bgcolor: 'white'}}>
             <TableRow sx={{ bgcolor: 'white' }}>
-              <TableCell 
+              <TableCell
                 onClick={() => handleSort('id')}
                 sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
+                align="center"
               >
                 Quote ID {sortConfig.key === 'id' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
-              <TableCell 
+              <TableCell
                 onClick={() => handleSort('item_description')}
                 sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
+                align="center"
               >
                 Customer {sortConfig.key === 'item_description' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
-              <TableCell 
+              <TableCell
                 onClick={() => handleSort('price')}
                 sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
-                align="right"
+                align="center"
               >
                 Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
-              <TableCell 
+              <TableCell
                 onClick={() => handleSort('created_at')}
                 sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
+                align="center"
               >
                 Created {sortConfig.key === 'created_at' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
-              <TableCell 
-                onClick={() => handleSort('expires_in')}
+              <TableCell
+                onClick={() => handleSort('days_remaining')}
                 sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
+                align="center"
               >
-                Expires In {sortConfig.key === 'expires_in' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                Expires In {sortConfig.key === 'days_remaining' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </TableCell>
-              <TableCell 
-                onClick={() => handleSort('expires_in')}
-                sx={{ cursor: 'pointer', userSelect: 'none', bgcolor: 'white', fontWeight: 'bold' }}
-              >
-                Days Remaining {sortConfig.key === 'days_remaining' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-              </TableCell>
-              <TableCell sx={{ bgcolor: 'white', fontWeight: 'bold' }}>Actions</TableCell>
+              <TableCell sx={{ bgcolor: 'white', fontWeight: 'bold' }} align="center">Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody sx={{ bgcolor: 'white' }}>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={8} align="center">
+                <TableCell colSpan={7} align="center">
                   <CircularProgress />
                 </TableCell>
               </TableRow>
             ) : getSortedQuotes().length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} align="center">
+                <TableCell colSpan={7} align="center">
                   No quotes found
                 </TableCell>
               </TableRow>
             ) : (
               getSortedQuotes().map((quote) => (
                 <TableRow key={quote.quote_id} sx={{ bgcolor: 'transparent', '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.04)' } }}>
-                  <TableCell>{quote.quote_id}</TableCell>
-                  <TableCell>
+                  <TableCell align="center">{quote.quote_id}</TableCell>
+                  <TableCell align="center">
                     <Typography variant="body2">{quote.customer_name}</Typography>
                     <Typography variant="caption" color="textSecondary">
                       {quote.customer_email}
                     </Typography>
                   </TableCell>
-                  <TableCell>
+                  <TableCell align="center">
                     <Typography variant="body1">
                       ${quote.total_amount}
                     </Typography>
                   </TableCell>
-                  <TableCell>{formatDate(quote.created_at)}</TableCell>
-                  <TableCell>
-                      {quote.expires_in} days
+                  <TableCell align="center">{formatDate(quote.created_at)}</TableCell>
+                  <TableCell align="center">
+                    {quote.days_remaining <= 0
+                      ? <span style={{ color: 'red' }}>Expired</span>
+                      : `${quote.days_remaining} days`}
                   </TableCell>
-                  <TableCell>
-                    {quote.days_remaining}
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', gap: 1 }}>
+                  <TableCell align="center">
+                    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
                       <Tooltip title="View Details">
                         <IconButton
                           size="small"
@@ -699,8 +696,7 @@ function QuoteManager() {
                     Status: {selectedQuote.days_remaining > 0 ? 'Active' : 'Expired'}
                   </Typography>
                   <Typography variant="body2">
-                    Expires In: {selectedQuote.expires_in} days
-                    {selectedQuote.days_remaining > 0 && ` (${selectedQuote.days_remaining} days remaining)`}
+                    Expires In: {selectedQuote.days_remaining <= 0 ? 'Expired' : `${selectedQuote.days_remaining} days`}
                   </Typography>
                 </Grid>
               </Grid>
