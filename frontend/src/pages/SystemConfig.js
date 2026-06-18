@@ -39,6 +39,7 @@ import { CloudUpload as UploadIcon, Delete as DeleteIcon, Store as StoreIcon, Ed
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
 import config from '../config';
+import { useAuth } from '../context/AuthContext';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -89,6 +90,8 @@ function TabPanel({ children, value, index }) {
 }
 
 function SystemConfig() {
+  const { user } = useAuth();
+  const isManagerOrOwner = user?.role === 'Store Manager' || user?.role === 'Store Owner';
   const [activeTab, setActiveTab] = useState(0);
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -99,6 +102,10 @@ function SystemConfig() {
   // Employee Configuration state
   const [employeePermissions, setEmployeePermissions] = useState([]);
   const [employeePermissionsLoading, setEmployeePermissionsLoading] = useState(false);
+
+  // Quotes Configuration state
+  const [quoteConfig, setQuoteConfig] = useState({ days: 30, auto_delete: false });
+  const [quoteConfigLoading, setQuoteConfigLoading] = useState(false);
 
   // Pricing Calculator state
   const [calculatorSettings, setCalculatorSettings] = useState({
@@ -238,6 +245,7 @@ function SystemConfig() {
   // Opening drawer mode (Individual Denominations vs Drawer Total)
   const [isIndividualDenominationsDrawers, setIsIndividualDenominationsDrawers] = useState(false);
   const [isIndividualDenominationsSafe, setIsIndividualDenominationsSafe] = useState(false);
+  const [isIndividualDenominationsMasterSafe, setIsIndividualDenominationsMasterSafe] = useState(false);
   const [isElectronicBlindCountDrawers, setIsElectronicBlindCountDrawers] = useState(false);
   const [isElectronicBlindCountSafe, setIsElectronicBlindCountSafe] = useState(false);
   const [minClose, setMinClose] = useState(0); // For physical drawers
@@ -362,20 +370,23 @@ function SystemConfig() {
       const drawerConfigRes = await axios.get(`${API_BASE_URL}/drawer-type-config`);
       const physicalConfig = drawerConfigRes.data.find(c => c.drawer_type === 'physical');
       const safeConfig = drawerConfigRes.data.find(c => c.drawer_type === 'safe');
+      const masterSafeConfig = drawerConfigRes.data.find(c => c.drawer_type === 'master_safe');
       setIsBlindCountDrawers(physicalConfig ? physicalConfig.blind_count : true);
       setIsBlindCountSafe(safeConfig ? safeConfig.blind_count : true);
       setIsIndividualDenominationsDrawers(physicalConfig ? physicalConfig.individual_denominations : false);
       setIsIndividualDenominationsSafe(safeConfig ? safeConfig.individual_denominations : false);
+      setIsIndividualDenominationsMasterSafe(masterSafeConfig ? masterSafeConfig.individual_denominations : false);
       setIsElectronicBlindCountDrawers(physicalConfig ? physicalConfig.electronic_blind_count : false);
       setIsElectronicBlindCountSafe(safeConfig ? safeConfig.electronic_blind_count : false);
     } catch (error) {
       console.error('Error fetching drawer mode preferences:', error);
-      setIsBlindCountDrawers(true); // Default to blind count
-      setIsBlindCountSafe(true); // Default to blind count
-      setIsIndividualDenominationsDrawers(false); // Default to drawer total
-      setIsIndividualDenominationsSafe(false); // Default to drawer total
-      setIsElectronicBlindCountDrawers(false); // Default to open count
-      setIsElectronicBlindCountSafe(false); // Default to open count
+      setIsBlindCountDrawers(true);
+      setIsBlindCountSafe(true);
+      setIsIndividualDenominationsDrawers(false);
+      setIsIndividualDenominationsSafe(false);
+      setIsIndividualDenominationsMasterSafe(false);
+      setIsElectronicBlindCountDrawers(false);
+      setIsElectronicBlindCountSafe(false);
     }
   };
 
@@ -1048,11 +1059,36 @@ function SystemConfig() {
     }
   };
 
-  const handleTabChange = (event, newValue) => {
+  const fetchQuoteConfig = async () => {
+    setQuoteConfigLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE_URL}/quote-expiration/config`);
+      setQuoteConfig({ days: res.data.days ?? 30, auto_delete: res.data.auto_delete ?? false });
+    } catch (err) {
+      console.error('Error fetching quote config:', err);
+    } finally {
+      setQuoteConfigLoading(false);
+    }
+  };
+
+  const handleSaveQuoteConfig = async () => {
+    try {
+      await axios.put(`${API_BASE_URL}/quote-expiration/config`, quoteConfig);
+      setSnackbar({ open: true, message: 'Quote settings saved', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to save quote settings', severity: 'error' });
+    }
+  };
+
+const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
-    // Fetch employee permissions when switching to that tab (index 6)
-    if (newValue === 6) {
+    // Fetch employee permissions when switching to that tab (index 7)
+    if (newValue === 7) {
       fetchEmployeePermissions();
+    }
+    // Fetch quote config when switching to Quotes tab (index 6)
+    if (newValue === 6) {
+      fetchQuoteConfig();
     }
     // Fetch backup settings when switching to General tab (index 0)
     if (newValue === 0) {
@@ -1897,6 +1933,29 @@ function SystemConfig() {
     }
   };
 
+  const handleIndividualDenominationsMasterSafeToggle = async (event) => {
+    const newValue = event.target.checked;
+    setIsIndividualDenominationsMasterSafe(newValue);
+    try {
+      await axios.put(`${API_BASE_URL}/drawer-type-config/master_safe`, {
+        individual_denominations: newValue
+      });
+      setSnackbar({
+        open: true,
+        message: `Master Safe tracking set to ${newValue ? 'Individual Denominations' : 'Total Cash Balance'}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error updating individual denominations preference for master safe:', error);
+      setIsIndividualDenominationsMasterSafe(!newValue);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update tracking settings for master safe',
+        severity: 'error'
+      });
+    }
+  };
+
   const handleElectronicBlindCountDrawersToggle = async (event) => {
     const newValue = event.target.checked;
     setIsElectronicBlindCountDrawers(newValue);
@@ -2629,7 +2688,8 @@ function SystemConfig() {
           <Tab label="Pricing Calculator" />
           <Tab label="Account Authorization" />
           <Tab label="Item Attributes" />
-          <Tab label="Employee Configuration" />
+          <Tab label="Quotes" />
+          {isManagerOrOwner && <Tab label="Employee Configuration" />}
         </Tabs>
       </Box>
 
@@ -3742,6 +3802,24 @@ function SystemConfig() {
                               color="primary"
                             />
                             <Typography variant="body2" color={isIndividualDenominationsSafe ? 'primary' : 'text.secondary'} fontWeight={isIndividualDenominationsSafe ? 'bold' : 'normal'}>
+                              Individual Denominations
+                            </Typography>
+                          </Box>
+                        </Box>
+                        <Box sx={{ flex: '1 1 200px' }}>
+                          <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                            Master Safe
+                          </Typography>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <Typography variant="body2" color={!isIndividualDenominationsMasterSafe ? 'primary' : 'text.secondary'} fontWeight={!isIndividualDenominationsMasterSafe ? 'bold' : 'normal'}>
+                              Total Cash Balance
+                            </Typography>
+                            <Switch
+                              checked={isIndividualDenominationsMasterSafe}
+                              onChange={handleIndividualDenominationsMasterSafeToggle}
+                              color="primary"
+                            />
+                            <Typography variant="body2" color={isIndividualDenominationsMasterSafe ? 'primary' : 'text.secondary'} fontWeight={isIndividualDenominationsMasterSafe ? 'bold' : 'normal'}>
                               Individual Denominations
                             </Typography>
                           </Box>
@@ -4957,6 +5035,54 @@ function SystemConfig() {
       <TabPanel value={activeTab} index={6}>
         <StyledPaper elevation={2}>
           <ConfigSection>
+            <Typography variant="h6" gutterBottom>Quote Settings</Typography>
+            {quoteConfigLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, maxWidth: 480 }}>
+                <Box>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    Number of days before a quote expires
+                  </Typography>
+                  <TextField
+                    label="Expiration Days"
+                    type="number"
+                    size="small"
+                    value={quoteConfig.days}
+                    onChange={e => setQuoteConfig(prev => ({ ...prev, days: parseInt(e.target.value) || 1 }))}
+                    inputProps={{ min: 1 }}
+                    sx={{ width: 160 }}
+                  />
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Box>
+                    <Typography variant="body1">Auto-Delete Expired Quotes</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Automatically removes expired quotes when the Quotes page is opened
+                    </Typography>
+                  </Box>
+                  <Switch
+                    checked={quoteConfig.auto_delete}
+                    onChange={e => setQuoteConfig(prev => ({ ...prev, auto_delete: e.target.checked }))}
+                    color="primary"
+                  />
+                </Box>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <Button variant="contained" onClick={handleSaveQuoteConfig}>
+                    Save Settings
+                  </Button>
+                </Box>
+              </Box>
+            )}
+          </ConfigSection>
+        </StyledPaper>
+      </TabPanel>
+
+      {isManagerOrOwner && <TabPanel value={activeTab} index={7}>
+        <StyledPaper elevation={2}>
+          <ConfigSection>
             {employeePermissionsLoading ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
                 <CircularProgress />
@@ -5139,7 +5265,7 @@ function SystemConfig() {
             )}
           </ConfigSection>
         </StyledPaper>
-      </TabPanel>
+      </TabPanel>}
 
       {/* Add/Edit Tender Type Dialog */}
       <Dialog

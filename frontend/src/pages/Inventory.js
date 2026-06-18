@@ -491,10 +491,14 @@ function Inventory() {
                               Add to Ticket
                             </Button>
                           )}
-                          {status !== 'SCRAP PROCESS' && status !== 'SCRAP' && status !== 'SOLD TO REFINER' && status !== 'SOLD' && (
-                            <Button
+                          {status !== 'SCRAP PROCESS' && status !== 'SCRAP' && status !== 'SOLD TO REFINER' && status !== 'SOLD' && (() => {
+                            const noPreciousMetal = item._type === 'jewelry' && !['Gold', 'Silver', 'Platinum', 'Palladium'].includes(item.precious_metal_type);
+                            return (
+                            <Tooltip title={noPreciousMetal ? 'No precious metal content — cannot send to scrap' : ''} arrow>
+                              <span>
+                              <Button
                               variant="outlined" color="error" size="small"
-                              disabled={isStoreClosed}
+                              disabled={isStoreClosed || noPreciousMetal}
                               onClick={e => {
                                 e.stopPropagation();
                                 setItemToScrap(item);
@@ -505,7 +509,10 @@ function Inventory() {
                             >
                               To Scrap
                             </Button>
-                          )}
+                              </span>
+                            </Tooltip>
+                            );
+                          })()}
                         </Box>
                       </TableCell>
                     </TableRow>

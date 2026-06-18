@@ -75,7 +75,7 @@ function CashDrawer() {
   const API_BASE_URL = config.apiUrl;
   const location = useLocation();
   const navigate = useNavigate();
-  const { isStoreClosed, isPastBusinessHours, todayHours } = useStoreStatus();
+  const { isStoreClosed, isPastBusinessHours, todayHours, storeTimezone } = useStoreStatus();
   const { user: currentUser } = useAuth();
 
   const [activeSession, setActiveSession] = useState(null);
@@ -115,10 +115,26 @@ function CashDrawer() {
   const [transferMinMaxWarningData, setTransferMinMaxWarningData] = useState(null); // { resultingBalance, minClose, maxClose, drawerName, transferAmount }
   const [physicalTenderWarningDialog, setPhysicalTenderWarningDialog] = useState(false);
   const [showManagerOverrideView, setShowManagerOverrideView] = useState(false); // For showing expected values
+  const [viewBalanceApprovalDialog, setViewBalanceApprovalDialog] = useState(false);
+  const [viewBalanceApprovalUsername, setViewBalanceApprovalUsername] = useState('');
+  const [viewBalanceApprovalPassword, setViewBalanceApprovalPassword] = useState('');
+  const [viewBalanceApprovalError, setViewBalanceApprovalError] = useState('');
+  const [viewBalanceApprovalLoading, setViewBalanceApprovalLoading] = useState(false);
+  const [viewBalanceDialog, setViewBalanceDialog] = useState(false);
+  const [viewBalanceDenominations, setViewBalanceDenominations] = useState(null);
+  const [managerCloseDialog, setManagerCloseDialog] = useState(false);
+  const [managerCloseTarget, setManagerCloseTarget] = useState(null);
+  const [managerCloseAmount, setManagerCloseAmount] = useState('');
+  const [managerCloseNotes, setManagerCloseNotes] = useState('');
+  const [managerCloseUsername, setManagerCloseUsername] = useState('');
+  const [managerClosePassword, setManagerClosePassword] = useState('');
+  const [managerCloseError, setManagerCloseError] = useState('');
+  const [managerCloseLoading, setManagerCloseLoading] = useState(false);
   const [quickReportDialog, setQuickReportDialog] = useState(false);
   const [quickReportTxnDetail, setQuickReportTxnDetail] = useState(null);
   const [quickReportTxnLoading, setQuickReportTxnLoading] = useState(false);
   const [clockInWarningOpen, setClockInWarningOpen] = useState(false);
+  const [clockInLoading, setClockInLoading] = useState(false);
 
   // Transaction Journal states
   const [journalEntries, setJournalEntries] = useState([]);
@@ -238,6 +254,10 @@ function CashDrawer() {
   const [bankWithdrawalAmount, setBankWithdrawalAmount] = useState('');
   const [bankWithdrawalReference, setBankWithdrawalReference] = useState('');
   const [bankWithdrawalNotes, setBankWithdrawalNotes] = useState('');
+  const [bankWithdrawalDenominations, setBankWithdrawalDenominations] = useState({
+    bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+    coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+  });
 
   // Petty cash payout dialog states
   const [pettyCashDialog, setPettyCashDialog] = useState(false);
@@ -354,9 +374,21 @@ function CashDrawer() {
   useEffect(() => {
     if (activeSession && activeSession.drawer_type && drawerBlindCountPrefs.drawers !== undefined) {
       const isSafe = activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe';
-      setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
-      setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
-      setIsElectronicBlindCount(isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers);
+      // Use per-drawer config from the session if available, otherwise fall back to type-level prefs
+      const perDrawerBlindCount = activeSession.blind_count !== undefined && activeSession.blind_count !== null
+        ? activeSession.blind_count
+        : (isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
+      const perDrawerIndivDenoms = activeSession.individual_denominations !== undefined && activeSession.individual_denominations !== null
+        ? activeSession.individual_denominations
+        : (activeSession.drawer_type === 'master_safe' ? drawerIndividualDenominationsPrefs.master_safe :
+           activeSession.drawer_type === 'safe' ? drawerIndividualDenominationsPrefs.safe :
+           drawerIndividualDenominationsPrefs.drawers);
+      const perDrawerElecBlindCount = activeSession.electronic_blind_count !== undefined && activeSession.electronic_blind_count !== null
+        ? activeSession.electronic_blind_count
+        : (isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers);
+      setIsBlindCount(perDrawerBlindCount);
+      setIsIndividualDenominations(perDrawerIndivDenoms);
+      setIsElectronicBlindCount(perDrawerElecBlindCount);
       setSelectedDrawerType(activeSession.drawer_type);
     }
   }, [activeSession, drawerBlindCountPrefs, drawerIndividualDenominationsPrefs, drawerElectronicBlindCountPrefs]);
@@ -402,7 +434,10 @@ function CashDrawer() {
       }
       
       // Set opening mode (individual denominations) based on drawer type filter
-      if (drawerTypeFilter === 'safe' || drawerTypeFilter === 'master_safe') {
+      if (drawerTypeFilter === 'master_safe') {
+        setIsIndividualDenominations(drawerIndividualDenominationsPrefs.master_safe);
+        setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
+      } else if (drawerTypeFilter === 'safe') {
         setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
         setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
       } else if (drawerTypeFilter === 'physical') {
@@ -810,21 +845,23 @@ function CashDrawer() {
       const drawerConfigRes = await axios.get(`${API_BASE_URL}/drawer-type-config`);
       const physicalConfig = drawerConfigRes.data.find(c => c.drawer_type === 'physical');
       const safeConfig = drawerConfigRes.data.find(c => c.drawer_type === 'safe');
+      const masterSafeConfig = drawerConfigRes.data.find(c => c.drawer_type === 'master_safe');
       const blindCountDrawers = physicalConfig ? physicalConfig.blind_count : true;
       const blindCountSafe = safeConfig ? safeConfig.blind_count : true;
       const individualDenominationsDrawers = physicalConfig ? physicalConfig.individual_denominations : false;
       const individualDenominationsSafe = safeConfig ? safeConfig.individual_denominations : false;
+      const individualDenominationsMasterSafe = masterSafeConfig ? masterSafeConfig.individual_denominations : false;
       const electronicBlindCountDrawers = physicalConfig ? physicalConfig.electronic_blind_count : false;
       const electronicBlindCountSafe = safeConfig ? safeConfig.electronic_blind_count : false;
 
-      // Store both preference sets
       setDrawerBlindCountPrefs({
         drawers: blindCountDrawers,
         safe: blindCountSafe
       });
       setDrawerIndividualDenominationsPrefs({
         drawers: individualDenominationsDrawers,
-        safe: individualDenominationsSafe
+        safe: individualDenominationsSafe,
+        master_safe: individualDenominationsMasterSafe
       });
       setDrawerElectronicBlindCountPrefs({
         drawers: electronicBlindCountDrawers,
@@ -833,12 +870,17 @@ function CashDrawer() {
 
       // Set initial modes based on current selection or default to drawers
       if (selectedDrawerType) {
-        const isSafe = selectedDrawerType === 'safe' || selectedDrawerType === 'master_safe';
-        setIsBlindCount(isSafe ? blindCountSafe : blindCountDrawers);
-        setIsIndividualDenominations(isSafe ? individualDenominationsSafe : individualDenominationsDrawers);
-        setIsElectronicBlindCount(isSafe ? electronicBlindCountSafe : electronicBlindCountDrawers);
+        const isMasterSafe = selectedDrawerType === 'master_safe';
+        const isSafe = selectedDrawerType === 'safe';
+        setIsBlindCount(isSafe || isMasterSafe ? blindCountSafe : blindCountDrawers);
+        setIsIndividualDenominations(
+          isMasterSafe ? individualDenominationsMasterSafe :
+          isSafe ? individualDenominationsSafe :
+          individualDenominationsDrawers
+        );
+        setIsElectronicBlindCount(isSafe || isMasterSafe ? electronicBlindCountSafe : electronicBlindCountDrawers);
       } else {
-        setIsBlindCount(blindCountDrawers); // Default to drawers preference
+        setIsBlindCount(blindCountDrawers);
         setIsIndividualDenominations(individualDenominationsDrawers);
         setIsElectronicBlindCount(electronicBlindCountDrawers);
       }
@@ -1402,27 +1444,31 @@ function CashDrawer() {
       }
     }
 
-    // Check business hours
+    // Check business hours using store's configured timezone
     if (todayHours) {
       if (todayHours.is_closed) {
         showSnackbar('Cannot open drawer: the store is closed today', 'error');
         return;
       }
-      const now = new Date();
+      const timeParts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: storeTimezone || 'UTC',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).formatToParts(new Date());
+      const nowHour = parseInt(timeParts.find(p => p.type === 'hour')?.value || '0', 10) % 24;
+      const nowMin = parseInt(timeParts.find(p => p.type === 'minute')?.value || '0', 10);
+      const nowMinutes = nowHour * 60 + nowMin;
       if (todayHours.open_time) {
         const [openHour, openMin] = todayHours.open_time.substring(0, 5).split(':').map(Number);
-        const openDate = new Date();
-        openDate.setHours(openHour, openMin, 0, 0);
-        if (now < openDate) {
+        if (nowMinutes < openHour * 60 + openMin) {
           showSnackbar(`Cannot open drawer: store doesn't open until ${todayHours.open_time.substring(0, 5)}`, 'error');
           return;
         }
       }
       if (todayHours.close_time) {
         const [closeHour, closeMin] = todayHours.close_time.substring(0, 5).split(':').map(Number);
-        const closeDate = new Date();
-        closeDate.setHours(closeHour, closeMin, 0, 0);
-        if (now > closeDate) {
+        if (nowMinutes > closeHour * 60 + closeMin) {
           showSnackbar(`Cannot open drawer: store closed at ${todayHours.close_time.substring(0, 5)}`, 'error');
           return;
         }
@@ -1698,8 +1744,8 @@ function CashDrawer() {
     // Calculate balance from denomination counts (close dialog always uses denomination counting)
     const calculatedBalance = calculateDenominationTotal(closingDenominations);
 
-    // Validation - denomination total must be entered
-    if (calculatedBalance === 0) {
+    // Validation - denomination total must be entered (skip for force close — $0 is valid when manager approved)
+    if (calculatedBalance === 0 && !forceClose) {
       showSnackbar('Please enter denomination counts', 'error');
       return;
     }
@@ -2216,6 +2262,10 @@ function CashDrawer() {
     setBankWithdrawalAmount('');
     setBankWithdrawalReference('');
     setBankWithdrawalNotes('');
+    setBankWithdrawalDenominations({
+      bill_100: 0, bill_50: 0, bill_20: 0, bill_10: 0, bill_5: 0,
+      coin_2: 0, coin_1: 0, coin_0_25: 0, coin_0_10: 0, coin_0_05: 0
+    });
     // Keep selected bank as default
     const defaultBank = banks.find(b => b.is_default);
     if (defaultBank) {
@@ -2236,7 +2286,10 @@ function CashDrawer() {
       return;
     }
 
-    const withdrawalTotal = parseFloat(bankWithdrawalAmount) || 0;
+    const usesDenominations = drawerUsesDenominations(activeSession);
+    const withdrawalTotal = usesDenominations
+      ? calculateDenominationTotal(bankWithdrawalDenominations)
+      : parseFloat(bankWithdrawalAmount) || 0;
 
     if (withdrawalTotal <= 0) {
       showSnackbar('Please enter a valid withdrawal amount', 'error');
@@ -2273,7 +2326,8 @@ function CashDrawer() {
           amount: withdrawalTotal,
           withdrawal_reference: bankWithdrawalReference || null,
           notes: bankWithdrawalNotes || null,
-          performed_by: currentUser.id
+          performed_by: currentUser.id,
+          denominations: usesDenominations ? bankWithdrawalDenominations : null
         }
       );
 
@@ -2336,8 +2390,7 @@ function CashDrawer() {
 
     // Check if denominations are required
     const sourceDrawerType = pettyCashSourceSession.drawer_type;
-    const usesDenominations = sourceDrawerType === 'physical' ||
-      ((sourceDrawerType === 'safe' || sourceDrawerType === 'master_safe') && drawerIndividualDenominationsPrefs.safe);
+    const usesDenominations = drawerUsesDenominations(pettyCashSourceSession);
 
     let payoutTotal;
     if (usesDenominations) {
@@ -2606,12 +2659,22 @@ function CashDrawer() {
     }
   };
 
-  // Check if drawer uses denominations (physical drawers always do, safes based on preference)
-  const drawerUsesDenominations = (drawerType) => {
-    if (drawerType === 'physical') return true;
-    if (drawerType === 'safe' || drawerType === 'master_safe') {
-      return drawerIndividualDenominationsPrefs.safe;
+  // Check if a drawer/session uses individual denominations.
+  // Accepts a session object (preferred — uses per-drawer config) or a drawer type string (falls back to type-level prefs).
+  const drawerUsesDenominations = (drawerTypeOrSession) => {
+    if (drawerTypeOrSession && typeof drawerTypeOrSession === 'object') {
+      // Session object — use per-drawer individual_denominations if present
+      if (drawerTypeOrSession.individual_denominations !== undefined && drawerTypeOrSession.individual_denominations !== null) {
+        return !!drawerTypeOrSession.individual_denominations;
+      }
+      // Fall back to type-level pref using the session's drawer_type
+      return drawerUsesDenominations(drawerTypeOrSession.drawer_type);
     }
+    // String drawer type — fall back to type-level prefs
+    const drawerType = drawerTypeOrSession;
+    if (drawerType === 'physical') return drawerIndividualDenominationsPrefs.drawers;
+    if (drawerType === 'master_safe') return drawerIndividualDenominationsPrefs.master_safe;
+    if (drawerType === 'safe') return drawerIndividualDenominationsPrefs.safe;
     return false;
   };
 
@@ -2659,6 +2722,90 @@ function CashDrawer() {
       console.error('Manager approval error:', err);
       setManagerApprovalError(err.response?.data?.error || 'Invalid credentials');
       setManagerApprovalLoading(false);
+    }
+  };
+
+  const handleViewBalanceApproval = async () => {
+    if (!viewBalanceApprovalUsername || !viewBalanceApprovalPassword) {
+      setViewBalanceApprovalError('Please enter both username and password');
+      return;
+    }
+    setViewBalanceApprovalLoading(true);
+    setViewBalanceApprovalError('');
+    try {
+      const response = await axios.post(`${API_BASE_URL}/auth/login`, {
+        identifier: viewBalanceApprovalUsername,
+        password: viewBalanceApprovalPassword
+      });
+      const user = response.data.user;
+      if (user.role !== 'Store Manager' && user.role !== 'Store Owner') {
+        setViewBalanceApprovalError('Only Store Managers or Store Owners can view this information');
+        setViewBalanceApprovalLoading(false);
+        return;
+      }
+      if (drawerUsesDenominations(activeSession)) {
+        try {
+          const denomRes = await axios.get(`${API_BASE_URL}/cash-drawer/${activeSession.session_id}/denominations/current`);
+          setViewBalanceDenominations(denomRes.data);
+        } catch {
+          setViewBalanceDenominations(null);
+        }
+      } else {
+        setViewBalanceDenominations(null);
+      }
+      setViewBalanceApprovalDialog(false);
+      setViewBalanceApprovalUsername('');
+      setViewBalanceApprovalPassword('');
+      setViewBalanceApprovalError('');
+      setViewBalanceApprovalLoading(false);
+      setViewBalanceDialog(true);
+      showSnackbar(`Balance viewed — approved by ${user.first_name} ${user.last_name} (${user.role})`, 'info');
+    } catch (err) {
+      setViewBalanceApprovalError(err.response?.data?.error || 'Invalid credentials');
+      setViewBalanceApprovalLoading(false);
+    }
+  };
+
+  const handleManagerCloseDrawer = async () => {
+    if (!managerCloseUsername || !managerClosePassword) {
+      setManagerCloseError('Please enter both username and password');
+      return;
+    }
+    const closingAmount = parseFloat(managerCloseAmount);
+    if (isNaN(closingAmount) || closingAmount < 0) {
+      setManagerCloseError('Please enter a valid closing balance');
+      return;
+    }
+    setManagerCloseLoading(true);
+    setManagerCloseError('');
+    try {
+      const authRes = await axios.post(`${API_BASE_URL}/auth/login`, {
+        identifier: managerCloseUsername,
+        password: managerClosePassword
+      });
+      const user = authRes.data.user;
+      if (user.role !== 'Store Manager' && user.role !== 'Store Owner') {
+        setManagerCloseError('Only Store Managers or Store Owners can close another employee\'s drawer');
+        setManagerCloseLoading(false);
+        return;
+      }
+      await axios.put(`${API_BASE_URL}/cash-drawer/${managerCloseTarget.session_id}/close`, {
+        actual_balance: closingAmount,
+        closing_notes: managerCloseNotes || `Force closed by manager: ${user.first_name} ${user.last_name}`,
+        employee_id: user.id
+      });
+      showSnackbar(`${managerCloseTarget.drawer_name} closed by ${user.first_name} ${user.last_name}`, 'success');
+      setManagerCloseDialog(false);
+      setManagerCloseTarget(null);
+      setManagerCloseAmount('');
+      setManagerCloseNotes('');
+      setManagerCloseUsername('');
+      setManagerClosePassword('');
+      setManagerCloseError('');
+      await Promise.all([fetchOverview(), fetchAllActiveSessions(), checkActiveSession()]);
+    } catch (err) {
+      setManagerCloseError(err.response?.data?.error || err.response?.data?.message || 'Failed to close drawer');
+      setManagerCloseLoading(false);
     }
   };
 
@@ -2860,6 +3007,7 @@ function CashDrawer() {
                     <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>SAFE</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Status</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Balance</TableCell>
+                    {isManager && <TableCell sx={{ color: 'white', fontWeight: 'bold' }}></TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -2880,6 +3028,17 @@ function CashDrawer() {
                             : '—')
                           : '***'}
                       </TableCell>
+                      {isManager && (
+                        <TableCell>
+                          {safe.status === 'OPEN' && safe.session_id && (
+                            <Button size="small" color="error" variant="outlined"
+                              onClick={() => { setManagerCloseTarget(safe); setManagerCloseAmount(''); setManagerCloseNotes(''); setManagerCloseUsername(''); setManagerClosePassword(''); setManagerCloseError(''); setManagerCloseDialog(true); }}
+                            >
+                              Close
+                            </Button>
+                          )}
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -2898,6 +3057,7 @@ function CashDrawer() {
                     <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Type</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Balance</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}>Connected Employees</TableCell>
+                    {isManager && <TableCell sx={{ color: 'white', fontWeight: 'bold', bgcolor: '#1976d2' }}></TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -2920,6 +3080,17 @@ function CashDrawer() {
                           : '***'}
                       </TableCell>
                       <TableCell>{drawer.connected_employees || '—'}</TableCell>
+                      {isManager && (
+                        <TableCell>
+                          {drawer.status === 'OPEN' && drawer.session_id && (
+                            <Button size="small" color="error" variant="outlined"
+                              onClick={() => { setManagerCloseTarget(drawer); setManagerCloseAmount(''); setManagerCloseNotes(''); setManagerCloseUsername(''); setManagerClosePassword(''); setManagerCloseError(''); setManagerCloseDialog(true); }}
+                            >
+                              Close
+                            </Button>
+                          )}
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -3001,9 +3172,6 @@ function CashDrawer() {
                             if (physicalSession) {
                               setSelectedSessionType('physical');
                               setActiveSession(physicalSession);
-                              setIsBlindCount(drawerBlindCountPrefs.drawers);
-                              setIsIndividualDenominations(drawerIndividualDenominationsPrefs.drawers);
-                              setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.drawers);
                             }
                           }}
                         >
@@ -3018,8 +3186,6 @@ function CashDrawer() {
                             if (safeSession) {
                               setSelectedSessionType('safe');
                               setActiveSession(safeSession);
-                              setIsBlindCount(drawerBlindCountPrefs.safe);
-                              setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
                             }
                           }}
                         >
@@ -3034,9 +3200,6 @@ function CashDrawer() {
                             if (masterSafeSession) {
                               setSelectedSessionType('master_safe');
                               setActiveSession(masterSafeSession);
-                              setIsBlindCount(drawerBlindCountPrefs.safe);
-                              setIsIndividualDenominations(drawerIndividualDenominationsPrefs.safe);
-                              setIsElectronicBlindCount(drawerElectronicBlindCountPrefs.safe);
                             }
                           }}
                         >
@@ -3167,6 +3330,13 @@ function CashDrawer() {
                           ? 'Disconnect'
                           : `Close ${activeSession.drawer_type === 'safe' || activeSession.drawer_type === 'master_safe' ? 'Safe' : 'Drawer'}`}
                       </Button>
+                      <Button
+                        variant="outlined"
+                        startIcon={<ViewIcon />}
+                        onClick={() => setViewBalanceApprovalDialog(true)}
+                      >
+                        View Balance
+                      </Button>
                       {/* Show Transfer/Bank buttons only if employee opened a drawer or is a manager */}
                       {(isManager || activeSessions.some(s => s.is_opener)) && (
                       <>
@@ -3229,8 +3399,8 @@ function CashDrawer() {
                       </Menu>
                       </>
                       )}
-                      {/* Show Bank Deposit and Withdrawal when master safe session exists */}
-                      {(activeSession.drawer_type === 'master_safe' || allActiveSessions.some(s => s.drawer_type === 'master_safe')) && (
+                      {/* Bank Deposit and Withdrawal only available from the master safe */}
+                      {activeSession.drawer_type === 'master_safe' && (
                         <>
                           <Button
                             variant="outlined"
@@ -3421,22 +3591,6 @@ function CashDrawer() {
                       <ListItemText>Petty Cash Payout</ListItemText>
                     </MenuItem>
                   </Menu>
-                  <Button
-                    variant="outlined"
-                    startIcon={<AccountBalanceIcon />}
-                    disabled={isStoreClosed}
-                    onClick={openBankDepositDialog}
-                  >
-                    Bank Deposit
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    startIcon={<AccountBalanceIcon />}
-                    disabled={isStoreClosed}
-                    onClick={openBankWithdrawalDialog}
-                  >
-                    Bank Withdrawal
-                  </Button>
                 </Box>
               )}
             </Paper>
@@ -4714,9 +4868,18 @@ function CashDrawer() {
                   if (drawer) {
                     setSelectedDrawerType(drawer.drawer_type);
                     const isSafe = drawer.drawer_type === 'safe' || drawer.drawer_type === 'master_safe';
-                    setIsBlindCount(isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers);
-                    setIsIndividualDenominations(isSafe ? drawerIndividualDenominationsPrefs.safe : drawerIndividualDenominationsPrefs.drawers);
-                    setIsElectronicBlindCount(isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers);
+                    // Use per-drawer config; fall back to type-level prefs if not set
+                    setIsBlindCount(drawer.blind_count !== null && drawer.blind_count !== undefined
+                      ? drawer.blind_count
+                      : (isSafe ? drawerBlindCountPrefs.safe : drawerBlindCountPrefs.drawers));
+                    setIsIndividualDenominations(drawer.individual_denominations !== null && drawer.individual_denominations !== undefined
+                      ? drawer.individual_denominations
+                      : (drawer.drawer_type === 'master_safe' ? drawerIndividualDenominationsPrefs.master_safe :
+                         drawer.drawer_type === 'safe' ? drawerIndividualDenominationsPrefs.safe :
+                         drawerIndividualDenominationsPrefs.drawers));
+                    setIsElectronicBlindCount(drawer.electronic_blind_count !== null && drawer.electronic_blind_count !== undefined
+                      ? drawer.electronic_blind_count
+                      : (isSafe ? drawerElectronicBlindCountPrefs.safe : drawerElectronicBlindCountPrefs.drawers));
                     // Check if sharing mode is required for this drawer
                     const needsSharingMode = drawer.drawer_type === 'physical' && drawer.is_shared === null;
                     setSharingModeRequired(needsSharingMode);
@@ -5718,6 +5881,246 @@ function CashDrawer() {
         </DialogActions>
       </Dialog>
 
+      {/* Manager Close Other Drawer Dialog */}
+      <Dialog
+        open={managerCloseDialog}
+        onClose={() => setManagerCloseDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <WarningIcon color="error" />
+            <Typography variant="h6">Close Drawer — Manager Override</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="warning">
+              You are closing <strong>{managerCloseTarget?.drawer_name}</strong> on behalf of another employee. This action requires manager credentials.
+            </Alert>
+            {managerCloseTarget && (
+              <Box sx={{ p: 1.5, bgcolor: 'grey.100', borderRadius: 1 }}>
+                <Typography variant="body2"><strong>Drawer:</strong> {managerCloseTarget.drawer_name}</Typography>
+                {managerCloseTarget.connected_employees && (
+                  <Typography variant="body2"><strong>Employee(s):</strong> {managerCloseTarget.connected_employees}</Typography>
+                )}
+                <Typography variant="body2">
+                  <strong>Current Balance:</strong> {managerCloseTarget.balance !== null
+                    ? `$${parseFloat(managerCloseTarget.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : '—'}
+                </Typography>
+              </Box>
+            )}
+            <TextField
+              label="Closing Balance ($)"
+              type="number"
+              fullWidth
+              value={managerCloseAmount}
+              onChange={(e) => setManagerCloseAmount(e.target.value)}
+              inputProps={{ min: 0, step: '0.01' }}
+            />
+            <TextField
+              label="Closing Notes (optional)"
+              fullWidth
+              multiline
+              rows={2}
+              value={managerCloseNotes}
+              onChange={(e) => setManagerCloseNotes(e.target.value)}
+            />
+            <Divider />
+            <TextField
+              label="Manager Username"
+              fullWidth
+              value={managerCloseUsername}
+              onChange={(e) => setManagerCloseUsername(e.target.value)}
+              autoComplete="off"
+            />
+            <TextField
+              label="Manager Password"
+              type="password"
+              fullWidth
+              value={managerClosePassword}
+              onChange={(e) => setManagerClosePassword(e.target.value)}
+              autoComplete="off"
+              onKeyPress={(e) => { if (e.key === 'Enter') handleManagerCloseDrawer(); }}
+            />
+            {managerCloseError && <Alert severity="error">{managerCloseError}</Alert>}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setManagerCloseDialog(false)}>Cancel</Button>
+          <Button
+            onClick={handleManagerCloseDrawer}
+            variant="contained"
+            color="error"
+            disabled={managerCloseLoading}
+          >
+            {managerCloseLoading ? 'Closing...' : 'Close Drawer'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* View Balance Approval Dialog */}
+      <Dialog
+        open={viewBalanceApprovalDialog}
+        onClose={() => {
+          setViewBalanceApprovalDialog(false);
+          setViewBalanceApprovalUsername('');
+          setViewBalanceApprovalPassword('');
+          setViewBalanceApprovalError('');
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <ViewIcon color="primary" />
+            <Typography variant="h6">Manager Approval Required</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="info">
+              A Store Manager or Store Owner must approve viewing the current balance and denominations for <strong>{activeSession?.drawer_name}</strong>.
+            </Alert>
+            <TextField
+              label="Manager Username"
+              fullWidth
+              value={viewBalanceApprovalUsername}
+              onChange={(e) => setViewBalanceApprovalUsername(e.target.value)}
+              autoFocus
+              autoComplete="off"
+            />
+            <TextField
+              label="Manager Password"
+              type="password"
+              fullWidth
+              value={viewBalanceApprovalPassword}
+              onChange={(e) => setViewBalanceApprovalPassword(e.target.value)}
+              autoComplete="off"
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') handleViewBalanceApproval();
+              }}
+            />
+            {viewBalanceApprovalError && (
+              <Alert severity="error">{viewBalanceApprovalError}</Alert>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setViewBalanceApprovalDialog(false);
+            setViewBalanceApprovalUsername('');
+            setViewBalanceApprovalPassword('');
+            setViewBalanceApprovalError('');
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleViewBalanceApproval}
+            variant="contained"
+            color="primary"
+            disabled={viewBalanceApprovalLoading}
+          >
+            {viewBalanceApprovalLoading ? 'Verifying...' : 'View Balance'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* View Balance Display Dialog */}
+      <Dialog
+        open={viewBalanceDialog}
+        onClose={() => { setViewBalanceDialog(false); setViewBalanceDenominations(null); }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <ViewIcon color="primary" />
+            <Typography variant="h6">Current Balance — {activeSession?.drawer_name}</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Box sx={{ p: 2, bgcolor: 'primary.light', borderRadius: 1, color: 'primary.contrastText' }}>
+              <Typography variant="body2" sx={{ opacity: 0.85 }}>Current Expected Balance</Typography>
+              <Typography variant="h4" fontWeight="bold">
+                {formatCurrency(activeSession?.current_expected_balance)}
+              </Typography>
+            </Box>
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="text.secondary">Opening Balance</Typography>
+                <Typography variant="body1">{formatCurrency(activeSession?.opening_balance)}</Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="text.secondary">Transaction Count</Typography>
+                <Typography variant="body1">{activeSession?.transaction_count || 0}</Typography>
+              </Grid>
+            </Grid>
+            {viewBalanceDenominations && (
+              <>
+                <Divider />
+                <Typography variant="subtitle1" fontWeight="bold">Denomination Breakdown</Typography>
+                <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', '& td, & th': { p: '4px 8px', fontSize: '0.9rem' } }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid #ddd' }}>
+                      <th style={{ textAlign: 'left' }}>Denomination</th>
+                      <th style={{ textAlign: 'center' }}>Count</th>
+                      <th style={{ textAlign: 'right' }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { label: '$100', field: 'bill_100', value: 100 },
+                      { label: '$50',  field: 'bill_50',  value: 50 },
+                      { label: '$20',  field: 'bill_20',  value: 20 },
+                      { label: '$10',  field: 'bill_10',  value: 10 },
+                      { label: '$5',   field: 'bill_5',   value: 5 },
+                      { label: '$2',   field: 'coin_2',   value: 2 },
+                      { label: '$1',   field: 'coin_1',   value: 1 },
+                      { label: '$0.25', field: 'coin_0_25', value: 0.25 },
+                      { label: '$0.10', field: 'coin_0_10', value: 0.10 },
+                      { label: '$0.05', field: 'coin_0_05', value: 0.05 },
+                    ].map(item => {
+                      const qty = Math.round(viewBalanceDenominations[item.field] || 0);
+                      if (qty === 0) return null;
+                      return (
+                        <tr key={item.field}>
+                          <td>{item.label}</td>
+                          <td style={{ textAlign: 'center' }}>{qty}</td>
+                          <td style={{ textAlign: 'right' }}>{formatCurrency(qty * item.value)}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{ borderTop: '2px solid #ccc', fontWeight: 'bold' }}>
+                      <td colSpan={2}>Total</td>
+                      <td style={{ textAlign: 'right' }}>
+                        {formatCurrency(
+                          [
+                            { field: 'bill_100', value: 100 }, { field: 'bill_50', value: 50 },
+                            { field: 'bill_20', value: 20 },   { field: 'bill_10', value: 10 },
+                            { field: 'bill_5', value: 5 },     { field: 'coin_2', value: 2 },
+                            { field: 'coin_1', value: 1 },     { field: 'coin_0_25', value: 0.25 },
+                            { field: 'coin_0_10', value: 0.10 }, { field: 'coin_0_05', value: 0.05 },
+                          ].reduce((sum, d) => sum + Math.round(viewBalanceDenominations[d.field] || 0) * d.value, 0)
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </Box>
+              </>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setViewBalanceDialog(false); setViewBalanceDenominations(null); }} variant="contained">
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Adjustment Dialog */}
       <Dialog open={adjustmentDialog} onClose={() => setAdjustmentDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Add Cash Adjustment</DialogTitle>
@@ -5779,18 +6182,17 @@ function CashDrawer() {
                       const activeType = activeSession?.drawer_type;
                       const otherType = session.drawer_type;
 
-                      // Allowed sources (who can send TO this drawer type)
+                      // Any drawer/safe type can transfer to any other drawer/safe type
+                      const allTypes = ['physical', 'safe', 'master_safe'];
                       const allowedSources = {
-                        'physical': ['physical', 'safe'],
-                        'safe': ['physical', 'master_safe'],
-                        'master_safe': ['safe']
+                        'physical': allTypes,
+                        'safe': allTypes,
+                        'master_safe': allTypes
                       };
-
-                      // Allowed targets (who this drawer type can send TO)
                       const allowedTargets = {
-                        'physical': ['physical', 'safe'],
-                        'safe': ['physical', 'master_safe'],
-                        'master_safe': ['safe']
+                        'physical': allTypes,
+                        'safe': allTypes,
+                        'master_safe': allTypes
                       };
 
                       if (adjustmentType === 'transfer_from') {
@@ -5928,12 +6330,7 @@ function CashDrawer() {
                         if (transferSource && session.session_id === transferSource.session_id) return false;
                         // Apply transfer rules
                         if (transferSource) {
-                          const allowedTargets = {
-                            'physical': ['physical', 'safe'],
-                            'safe': ['physical', 'master_safe'],
-                            'master_safe': ['safe']
-                          };
-                          return allowedTargets[transferSource.drawer_type]?.includes(session.drawer_type) || false;
+                          return true; // Any combination is allowed
                         }
                         return true;
                       })
@@ -5953,9 +6350,7 @@ function CashDrawer() {
             {transferSource && (
               <Alert severity="info" sx={{ mb: 2 }}>
                 <Typography variant="body2">
-                  {transferSource.drawer_type === 'physical' && 'Physical drawers can transfer to: Physical Drawers, Safe'}
-                  {transferSource.drawer_type === 'safe' && 'Safe can transfer to: Physical Drawers, Master Safe'}
-                  {transferSource.drawer_type === 'master_safe' && 'Master Safe can transfer to: Safe'}
+                  Any drawer or safe can transfer to any other drawer or safe.
                 </Typography>
               </Alert>
             )}
@@ -5965,10 +6360,10 @@ function CashDrawer() {
               <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2 }}>
                 {/* Cash Section with Denominations */}
                 <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1 }}>
-                  Cash {(drawerUsesDenominations(transferSource.drawer_type) || drawerUsesDenominations(transferDestination.drawer_type)) && '(Denominations Required)'}
+                  Cash {(drawerUsesDenominations(transferSource) || drawerUsesDenominations(transferDestination)) && '(Denominations Required)'}
                 </Typography>
 
-                {(drawerUsesDenominations(transferSource.drawer_type) || drawerUsesDenominations(transferDestination.drawer_type)) ? (
+                {(drawerUsesDenominations(transferSource) || drawerUsesDenominations(transferDestination)) ? (
                   <Box component="table" sx={{ width: '100%', mb: 3, borderCollapse: 'collapse', '& td, & th': { p: 0.5, fontSize: '0.9rem' } }}>
                     <tbody>
                       {[
@@ -6264,7 +6659,7 @@ function CashDrawer() {
           setBankWithdrawalDialog(false);
           resetBankWithdrawalForm();
         }}
-        maxWidth="sm"
+        maxWidth={drawerUsesDenominations(activeSession) ? 'md' : 'sm'}
         fullWidth
       >
         <DialogTitle>
@@ -6291,17 +6686,76 @@ function CashDrawer() {
               </Select>
             </FormControl>
 
-            {/* Withdrawal Amount */}
-            <TextField
-              fullWidth
-              label="Withdrawal Amount"
-              type="number"
-              value={bankWithdrawalAmount}
-              onChange={(e) => setBankWithdrawalAmount(e.target.value)}
-              inputProps={{ min: 0, step: '0.01' }}
-              sx={{ mb: 2 }}
-              required
-            />
+            {/* Withdrawal Amount - denominations or simple input based on master safe config */}
+            {drawerUsesDenominations(activeSession) ? (
+              <>
+                <Typography variant="subtitle1" gutterBottom>
+                  Enter Withdrawal Amount by Denomination
+                </Typography>
+                <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Denomination</TableCell>
+                        <TableCell align="center">Count</TableCell>
+                        <TableCell align="right">Subtotal</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {[
+                        { label: '$100', field: 'bill_100', value: 100 },
+                        { label: '$50', field: 'bill_50', value: 50 },
+                        { label: '$20', field: 'bill_20', value: 20 },
+                        { label: '$10', field: 'bill_10', value: 10 },
+                        { label: '$5', field: 'bill_5', value: 5 },
+                        { label: '$2', field: 'coin_2', value: 2 },
+                        { label: '$1', field: 'coin_1', value: 1 },
+                        { label: '25¢', field: 'coin_0_25', value: 0.25 },
+                        { label: '10¢', field: 'coin_0_10', value: 0.10 },
+                        { label: '5¢', field: 'coin_0_05', value: 0.05 },
+                      ].map((item) => (
+                        <TableRow key={item.field}>
+                          <TableCell>{item.label}</TableCell>
+                          <TableCell align="center">
+                            <TextField
+                              type="number"
+                              size="small"
+                              inputProps={{ min: 0, style: { textAlign: 'center' } }}
+                              sx={{ width: 80 }}
+                              value={bankWithdrawalDenominations[item.field] || 0}
+                              onChange={(e) => {
+                                const val = Math.max(0, parseInt(e.target.value) || 0);
+                                setBankWithdrawalDenominations(prev => ({ ...prev, [item.field]: val }));
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            {formatCurrency((bankWithdrawalDenominations[item.field] || 0) * item.value)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow>
+                        <TableCell colSpan={2}><strong>Total Withdrawal</strong></TableCell>
+                        <TableCell align="right">
+                          <strong>{formatCurrency(calculateDenominationTotal(bankWithdrawalDenominations))}</strong>
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </>
+            ) : (
+              <TextField
+                fullWidth
+                label="Withdrawal Amount"
+                type="number"
+                value={bankWithdrawalAmount}
+                onChange={(e) => setBankWithdrawalAmount(e.target.value)}
+                inputProps={{ min: 0, step: '0.01' }}
+                sx={{ mb: 2 }}
+                required
+              />
+            )}
 
             {/* Reference Number */}
             <TextField
@@ -6334,7 +6788,13 @@ function CashDrawer() {
             onClick={handleBankWithdrawal}
             variant="contained"
             color="primary"
-            disabled={!selectedWithdrawalBank || !bankWithdrawalAmount || parseFloat(bankWithdrawalAmount) <= 0 || isStoreClosed}
+            disabled={
+              !selectedWithdrawalBank ||
+              (drawerUsesDenominations(activeSession)
+                ? calculateDenominationTotal(bankWithdrawalDenominations) <= 0
+                : !bankWithdrawalAmount || parseFloat(bankWithdrawalAmount) <= 0) ||
+              isStoreClosed
+            }
           >
             Complete Withdrawal
           </Button>
@@ -6401,8 +6861,7 @@ function CashDrawer() {
 
             {/* Amount Entry - denominations or simple input based on drawer type */}
             {pettyCashSourceSession && (
-              (pettyCashSourceSession.drawer_type === 'physical' ||
-               ((pettyCashSourceSession.drawer_type === 'safe' || pettyCashSourceSession.drawer_type === 'master_safe') && drawerIndividualDenominationsPrefs.safe)) ? (
+              drawerUsesDenominations(pettyCashSourceSession) ? (
                 <>
                   <Typography variant="subtitle1" gutterBottom>
                     Enter Payout Amount by Denomination
@@ -6511,8 +6970,7 @@ function CashDrawer() {
               !pettyCashSourceSession ||
               isStoreClosed ||
               (pettyCashSourceSession && (
-                (pettyCashSourceSession.drawer_type === 'physical' ||
-                 ((pettyCashSourceSession.drawer_type === 'safe' || pettyCashSourceSession.drawer_type === 'master_safe') && drawerIndividualDenominationsPrefs.safe))
+                drawerUsesDenominations(pettyCashSourceSession)
                   ? calculateDenominationTotal(pettyCashDenominations) <= 0
                   : (!pettyCashAmount || parseFloat(pettyCashAmount) <= 0)
               ))
@@ -7307,25 +7765,44 @@ function CashDrawer() {
             You must be clocked in before opening a drawer.
           </Alert>
           <Typography variant="body1">
-            Please go to the Time Clock to clock in first.
+            Would you like to clock in now?
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button
-            onClick={() => setClockInWarningOpen(false)}
-            color="inherit"
-          >
+          <Button onClick={() => setClockInWarningOpen(false)} color="inherit">
             Cancel
           </Button>
           <Button
-            onClick={() => {
-              setClockInWarningOpen(false);
-              navigate('/time-clock');
-            }}
             variant="contained"
             color="primary"
+            disabled={clockInLoading}
+            onClick={async () => {
+              const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+              setClockInLoading(true);
+              try {
+                const response = await fetch(`${config.apiUrl}/employee-sessions/clock-in`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ employee_id: currentUser.id }),
+                });
+                if (response.ok) {
+                  window.dispatchEvent(new CustomEvent('clockStatusChanged'));
+                  setClockInWarningOpen(false);
+                  showSnackbar('Clocked in successfully', 'success');
+                  // Small delay so state settles before re-triggering open
+                  setTimeout(() => handleOpenDrawer(), 300);
+                } else {
+                  const err = await response.json();
+                  showSnackbar(err.error || 'Failed to clock in', 'error');
+                }
+              } catch (e) {
+                showSnackbar('Failed to clock in', 'error');
+              } finally {
+                setClockInLoading(false);
+              }
+            }}
           >
-            Go to Time Clock
+            {clockInLoading ? 'Clocking In...' : 'Clock In Now'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -33,6 +33,8 @@ import {
   Logout as ClockOutIcon,
   Edit as EditIcon,
   SupervisorAccount as ForceIcon,
+  Add as AddIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import config from '../config';
@@ -69,6 +71,13 @@ function TimeClock() {
   // Session picker state (for employees with multiple sessions)
   const [editPickerTarget, setEditPickerTarget] = useState(null);
 
+  // Add entry state
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addTarget, setAddTarget] = useState(null); // { employee_id, employee_name }
+  const [addClockIn, setAddClockIn] = useState('');
+  const [addClockOut, setAddClockOut] = useState('');
+  const [addSaving, setAddSaving] = useState(false);
+
   // Manager auth state
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [managerUsername, setManagerUsername] = useState('');
@@ -76,6 +85,7 @@ function TimeClock() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [authorizedUser, setAuthorizedUser] = useState(null); // { id, role } of whoever enabled edit mode
 
   // Force clock state
   const [forceDialogOpen, setForceDialogOpen] = useState(false);
@@ -325,6 +335,7 @@ function TimeClock() {
     // Auto-authorize if the current user is a Store Manager or Store Owner
     if (user?.role === 'Store Manager' || user?.role === 'Store Owner') {
       setIsAuthorized(true);
+      setAuthorizedUser({ id: user.id, role: user.role });
       setSnackbar({ open: true, message: 'Edit mode enabled', severity: 'success' });
       return;
     }
@@ -361,6 +372,7 @@ function TimeClock() {
       }
 
       setIsAuthorized(true);
+      setAuthorizedUser({ id: data.user.id, role: data.user.role });
       setAuthDialogOpen(false);
       setManagerUsername('');
       setManagerPassword('');
@@ -390,13 +402,29 @@ function TimeClock() {
     setEditDialogOpen(true);
   };
 
+  const isTargetOwner = (employeeId) => {
+    const target = allEmployees.find(e => e.employee_id === employeeId);
+    return target?.role === 'Store Owner';
+  };
+
+  const canEditTarget = (employeeId) => {
+    if (authorizedUser?.role === 'Store Owner') return true;
+    if (authorizedUser?.role === 'Store Manager' && isTargetOwner(employeeId)) return false;
+    return true;
+  };
+
   const handleSaveEdit = async () => {
     if (!editSession) return;
+    if (!canEditTarget(editSession.employee_id)) {
+      setSnackbar({ open: true, message: 'Store Managers cannot edit Store Owner time entries', severity: 'error' });
+      return;
+    }
     setEditSaving(true);
     try {
       const body = {};
       if (editClockIn) body.clock_in_time = new Date(editClockIn).toISOString();
       if (editClockOut) body.clock_out_time = new Date(editClockOut).toISOString();
+      body.performer_id = authorizedUser?.id;
 
       const response = await fetch(`${config.apiUrl}/employee-sessions/${editSession.session_id}`, {
         method: 'PUT',
@@ -417,6 +445,69 @@ function TimeClock() {
       setSnackbar({ open: true, message: 'Failed to update time entry', severity: 'error' });
     } finally {
       setEditSaving(false);
+    }
+  };
+
+  const handleDeleteSession = async () => {
+    if (!editSession) return;
+    if (!canEditTarget(editSession.employee_id)) {
+      setSnackbar({ open: true, message: 'Store Managers cannot delete Store Owner time entries', severity: 'error' });
+      return;
+    }
+    setEditSaving(true);
+    try {
+      const response = await fetch(`${config.apiUrl}/employee-sessions/${editSession.session_id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ performer_id: authorizedUser?.id }),
+      });
+      if (response.ok) {
+        setSnackbar({ open: true, message: 'Time entry deleted', severity: 'success' });
+        setEditDialogOpen(false);
+        fetchReport();
+        fetchClockStatus();
+      } else {
+        const err = await response.json();
+        setSnackbar({ open: true, message: err.error || 'Failed to delete', severity: 'error' });
+      }
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to delete time entry', severity: 'error' });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleAddEntry = async () => {
+    if (!addTarget || !addClockIn) return;
+    if (!canEditTarget(addTarget.employee_id)) {
+      setSnackbar({ open: true, message: 'Store Managers cannot add time entries for Store Owners', severity: 'error' });
+      return;
+    }
+    setAddSaving(true);
+    try {
+      const response = await fetch(`${config.apiUrl}/employee-sessions/manual`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employee_id: addTarget.employee_id,
+          clock_in_time: new Date(addClockIn).toISOString(),
+          clock_out_time: addClockOut ? new Date(addClockOut).toISOString() : null,
+          performer_id: authorizedUser?.id,
+        }),
+      });
+      if (response.ok) {
+        setSnackbar({ open: true, message: 'Time entry added', severity: 'success' });
+        setAddDialogOpen(false);
+        fetchReport();
+        fetchClockStatus();
+      } else {
+        const err = await response.json();
+        setSnackbar({ open: true, message: err.error || 'Failed to add entry', severity: 'error' });
+      }
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to add time entry', severity: 'error' });
+    } finally {
+      setAddSaving(false);
     }
   };
 
@@ -459,8 +550,9 @@ function TimeClock() {
     }
   };
 
-  // Compute report totals
-  const totalHours = report.reduce((sum, emp) => sum + calculateEmployeeTotal(emp.sessions), 0);
+  // Compute report totals — only employees with at least one session
+  const activeReport = report.filter(emp => emp.sessions && emp.sessions.length > 0);
+  const totalHours = activeReport.reduce((sum, emp) => sum + calculateEmployeeTotal(emp.sessions), 0);
   const grandNetMinutes = Math.round(totalHours * 60);
 
   return (
@@ -568,7 +660,7 @@ function TimeClock() {
                   Edit
                 </Button>
               ) : (
-                <Chip label="Edit Mode" color="warning" size="small" onDelete={() => setIsAuthorized(false)} />
+                <Chip label="Edit Mode" color="warning" size="small" onDelete={() => { setIsAuthorized(false); setAuthorizedUser(null); }} />
               )}
             </>
           )}
@@ -594,7 +686,7 @@ function TimeClock() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {report.length === 0 ? (
+                {activeReport.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={isAuthorized ? 7 : 6} align="center">
                       No data for selected date range.
@@ -602,12 +694,14 @@ function TimeClock() {
                   </TableRow>
                 ) : (
                   <>
-                    {report.map((emp, empIdx) => {
+                    {activeReport.map((emp, empIdx) => {
                       const days = buildEmployeeDays(emp.sessions);
                       const empNetMinutes = Math.round(calculateEmployeeTotal(emp.sessions) * 60);
                       const empTotal = calculateEmployeeTotal(emp.sessions);
                       const empBg = empIdx % 2 === 0 ? '#f5f5f5' : 'white';
                       const colCount = isAuthorized ? 7 : 6;
+                      const empRole = allEmployees.find(e => e.employee_id === emp.employee_id)?.role;
+                      const hideActions = empRole === 'Store Owner' && authorizedUser?.role === 'Store Manager';
 
                       const rows = [];
                       let isFirstRow = true;
@@ -652,41 +746,59 @@ function TimeClock() {
                                 </TableCell>
                                 {isAuthorized && (
                                   <TableCell sx={{ py: 0 }}>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                      <Button
-                                        size="small"
-                                        startIcon={<EditIcon />}
-                                        onClick={() => openEditDialog(emp.employee_name, session)}
-                                        sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
-                                      >
-                                        Edit
-                                      </Button>
-                                      {isFirstRow && (
-                                        clockedInEmployeeIds.has(emp.employee_id) ? (
-                                          <Button
-                                            size="small"
-                                            variant="outlined"
-                                            color="error"
-                                            startIcon={<ForceIcon />}
-                                            onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'out')}
-                                            sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
-                                          >
-                                            Force OUT
-                                          </Button>
-                                        ) : (
-                                          <Button
-                                            size="small"
-                                            variant="outlined"
-                                            color="success"
-                                            startIcon={<ForceIcon />}
-                                            onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'in')}
-                                            sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
-                                          >
-                                            Force IN
-                                          </Button>
-                                        )
-                                      )}
-                                    </Box>
+                                    {!hideActions && (
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                        <Button
+                                          size="small"
+                                          startIcon={<EditIcon />}
+                                          onClick={() => openEditDialog(emp.employee_name, session)}
+                                          sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
+                                        >
+                                          Edit
+                                        </Button>
+                                        {isFirstRow && (
+                                          <>
+                                            {clockedInEmployeeIds.has(emp.employee_id) ? (
+                                              <Button
+                                                size="small"
+                                                variant="outlined"
+                                                color="error"
+                                                startIcon={<ForceIcon />}
+                                                onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'out')}
+                                                sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
+                                              >
+                                                Force OUT
+                                              </Button>
+                                            ) : (
+                                              <Button
+                                                size="small"
+                                                variant="outlined"
+                                                color="success"
+                                                startIcon={<ForceIcon />}
+                                                onClick={() => handleForceClick(emp.employee_id, emp.employee_name, 'in')}
+                                                sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
+                                              >
+                                                Force IN
+                                              </Button>
+                                            )}
+                                            <Button
+                                              size="small"
+                                              variant="outlined"
+                                              startIcon={<AddIcon />}
+                                              onClick={() => {
+                                                setAddTarget({ employee_id: emp.employee_id, employee_name: emp.employee_name });
+                                                setAddClockIn('');
+                                                setAddClockOut('');
+                                                setAddDialogOpen(true);
+                                              }}
+                                              sx={{ textTransform: 'none', fontSize: '0.75rem', minWidth: 0, px: 0.5 }}
+                                            >
+                                              Add
+                                            </Button>
+                                          </>
+                                        )}
+                                      </Box>
+                                    )}
                                   </TableCell>
                                 )}
                               </TableRow>
@@ -709,7 +821,7 @@ function TimeClock() {
                       );
 
                       // Separator between employees
-                      if (empIdx < report.length - 1) {
+                      if (empIdx < activeReport.length - 1) {
                         rows.push(
                           <TableRow key={`${emp.employee_id}-sep`}>
                             <TableCell colSpan={colCount} sx={{ p: 0, borderBottom: '2px solid #ccc' }} />
@@ -720,7 +832,7 @@ function TimeClock() {
                       return rows;
                     })}
                     {/* Grand total row */}
-                    {report.length > 1 && (
+                    {activeReport.length > 1 && (
                       <TableRow sx={{ bgcolor: '#e3f2fd' }}>
                         <TableCell colSpan={4} />
                         <TableCell sx={{ fontWeight: 700 }}>All Employees:</TableCell>
@@ -867,12 +979,65 @@ function TimeClock() {
             />
           </Box>
         </DialogContent>
+        <DialogActions sx={{ justifyContent: 'space-between' }}>
+          <Button
+            onClick={handleDeleteSession}
+            color="error"
+            startIcon={<DeleteIcon />}
+            disabled={editSaving}
+          >
+            Delete
+          </Button>
+          <Box>
+            <Button onClick={() => setEditDialogOpen(false)} color="inherit" disabled={editSaving}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit} variant="contained" disabled={editSaving} sx={{ ml: 1 }}>
+              {editSaving ? 'Saving...' : 'Save'}
+            </Button>
+          </Box>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add Entry Dialog */}
+      <Dialog
+        open={addDialogOpen}
+        onClose={() => setAddDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Add Time Entry — {addTarget?.employee_name}</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+            <TextField
+              label="Clock In"
+              type="datetime-local"
+              value={addClockIn}
+              onChange={(e) => setAddClockIn(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+              required
+            />
+            <TextField
+              label="Clock Out"
+              type="datetime-local"
+              value={addClockOut}
+              onChange={(e) => setAddClockOut(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              fullWidth
+            />
+          </Box>
+        </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)} color="inherit">
+          <Button onClick={() => setAddDialogOpen(false)} color="inherit" disabled={addSaving}>
             Cancel
           </Button>
-          <Button onClick={handleSaveEdit} variant="contained" disabled={editSaving}>
-            {editSaving ? 'Saving...' : 'Save'}
+          <Button
+            onClick={handleAddEntry}
+            variant="contained"
+            disabled={addSaving || !addClockIn}
+          >
+            {addSaving ? 'Saving...' : 'Add Entry'}
           </Button>
         </DialogActions>
       </Dialog>

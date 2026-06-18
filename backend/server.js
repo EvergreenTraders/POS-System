@@ -5,6 +5,24 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
+
+const emailTransporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST,
+  port: parseInt(process.env.EMAIL_PORT) || 587,
+  secure: false,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+function generateTempPassword() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let pw = '';
+  for (let i = 0; i < 16; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+  return pw;
+}
 
 const app = express();
 
@@ -330,6 +348,9 @@ pool.query(`
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS employment_type VARCHAR(20) NOT NULL DEFAULT 'hourly'
 `).catch(err => console.error('employment_type migration:', err.message));
+pool.query(`
+  ALTER TABLE quote_expiration ADD COLUMN IF NOT EXISTS auto_delete BOOLEAN NOT NULL DEFAULT FALSE
+`).catch(err => console.error('quote_expiration auto_delete migration:', err.message));
 
 // Bank account migrations
 pool.query(`
@@ -448,6 +469,80 @@ app.post('/api/auth/login', async (req, res) => {
     }
   } catch (err) {
     console.error('Login error:', err);
+    return res.status(500).json({ error: 'Internal server error', details: err.message });
+  }
+});
+
+app.post('/api/auth/manager-override', async (req, res) => {
+  try {
+    const { employeeIdentifier, managerIdentifier, managerPassword, store_id } = req.body;
+
+    // Verify manager credentials
+    const managerQuery = await pool.query(
+      'SELECT * FROM employees WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)',
+      [managerIdentifier]
+    );
+    if (managerQuery.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid manager credentials' });
+    }
+    const manager = managerQuery.rows[0];
+    if (manager.password !== managerPassword) {
+      return res.status(401).json({ error: 'Invalid manager credentials' });
+    }
+    if (manager.role !== 'Store Manager' && manager.role !== 'Store Owner') {
+      return res.status(403).json({ error: 'Only Store Managers or Store Owners can perform an override' });
+    }
+
+    // Find target employee
+    const employeeQuery = await pool.query(
+      'SELECT * FROM employees WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)',
+      [employeeIdentifier]
+    );
+    if (employeeQuery.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    const employee = employeeQuery.rows[0];
+
+    if (store_id && employee.store_id && employee.store_id !== parseInt(store_id)) {
+      return res.status(403).json({ error: 'Employee is not assigned to this store' });
+    }
+
+    const token = jwt.sign(
+      { id: employee.employee_id, role: employee.role, username: employee.username },
+      process.env.JWT_SECRET || 'evergreen_jwt_secret_2024',
+      { expiresIn: '24h' }
+    );
+
+    const imageBase64 = employee.image ? employee.image.toString('base64') : null;
+
+    return res.json({
+      token,
+      user: {
+        id: employee.employee_id,
+        username: employee.username,
+        email: employee.email,
+        role: employee.role,
+        firstName: employee.first_name,
+        lastName: employee.last_name,
+        image: imageBase64,
+        track_hours: employee.track_hours !== false,
+        can_open_store: employee.can_open_store !== false,
+        can_open_drawer: employee.can_open_drawer !== false,
+        can_view_drawer: employee.can_view_drawer !== false,
+        can_view_safe: employee.can_view_safe !== false,
+        transfer_allowed_drawer: employee.transfer_allowed_drawer !== false,
+        transfer_allowed_safe: employee.transfer_allowed_safe !== false,
+        transfer_allowed_bank: employee.transfer_allowed_bank !== false,
+        transfer_allowed_store: employee.transfer_allowed_store !== false,
+        transfer_limit: employee.transfer_limit != null ? parseFloat(employee.transfer_limit) : null,
+        can_petty_cash: employee.can_petty_cash !== false,
+        petty_cash_limit: employee.petty_cash_limit != null ? parseFloat(employee.petty_cash_limit) : null,
+        discrepancy_threshold: employee.discrepancy_threshold != null ? parseFloat(employee.discrepancy_threshold) : null,
+        employment_type: employee.employment_type || 'hourly'
+      }
+    });
+  } catch (err) {
+    console.error('Manager override error:', err);
     return res.status(500).json({ error: 'Internal server error', details: err.message });
   }
 });
@@ -574,6 +669,55 @@ app.put('/api/employees/:id', async (req, res) => {
   } catch (err) {
     console.error('Error updating employee:', err);
     res.status(500).json({ error: 'Failed to update employee' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { employeeIdentifier, oldPassword, newPassword } = req.body;
+    if (!newPassword || newPassword.trim() === '') {
+      return res.status(400).json({ error: 'New password cannot be empty' });
+    }
+    const result = await pool.query(
+      'SELECT employee_id, password FROM employees WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)',
+      [employeeIdentifier]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    if (result.rows[0].password !== oldPassword) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    await pool.query(
+      'UPDATE employees SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE employee_id = $2',
+      [newPassword, result.rows[0].employee_id]
+    );
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error('Error resetting password:', err);
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { identifier } = req.body;
+    const result = await pool.query(
+      'SELECT employee_id, first_name FROM employees WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)',
+      [identifier]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No account found with that username or email' });
+    }
+    const tempPassword = generateTempPassword();
+    await pool.query(
+      'UPDATE employees SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE employee_id = $2',
+      [tempPassword, result.rows[0].employee_id]
+    );
+    res.json({ tempPassword });
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({ error: 'Failed to generate temporary password' });
   }
 });
 
@@ -869,7 +1013,7 @@ app.get('/api/employee-sessions/report', async (req, res) => {
       empParams.push(empIdFilter);
     }
     const employeesResult = await pool.query(`
-      SELECT employee_id, first_name, last_name, username, status
+      SELECT employee_id, first_name, last_name, username, status, role
       FROM employees
       WHERE status = 'Active'
         AND ($1::int IS NULL OR store_id = $1)
@@ -906,6 +1050,7 @@ app.get('/api/employee-sessions/report', async (req, res) => {
       return {
         employee_id: emp.employee_id,
         employee_name: `${emp.first_name} ${emp.last_name}`,
+        role: emp.role,
         store_code: currentStore.store_code,
         store_name: currentStore.store_name,
         sessions: empSessions
@@ -922,11 +1067,32 @@ app.get('/api/employee-sessions/report', async (req, res) => {
   }
 });
 
+// Helper: returns 403 if a Store Manager is trying to act on a Store Owner's session
+async function checkEditPermission(performerId, targetEmployeeId, res) {
+  if (!performerId) return false;
+  const [perfResult, targetResult] = await Promise.all([
+    pool.query('SELECT role FROM employees WHERE employee_id = $1', [performerId]),
+    pool.query('SELECT role FROM employees WHERE employee_id = $1', [targetEmployeeId]),
+  ]);
+  const performerRole = perfResult.rows[0]?.role;
+  const targetRole = targetResult.rows[0]?.role;
+  if (performerRole === 'Store Manager' && targetRole === 'Store Owner') {
+    res.status(403).json({ error: 'Store Managers cannot edit Store Owner time entries' });
+    return true;
+  }
+  return false;
+}
+
 // PUT /api/employee-sessions/:id - Update a session (manager edit)
 app.put('/api/employee-sessions/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { clock_in_time, clock_out_time } = req.body;
+    const { clock_in_time, clock_out_time, performer_id } = req.body;
+
+    // Look up whose session this is
+    const sessionCheck = await pool.query('SELECT employee_id FROM employee_sessions WHERE session_id = $1', [id]);
+    if (sessionCheck.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+    if (await checkEditPermission(performer_id, sessionCheck.rows[0].employee_id, res)) return;
 
     const result = await pool.query(`
       UPDATE employee_sessions
@@ -936,14 +1102,49 @@ app.put('/api/employee-sessions/:id', async (req, res) => {
       RETURNING *
     `, [clock_in_time || null, clock_out_time || null, id]);
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
-
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating employee session:', error);
     res.status(500).json({ error: 'Failed to update session' });
+  }
+});
+
+// DELETE /api/employee-sessions/:id - Delete a session (manager edit)
+app.delete('/api/employee-sessions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { performer_id } = req.body || {};
+
+    const sessionCheck = await pool.query('SELECT employee_id FROM employee_sessions WHERE session_id = $1', [id]);
+    if (sessionCheck.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+    if (await checkEditPermission(performer_id, sessionCheck.rows[0].employee_id, res)) return;
+
+    await pool.query('DELETE FROM employee_sessions WHERE session_id = $1', [id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting employee session:', error);
+    res.status(500).json({ error: 'Failed to delete session' });
+  }
+});
+
+// POST /api/employee-sessions/manual - Manually add a time entry (manager edit)
+app.post('/api/employee-sessions/manual', async (req, res) => {
+  try {
+    const { employee_id, clock_in_time, clock_out_time, performer_id } = req.body;
+    if (!employee_id || !clock_in_time) {
+      return res.status(400).json({ error: 'employee_id and clock_in_time are required' });
+    }
+    if (await checkEditPermission(performer_id, employee_id, res)) return;
+    const status = clock_out_time ? 'clocked_out' : 'clocked_in';
+    const result = await pool.query(`
+      INSERT INTO employee_sessions (employee_id, clock_in_time, clock_out_time, status)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [employee_id, clock_in_time, clock_out_time || null, status]);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error adding manual employee session:', error);
+    res.status(500).json({ error: 'Failed to add time entry' });
   }
 });
 
@@ -955,7 +1156,8 @@ app.put('/api/employee-sessions/:id', async (req, res) => {
 app.get('/api/cash-drawer/active', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT ads.* FROM active_drawer_sessions ads
+      SELECT ads.*, d.individual_denominations, d.blind_count, d.electronic_blind_count
+      FROM active_drawer_sessions ads
       JOIN drawers d ON ads.drawer_id = d.drawer_id
       WHERE d.store_id = (SELECT store_id FROM stores WHERE is_current_store = TRUE LIMIT 1)
       ORDER BY ads.opened_at DESC
@@ -1117,6 +1319,9 @@ app.get('/api/cash-drawer/employee/:employeeId/active', async (req, res) => {
         d.drawer_type,
         d.drawer_name,
         d.is_shared,
+        d.individual_denominations,
+        d.blind_count,
+        d.electronic_blind_count,
         calculate_expected_balance(s.session_id) AS current_expected_balance,
         (SELECT COUNT(*) FROM transactions WHERE session_id = s.session_id) AS transaction_count,
         (SELECT COALESCE(SUM(amount), 0) FROM cash_drawer_transactions WHERE session_id = s.session_id) AS total_transactions,
@@ -2866,7 +3071,7 @@ app.get('/api/bank-deposits', async (req, res) => {
 // POST /api/cash-drawer/:sessionId/bank-withdrawal - Withdraw cash from bank to master safe
 app.post('/api/cash-drawer/:sessionId/bank-withdrawal', async (req, res) => {
   const { sessionId } = req.params;
-  const { bank_id, amount, withdrawal_reference, notes, performed_by } = req.body;
+  const { bank_id, amount, withdrawal_reference, notes, performed_by, denominations } = req.body;
 
   // Validation
   if (!bank_id || !amount || !performed_by) {
@@ -2945,6 +3150,20 @@ app.post('/api/cash-drawer/:sessionId/bank-withdrawal', async (req, res) => {
     `, [sessionId, withdrawalAmount, `Bank withdrawal from ${bankName}${notes ? ': ' + notes : ''}`, performed_by]);
 
     const adjustmentId = adjustmentResult.rows[0].adjustment_id;
+
+    // Store denominations if provided
+    if (denominations) {
+      const d = denominations;
+      await client.query(`
+        INSERT INTO adjustment_denominations
+          (adjustment_id, bill_100, bill_50, bill_20, bill_10, bill_5, coin_2, coin_1, coin_0_25, coin_0_10, coin_0_05)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [
+        adjustmentId,
+        d.bill_100 || 0, d.bill_50 || 0, d.bill_20 || 0, d.bill_10 || 0, d.bill_5 || 0,
+        d.coin_2 || 0, d.coin_1 || 0, d.coin_0_25 || 0, d.coin_0_10 || 0, d.coin_0_05 || 0
+      ]);
+    }
 
     // Create bank withdrawal record (reuse bank_deposits table with negative indicator or create separate tracking)
     // For simplicity, we'll track in bank_deposits with a note indicating withdrawal
@@ -4124,6 +4343,43 @@ app.post('/api/cash-drawer/:sessionId/denominations', async (req, res) => {
   } catch (error) {
     console.error('Error saving denominations:', error);
     res.status(500).json({ error: 'Failed to save denominations' });
+  }
+});
+
+// GET /api/cash-drawer/:sessionId/denominations/current - Compute running denomination totals
+app.get('/api/cash-drawer/:sessionId/denominations/current', async (req, res) => {
+  const { sessionId } = req.params;
+  const denomKeys = ['bill_100', 'bill_50', 'bill_20', 'bill_10', 'bill_5', 'coin_2', 'coin_1', 'coin_0_25', 'coin_0_10', 'coin_0_05'];
+  try {
+    // Start with opening denominations
+    const openingResult = await pool.query(
+      'SELECT * FROM cash_denominations WHERE session_id = $1 AND denomination_type = $2 LIMIT 1',
+      [sessionId, 'opening']
+    );
+    const current = {};
+    for (const key of denomKeys) {
+      current[key] = parseFloat(openingResult.rows[0]?.[key] || 0);
+    }
+
+    // Apply all adjustment denominations (positive amount = money in, negative = money out)
+    const adjResult = await pool.query(`
+      SELECT ad.*, cda.amount
+      FROM adjustment_denominations ad
+      JOIN cash_drawer_adjustments cda ON ad.adjustment_id = cda.adjustment_id
+      WHERE cda.session_id = $1
+    `, [sessionId]);
+
+    for (const adj of adjResult.rows) {
+      const isDebit = parseFloat(adj.amount) < 0;
+      for (const key of denomKeys) {
+        current[key] += isDebit ? -parseFloat(adj[key] || 0) : parseFloat(adj[key] || 0);
+      }
+    }
+
+    res.json(current);
+  } catch (error) {
+    console.error('Error computing current denominations:', error);
+    res.status(500).json({ error: 'Failed to compute current denominations' });
   }
 });
 
@@ -5495,7 +5751,6 @@ app.get('/api/drawer-type-config', async (req, res) => {
   try {
     // Get drawer type config - prioritize drawers with non-zero values
     // If all drawers have zero values, return the first drawer's values
-    // Note: master_safe uses the same values as safe, so we only return physical and safe
     const result = await pool.query(`
       WITH ranked_drawers AS (
         SELECT
@@ -5512,7 +5767,7 @@ app.get('/api/drawer-type-config', async (req, res) => {
               drawer_id
           ) as rn
         FROM drawers
-        WHERE drawer_type IN ('physical', 'safe')
+        WHERE drawer_type IN ('physical', 'safe', 'master_safe')
       )
       SELECT drawer_type, min_close, max_close, blind_count, individual_denominations, electronic_blind_count
       FROM ranked_drawers
@@ -5562,13 +5817,8 @@ app.put('/api/drawer-type-config/:drawerType', async (req, res) => {
     const { drawerType } = req.params;
     const { min_close, max_close, blind_count, individual_denominations, electronic_blind_count } = req.body;
 
-    // Determine which drawer types to update
-    let drawerTypes = [drawerType];
-
-    // If updating safe, also update master_safe to keep them in sync
-    if (drawerType === 'safe') {
-      drawerTypes = ['safe', 'master_safe'];
-    }
+    // Each drawer type is updated independently
+    const drawerTypes = [drawerType];
 
     // Build dynamic SET clause based on provided fields
     const setClauses = ['updated_at = CURRENT_TIMESTAMP'];
@@ -5757,6 +6007,28 @@ app.put('/api/carat-conversion', async (req, res) => {
 });
 
 // Quote Management API Endpoints
+
+app.delete('/api/quotes/expired', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const expired = await client.query(`SELECT id, quote_id FROM quotes WHERE days_remaining <= 0`);
+    const intIds = expired.rows.map(r => r.id);
+    const strIds = expired.rows.map(r => r.quote_id);
+    if (strIds.length > 0) {
+      await client.query(`DELETE FROM quote_items WHERE quote_id = ANY($1)`, [strIds]);
+      await client.query(`DELETE FROM quotes WHERE id = ANY($1)`, [intIds]);
+    }
+    await client.query('COMMIT');
+    res.json({ deleted: intIds.length });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting expired quotes:', err);
+    res.status(500).json({ error: 'Failed to delete expired quotes' });
+  } finally {
+    client.release();
+  }
+});
 
 // Get all quotes with customer and employee details
 app.get('/api/quotes', async (req, res) => {
@@ -7789,45 +8061,40 @@ app.get('/api/quote-expiration/config', async (req, res) => {
 app.put('/api/quote-expiration/config', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { days } = req.body;
-    
+    const { days, auto_delete } = req.body;
+
     if (!days || days < 1) {
       return res.status(400).json({ error: 'Days must be a positive number' });
     }
 
     await client.query('BEGIN');
 
-    // Update configuration or insert if none exists
     const updateResult = await client.query(`
       UPDATE quote_expiration
-      SET days = $1, updated_at = CURRENT_TIMESTAMP
-      RETURNING days, created_at, updated_at
-    `, [days]);
+      SET days = $1, auto_delete = $2, updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `, [days, auto_delete !== undefined ? auto_delete : false]);
 
-    // If no rows were updated, insert new configuration
     let result;
     if (updateResult.rowCount === 0) {
       result = await client.query(`
-        INSERT INTO quote_expiration (days)
-        VALUES ($1)
-        RETURNING id, days, created_at, updated_at
-      `, [days]);
+        INSERT INTO quote_expiration (days, auto_delete)
+        VALUES ($1, $2)
+        RETURNING *
+      `, [days, auto_delete !== undefined ? auto_delete : false]);
     } else {
       result = updateResult;
     }
-
-    // Note: We no longer update existing quotes' expires_in value
-    // New quotes will use this configuration when created
 
     await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error('Error creating quote expiration config:', err);
-    res.status(500).json({ error: 'Failed to create quote expiration configuration' });
-    } finally {
-        client.release();
-    }
+    console.error('Error updating quote expiration config:', err);
+    res.status(500).json({ error: 'Failed to update quote expiration configuration' });
+  } finally {
+    client.release();
+  }
 });
 
 // Inventory Hold Period Configuration API Endpoints
