@@ -1,5 +1,11 @@
 #!/bin/bash
 # This hook runs after the application is deployed
+# Only runs migrations if RUN_MIGRATIONS=true is set in EB environment
+
+if [ "${RUN_MIGRATIONS}" != "true" ]; then
+    echo "RUN_MIGRATIONS is not set to true, skipping migrations"
+    exit 0
+fi
 
 cd /var/app/current/backend
 
