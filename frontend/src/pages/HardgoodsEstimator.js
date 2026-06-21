@@ -474,14 +474,6 @@ function HardgoodsEstimator() {
                     ))}
                   </Select>
                 </FormControl>
-                <FormControl fullWidth size="small">
-                  <InputLabel>Source</InputLabel>
-                  <Select value={form.source} onChange={e => setField('source', e.target.value)} label="Source">
-                    {SOURCE_OPTIONS.map(s => (
-                      <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
               </Box>
 
               <TextField
