@@ -27,18 +27,16 @@ function generateTempPassword() {
 const app = express();
 
 // Middleware
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://pos-system-frontend.s3-website.ca-central-1.amazonaws.com',
-];
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, Postman)
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-    callback(new Error('Not allowed by CORS'));
-  },
+  origin: [
+    "http://localhost:3000",
+    "http://pos-system-frontend.s3-website.ca-central-1.amazonaws.com",
+  ],
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
 }));
+
 app.use(express.json());
 // Serve uploaded files statically
 app.use('/uploads', express.static('uploads'));

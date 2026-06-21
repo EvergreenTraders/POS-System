@@ -27,21 +27,26 @@ CREATE TRIGGER update_tax_config_timestamp
     EXECUTE FUNCTION update_tax_config_timestamp();
 
 -- Insert default Canadian provincial tax rates
-INSERT INTO tax_config (province_code, province_name, gst_rate, pst_rate, hst_rate) VALUES
-    ('AB', 'Alberta', 5.000, 0.000, 0.000),
-    ('BC', 'British Columbia', 5.000, 7.000, 0.000),
-    ('MB', 'Manitoba', 5.000, 7.000, 0.000),
-    ('NB', 'New Brunswick', 0.000, 0.000, 15.000),
-    ('NL', 'Newfoundland and Labrador', 0.000, 0.000, 15.000),
-    ('NT', 'Northwest Territories', 5.000, 0.000, 0.000),
-    ('NS', 'Nova Scotia', 0.000, 0.000, 15.000),
-    ('NU', 'Nunavut', 5.000, 0.000, 0.000),
-    ('ON', 'Ontario', 0.000, 0.000, 13.000),
-    ('PE', 'Prince Edward Island', 0.000, 0.000, 15.000),
-    ('QC', 'Quebec', 5.000, 9.975, 0.000),
-    ('SK', 'Saskatchewan', 5.000, 6.000, 0.000),
-    ('YT', 'Yukon', 5.000, 0.000, 0.000)
-ON CONFLICT (province_code) DO NOTHING;
+INSERT INTO tax_config (province_code, province_name, gst_rate, pst_rate, hst_rate)
+SELECT province_code, province_name, gst_rate, pst_rate, hst_rate
+FROM (VALUES
+    ('AB', 'Alberta',                      5.000::DECIMAL(5,3), 0.000::DECIMAL(5,3), 0.000::DECIMAL(5,3)),
+    ('BC', 'British Columbia',             5.000::DECIMAL(5,3), 7.000::DECIMAL(5,3), 0.000::DECIMAL(5,3)),
+    ('MB', 'Manitoba',                     5.000::DECIMAL(5,3), 7.000::DECIMAL(5,3), 0.000::DECIMAL(5,3)),
+    ('NB', 'New Brunswick',                0.000::DECIMAL(5,3), 0.000::DECIMAL(5,3), 15.000::DECIMAL(5,3)),
+    ('NL', 'Newfoundland and Labrador',    0.000::DECIMAL(5,3), 0.000::DECIMAL(5,3), 15.000::DECIMAL(5,3)),
+    ('NT', 'Northwest Territories',        5.000::DECIMAL(5,3), 0.000::DECIMAL(5,3), 0.000::DECIMAL(5,3)),
+    ('NS', 'Nova Scotia',                  0.000::DECIMAL(5,3), 0.000::DECIMAL(5,3), 15.000::DECIMAL(5,3)),
+    ('NU', 'Nunavut',                      5.000::DECIMAL(5,3), 0.000::DECIMAL(5,3), 0.000::DECIMAL(5,3)),
+    ('ON', 'Ontario',                      0.000::DECIMAL(5,3), 0.000::DECIMAL(5,3), 13.000::DECIMAL(5,3)),
+    ('PE', 'Prince Edward Island',         0.000::DECIMAL(5,3), 0.000::DECIMAL(5,3), 15.000::DECIMAL(5,3)),
+    ('QC', 'Quebec',                       5.000::DECIMAL(5,3), 9.975::DECIMAL(5,3), 0.000::DECIMAL(5,3)),
+    ('SK', 'Saskatchewan',                 5.000::DECIMAL(5,3), 6.000::DECIMAL(5,3), 0.000::DECIMAL(5,3)),
+    ('YT', 'Yukon',                        5.000::DECIMAL(5,3), 0.000::DECIMAL(5,3), 0.000::DECIMAL(5,3))
+) AS vals(province_code, province_name, gst_rate, pst_rate, hst_rate)
+WHERE NOT EXISTS (
+    SELECT 1 FROM tax_config t WHERE t.province_code = vals.province_code AND t.store_id IS NULL
+);
 
 -- Create index for faster province lookups
 CREATE INDEX IF NOT EXISTS idx_tax_config_province ON tax_config(province_code);
