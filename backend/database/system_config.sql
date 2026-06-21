@@ -113,16 +113,26 @@ BEGIN
         days INTEGER NOT NULL DEFAULT 30,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP,
+        auto_delete BOOLEAN NOT NULL DEFAULT FALSE,
         CONSTRAINT valid_days CHECK (days > 0)
     );
+
+    -- Add auto_delete column if it doesn't exist (for existing deployments)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'quote_expiration' AND column_name = 'auto_delete'
+    ) THEN
+        ALTER TABLE quote_expiration ADD COLUMN auto_delete BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
 
     -- Add comments for documentation
     COMMENT ON TABLE quote_expiration IS 'Stores configuration for quote expiration period';
     COMMENT ON COLUMN quote_expiration.days IS 'Number of days to keep quotes before marking them as expired';
+    COMMENT ON COLUMN quote_expiration.auto_delete IS 'Whether to automatically delete expired quotes';
 
     -- Insert default configuration if table is empty
-    INSERT INTO quote_expiration (days)
-    SELECT 30
+    INSERT INTO quote_expiration (days, auto_delete)
+    SELECT 30, FALSE
     WHERE NOT EXISTS (SELECT 1 FROM quote_expiration LIMIT 1);
 
     -- Create inventory_hold_period table for storing hold duration configuration
