@@ -5,7 +5,6 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
 
 const emailTransporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
