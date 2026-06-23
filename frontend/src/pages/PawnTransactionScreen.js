@@ -7,6 +7,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
+import JewelryIntakeScreen from './JewelryIntakeScreen';
 
 const PURPLE      = '#6d28d9';
 const PURPLE_DARK = '#5b21b6';
@@ -42,6 +43,8 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [activePawns, setActivePawns]     = useState([]);
   const [stats, setStats]                 = useState(initialStats);
   const [loadingPawns, setLoadingPawns]   = useState(false);
+  const [intakeOpen, setIntakeOpen]       = useState(false);
+  const [intakeEntry, setIntakeEntry]     = useState('');
 
   useEffect(() => {
     if (!customer?.id) return;
@@ -78,6 +81,30 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
 
   const handleAddItem = (item) => setPawnItems(prev => [...prev, item]);
 
+  const openIntake = () => {
+    setIntakeEntry(itemSearch);
+    setIntakeOpen(true);
+  };
+
+  const handleIntakeBack = (dest) => {
+    setIntakeOpen(false);
+    if (dest === 'transactions') onClose();
+  };
+
+  const handleIntakeSave = (item) => {
+    handleAddItem(item);
+    setItemSearch('');
+    setIntakeOpen(false);
+  };
+
+  const handleIntakeSaveAndAdd = (item) => {
+    handleAddItem(item);
+    setItemSearch('');
+    // reopen intake fresh
+    setIntakeEntry('');
+    setIntakeOpen(true);
+  };
+
   const STAT_BOXES = [
     { icon: 'Inventory2',    label: 'Active Pawns',    value: activePawnCount,    color: '#7c3aed', bg: '#f3e8ff' },
     { icon: 'Warning',       label: 'Overdue Pawns',   value: overduePawnCount,   color: '#d97706', bg: '#fff7ed' },
@@ -85,8 +112,32 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     { icon: 'CalendarMonth', label: 'First Pawn Date', value: firstPawnDate,      color: '#059669', bg: '#ecfdf5' },
   ];
 
+  if (intakeOpen) {
+    return (
+      <JewelryIntakeScreen
+        customer={customer}
+        ticketId={ticketId}
+        initialEntry={intakeEntry}
+        onBack={handleIntakeBack}
+        onSaveItem={handleIntakeSave}
+        onSaveAndAddAnother={handleIntakeSaveAndAdd}
+      />
+    );
+  }
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
+
+      {/* Breadcrumb */}
+      <Box sx={{ bgcolor: PURPLE, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+        <Typography variant="body2" fontWeight={400} sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }} onClick={onClose}>
+          Transactions
+        </Typography>
+        <MuiIcons.ChevronRight sx={{ fontSize: 16, opacity: 0.6 }} />
+        <Typography variant="body2" fontWeight={700}>
+          Pawn Ticket ({ticketId})
+        </Typography>
+      </Box>
 
       {/* ── TOP: two equal halves ── */}
       <Box sx={{ display: 'flex', gap: 1.5, p: 1.5, pb: 1.5, flexShrink: 0 }}>
@@ -221,6 +272,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
             placeholder="Scan / Search / Describe Item"
             value={itemSearch}
             onChange={e => setItemSearch(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && itemSearch.trim() && openIntake()}
             InputProps={{
               startAdornment: <InputAdornment position="start"><MuiIcons.Search sx={{ color: 'text.secondary' }} /></InputAdornment>,
               endAdornment: (
@@ -232,6 +284,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
           />
           <Button variant="outlined" startIcon={<MuiIcons.AddCircleOutline />}
+            onClick={openIntake}
             sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
             Free-type Quick Add
           </Button>
