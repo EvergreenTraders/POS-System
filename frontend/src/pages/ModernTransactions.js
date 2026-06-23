@@ -143,13 +143,14 @@ function TransactionTypeButton({ label, icon, color }) {
       variant="outlined"
       sx={{
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        p: 1, cursor: 'pointer', borderRadius: 2, borderColor: '#e0e0e0', minWidth: 70,
+        p: { md: 1, xl: 0.75 }, cursor: 'pointer', borderRadius: 2, borderColor: '#e0e0e0',
+        minWidth: { md: 70, xl: 60 },
         '&:hover': { bgcolor: '#f5f5f5', borderColor: color },
         transition: 'all 0.15s',
       }}
     >
-      <Box sx={{ color, mb: 0.25 }}>{icon}</Box>
-      <Typography variant="caption" align="center" fontWeight={500} sx={{ fontSize: 10, color: color }}>{label}</Typography>
+      <Box sx={{ color, mb: 0.25, '& svg': { fontSize: { md: 24, xl: 20 } } }}>{icon}</Box>
+      <Typography align="center" fontWeight={500} sx={{ fontSize: { md: 10, xl: 9 }, color }}>{label}</Typography>
     </Paper>
   );
 }
@@ -162,6 +163,7 @@ export default function ModernTransactions() {
 
   // Customer state
   const [customer, setCustomer] = useState(null);
+  const [customerStats, setCustomerStats] = useState(null);
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerResults, setCustomerResults] = useState([]);
   const [searchingCustomer, setSearchingCustomer] = useState(false);
@@ -191,14 +193,23 @@ export default function ModernTransactions() {
     }
   };
 
-  const handleSelectCustomer = (c) => {
+  const handleSelectCustomer = async (c) => {
     setCustomer(c);
     setCustomerSearch('');
     setCustomerResults([]);
     setShowResults(false);
+    try {
+      const res = await axios.get(`${config.apiUrl}/customers/${c.id}/stats`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setCustomerStats(res.data);
+    } catch (err) {
+      console.error('Failed to fetch customer stats:', err);
+      setCustomerStats(null);
+    }
   };
 
-  const handleClearCustomer = () => setCustomer(null);
+  const handleClearCustomer = () => { setCustomer(null); setCustomerStats(null); };
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
@@ -231,65 +242,95 @@ export default function ModernTransactions() {
       </Paper>
 
       {/* ── Body (three columns + full-width bottom bar) ── */}
-      <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 1.5, p: 1.5, overflow: 'hidden' }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, gap: { md: 1.5, xl: 1 }, p: { md: 1.5, xl: 1 }, overflow: 'hidden' }}>
 
       {/* Three-column row */}
-      <Box sx={{ display: 'flex', flex: 1, gap: 1.5, overflow: 'hidden', minHeight: 0 }}>
+      <Box sx={{ display: 'flex', flex: 1, gap: { md: 1.5, xl: 1 }, overflow: 'hidden', minHeight: 0 }}>
 
         {/* ── LEFT: Customer panel ── */}
         <Paper sx={{ width: 240, flexShrink: 0, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', alignSelf: 'flex-start', maxHeight: '100%' }}>
-          <Box sx={{ px: 2, py: 1, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography fontWeight={700} fontSize={13} letterSpacing={1}>CUSTOMER</Typography>
+          <Box sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>CUSTOMER</Typography>
           </Box>
 
-          <Box sx={{ p: 1.5, flex: 1, overflowY: 'auto' }}>
+          <Box sx={{ p: { md: 1.5, xl: 1 }, flex: 1, overflowY: 'auto' }}>
             {customer ? (
               /* ── Customer selected ── */
               <>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
-                  <Avatar sx={{ bgcolor: GREEN, width: 44, height: 44, fontSize: 16, fontWeight: 700 }}>
+                {/* Name + avatar */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: { md: 1.5, xl: 1 }, mb: { md: 1.5, xl: 1 } }}>
+                  <Avatar sx={{ bgcolor: GREEN, width: { md: 40, xl: 32 }, height: { md: 40, xl: 32 }, fontSize: { md: 15, xl: 12 }, fontWeight: 700 }}>
                     {customer.first_name?.[0]}{customer.last_name?.[0]}
                   </Avatar>
-                  <Box>
-                    <Typography fontWeight={700} fontSize={14}>
-                      {customer.first_name} {customer.last_name}
-                    </Typography>
-                    {customer.status && (
-                      <Chip label={customer.status} size="small"
-                        sx={{ height: 16, fontSize: 9, mt: 0.25,
-                          bgcolor: customer.status === 'active' ? '#e8f5e9' : '#fff3e0',
-                          color: customer.status === 'active' ? '#2e7d32' : '#e65100' }} />
-                    )}
-                  </Box>
+                  <Typography fontWeight={700} fontSize={{ md: 15, xl: 13 }} lineHeight={1.2}>
+                    {customer.first_name} {customer.last_name}
+                  </Typography>
                 </Box>
 
-                <Stack spacing={0.25} mb={1.5}>
+                {/* Contact info */}
+                <Stack spacing={{ md: 0.5, xl: 0.25 }} mb={{ md: 1.5, xl: 1 }}>
                   {customer.phone && (
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ width: 48 }}>Phone:</Typography>
-                      <Typography variant="caption">{customer.phone}</Typography>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="caption" color="text.secondary">Phone:</Typography>
+                      <Typography variant="caption" fontWeight={500}>{customer.phone}</Typography>
                     </Box>
                   )}
                   {customer.email && (
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ width: 48 }}>Email:</Typography>
-                      <Typography variant="caption" noWrap>{customer.email}</Typography>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>Email:</Typography>
+                      <Typography variant="caption" fontWeight={500} noWrap>{customer.email}</Typography>
                     </Box>
                   )}
-                  {customer.tax_exempt && (
-                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ width: 48 }}>Tax:</Typography>
-                      <Chip label="Tax Exempt" size="small"
-                        sx={{ height: 16, fontSize: 9, bgcolor: '#fff3e0', color: '#e65100' }} />
-                    </Box>
-                  )}
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="caption" color="text.secondary">ID:</Typography>
+                    {customer.id_number ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Typography variant="caption" fontWeight={500}>Verified</Typography>
+                        <MuiIcons.CheckCircle sx={{ fontSize: 13, color: '#2e7d32' }} />
+                      </Box>
+                    ) : (
+                      <Typography variant="caption" color="text.secondary" fontStyle="italic">Not on file</Typography>
+                    )}
+                  </Box>
+                </Stack>
+
+                <Divider sx={{ mb: { md: 1.5, xl: 1 } }} />
+
+                {/* Stats rows — icons/colors pulled from transaction_type DB via transactionTypes state */}
+                <Stack spacing={{ md: 0.75, xl: 0.5 }} mb={{ md: 1.5, xl: 1 }}>
+                  {(() => {
+                    const byType = (type) => transactionTypes.find(t => t.type === type) ?? {};
+                    const pawn    = byType('pawn');
+                    const layaway = byType('layaway');
+                    const repair  = byType('repair');
+                    return [
+                      { icon: pawn.icon,  label: 'Active Pawns',   value: customerStats?.active_pawns    ?? 0,  color: pawn.color },
+                      { icon: layaway.icon, label: 'Active Layaways', value: customerStats?.active_layaways ?? 0,  color: layaway.color },
+                      { icon: repair.icon,  label: 'Open Repairs',    value: customerStats?.open_repairs    ?? 0,  color: repair.color  },
+                      { icon: 'CreditCard',  label: 'Store Credit',    value: customerStats?.store_credit != null ? `$${Number(customerStats.store_credit).toFixed(2)}` : '$0.00', color: '#2e7d32' },
+                      { icon: 'AccessTime',   label: 'Customer Since',  value: customer.created_at ? new Date(customer.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—', color: '#546e7a' },
+                    ];
+                  })().map(({ icon, label, value, color }) => {
+                    const Icon = MuiIcons[icon] ?? MuiIcons.Circle;
+                    return (
+                      <Box key={label} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                          <Icon sx={{ fontSize: { md: 15, xl: 13 }, color }} />
+                          <Typography sx={{ fontSize: { md: 12, xl: 11 } }} color="text.secondary">{label}</Typography>
+                        </Box>
+                        <Typography sx={{ fontSize: { md: 12, xl: 11 } }} fontWeight={600}
+                          color={label === 'Store Credit' ? '#2e7d32' : 'text.primary'}>
+                          {value}
+                        </Typography>
+                      </Box>
+                    );
+                  })}
                 </Stack>
 
                 <Divider sx={{ mb: 1 }} />
 
                 <Stack spacing={0.75}>
                   <Button fullWidth variant="contained" size="small"
-                    onClick={handleClearCustomer}
                     sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, borderRadius: 2, fontSize: 11, fontWeight: 700 }}>
                     Select Customer
                   </Button>
@@ -374,9 +415,9 @@ export default function ModernTransactions() {
         {/* ── MIDDLE: Transaction workspace ── */}
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, overflow: 'hidden', minWidth: 0 }}>
           {/* Workspace header */}
-          <Paper sx={{ px: 2, py: 1, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Paper sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Typography fontWeight={700} fontSize={13} letterSpacing={1}>TRANSACTION WORKSPACE</Typography>
+              <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>TRANSACTION WORKSPACE</Typography>
               <Badge badgeContent={5} color="primary" sx={{ '& .MuiBadge-badge': { position: 'relative', transform: 'none', ml: 0.5 } }}>
                 <Box />
               </Badge>
@@ -390,7 +431,7 @@ export default function ModernTransactions() {
 
           {/* Transaction cards grid */}
           <Box sx={{ flex: 1, overflowY: 'auto' }}>
-            <Grid container spacing={1.5}>
+            <Grid container spacing={{ md: 1.5, xl: 1 }}>
               {SAMPLE_TRANSACTIONS.map(tx => (
                 <Grid item xs={12} sm={6} md={4} key={tx.id}>
                   <TransactionCard tx={tx} />
@@ -403,13 +444,13 @@ export default function ModernTransactions() {
 
         {/* ── RIGHT: Summary panel ── */}
         <Paper sx={{ width: 220, flexShrink: 0, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', alignSelf: 'flex-start', maxHeight: '100%' }}>
-          <Box sx={{ px: 2, py: 1, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-            <Typography fontWeight={700} fontSize={13} letterSpacing={1}>SUMMARY</Typography>
+          <Box sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+            <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>SUMMARY</Typography>
             <IconButton size="small" sx={{ color: '#fff' }}><MuiIcons.ExpandMore fontSize="small" /></IconButton>
           </Box>
 
           {/* Scrollable: summary lines + net due + checkout + workspace status */}
-          <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5, minHeight: 0 }}>
+          <Box sx={{ flex: 1, overflowY: 'auto', p: { md: 1.5, xl: 1 }, minHeight: 0 }}>
             {SUMMARY_LINES.map((l, i) => (
               <Box key={i} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
                 <Typography variant="caption" color="text.secondary">{l.label}</Typography>
@@ -422,14 +463,14 @@ export default function ModernTransactions() {
             <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" mb={0.5}>
               NET DUE FROM CUSTOMER
             </Typography>
-            <Typography variant="h5" fontWeight={800} color={GREEN} mb={2}>$747.58</Typography>
+            <Typography fontWeight={800} color={GREEN} mb={{ md: 2, xl: 1 }} sx={{ fontSize: { md: '1.5rem', xl: '1.2rem' } }}>$747.58</Typography>
 
-            <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+            <Typography variant="caption" color="text.secondary" display="block" mb={{ md: 1.5, xl: 0.75 }}>
               No payment has been entered yet.
             </Typography>
 
-            <Button fullWidth variant="contained" size="medium"
-              sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, borderRadius: 2, fontWeight: 700, mb: 2 }}>
+            <Button fullWidth variant="contained" size="small"
+              sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, borderRadius: 2, fontWeight: 700, mb: { md: 2, xl: 1 } }}>
               Checkout / Payment
             </Button>
 
@@ -453,13 +494,13 @@ export default function ModernTransactions() {
       </Box>{/* end three-column row */}
 
       {/* ── Full-width bottom bar: ADD TRANSACTION + ACTIONS ── */}
-      <Paper sx={{ p: 1.5, borderRadius: 2, flexShrink: 0, display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+      <Paper sx={{ p: { md: 1.5, xl: 1 }, borderRadius: 2, flexShrink: 0, display: 'flex', gap: { md: 2, xl: 1.5 }, alignItems: 'flex-start' }}>
         {/* ADD TRANSACTION */}
         <Box sx={{ flex: 1 }}>
-          <Typography variant="caption" fontWeight={700} color="text.secondary" letterSpacing={1} display="block" mb={1}>
+          <Typography fontWeight={700} color="text.secondary" letterSpacing={1} display="block" mb={{ md: 1, xl: 0.5 }} sx={{ fontSize: { md: 12, xl: 10 } }}>
             ADD TRANSACTION
           </Typography>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: { md: 1, xl: 0.75 }, flexWrap: 'wrap' }}>
             {transactionTypes.map(t => {
               const IconComponent = MuiIcons[t.icon] ?? MuiIcons.Add;
               return (
@@ -479,10 +520,10 @@ export default function ModernTransactions() {
 
         {/* ACTIONS */}
         <Box sx={{ flexShrink: 0 }}>
-          <Typography variant="caption" fontWeight={700} color="text.secondary" letterSpacing={1} display="block" mb={1}>
+          <Typography fontWeight={700} color="text.secondary" letterSpacing={1} display="block" mb={{ md: 1, xl: 0.5 }} sx={{ fontSize: { md: 12, xl: 10 } }}>
             ACTIONS
           </Typography>
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <Box sx={{ display: 'flex', gap: { md: 1, xl: 0.75 } }}>
             {[
               { label: 'Notes',    icon: 'Assignment' },
               { label: 'Discount', icon: 'Percent'    },
