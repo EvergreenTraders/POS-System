@@ -5,49 +5,10 @@ import {
   Box, Typography, Paper, Grid, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Badge, Tooltip, Stack
 } from '@mui/material';
-import SearchIcon from '@mui/icons-material/Search';
-import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
-import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
-import LocalParkingIcon from '@mui/icons-material/LocalParking';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import AddIcon from '@mui/icons-material/Add';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
-import EditIcon from '@mui/icons-material/Edit';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import PersonIcon from '@mui/icons-material/Person';
-import PersonAddIcon from '@mui/icons-material/PersonAdd';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import QrCode2Icon from '@mui/icons-material/QrCode2';
-import ClearIcon from '@mui/icons-material/Clear';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import FlashOnIcon from '@mui/icons-material/FlashOn';
-import LocalOfferIcon from '@mui/icons-material/LocalOffer';
-import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
-import SavingsIcon from '@mui/icons-material/Savings';
-import BalanceIcon from '@mui/icons-material/Balance';
-import HandshakeIcon from '@mui/icons-material/Handshake';
-import LayersIcon from '@mui/icons-material/Layers';
-import BuildIcon from '@mui/icons-material/Build';
-import PaymentIcon from '@mui/icons-material/Payment';
-import RedeemIcon from '@mui/icons-material/Redeem';
-import UndoIcon from '@mui/icons-material/Undo';
+import * as MuiIcons from '@mui/icons-material';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
-
-// ── Icon/colour map keyed by transaction type string ─────────────────────────
-const TYPE_META = {
-  pawn:        { icon: <SavingsIcon />,     color: '#6a1b9a' },
-  buy:         { icon: <ShoppingCartIcon />, color: '#1565c0' },
-  sale:        { icon: <LocalOfferIcon />,  color: '#2e7d32' },
-  refund:      { icon: <UndoIcon />,        color: '#c62828' },
-  repair:      { icon: <BuildIcon />,       color: '#bf360c' },
-  payment:     { icon: <PaymentIcon />,     color: '#f9a825' },
-  redeem:      { icon: <RedeemIcon />,      color: '#f9a825' },
-  layaway:     { icon: <LayersIcon />,      color: '#37474f' },
-  trade:       { icon: <BalanceIcon />,     color: '#00695c' },
-  consignment: { icon: <HandshakeIcon />,   color: '#e65100' },
-};
 
 // ── Sample workspace transactions ────────────────────────────────────────────
 const SAMPLE_TRANSACTIONS = [
@@ -135,7 +96,7 @@ function TransactionCard({ tx }) {
           <Typography fontWeight={700} fontSize={13} color={tx.accentColor}>{tx.type}</Typography>
           <Chip label={tx.status} size="small" sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: tx.statusColor, color: '#fff' }} />
         </Box>
-        <IconButton size="small"><MoreVertIcon fontSize="small" /></IconButton>
+        <IconButton size="small"><MuiIcons.MoreVert fontSize="small" /></IconButton>
       </Box>
 
       <Box sx={{ px: 1.5, pb: 1 }}>
@@ -166,9 +127,9 @@ function TransactionCard({ tx }) {
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-          <Button size="small" variant="outlined" startIcon={<EditIcon />} sx={{ flex: 1, fontSize: 11 }}>Edit</Button>
+          <Button size="small" variant="outlined" startIcon={<MuiIcons.Edit />} sx={{ flex: 1, fontSize: 11 }}>Edit</Button>
           {tx.type !== 'PAWN PAYMENT' && tx.type !== 'REPAIR DROP-OFF' && (
-            <Button size="small" variant="outlined" startIcon={<AddIcon />} sx={{ flex: 1, fontSize: 11 }}>Add Item</Button>
+            <Button size="small" variant="outlined" startIcon={<MuiIcons.Add />} sx={{ flex: 1, fontSize: 11 }}>Add Item</Button>
           )}
         </Box>
       </Box>
@@ -217,20 +178,20 @@ export default function ModernTransactions() {
           size="small"
           fullWidth
           InputProps={{
-            startAdornment: <InputAdornment position="start"><SearchIcon sx={{ color: 'text.secondary' }} /></InputAdornment>,
+            startAdornment: <InputAdornment position="start"><MuiIcons.Search sx={{ color: 'text.secondary' }} /></InputAdornment>,
             endAdornment: (
               <InputAdornment position="end">
-                <IconButton size="small"><QrCodeScannerIcon /></IconButton>
-                <IconButton size="small"><PhotoCameraIcon /></IconButton>
+                <IconButton size="small"><MuiIcons.QrCodeScanner /></IconButton>
+                <IconButton size="small"><MuiIcons.PhotoCamera /></IconButton>
               </InputAdornment>
             ),
           }}
           sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
         />
-        <Button variant="outlined" startIcon={<LocalParkingIcon />} sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}>
+        <Button variant="outlined" startIcon={<MuiIcons.LocalParking />} sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}>
           Park Transaction
         </Button>
-        <Button variant="outlined" startIcon={<PlayArrowIcon />} sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}>
+        <Button variant="outlined" startIcon={<MuiIcons.PlayArrow />} sx={{ whiteSpace: 'nowrap', borderRadius: 2 }}>
           Resume
         </Button>
       </Paper>
@@ -242,13 +203,13 @@ export default function ModernTransactions() {
         <Paper sx={{ width: 240, flexShrink: 0, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <Box sx={{ px: 2, py: 1, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography fontWeight={700} fontSize={13} letterSpacing={1}>CUSTOMER</Typography>
-            <IconButton size="small" sx={{ color: '#fff' }}><ExpandMoreIcon fontSize="small" /></IconButton>
+            <IconButton size="small" sx={{ color: '#fff' }}><MuiIcons.ExpandMore fontSize="small" /></IconButton>
           </Box>
 
           <Box sx={{ p: 1.5, flex: 1, overflowY: 'auto' }}>
             {/* Avatar + name */}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
-              <Avatar sx={{ bgcolor: '#b0bec5', width: 44, height: 44 }}><PersonIcon /></Avatar>
+              <Avatar sx={{ bgcolor: '#b0bec5', width: 44, height: 44 }}><MuiIcons.Person /></Avatar>
               <Box>
                 <Typography fontWeight={700} fontSize={14}>John Smith</Typography>
               </Box>
@@ -266,7 +227,7 @@ export default function ModernTransactions() {
               </Box>
               <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                 <Typography variant="caption" color="text.secondary" sx={{ width: 48 }}>ID:</Typography>
-                <Chip icon={<CheckCircleIcon sx={{ fontSize: '12px !important' }} />} label="Verified" size="small"
+                <Chip icon={<MuiIcons.CheckCircle sx={{ fontSize: '12px !important' }} />} label="Verified" size="small"
                   sx={{ height: 18, fontSize: 10, bgcolor: '#e8f5e9', color: '#2e7d32', '& .MuiChip-icon': { color: '#2e7d32' } }} />
               </Box>
             </Stack>
@@ -303,16 +264,16 @@ export default function ModernTransactions() {
                 Select Customer
               </Button>
               {[
-                { label: 'Create New Customer', icon: <PersonAddIcon fontSize="small" /> },
-                { label: 'View Customer',        icon: <VisibilityIcon fontSize="small" /> },
-                { label: 'Scan ID',              icon: <QrCode2Icon fontSize="small" /> },
+                { label: 'Create New Customer', icon: <MuiIcons.PersonAdd fontSize="small" /> },
+                { label: 'View Customer',        icon: <MuiIcons.Visibility fontSize="small" /> },
+                { label: 'Scan ID',              icon: <MuiIcons.QrCode2 fontSize="small" /> },
               ].map(b => (
                 <Button key={b.label} fullWidth variant="outlined" size="small" startIcon={b.icon}
                   sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
                   {b.label}
                 </Button>
               ))}
-              <Button fullWidth variant="outlined" size="small" startIcon={<ClearIcon fontSize="small" />} color="error"
+              <Button fullWidth variant="outlined" size="small" startIcon={<MuiIcons.Clear fontSize="small" />} color="error"
                 sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
                 Clear Customer
               </Button>
@@ -331,7 +292,7 @@ export default function ModernTransactions() {
               </Badge>
               <Typography variant="caption" color="text.secondary">Add, edit or remove transactions before checkout.</Typography>
             </Box>
-            <Button variant="contained" size="small" startIcon={<AddIcon />} endIcon={<ExpandMoreIcon />}
+            <Button variant="contained" size="small" startIcon={<MuiIcons.Add />} endIcon={<MuiIcons.ExpandMore />}
               sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, borderRadius: 2, fontSize: 12 }}>
               Add Transaction
             </Button>
@@ -355,13 +316,13 @@ export default function ModernTransactions() {
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
               {transactionTypes.map(t => {
-                const meta = TYPE_META[t.type] ?? { icon: <AddIcon />, color: '#607d8b' };
+                const IconComponent = MuiIcons[t.icon] ?? MuiIcons.Add;
                 return (
                   <TransactionTypeButton
                     key={t.id}
                     label={t.type.charAt(0).toUpperCase() + t.type.slice(1)}
-                    icon={meta.icon}
-                    color={meta.color}
+                    icon={<IconComponent />}
+                    color={t.color ?? '#607d8b'}
                   />
                 );
               })}
@@ -373,7 +334,7 @@ export default function ModernTransactions() {
         <Paper sx={{ width: 220, flexShrink: 0, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <Box sx={{ px: 2, py: 1, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography fontWeight={700} fontSize={13} letterSpacing={1}>SUMMARY</Typography>
-            <IconButton size="small" sx={{ color: '#fff' }}><ExpandMoreIcon fontSize="small" /></IconButton>
+            <IconButton size="small" sx={{ color: '#fff' }}><MuiIcons.ExpandMore fontSize="small" /></IconButton>
           </Box>
 
           <Box sx={{ p: 1.5, flex: 1, overflowY: 'auto' }}>
@@ -411,7 +372,7 @@ export default function ModernTransactions() {
               'Ready to checkout',
             ].map(msg => (
               <Box key={msg} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75 }}>
-                <CheckCircleIcon sx={{ fontSize: 14, color: '#2e7d32' }} />
+                <MuiIcons.CheckCircle sx={{ fontSize: 14, color: '#2e7d32' }} />
                 <Typography variant="caption" color="text.secondary">{msg}</Typography>
               </Box>
             ))}

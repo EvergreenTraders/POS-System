@@ -152,22 +152,28 @@ COMMENT ON COLUMN payment_methods.accepted_for_pawn_redeems IS 'Whether this ten
 CREATE TABLE IF NOT EXISTS transaction_type (
     id SERIAL PRIMARY KEY,
     type VARCHAR(50) NOT NULL UNIQUE,
+    icon VARCHAR(50),
+    color VARCHAR(20),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insert transaction types
-INSERT INTO transaction_type (type) VALUES
-    ('pawn'),
-    ('buy'),
-    ('sale'),
-    ('refund'),
-    ('repair'),
-    ('payment'),
-    ('redeem'),
-    ('layaway'),
-    ('trade')
-ON CONFLICT (type) DO NOTHING;
+-- Add icon/color columns for existing deployments
+ALTER TABLE transaction_type ADD COLUMN IF NOT EXISTS icon VARCHAR(50);
+ALTER TABLE transaction_type ADD COLUMN IF NOT EXISTS color VARCHAR(20);
+
+-- Insert transaction types with icon and color
+INSERT INTO transaction_type (type, icon, color) VALUES
+    ('pawn',    'Savings',      '#6a1b9a'),
+    ('buy',     'ShoppingCart', '#1565c0'),
+    ('sale',    'LocalOffer',   '#2e7d32'),
+    ('refund',  'Undo',         '#c62828'),
+    ('repair',  'Build',        '#bf360c'),
+    ('payment', 'Payment',      '#f9a825'),
+    ('redeem',  'Redeem',       '#f9a825'),
+    ('layaway', 'Layers',       '#37474f'),
+    ('trade',   'Balance',      '#00695c')
+ON CONFLICT (type) DO UPDATE SET icon = EXCLUDED.icon, color = EXCLUDED.color;
 
 -- Remove deprecated types (retail remapped to sale, return removed)
 UPDATE transaction_items SET transaction_type_id = (SELECT id FROM transaction_type WHERE type = 'sale')
