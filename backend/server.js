@@ -7944,9 +7944,9 @@ app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
   const { status } = req.body;
 
   // Validate status
-  const validStatuses = ['PAWN', 'REDEEMED', 'FORFEITED'];
+  const validStatuses = ['ACTIVE', 'REDEEMED', 'FORFEITED'];
   if (!validStatuses.includes(status)) {
-    return res.status(400).json({ error: 'Invalid status. Must be one of: PAWN, REDEEMED, FORFEITED' });
+    return res.status(400).json({ error: 'Invalid status. Must be one of: ACTIVE, REDEEMED, FORFEITED' });
   }
 
   try {
@@ -7961,8 +7961,8 @@ app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
     // Determine jewelry status based on pawn_ticket status
     // FORFEITED pawn tickets -> jewelry moves to IN_PROCESS (ready for resale)
     // REDEEMED pawn tickets -> jewelry status is REDEEMED
-    // PAWN -> jewelry status is PAWN
-    const jewelryStatus = status === 'FORFEITED' ? 'IN_PROCESS' : status;
+    // ACTIVE (ticket still open) -> jewelry status stays PAWN
+    const jewelryStatus = status === 'FORFEITED' ? 'IN_PROCESS' : status === 'ACTIVE' ? 'PAWN' : status;
 
     // Update all jewelry items associated with this pawn ticket
     const itemsResult = await pool.query(
@@ -8854,7 +8854,7 @@ app.get('/api/customers/search', async (req, res) => {
       // General search - search across all fields with OR
       const searchTerm = first_name.toLowerCase();
       const query = `
-        SELECT id, first_name, last_name, email, phone, status, tax_exempt
+        SELECT id, first_name, last_name, email, phone, status, tax_exempt, created_at, id_number
         FROM customers
         WHERE LOWER(first_name) LIKE $1
            OR LOWER(last_name) LIKE $1
@@ -8982,6 +8982,23 @@ app.get('/api/customers/search', async (req, res) => {
     } finally {
         client.release();
     }
+});
+
+app.get('/api/customers/:id/stats', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT COUNT(DISTINCT j.item_id) AS active_pawns
+      FROM pawn_ticket pt
+      JOIN transactions t ON t.transaction_id = pt.transaction_id
+      JOIN jewelry j ON j.item_id = pt.item_id
+      WHERE t.customer_id = $1 AND pt.status = 'ACTIVE' AND j.status = 'PAWN'
+    `, [id]);
+    res.json({ active_pawns: parseInt(result.rows[0].active_pawns) || 0 });
+  } catch (err) {
+    console.error('Error fetching customer stats:', err);
+    res.status(500).json({ error: 'Failed to fetch customer stats' });
+  }
 });
 
 app.get('/api/customers/:id', async (req, res) => {
@@ -10778,7 +10795,7 @@ app.get('/api/customer-dashboard', async (req, res) => {
 // Transaction Types API Endpoints
 app.get('/api/transaction-types', async (req, res) => {
   try {
-    const query = 'SELECT * FROM transaction_type ORDER BY id';
+    const query = 'SELECT * FROM transaction_type ORDER BY COALESCE(sort_order, 99), id';
     const result = await pool.query(query);
     res.json(result.rows);
   } catch (error) {
@@ -13102,7 +13119,7 @@ app.post('/api/pawn/check-forfeitures', async (req, res) => {
       INNER JOIN pawn_ticket pt ON j.item_id = pt.item_id
       INNER JOIN transactions t ON pt.transaction_id = t.transaction_id
       WHERE j.status = 'PAWN'
-        AND pt.status = 'PAWN'
+        AND pt.status = 'ACTIVE'
         AND t.transaction_date + INTERVAL '1 day' * $1 < CURRENT_DATE
     `;
 
@@ -13190,7 +13207,7 @@ async function checkPawnForfeitures() {
       INNER JOIN pawn_ticket pt ON j.item_id = pt.item_id
       INNER JOIN transactions t ON pt.transaction_id = t.transaction_id
       WHERE j.status = 'PAWN'
-        AND pt.status = 'PAWN'
+        AND pt.status = 'ACTIVE'
         AND t.transaction_date + INTERVAL '1 day' * $1 < CURRENT_DATE
     `;
 

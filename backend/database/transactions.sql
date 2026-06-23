@@ -152,22 +152,36 @@ COMMENT ON COLUMN payment_methods.accepted_for_pawn_redeems IS 'Whether this ten
 CREATE TABLE IF NOT EXISTS transaction_type (
     id SERIAL PRIMARY KEY,
     type VARCHAR(50) NOT NULL UNIQUE,
+    icon VARCHAR(50),
+    color VARCHAR(20),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insert transaction types
-INSERT INTO transaction_type (type) VALUES
-    ('pawn'),
-    ('buy'),
-    ('retail'),
-    ('sale'),
-    ('refund'),
-    ('return'),
-    ('repair'),
-    ('payment'),
-    ('redeem')
-ON CONFLICT (type) DO NOTHING;
+-- Add icon/color/sort_order columns for existing deployments
+ALTER TABLE transaction_type ADD COLUMN IF NOT EXISTS icon VARCHAR(50);
+ALTER TABLE transaction_type ADD COLUMN IF NOT EXISTS color VARCHAR(20);
+ALTER TABLE transaction_type ADD COLUMN IF NOT EXISTS sort_order INTEGER;
+
+-- Insert transaction types with icon, color, and sort order
+INSERT INTO transaction_type (type, icon, color, sort_order) VALUES
+    ('quick_sale',  'Bolt',           '#00acc1',  1),
+    ('sale',        'LocalOffer',     '#2e7d32',  2),
+    ('buy',         'ShoppingCart',   '#1565c0',  3),
+    ('pawn',        'Savings',        '#6a1b9a',  4),
+    ('trade',       'Balance',        '#00695c',  5),
+    ('consignment', 'Handshake',      '#e65100',  6),
+    ('layaway',     'CalendarMonth',  '#37474f',  7),
+    ('repair',      'Build',          '#c62828',  8),
+    ('payment',     'MonetizationOn', '#f9a825',  9),
+    ('redeem',      'ExitToApp',      '#388e3c', 10),
+    ('refund',      'Undo',           '#e53935', 11)
+ON CONFLICT (type) DO UPDATE SET icon = EXCLUDED.icon, color = EXCLUDED.color, sort_order = EXCLUDED.sort_order;
+
+-- Remove deprecated types (retail remapped to sale, return removed)
+UPDATE transaction_items SET transaction_type_id = (SELECT id FROM transaction_type WHERE type = 'sale')
+    WHERE transaction_type_id = (SELECT id FROM transaction_type WHERE type = 'retail');
+DELETE FROM transaction_type WHERE type IN ('retail', 'return');
 
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,

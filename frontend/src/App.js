@@ -35,6 +35,7 @@ import QuoteManager from './pages/QuoteManager';
 import CustomerManager from './pages/CustomerManager';
 import CustomerEditor from './pages/CustomerEditor';
 import CustomerTicket from './pages/CustomerTicket';
+import ModernTransactions from './pages/ModernTransactions';
 import CustomerReporting from './pages/CustomerReporting';
 import CustomerDashboard from './pages/CustomerDashboard';
 import Cart from './pages/Cart';
@@ -535,6 +536,16 @@ function App() {
                   <ProtectedRoute>
                     <AuthenticatedLayout>
                       <CustomerEditor />
+                    </AuthenticatedLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/modern-transactions"
+                element={
+                  <ProtectedRoute>
+                    <AuthenticatedLayout>
+                      <ModernTransactions />
                     </AuthenticatedLayout>
                   </ProtectedRoute>
                 }

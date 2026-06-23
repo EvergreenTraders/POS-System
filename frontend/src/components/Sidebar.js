@@ -29,6 +29,7 @@ import {
   Assessment as AssessmentIcon,
   BookmarkAdded as LayawayIcon,
   PointOfSale as TransactionsIcon,
+  AutoAwesome as ModernTransactionsIcon,
   AccountBalance as CashDrawerIcon,
   AccessTime as TimeClockIcon,
 } from '@mui/icons-material';
@@ -142,6 +143,15 @@ function Sidebar() {
               <QuoteIcon />
             </ListItemIcon>
             {isOpen && <ListItemText primary="Quotes" />}
+          </StyledListItem>
+        </StyledLink>
+
+        <StyledLink to="/modern-transactions">
+          <StyledListItem active={isActive('/modern-transactions')}>
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 0, mr: isOpen ? 3 : 'auto', justifyContent: 'center' }}>
+              <ModernTransactionsIcon />
+            </ListItemIcon>
+            {isOpen && <ListItemText primary="Modern Transactions" />}
           </StyledListItem>
         </StyledLink>
 

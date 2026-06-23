@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS pawn_ticket (
   transaction_id VARCHAR(50),
   item_id VARCHAR(50),
   inventory_type VARCHAR(50),
-  status VARCHAR(20) DEFAULT 'PAWN',
+  status VARCHAR(20) DEFAULT 'ACTIVE',
   term_days INTEGER DEFAULT 90,
   interest_rate DECIMAL(5,2) DEFAULT 2.9,
   insurance_rate DECIMAL(5,2) DEFAULT 1.0,
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS pawn_ticket (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-COMMENT ON COLUMN pawn_ticket.status IS 'Status of the pawn ticket: PAWN, REDEEMED, FORFEITED';
+COMMENT ON COLUMN pawn_ticket.status IS 'Status of the pawn ticket: ACTIVE, REDEEMED, FORFEITED';
 COMMENT ON COLUMN pawn_ticket.term_days IS 'Pawn term in days (frozen at ticket creation)';
 COMMENT ON COLUMN pawn_ticket.interest_rate IS 'Interest rate percentage (frozen at ticket creation)';
 COMMENT ON COLUMN pawn_ticket.insurance_rate IS 'Insurance rate percentage per period (frozen at ticket creation)';
