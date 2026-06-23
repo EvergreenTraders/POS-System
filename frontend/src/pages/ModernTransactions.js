@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import config from '../config';
 import {
   Box, Typography, Paper, Grid, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Badge, Tooltip, Stack
@@ -33,20 +35,19 @@ import UndoIcon from '@mui/icons-material/Undo';
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 
-// ── Transaction type button configs ──────────────────────────────────────────
-const TRANSACTION_TYPES = [
-  { label: 'Quick Sale', icon: <FlashOnIcon />, color: '#1565c0' },
-  { label: 'Sale',       icon: <LocalOfferIcon />, color: '#2e7d32' },
-  { label: 'Buy',        icon: <ShoppingCartIcon />, color: '#1565c0' },
-  { label: 'Pawn',       icon: <SavingsIcon />, color: '#6a1b9a' },
-  { label: 'Trade',      icon: <BalanceIcon />, color: '#00695c' },
-  { label: 'Consignment',icon: <HandshakeIcon />, color: '#e65100' },
-  { label: 'Layaway',    icon: <LayersIcon />, color: '#37474f' },
-  { label: 'Repair',     icon: <BuildIcon />, color: '#bf360c' },
-  { label: 'Payment',    icon: <PaymentIcon />, color: '#f9a825' },
-  { label: 'Redeem',     icon: <RedeemIcon />, color: '#f9a825' },
-  { label: 'Refund',     icon: <UndoIcon />, color: '#c62828' },
-];
+// ── Icon/colour map keyed by transaction type string ─────────────────────────
+const TYPE_META = {
+  pawn:        { icon: <SavingsIcon />,     color: '#6a1b9a' },
+  buy:         { icon: <ShoppingCartIcon />, color: '#1565c0' },
+  sale:        { icon: <LocalOfferIcon />,  color: '#2e7d32' },
+  refund:      { icon: <UndoIcon />,        color: '#c62828' },
+  repair:      { icon: <BuildIcon />,       color: '#bf360c' },
+  payment:     { icon: <PaymentIcon />,     color: '#f9a825' },
+  redeem:      { icon: <RedeemIcon />,      color: '#f9a825' },
+  layaway:     { icon: <LayersIcon />,      color: '#37474f' },
+  trade:       { icon: <BalanceIcon />,     color: '#00695c' },
+  consignment: { icon: <HandshakeIcon />,   color: '#e65100' },
+};
 
 // ── Sample workspace transactions ────────────────────────────────────────────
 const SAMPLE_TRANSACTIONS = [
@@ -196,6 +197,13 @@ function TransactionTypeButton({ label, icon, color }) {
 
 export default function ModernTransactions() {
   const [search, setSearch] = useState('');
+  const [transactionTypes, setTransactionTypes] = useState([]);
+
+  useEffect(() => {
+    axios.get(`${config.apiUrl}/transaction-types`)
+      .then(res => setTransactionTypes(res.data))
+      .catch(err => console.error('Failed to load transaction types:', err));
+  }, []);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
@@ -346,9 +354,17 @@ export default function ModernTransactions() {
               ADD TRANSACTION
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-              {TRANSACTION_TYPES.map(t => (
-                <TransactionTypeButton key={t.label} {...t} />
-              ))}
+              {transactionTypes.map(t => {
+                const meta = TYPE_META[t.type] ?? { icon: <AddIcon />, color: '#607d8b' };
+                return (
+                  <TransactionTypeButton
+                    key={t.id}
+                    label={t.type.charAt(0).toUpperCase() + t.type.slice(1)}
+                    icon={meta.icon}
+                    color={meta.color}
+                  />
+                );
+              })}
             </Box>
           </Paper>
         </Box>

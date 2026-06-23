@@ -160,14 +160,19 @@ CREATE TABLE IF NOT EXISTS transaction_type (
 INSERT INTO transaction_type (type) VALUES
     ('pawn'),
     ('buy'),
-    ('retail'),
     ('sale'),
     ('refund'),
-    ('return'),
     ('repair'),
     ('payment'),
-    ('redeem')
+    ('redeem'),
+    ('layaway'),
+    ('trade')
 ON CONFLICT (type) DO NOTHING;
+
+-- Remove deprecated types (retail remapped to sale, return removed)
+UPDATE transaction_items SET transaction_type_id = (SELECT id FROM transaction_type WHERE type = 'sale')
+    WHERE transaction_type_id = (SELECT id FROM transaction_type WHERE type = 'retail');
+DELETE FROM transaction_type WHERE type IN ('retail', 'return');
 
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,
