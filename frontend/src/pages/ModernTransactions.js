@@ -201,7 +201,7 @@ export default function ModernTransactions() {
   const handleClearCustomer = () => setCustomer(null);
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
 
       {/* ── Top search bar ── */}
       <Paper elevation={1} sx={{ px: 2, py: 1, display: 'flex', alignItems: 'center', gap: 1.5, borderRadius: 0, zIndex: 10 }}>
@@ -230,11 +230,14 @@ export default function ModernTransactions() {
         </Button>
       </Paper>
 
-      {/* ── Three-column body ── */}
-      <Box sx={{ display: 'flex', flex: 1, gap: 1.5, p: 1.5, overflow: 'hidden' }}>
+      {/* ── Body (three columns + full-width bottom bar) ── */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 1.5, p: 1.5, overflow: 'hidden' }}>
+
+      {/* Three-column row */}
+      <Box sx={{ display: 'flex', flex: 1, gap: 1.5, overflow: 'hidden', minHeight: 0 }}>
 
         {/* ── LEFT: Customer panel ── */}
-        <Paper sx={{ width: 240, flexShrink: 0, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Paper sx={{ width: 240, flexShrink: 0, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', alignSelf: 'flex-start', maxHeight: '100%' }}>
           <Box sx={{ px: 2, py: 1, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography fontWeight={700} fontSize={13} letterSpacing={1}>CUSTOMER</Typography>
           </Box>
@@ -396,35 +399,17 @@ export default function ModernTransactions() {
             </Grid>
           </Box>
 
-          {/* Add transaction type buttons */}
-          <Paper sx={{ p: 1.5, borderRadius: 2 }}>
-            <Typography variant="caption" fontWeight={700} color="text.secondary" letterSpacing={1} display="block" mb={1}>
-              ADD TRANSACTION
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-              {transactionTypes.map(t => {
-                const IconComponent = MuiIcons[t.icon] ?? MuiIcons.Add;
-                return (
-                  <TransactionTypeButton
-                    key={t.id}
-                    label={t.type.charAt(0).toUpperCase() + t.type.slice(1)}
-                    icon={<IconComponent />}
-                    color={t.color ?? '#607d8b'}
-                  />
-                );
-              })}
-            </Box>
-          </Paper>
         </Box>
 
         {/* ── RIGHT: Summary panel ── */}
-        <Paper sx={{ width: 220, flexShrink: 0, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <Box sx={{ px: 2, py: 1, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Paper sx={{ width: 220, flexShrink: 0, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden', alignSelf: 'flex-start', maxHeight: '100%' }}>
+          <Box sx={{ px: 2, py: 1, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
             <Typography fontWeight={700} fontSize={13} letterSpacing={1}>SUMMARY</Typography>
             <IconButton size="small" sx={{ color: '#fff' }}><MuiIcons.ExpandMore fontSize="small" /></IconButton>
           </Box>
 
-          <Box sx={{ p: 1.5, flex: 1, overflowY: 'auto' }}>
+          {/* Scrollable: summary lines + net due + checkout + workspace status */}
+          <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5, minHeight: 0 }}>
             {SUMMARY_LINES.map((l, i) => (
               <Box key={i} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
                 <Typography variant="caption" color="text.secondary">{l.label}</Typography>
@@ -463,22 +448,57 @@ export default function ModernTransactions() {
                 <Typography variant="caption" color="text.secondary">{msg}</Typography>
               </Box>
             ))}
-
-            <Divider sx={{ my: 1.5 }} />
-
-            <Typography variant="caption" fontWeight={700} color="text.secondary" letterSpacing={1} display="block" mb={1}>
-              ACTIONS
-            </Typography>
-            <Grid container spacing={0.75}>
-              {['Notes', 'Discount', 'Void', 'Print'].map(a => (
-                <Grid item xs={6} key={a}>
-                  <Button fullWidth variant="outlined" size="small" sx={{ fontSize: 10, borderRadius: 1.5 }}>{a}</Button>
-                </Grid>
-              ))}
-            </Grid>
           </Box>
         </Paper>
-      </Box>
+      </Box>{/* end three-column row */}
+
+      {/* ── Full-width bottom bar: ADD TRANSACTION + ACTIONS ── */}
+      <Paper sx={{ p: 1.5, borderRadius: 2, flexShrink: 0, display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+        {/* ADD TRANSACTION */}
+        <Box sx={{ flex: 1 }}>
+          <Typography variant="caption" fontWeight={700} color="text.secondary" letterSpacing={1} display="block" mb={1}>
+            ADD TRANSACTION
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            {transactionTypes.map(t => {
+              const IconComponent = MuiIcons[t.icon] ?? MuiIcons.Add;
+              return (
+                <TransactionTypeButton
+                  key={t.id}
+                  label={t.type.charAt(0).toUpperCase() + t.type.slice(1)}
+                  icon={<IconComponent />}
+                  color={t.color ?? '#607d8b'}
+                />
+              );
+            })}
+          </Box>
+        </Box>
+
+        {/* Divider */}
+        <Divider orientation="vertical" flexItem />
+
+        {/* ACTIONS */}
+        <Box sx={{ flexShrink: 0 }}>
+          <Typography variant="caption" fontWeight={700} color="text.secondary" letterSpacing={1} display="block" mb={1}>
+            ACTIONS
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            {[
+              { label: 'Notes',    icon: 'Assignment' },
+              { label: 'Discount', icon: 'Percent'    },
+              { label: 'Void',     icon: 'Block'      },
+              { label: 'Print',    icon: 'Print'      },
+            ].map(a => {
+              const Icon = MuiIcons[a.icon];
+              return (
+                <TransactionTypeButton key={a.label} label={a.label} icon={<Icon />} color="#607d8b" />
+              );
+            })}
+          </Box>
+        </Box>
+      </Paper>
+
+      </Box>{/* end body wrapper */}
     </Box>
   );
 }

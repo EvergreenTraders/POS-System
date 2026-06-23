@@ -10778,7 +10778,7 @@ app.get('/api/customer-dashboard', async (req, res) => {
 // Transaction Types API Endpoints
 app.get('/api/transaction-types', async (req, res) => {
   try {
-    const query = 'SELECT * FROM transaction_type ORDER BY id';
+    const query = 'SELECT * FROM transaction_type ORDER BY COALESCE(sort_order, 99), id';
     const result = await pool.query(query);
     res.json(result.rows);
   } catch (error) {

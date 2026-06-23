@@ -158,22 +158,25 @@ CREATE TABLE IF NOT EXISTS transaction_type (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Add icon/color columns for existing deployments
+-- Add icon/color/sort_order columns for existing deployments
 ALTER TABLE transaction_type ADD COLUMN IF NOT EXISTS icon VARCHAR(50);
 ALTER TABLE transaction_type ADD COLUMN IF NOT EXISTS color VARCHAR(20);
+ALTER TABLE transaction_type ADD COLUMN IF NOT EXISTS sort_order INTEGER;
 
--- Insert transaction types with icon and color
-INSERT INTO transaction_type (type, icon, color) VALUES
-    ('pawn',    'Savings',      '#6a1b9a'),
-    ('buy',     'ShoppingCart', '#1565c0'),
-    ('sale',    'LocalOffer',   '#2e7d32'),
-    ('refund',  'Undo',         '#c62828'),
-    ('repair',  'Build',        '#bf360c'),
-    ('payment', 'Payment',      '#f9a825'),
-    ('redeem',  'Redeem',       '#f9a825'),
-    ('layaway', 'Layers',       '#37474f'),
-    ('trade',   'Balance',      '#00695c')
-ON CONFLICT (type) DO UPDATE SET icon = EXCLUDED.icon, color = EXCLUDED.color;
+-- Insert transaction types with icon, color, and sort order
+INSERT INTO transaction_type (type, icon, color, sort_order) VALUES
+    ('quick_sale',  'Bolt',           '#00acc1',  1),
+    ('sale',        'LocalOffer',     '#2e7d32',  2),
+    ('buy',         'ShoppingCart',   '#1565c0',  3),
+    ('pawn',        'Savings',        '#6a1b9a',  4),
+    ('trade',       'Balance',        '#00695c',  5),
+    ('consignment', 'Handshake',      '#e65100',  6),
+    ('layaway',     'CalendarMonth',  '#37474f',  7),
+    ('repair',      'Build',          '#c62828',  8),
+    ('payment',     'MonetizationOn', '#f9a825',  9),
+    ('redeem',      'ExitToApp',      '#388e3c', 10),
+    ('refund',      'Undo',           '#e53935', 11)
+ON CONFLICT (type) DO UPDATE SET icon = EXCLUDED.icon, color = EXCLUDED.color, sort_order = EXCLUDED.sort_order;
 
 -- Remove deprecated types (retail remapped to sale, return removed)
 UPDATE transaction_items SET transaction_type_id = (SELECT id FROM transaction_type WHERE type = 'sale')
