@@ -3,9 +3,10 @@ import axios from 'axios';
 import config from '../config';
 import {
   Box, Typography, Paper, Grid, Avatar, Button, IconButton, Chip,
-  Divider, TextField, InputAdornment, Badge, Tooltip, Stack
+  Divider, TextField, InputAdornment, Badge, Tooltip, Stack, Snackbar, Alert
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
+import PawnTransactionScreen from './PawnTransactionScreen';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
@@ -137,10 +138,11 @@ function TransactionCard({ tx }) {
   );
 }
 
-function TransactionTypeButton({ label, icon, color }) {
+function TransactionTypeButton({ label, icon, color, onClick }) {
   return (
     <Paper
       variant="outlined"
+      onClick={onClick}
       sx={{
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         p: { md: 1, xl: 0.75 }, cursor: 'pointer', borderRadius: 2, borderColor: '#e0e0e0',
@@ -160,6 +162,8 @@ function TransactionTypeButton({ label, icon, color }) {
 export default function ModernTransactions() {
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
+  const [pawnOpen, setPawnOpen]           = useState(false);
+  const [noCustomerWarning, setNoCustomerWarning] = useState(false);
 
   // Customer state
   const [customer, setCustomer] = useState(null);
@@ -210,6 +214,23 @@ export default function ModernTransactions() {
   };
 
   const handleClearCustomer = () => { setCustomer(null); setCustomerStats(null); };
+
+  const handleTransactionTypeClick = (type) => {
+    if (type === 'pawn') {
+      if (!customer) { setNoCustomerWarning(true); return; }
+      setPawnOpen(true);
+    }
+  };
+
+  if (pawnOpen) {
+    return (
+      <PawnTransactionScreen
+        customer={customer}
+        customerStats={customerStats}
+        onClose={() => setPawnOpen(false)}
+      />
+    );
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
@@ -509,6 +530,7 @@ export default function ModernTransactions() {
                   label={t.type.charAt(0).toUpperCase() + t.type.slice(1)}
                   icon={<IconComponent />}
                   color={t.color ?? '#607d8b'}
+                  onClick={() => handleTransactionTypeClick(t.type)}
                 />
               );
             })}
@@ -540,6 +562,17 @@ export default function ModernTransactions() {
       </Paper>
 
       </Box>{/* end body wrapper */}
+
+      <Snackbar
+        open={noCustomerWarning}
+        autoHideDuration={4000}
+        onClose={() => setNoCustomerWarning(false)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity="warning" onClose={() => setNoCustomerWarning(false)} sx={{ fontWeight: 600 }}>
+          Please select a customer before opening a pawn ticket.
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

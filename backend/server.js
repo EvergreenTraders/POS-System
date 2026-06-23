@@ -8988,16 +8988,74 @@ app.get('/api/customers/:id/stats', async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(`
-      SELECT COUNT(DISTINCT j.item_id) AS active_pawns
-      FROM pawn_ticket pt
-      JOIN transactions t ON t.transaction_id = pt.transaction_id
-      JOIN jewelry j ON j.item_id = pt.item_id
-      WHERE t.customer_id = $1 AND pt.status = 'ACTIVE' AND j.status = 'PAWN'
+      SELECT
+        COUNT(DISTINCT j.item_id) FILTER (WHERE pt.status = 'ACTIVE' AND j.status = 'PAWN') AS active_pawns,
+        COUNT(DISTINCT j.item_id) FILTER (WHERE pt.status = 'ACTIVE' AND j.status = 'PAWN' AND pt.due_date < CURRENT_DATE) AS overdue_pawns,
+        COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'FORFEITED') AS forfeited_pawns,
+        COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'REDEEMED') AS redeemed_pawns
+      FROM transactions t
+      LEFT JOIN pawn_ticket pt ON pt.transaction_id = t.transaction_id
+      LEFT JOIN jewelry j ON j.item_id = pt.item_id
+      WHERE t.customer_id = $1
     `, [id]);
-    res.json({ active_pawns: parseInt(result.rows[0].active_pawns) || 0 });
+
+    const row = result.rows[0];
+    const activePawns    = parseInt(row.active_pawns)    || 0;
+    const overduePawns   = parseInt(row.overdue_pawns)   || 0;
+    const forfeitedPawns = parseInt(row.forfeited_pawns) || 0;
+    const redeemedPawns  = parseInt(row.redeemed_pawns)  || 0;
+    const forfeitRatio   = (forfeitedPawns + redeemedPawns) > 0
+      ? Math.round((forfeitedPawns / (forfeitedPawns + redeemedPawns)) * 100)
+      : 0;
+
+    res.json({
+      active_pawns:  activePawns,
+      overdue_pawns: overduePawns,
+      forfeited_pawns: forfeitedPawns,
+      redeemed_pawns: redeemedPawns,
+      forfeit_ratio: forfeitRatio,
+    });
   } catch (err) {
     console.error('Error fetching customer stats:', err);
     res.status(500).json({ error: 'Failed to fetch customer stats' });
+  }
+});
+
+app.get('/api/customers/:id/pawns', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        pt.pawn_ticket_id,
+        pt.due_date,
+        pt.status,
+        j.short_desc AS item_description,
+        j.item_price AS pawn_amount,
+        t.transaction_date
+      FROM pawn_ticket pt
+      JOIN transactions t ON t.transaction_id = pt.transaction_id
+      JOIN jewelry j ON j.item_id = pt.item_id
+      WHERE t.customer_id = $1 AND pt.status IN ('ACTIVE', 'OVERDUE')
+      ORDER BY pt.due_date ASC
+    `, [id]);
+
+    const today = new Date();
+    const pawns = result.rows.map(row => ({
+      ticket:     row.pawn_ticket_id,
+      item:       row.item_description || '—',
+      amount:     row.pawn_amount ? `$${parseFloat(row.pawn_amount).toFixed(2)}` : '—',
+      dueDate:    row.due_date ? new Date(row.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
+      overdue:    row.due_date ? new Date(row.due_date) < today : false,
+      daysInfo:   row.due_date ? (() => {
+        const diff = Math.round((new Date(row.due_date) - today) / (1000 * 60 * 60 * 24));
+        return diff < 0 ? `(${Math.abs(diff)} day${Math.abs(diff) !== 1 ? 's' : ''} overdue)` : `(in ${diff} day${diff !== 1 ? 's' : ''})`;
+      })() : '',
+    }));
+
+    res.json(pawns);
+  } catch (err) {
+    console.error('Error fetching customer pawns:', err);
+    res.status(500).json({ error: 'Failed to fetch customer pawns' });
   }
 });
 
