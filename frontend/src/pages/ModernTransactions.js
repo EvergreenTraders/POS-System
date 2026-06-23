@@ -160,11 +160,45 @@ export default function ModernTransactions() {
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
 
+  // Customer state
+  const [customer, setCustomer] = useState(null);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerResults, setCustomerResults] = useState([]);
+  const [searchingCustomer, setSearchingCustomer] = useState(false);
+  const [showResults, setShowResults] = useState(false);
+
   useEffect(() => {
     axios.get(`${config.apiUrl}/transaction-types`)
       .then(res => setTransactionTypes(res.data))
       .catch(err => console.error('Failed to load transaction types:', err));
   }, []);
+
+  const handleCustomerSearch = async (query) => {
+    setCustomerSearch(query);
+    if (!query.trim()) { setCustomerResults([]); setShowResults(false); return; }
+    setSearchingCustomer(true);
+    try {
+      const res = await axios.get(`${config.apiUrl}/customers/search`, {
+        params: { first_name: query, last_name: query, phone: query, email: query },
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setCustomerResults(res.data);
+      setShowResults(true);
+    } catch (err) {
+      console.error('Customer search failed:', err);
+    } finally {
+      setSearchingCustomer(false);
+    }
+  };
+
+  const handleSelectCustomer = (c) => {
+    setCustomer(c);
+    setCustomerSearch('');
+    setCustomerResults([]);
+    setShowResults(false);
+  };
+
+  const handleClearCustomer = () => setCustomer(null);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
@@ -203,79 +237,132 @@ export default function ModernTransactions() {
         <Paper sx={{ width: 240, flexShrink: 0, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <Box sx={{ px: 2, py: 1, bgcolor: GREEN, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography fontWeight={700} fontSize={13} letterSpacing={1}>CUSTOMER</Typography>
-            <IconButton size="small" sx={{ color: '#fff' }}><MuiIcons.ExpandMore fontSize="small" /></IconButton>
           </Box>
 
           <Box sx={{ p: 1.5, flex: 1, overflowY: 'auto' }}>
-            {/* Avatar + name */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
-              <Avatar sx={{ bgcolor: '#b0bec5', width: 44, height: 44 }}><MuiIcons.Person /></Avatar>
-              <Box>
-                <Typography fontWeight={700} fontSize={14}>John Smith</Typography>
-              </Box>
-            </Box>
+            {customer ? (
+              /* ── Customer selected ── */
+              <>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
+                  <Avatar sx={{ bgcolor: GREEN, width: 44, height: 44, fontSize: 16, fontWeight: 700 }}>
+                    {customer.first_name?.[0]}{customer.last_name?.[0]}
+                  </Avatar>
+                  <Box>
+                    <Typography fontWeight={700} fontSize={14}>
+                      {customer.first_name} {customer.last_name}
+                    </Typography>
+                    {customer.status && (
+                      <Chip label={customer.status} size="small"
+                        sx={{ height: 16, fontSize: 9, mt: 0.25,
+                          bgcolor: customer.status === 'active' ? '#e8f5e9' : '#fff3e0',
+                          color: customer.status === 'active' ? '#2e7d32' : '#e65100' }} />
+                    )}
+                  </Box>
+                </Box>
 
-            {/* Contact details */}
-            <Stack spacing={0.25} mb={1.5}>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ width: 48 }}>Phone:</Typography>
-                <Typography variant="caption">506-555-1234</Typography>
-              </Box>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ width: 48 }}>Email:</Typography>
-                <Typography variant="caption">john.smith@email.com</Typography>
-              </Box>
-              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                <Typography variant="caption" color="text.secondary" sx={{ width: 48 }}>ID:</Typography>
-                <Chip icon={<MuiIcons.CheckCircle sx={{ fontSize: '12px !important' }} />} label="Verified" size="small"
-                  sx={{ height: 18, fontSize: 10, bgcolor: '#e8f5e9', color: '#2e7d32', '& .MuiChip-icon': { color: '#2e7d32' } }} />
-              </Box>
-            </Stack>
+                <Stack spacing={0.25} mb={1.5}>
+                  {customer.phone && (
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ width: 48 }}>Phone:</Typography>
+                      <Typography variant="caption">{customer.phone}</Typography>
+                    </Box>
+                  )}
+                  {customer.email && (
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ width: 48 }}>Email:</Typography>
+                      <Typography variant="caption" noWrap>{customer.email}</Typography>
+                    </Box>
+                  )}
+                  {customer.tax_exempt && (
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ width: 48 }}>Tax:</Typography>
+                      <Chip label="Tax Exempt" size="small"
+                        sx={{ height: 16, fontSize: 9, bgcolor: '#fff3e0', color: '#e65100' }} />
+                    </Box>
+                  )}
+                </Stack>
 
-            <Divider sx={{ mb: 1 }} />
+                <Divider sx={{ mb: 1 }} />
 
-            {/* Stats */}
-            {[
-              { label: 'Active Pawns', value: 2 },
-              { label: 'Active Layaways', value: 1 },
-              { label: 'Open Repairs', value: 1 },
-            ].map(s => (
-              <Box key={s.label} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                <Typography variant="caption" color="text.secondary">{s.label}</Typography>
-                <Typography variant="caption" fontWeight={600}>{s.value}</Typography>
-              </Box>
-            ))}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
-              <Typography variant="caption" color="text.secondary">Store Credit</Typography>
-              <Typography variant="caption" fontWeight={700} color="#2e7d32">$75.00</Typography>
-            </Box>
+                <Stack spacing={0.75}>
+                  <Button fullWidth variant="contained" size="small"
+                    onClick={handleClearCustomer}
+                    sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, borderRadius: 2, fontSize: 11, fontWeight: 700 }}>
+                    Select Customer
+                  </Button>
+                  <Button fullWidth variant="outlined" size="small"
+                    startIcon={<MuiIcons.Visibility fontSize="small" />}
+                    sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
+                    View Customer
+                  </Button>
+                  <Button fullWidth variant="outlined" size="small" color="error"
+                    onClick={handleClearCustomer}
+                    startIcon={<MuiIcons.Clear fontSize="small" />}
+                    sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
+                    Clear Customer
+                  </Button>
+                </Stack>
+              </>
+            ) : (
+              /* ── No customer selected ── */
+              <>
+                {/* Search box */}
+                <Box sx={{ position: 'relative', mb: 1.5 }}>
+                  <TextField
+                    fullWidth size="small"
+                    placeholder="Search by name, phone, email..."
+                    value={customerSearch}
+                    onChange={e => handleCustomerSearch(e.target.value)}
+                    onBlur={() => setTimeout(() => setShowResults(false), 200)}
+                    onFocus={() => customerResults.length > 0 && setShowResults(true)}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          {searchingCustomer
+                            ? <MuiIcons.HourglassEmpty fontSize="small" sx={{ color: 'text.secondary' }} />
+                            : <MuiIcons.Search fontSize="small" sx={{ color: 'text.secondary' }} />}
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                  {showResults && customerResults.length > 0 && (
+                    <Paper elevation={4} sx={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, maxHeight: 200, overflowY: 'auto', borderRadius: 1, mt: 0.5 }}>
+                      {customerResults.map(c => (
+                        <Box
+                          key={c.id}
+                          onMouseDown={() => handleSelectCustomer(c)}
+                          sx={{ px: 1.5, py: 1, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' }, borderBottom: '1px solid #f0f0f0' }}
+                        >
+                          <Typography fontSize={12} fontWeight={600}>{c.first_name} {c.last_name}</Typography>
+                          {c.phone && <Typography fontSize={11} color="text.secondary">{c.phone}</Typography>}
+                          {c.email && <Typography fontSize={11} color="text.secondary" noWrap>{c.email}</Typography>}
+                        </Box>
+                      ))}
+                    </Paper>
+                  )}
+                  {showResults && customerResults.length === 0 && !searchingCustomer && customerSearch && (
+                    <Paper elevation={4} sx={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, borderRadius: 1, mt: 0.5, px: 1.5, py: 1 }}>
+                      <Typography fontSize={12} color="text.secondary">No customers found</Typography>
+                    </Paper>
+                  )}
+                </Box>
 
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
-              <Typography variant="caption" color="text.secondary">Customer Since</Typography>
-              <Typography variant="caption">Jan 18, 2024</Typography>
-            </Box>
+              </>
+            )}
 
-            <Divider sx={{ mb: 1 }} />
-
-            {/* Action buttons */}
-            <Stack spacing={0.75}>
-              <Button fullWidth variant="contained" size="small"
-                sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, borderRadius: 2, fontSize: 12, fontWeight: 700 }}>
-                Select Customer
-              </Button>
-              {[
-                { label: 'Create New Customer', icon: <MuiIcons.PersonAdd fontSize="small" /> },
-                { label: 'View Customer',        icon: <MuiIcons.Visibility fontSize="small" /> },
-                { label: 'Scan ID',              icon: <MuiIcons.QrCode2 fontSize="small" /> },
-              ].map(b => (
-                <Button key={b.label} fullWidth variant="outlined" size="small" startIcon={b.icon}
-                  sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
-                  {b.label}
-                </Button>
-              ))}
-              <Button fullWidth variant="outlined" size="small" startIcon={<MuiIcons.Clear fontSize="small" />} color="error"
+            {/* Always visible */}
+            <Stack spacing={0.75} mt={1.5}>
+              <Divider />
+              <Button fullWidth variant="outlined" size="small"
+                startIcon={<MuiIcons.PersonAdd fontSize="small" />}
                 sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
-                Clear Customer
+                Create New Customer
+              </Button>
+              <Button fullWidth variant="outlined" size="small"
+                startIcon={<MuiIcons.QrCode2 fontSize="small" />}
+                sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
+                Scan ID
               </Button>
             </Stack>
           </Box>
