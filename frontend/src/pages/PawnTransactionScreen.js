@@ -13,7 +13,28 @@ const PURPLE_DARK = '#5b21b6';
 
 const COL = '130px 52px 110px 1fr 130px 46px 70px 100px 110px';
 
+const PENDING_KEY  = 'pendingPTTicketId';
+const COUNTER_KEY  = 'lastPTTicketNumber';
+
+function generatePawnTicketId() {
+  // Reuse an uncommitted ticket ID if one exists (e.g. user cancelled before saving)
+  const pending = localStorage.getItem(PENDING_KEY);
+  if (pending) return pending;
+
+  let last = parseInt(localStorage.getItem(COUNTER_KEY) || '0');
+  last += 1;
+  localStorage.setItem(COUNTER_KEY, last.toString());
+  const id = `PT-${last.toString().padStart(8, '0')}`;
+  localStorage.setItem(PENDING_KEY, id);
+  return id;
+}
+
+function commitPawnTicketId() {
+  localStorage.removeItem(PENDING_KEY);
+}
+
 export default function PawnTransactionScreen({ customer, customerStats: initialStats, onClose }) {
+  const [ticketId]                        = useState(() => generatePawnTicketId());
   const [itemSearch, setItemSearch]       = useState('');
   const [ticketNote, setTicketNote]       = useState('');
   const [showOnReceipt, setShowOnReceipt] = useState(false);
@@ -26,9 +47,9 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     if (!customer?.id) return;
     const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
 
-    axios.get(`${config.apiUrl}/customers/${customer.id}/stats`, { headers })
+    axios.get(`${config.apiUrl}/customers/${customer.id}/pawn/stats`, { headers })
       .then(res => setStats(res.data))
-      .catch(err => console.error('Failed to load customer stats:', err));
+      .catch(err => console.error('Failed to load customer pawn stats:', err));
 
     setLoadingPawns(true);
     axios.get(`${config.apiUrl}/customers/${customer.id}/pawns`, { headers })
@@ -55,6 +76,8 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
 
   const handleDeleteItem = (id) => setPawnItems(prev => prev.filter(i => i.id !== id));
 
+  const handleAddItem = (item) => setPawnItems(prev => [...prev, item]);
+
   const STAT_BOXES = [
     { icon: 'Inventory2',    label: 'Active Pawns',    value: activePawnCount,    color: '#7c3aed', bg: '#f3e8ff' },
     { icon: 'Warning',       label: 'Overdue Pawns',   value: overduePawnCount,   color: '#d97706', bg: '#fff7ed' },
@@ -79,7 +102,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
             <Box sx={{ minWidth: 0 }}>
               <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
                 <Typography variant="caption" color="text.secondary">Pawn Ticket*</Typography>
-                <Typography variant="caption" color="text.secondary" fontStyle="italic">(assigned at checkout)</Typography>
+                <Typography variant="body2" fontWeight={700}>{ticketId}</Typography>
               </Box>
               <Typography fontWeight={800} fontSize={20} color="#3949ab" lineHeight={1.1}>
                 {customer?.first_name} {customer?.last_name}
@@ -118,9 +141,16 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           </Box>
 
           {/* Table header */}
-          <Box sx={{ display: 'grid', gridTemplateColumns: '110px 1fr 80px 140px', gap: 1, px: 2, py: 0.6, bgcolor: '#f8f9fa', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
-            {['Pawn Ticket #', 'Item', 'Amount', 'Due Date'].map(h => (
-              <Typography key={h} variant="caption" fontWeight={600} color="text.secondary">{h}</Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '120px 1fr 80px 150px', gap: 1, px: 2, py: 0.75, bgcolor: '#f8f9fa', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
+            {[
+              { label: 'Pawn Ticket #', align: 'left'   },
+              { label: 'Item',          align: 'center' },
+              { label: 'Amount',        align: 'center' },
+              { label: 'Due Date',      align: 'center' },
+            ].map(({ label, align }) => (
+              <Typography key={label} variant="caption" fontWeight={700} color="text.secondary" sx={{ textAlign: align }}>
+                {label}
+              </Typography>
             ))}
           </Box>
 
@@ -137,28 +167,40 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
             ) : (
               activePawns.map((pawn, idx) => (
                 <Box key={idx} sx={{
-                  display: 'grid', gridTemplateColumns: '110px 1fr 80px 140px',
+                  display: 'grid', gridTemplateColumns: '120px 1fr 80px 150px',
                   gap: 1, px: 2, py: 0.9, borderBottom: '1px solid #f0f0f0', alignItems: 'center',
                   '&:hover': { bgcolor: '#f9f9f9' },
                 }}>
+
+                  {/* Ticket # */}
                   <Typography variant="caption" color={PURPLE} fontWeight={600} sx={{ cursor: 'pointer' }}>
                     {pawn.ticket}
                   </Typography>
-                  <Box>
+
+                  {/* Item — badge inline so row height stays consistent */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
                     {pawn.overdue && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4, mb: 0.2 }}>
-                        <MuiIcons.Warning sx={{ fontSize: 10, color: '#dc2626' }} />
-                        <Chip label="OVERDUE" size="small" sx={{ height: 15, fontSize: 9, fontWeight: 700, bgcolor: '#fee2e2', color: '#dc2626' }} />
-                      </Box>
+                      <Chip
+                        label="OVERDUE"
+                        size="small"
+                        icon={<MuiIcons.Warning sx={{ fontSize: '10px !important', color: '#dc2626 !important' }} />}
+                        sx={{ height: 16, fontSize: 9, fontWeight: 700, bgcolor: '#fee2e2', color: '#dc2626', flexShrink: 0, '& .MuiChip-label': { px: 0.5 } }}
+                      />
                     )}
-                    <Typography variant="caption" noWrap>{pawn.item}</Typography>
+                    <Typography variant="caption" noWrap sx={{ minWidth: 0 }}>{pawn.item}</Typography>
                   </Box>
-                  <Typography variant="caption" fontWeight={500}>{pawn.amount}</Typography>
-                  <Box>
-                    <Typography variant="caption" color={pawn.overdue ? '#dc2626' : 'text.primary'} fontWeight={500}>
+
+                  {/* Amount */}
+                  <Typography variant="caption" fontWeight={600} sx={{ textAlign: 'center' }}>
+                    {pawn.amount}
+                  </Typography>
+
+                  {/* Due Date */}
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="caption" display="block" color={pawn.overdue ? '#dc2626' : 'text.primary'} fontWeight={500}>
                       {pawn.dueDate}
                     </Typography>
-                    <Typography variant="caption" display="block" color={pawn.overdue ? '#dc2626' : 'text.secondary'} fontSize={10}>
+                    <Typography sx={{ fontSize: 10, color: pawn.overdue ? '#dc2626' : 'text.secondary' }}>
                       {pawn.daysInfo}
                     </Typography>
                   </Box>
@@ -350,10 +392,12 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           Cancel
         </Button>
         <Button size="small" variant="outlined"
+          onClick={() => { commitPawnTicketId(); }}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
           Add to Workspace
         </Button>
         <Button size="small" variant="contained" endIcon={<MuiIcons.ArrowForward />}
+          onClick={() => { commitPawnTicketId(); }}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}>
           Checkout Now
         </Button>

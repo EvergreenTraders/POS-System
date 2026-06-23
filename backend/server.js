@@ -8984,7 +8984,7 @@ app.get('/api/customers/search', async (req, res) => {
     }
 });
 
-app.get('/api/customers/:id/stats', async (req, res) => {
+app.get('/api/customers/:id/pawn/stats', async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(`
@@ -8992,11 +8992,13 @@ app.get('/api/customers/:id/stats', async (req, res) => {
         COUNT(DISTINCT j.item_id) FILTER (WHERE pt.status = 'ACTIVE' AND j.status = 'PAWN') AS active_pawns,
         COUNT(DISTINCT j.item_id) FILTER (WHERE pt.status = 'ACTIVE' AND j.status = 'PAWN' AND pt.due_date < CURRENT_DATE) AS overdue_pawns,
         COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'FORFEITED') AS forfeited_pawns,
-        COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'REDEEMED') AS redeemed_pawns
+        COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'REDEEMED') AS redeemed_pawns,
+        MIN(t.transaction_date) AS first_pawn_date
       FROM transactions t
       LEFT JOIN pawn_ticket pt ON pt.transaction_id = t.transaction_id
       LEFT JOIN jewelry j ON j.item_id = pt.item_id
       WHERE t.customer_id = $1
+        AND pt.pawn_ticket_id IS NOT NULL
     `, [id]);
 
     const row = result.rows[0];
@@ -9009,11 +9011,12 @@ app.get('/api/customers/:id/stats', async (req, res) => {
       : 0;
 
     res.json({
-      active_pawns:  activePawns,
-      overdue_pawns: overduePawns,
+      active_pawns:    activePawns,
+      overdue_pawns:   overduePawns,
       forfeited_pawns: forfeitedPawns,
-      redeemed_pawns: redeemedPawns,
-      forfeit_ratio: forfeitRatio,
+      redeemed_pawns:  redeemedPawns,
+      forfeit_ratio:   forfeitRatio,
+      first_pawn_date: row.first_pawn_date ?? null,
     });
   } catch (err) {
     console.error('Error fetching customer stats:', err);
@@ -9036,7 +9039,9 @@ app.get('/api/customers/:id/pawns', async (req, res) => {
       JOIN transactions t ON t.transaction_id = pt.transaction_id
       JOIN jewelry j ON j.item_id = pt.item_id
       WHERE t.customer_id = $1 AND pt.status IN ('ACTIVE', 'OVERDUE')
-      ORDER BY pt.due_date ASC
+      ORDER BY
+        CASE WHEN pt.due_date < CURRENT_DATE THEN 0 ELSE 1 END ASC,
+        pt.due_date ASC
     `, [id]);
 
     const today = new Date();
