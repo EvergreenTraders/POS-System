@@ -17,6 +17,52 @@ const COL = '130px 52px 110px 1fr 130px 46px 70px 100px 110px';
 const PENDING_KEY  = 'pendingPTTicketId';
 const COUNTER_KEY  = 'lastPTTicketNumber';
 
+function parsePawnDescription(parts, categoryCodeMap, colorCodeMap, metalTypeCodeMap) {
+  const result = { category: null, purity: null, weight: null, color: null, metal: null };
+  let i = 0;
+
+  if (parts[i] && categoryCodeMap[parts[i]]) {
+    result.category = categoryCodeMap[parts[i]];
+    i++;
+  }
+
+  if (i < parts.length) {
+    const p = parts[i];
+    if (p.match(/^\d+K?$/i)) {
+      result.purity = p.replace(/K$/i, '') + 'K';
+      i++;
+    } else if (p.match(/^0?\.\d+$/) || p.match(/^1\.0+$/)) {
+      result.purity = parseFloat(p);
+      i++;
+    } else if (p.match(/^[A-Z]+$/) && !p.match(/^\d/)) {
+      result.purity = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+      i++;
+    }
+  }
+
+  if (i < parts.length) {
+    const w = parts[i];
+    if (w.match(/^[\d.]+G?$/i)) {
+      result.weight = parseFloat(w.replace(/G$/i, ''));
+      i++;
+    }
+  }
+
+  if (i < parts.length) {
+    const cm = parts[i];
+    if (cm.length === 1) {
+      result.metal = metalTypeCodeMap[cm] || null;
+    } else if (metalTypeCodeMap[cm]) {
+      result.metal = metalTypeCodeMap[cm];
+    } else {
+      result.color  = colorCodeMap[cm[0]]        || null;
+      result.metal  = metalTypeCodeMap[cm.slice(1)] || null;
+    }
+  }
+
+  return result;
+}
+
 function generatePawnTicketId() {
   // Reuse an uncommitted ticket ID if one exists (e.g. user cancelled before saving)
   const pending = localStorage.getItem(PENDING_KEY);
@@ -45,6 +91,36 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [loadingPawns, setLoadingPawns]   = useState(false);
   const [intakeOpen, setIntakeOpen]       = useState(false);
   const [intakeEntry, setIntakeEntry]     = useState('');
+  const [parsedValues,    setParsedValues]    = useState(null);
+  const [categoryCodeMap, setCategoryCodeMap] = useState({});
+  const [colorCodeMap,    setColorCodeMap]    = useState({});
+  const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
+
+  useEffect(() => {
+    const fetchCodeMaps = async () => {
+      try {
+        const [catRes, colorRes, typeRes] = await Promise.all([
+          axios.get(`${config.apiUrl}/metal_category`),
+          axios.get(`${config.apiUrl}/metal_color`),
+          axios.get(`${config.apiUrl}/precious_metal_type`),
+        ]);
+        const catMap = {};
+        (catRes.data || []).forEach(c => { if (c.category_code) catMap[c.category_code.toUpperCase()] = c.category; });
+        setCategoryCodeMap(catMap);
+
+        const colorMap = {};
+        (colorRes.data || []).forEach(c => { if (c.color_code) colorMap[c.color_code.toUpperCase()] = c.color; });
+        setColorCodeMap(colorMap);
+
+        const typeMap = {};
+        (typeRes.data || []).forEach(t => { if (t.type_code) typeMap[t.type_code.toUpperCase()] = t.type; });
+        setMetalTypeCodeMap(typeMap);
+      } catch (err) {
+        console.error('Error fetching metal code maps:', err);
+      }
+    };
+    fetchCodeMaps();
+  }, []);
 
   useEffect(() => {
     if (!customer?.id) return;
@@ -82,7 +158,14 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const handleAddItem = (item) => setPawnItems(prev => [...prev, item]);
 
   const openIntake = () => {
-    setIntakeEntry(itemSearch);
+    const text  = itemSearch.trim();
+    const parts = text.toUpperCase().split(/\s+/);
+    if (parts[0] === 'J' && parts.length >= 2) {
+      setParsedValues(parsePawnDescription(parts.slice(1), categoryCodeMap, colorCodeMap, metalTypeCodeMap));
+    } else {
+      setParsedValues(null);
+    }
+    setIntakeEntry(text);
     setIntakeOpen(true);
   };
 
@@ -118,6 +201,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
         customer={customer}
         ticketId={ticketId}
         initialEntry={intakeEntry}
+        parsedValues={parsedValues}
         onBack={handleIntakeBack}
         onSaveItem={handleIntakeSave}
         onSaveAndAddAnother={handleIntakeSaveAndAdd}

@@ -5550,7 +5550,7 @@ app.get('/api/metal_style_subcategory', async (req, res) => {
 // Diamond Shapes API Endpoint
 app.get('/api/diamond_shape', async (req, res) => {
   try {
-    const result = await pool.query('SELECT shape, description, image_path FROM diamond_shape');
+    const result = await pool.query('SELECT id, shape, description, image_path FROM diamond_shape ORDER BY id');
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching diamond shapes:', error);
