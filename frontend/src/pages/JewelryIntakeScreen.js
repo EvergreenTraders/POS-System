@@ -3,6 +3,7 @@ import {
   Box, Typography, Paper, Button, IconButton, TextField, Select, MenuItem,
   FormControl, InputLabel, Chip, Divider, Checkbox, FormControlLabel,
   InputAdornment, Dialog, DialogContent, DialogActions, DialogTitle,
+  Tabs, Tab, Table, TableHead, TableBody, TableRow, TableCell,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import axios from 'axios';
@@ -80,7 +81,7 @@ function GemEntryDialog({ open, onClose, onSave, title = 'Gem', initial = null }
     setStoneColorId(initial?.stoneColorId || null);
     setStoneColor(initial?.stoneColor  || '');
     setStoneShape(initial?.stoneShape  || '');
-    setStoneWeight(initial?.stoneWeight || '');
+    setStoneWeight(initial?.stoneWeight || initial?.caratWeight || '');
     setStoneWidth(initial?.stoneWidth  || '');
     setStoneDepth(initial?.stoneDepth  || '');
     setStoneQty(initial?.stoneQty      || 1);
@@ -163,7 +164,24 @@ function GemEntryDialog({ open, onClose, onSave, title = 'Gem', initial = null }
     setStoneType(type);
   };
 
+  const [gemErrors, setGemErrors] = useState({});
+
   const handleSave = () => {
+    const errs = {};
+    if (gemType === 'diamond') {
+      if (!shape)   errs.shape   = true;
+      if (!cut)     errs.cut     = true;
+      if (!clarity) errs.clarity = true;
+      if (!color)   errs.color   = true;
+    } else {
+      if (!stoneType)   errs.stoneType   = true;
+      if (!stoneColor)  errs.stoneColor  = true;
+      if (!stoneShape)  errs.stoneShape  = true;
+      if (!stoneWeight) errs.stoneWeight = true;
+    }
+    if (Object.keys(errs).length) { setGemErrors(errs); return; }
+    setGemErrors({});
+
     if (gemType === 'diamond') {
       const shapeImage = shapes[shapeIdx]?.image || null;
       onSave({ gemType, shape, shapeImage, quantity: Number(quantity), size, caratWeight, exactColor, color, clarity, cut, labGrown, estValue });
@@ -387,12 +405,28 @@ function GemEntryDialog({ open, onClose, onSave, title = 'Gem', initial = null }
         </Box>
       </DialogContent>
 
-      <DialogActions sx={{ px: 2, py: 1.25, borderTop: '1px solid #e0e0e0', gap: 1 }}>
+      <DialogActions sx={{ px: 2, py: 1.25, borderTop: '1px solid #e0e0e0', gap: 1, flexDirection: 'column', alignItems: 'stretch' }}>
+        {Object.keys(gemErrors).length > 0 && (
+          <Typography variant="caption" color="error" sx={{ mb: 0.5 }}>
+            Required: {[
+              gemErrors.shape   && 'Shape',
+              gemErrors.cut     && 'Cut',
+              gemErrors.clarity && 'Clarity',
+              gemErrors.color   && 'Color',
+              gemErrors.stoneType   && 'Type',
+              gemErrors.stoneColor  && 'Color',
+              gemErrors.stoneShape  && 'Shape',
+              gemErrors.stoneWeight && 'Weight',
+            ].filter(Boolean).join(', ')}
+          </Typography>
+        )}
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
         <Button onClick={onClose} sx={{ textTransform: 'none', borderRadius: 2 }}>Cancel</Button>
         <Button variant="contained" onClick={handleSave}
           sx={{ textTransform: 'none', borderRadius: 2, bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN }, px: 3 }}>
           Save
         </Button>
+        </Box>
       </DialogActions>
     </Dialog>
   );
@@ -415,12 +449,12 @@ export default function JewelryIntakeScreen({
   const [isPopupOpen,       setIsPopupOpen]       = useState(false);
   const [popupImageIndex,   setPopupImageIndex]   = useState(0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isCameraEnabled,   setIsCameraEnabled]   = useState(false);
   const videoRef          = useRef(null);
   const pendingPurityRef  = useRef(null);
   const parsedAppliedRef  = useRef(false);
   // Metal lookup data from API
   const [preciousMetalTypes,    setPreciousMetalTypes]    = useState([]);
-  const [nonPreciousMetalTypes, setNonPreciousMetalTypes] = useState([]);
   const [metalCategories,       setMetalCategories]       = useState([]);
   const [metalColors,           setMetalColors]           = useState([]);
   const [metalPurities,         setMetalPurities]         = useState([]);
@@ -431,31 +465,35 @@ export default function JewelryIntakeScreen({
   const [metal,             setMetal]             = useState('');
   const [purity,            setPurity]            = useState({ id: '', purity: '', value: '' });
   const [colour,            setColour]            = useState('');
-  const [grossWeight,       setGrossWeight]       = useState('6.25');
-  const [stoneWeight,       setStoneWeight]       = useState('0.55');
-  const [netMetalWeight]                          = useState('5.70');
-  const [condition,         setCondition]         = useState('Good');
-  const [ringSize,          setRingSize]          = useState('7.5');
-  const [shape,             setShape]             = useState('Round');
-  const [style,             setStyle]             = useState('Cluster');
+  const [grossWeight,       setGrossWeight]       = useState('');
   const [spotPrice,         setSpotPrice]         = useState('');
   const [metalSpotPrices,   setMetalSpotPrices]   = useState({ CADXAU: 0, CADXAG: 0, CADXPT: 0, CADXPD: 0 });
-  const [isLivePricing,     setIsLivePricing]     = useState(false);
   const [isPerTransaction,  setIsPerTransaction]  = useState(false);
   const [lastFetched,       setLastFetched]       = useState(null);
   const [cachedRates,       setCachedRates]       = useState({});
-  const [estimatedYear,     setEstimatedYear]     = useState('');
-  const [origin,            setOrigin]            = useState('Unknown');
   const [estMetalValue,        setEstMetalValue]        = useState('');
   const [isMetalValueManual,   setIsMetalValueManual]   = useState(false);
   const [primaryGemDialogOpen, setPrimaryGemDialogOpen] = useState(false);
   const [primaryGem,           setPrimaryGem]           = useState(null);
   const [secondaryGems,        setSecondaryGems]        = useState([]);
+  const [gemTab,               setGemTab]               = useState(0);
   const [secGemDialogOpen,     setSecGemDialogOpen]     = useState(false);
   const [editingSecIdx,        setEditingSecIdx]        = useState(null);
   const [mode,              setMode]              = useState('unique');
   const [suggestCatalog,    setSuggestCatalog]    = useState(true);
-  const [paidAmount,        setPaidAmount]        = useState('478.00');
+  const [paidAmount,        setPaidAmount]        = useState('');
+  // Pricing
+  const [priceEstimatePercentages, setPriceEstimatePercentages] = useState({});
+  const [diamondEstimates,         setDiamondEstimates]         = useState([]);
+  const [compMetalVal,    setCompMetalVal]    = useState('');
+  const [compDiamondVal,  setCompDiamondVal]  = useState('');
+  const [compStoneVal,    setCompStoneVal]    = useState('');
+  const [pawnPct,  setPawnPct]  = useState('');
+  const [buyPct,   setBuyPct]   = useState('');
+  const [meltPct,  setMeltPct]  = useState('98');
+  const [pawnVal,  setPawnVal]  = useState('');
+  const [buyVal,   setBuyVal]   = useState('');
+  const [meltVal,  setMeltVal]  = useState('');
 
   const parsedParts = [category, colour, metal, purity.purity].filter(Boolean);
 
@@ -482,16 +520,26 @@ export default function JewelryIntakeScreen({
   useEffect(() => {
     const fetchAllMetalData = async () => {
       try {
-        const [typesRes, nonPreciousRes, categoriesRes, colorsRes] = await Promise.all([
+        const [typesRes, categoriesRes, colorsRes, priceEstRes, diamEstRes, prefsRes] = await Promise.all([
           axios.get(`${config.apiUrl}/precious_metal_type`),
-          axios.get(`${config.apiUrl}/non_precious_metal_type`),
           axios.get(`${config.apiUrl}/metal_category`),
           axios.get(`${config.apiUrl}/metal_color`),
+          axios.get(`${config.apiUrl}/price_estimates`),
+          axios.get(`${config.apiUrl}/diamond_estimates`),
+          axios.get(`${config.apiUrl}/user_preferences`),
         ]);
+        const camPref = (prefsRes.data || []).find(p => p.preference_name === 'cameraEnabled');
+        setIsCameraEnabled(camPref ? camPref.preference_value === 'true' : false);
         setPreciousMetalTypes(typesRes.data   || []);
-        setNonPreciousMetalTypes(nonPreciousRes.data || []);
         setMetalCategories(categoriesRes.data || []);
         setMetalColors(colorsRes.data         || []);
+        setDiamondEstimates(diamEstRes.data   || []);
+        const grouped = {};
+        (priceEstRes.data || []).forEach(e => {
+          if (!grouped[e.precious_metal_type_id]) grouped[e.precious_metal_type_id] = [];
+          grouped[e.precious_metal_type_id].push(e);
+        });
+        setPriceEstimatePercentages(grouped);
       } catch (err) {
         console.error('Error fetching metal data:', err);
       }
@@ -500,7 +548,6 @@ export default function JewelryIntakeScreen({
       try {
         const lpRes = await axios.get(`${config.apiUrl}/live_pricing`);
         const lp = lpRes.data[0] || {};
-        setIsLivePricing(lp.islivepricing);
         setIsPerTransaction(lp.per_transaction);
         if (lp.islivepricing) {
           if (lp.per_transaction) {
@@ -572,6 +619,7 @@ export default function JewelryIntakeScreen({
     const typeObj = preciousMetalTypes.find(t => t.type === value);
     setMetalTypeId(typeObj?.id ?? null);
     setSpotPrice(String(spotPriceForMetal(value, metalSpotPrices) || ''));
+    setColour(value === 'Gold' ? 'Yellow' : '');
   };
 
   const applyRates = useCallback((mapped, currentMetal) => {
@@ -670,12 +718,49 @@ export default function JewelryIntakeScreen({
     const sp  = parseFloat(spotPrice);
     const pv  = parseFloat(purity.value);
     const gw  = parseFloat(grossWeight);
-    const sw  = parseFloat(stoneWeight) || 0;
     if (sp > 0 && pv > 0 && gw > 0) {
-      const net = gw - sw;
-      if (net > 0) setEstMetalValue((sp * pv * net).toFixed(2));
+      setEstMetalValue((sp * pv * gw).toFixed(2));
     }
-  }, [spotPrice, purity.value, grossWeight, stoneWeight, isMetalValueManual]);
+  }, [spotPrice, purity.value, grossWeight, isMetalValueManual]);
+
+  // Sync component metal value from calculated estMetalValue
+  useEffect(() => { setCompMetalVal(estMetalValue); }, [estMetalValue]);
+
+  // Sync gem component values from primaryGem + secondaryGems
+  useEffect(() => {
+    const all = [primaryGem, ...secondaryGems].filter(Boolean);
+    const dTotal = all.filter(g => g.gemType === 'diamond')
+      .reduce((s, g) => s + (parseFloat(g.estValue) || 0), 0);
+    const sTotal = all.filter(g => g.gemType !== 'diamond')
+      .reduce((s, g) => s + (parseFloat(g.estValue) || 0), 0);
+    setCompDiamondVal(dTotal > 0 ? dTotal.toFixed(2) : '');
+    setCompStoneVal(sTotal > 0 ? sTotal.toFixed(2) : '');
+  }, [primaryGem, secondaryGems]);
+
+  // Load pawn/buy % from API when metalTypeId or percentages load
+  useEffect(() => {
+    if (!metalTypeId || !Object.keys(priceEstimatePercentages).length) return;
+    const ests = priceEstimatePercentages[metalTypeId] || [];
+    const pp = ests.find(e => e.transaction_type === 'pawn')?.estimate;
+    const bp = ests.find(e => e.transaction_type === 'buy')?.estimate;
+    if (pp != null) setPawnPct(String(pp));
+    if (bp != null) setBuyPct(String(bp));
+  }, [metalTypeId, priceEstimatePercentages]);
+
+  // Recalculate suggested transaction values
+  useEffect(() => {
+    const metal  = parseFloat(compMetalVal)   || 0;
+    const diamond = parseFloat(compDiamondVal) || 0;
+    const stone  = parseFloat(compStoneVal)   || 0;
+    const total  = metal + diamond + stone;
+    if (total <= 0) return;
+    const pp = parseFloat(pawnPct) || 0;
+    const bp = parseFloat(buyPct)  || 0;
+    const mp = parseFloat(meltPct) || 98;
+    setPawnVal((total * pp / 100).toFixed(2));
+    setBuyVal((total  * bp / 100).toFixed(2));
+    setMeltVal((metal * mp / 100).toFixed(2));
+  }, [compMetalVal, compDiamondVal, compStoneVal, pawnPct, buyPct, meltPct]);
 
   // ──────────────────────────────────────────────────────────────────────────
 
@@ -773,8 +858,20 @@ export default function JewelryIntakeScreen({
   };
 
   // ──────────────────────────────────────────────────────────────────────────
+  const [formErrors, setFormErrors] = useState({});
+
+  function validateMetal() {
+    const errs = {};
+    if (!category)      errs.category = true;
+    if (!metal)         errs.metal    = true;
+    if (!purity.purity) errs.purity   = true;
+    if (!grossWeight || parseFloat(grossWeight) <= 0) errs.grossWeight = true;
+    setFormErrors(errs);
+    return Object.keys(errs).length === 0;
+  }
 
   function handleSave() {
+    if (!validateMetal()) return;
     const item = {
       id:           Date.now(),
       item:         itemName,
@@ -786,12 +883,12 @@ export default function JewelryIntakeScreen({
       amount:       parseFloat(paidAmount) || 0,
       qty:          1,
       serial:       '',
-      size:         ringSize,
     };
     onSaveItem(item);
   }
 
   function handleSaveAndAdd() {
+    if (!validateMetal()) return;
     const item = {
       id:       Date.now(),
       item:     itemName,
@@ -799,7 +896,6 @@ export default function JewelryIntakeScreen({
       amount:   parseFloat(paidAmount) || 0,
       qty:      1,
       serial:   '',
-      size:     ringSize,
     };
     if (onSaveAndAddAnother) onSaveAndAddAnother(item);
     else onSaveItem(item);
@@ -880,7 +976,7 @@ export default function JewelryIntakeScreen({
           <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
 
           {/* Photo section — half width */}
-          <Paper sx={{ width: '50%', flexShrink: 0, borderRadius: 2, overflow: 'hidden', border: '1px solid #e0e0e0' }}>
+          <Paper sx={{ width: '50%', flexShrink: 0, borderRadius: 2, overflow: 'hidden', border: isCameraEnabled && images.length === 0 ? '1px solid #d32f2f' : '1px solid #e0e0e0' }}>
 
             {/* Display area — compact when empty, taller when showing content */}
             <Box sx={{ display: 'flex', height: (showCamera || images.length > 0) ? 210 : 90, bgcolor: '#f7f7f7', transition: 'height 0.2s' }}>
@@ -918,8 +1014,10 @@ export default function JewelryIntakeScreen({
                   </>
                 ) : (
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, userSelect: 'none' }}>
-                    <MuiIcons.AddAPhoto sx={{ fontSize: 40, color: '#c0c0c0' }} />
-                    <Typography variant="caption" color="text.disabled">No photo yet</Typography>
+                    <MuiIcons.AddAPhoto sx={{ fontSize: 40, color: isCameraEnabled ? '#d32f2f' : '#c0c0c0' }} />
+                    <Typography variant="caption" color={isCameraEnabled ? 'error' : 'text.disabled'}>
+                      {isCameraEnabled ? 'Photo required *' : 'No photo yet'}
+                    </Typography>
                   </Box>
                 )}
               </Box>
@@ -1014,24 +1112,24 @@ export default function JewelryIntakeScreen({
 
           {/* Form grid */}
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.25 }}>
-            <FormControl size="small" fullWidth>
+            <FormControl size="small" fullWidth error={!!formErrors.category}>
               <InputLabel>Category *</InputLabel>
-              <Select value={category} label="Category *" onChange={e => setCategory(e.target.value)} sx={{ borderRadius: 2 }}>
+              <Select value={category} label="Category *" onChange={e => { setCategory(e.target.value); setFormErrors(p => ({ ...p, category: false })); }} sx={{ borderRadius: 2 }}>
                 {metalCategories.map(c => <MenuItem key={c.id} value={c.category}>{c.category}</MenuItem>)}
               </Select>
             </FormControl>
-            <FormControl size="small" fullWidth>
+            <FormControl size="small" fullWidth error={!!formErrors.metal}>
               <InputLabel>Metal *</InputLabel>
-              <Select value={metal} label="Metal *" onChange={e => handleMetalChange(e.target.value)} sx={{ borderRadius: 2 }}>
+              <Select value={metal} label="Metal *" onChange={e => { handleMetalChange(e.target.value); setFormErrors(p => ({ ...p, metal: false })); }} sx={{ borderRadius: 2 }}>
                 {preciousMetalTypes.map(t => <MenuItem key={t.id} value={t.type}>{t.type}</MenuItem>)}
               </Select>
             </FormControl>
 
             <Box sx={{ display: 'flex', gap: 0.75 }}>
-              <FormControl size="small" sx={{ flex: 1, minWidth: 0 }}>
+              <FormControl size="small" sx={{ flex: 1, minWidth: 0 }} error={!!formErrors.purity}>
                 <InputLabel>Purity *</InputLabel>
                 <Select value={purity.id} label="Purity *"
-                  onChange={e => handlePurityChange(e.target.value)}
+                  onChange={e => { handlePurityChange(e.target.value); setFormErrors(p => ({ ...p, purity: false })); }}
                   sx={{ borderRadius: 2 }} disabled={metalPurities.length === 0}>
                   {metalPurities
                     .filter((p, i, arr) =>
@@ -1054,23 +1152,20 @@ export default function JewelryIntakeScreen({
                 />
               )}
             </Box>
-            <FormControl size="small" fullWidth>
-              <InputLabel>Color *</InputLabel>
-              <Select value={colour} label="Color *" onChange={e => setColour(e.target.value)} sx={{ borderRadius: 2 }}>
-                {metalColors.map(c => <MenuItem key={c.id} value={c.color}>{c.color}</MenuItem>)}
-              </Select>
-            </FormControl>
+            {metal === 'Gold' && (
+              <FormControl size="small" fullWidth>
+                <InputLabel>Color *</InputLabel>
+                <Select value={colour} label="Color *" onChange={e => setColour(e.target.value)} sx={{ borderRadius: 2 }}>
+                  {metalColors.map(c => <MenuItem key={c.id} value={c.color}>{c.color}</MenuItem>)}
+                </Select>
+              </FormControl>
+            )}
 
-            <TextField label="Weight *" size="small" value={grossWeight} onChange={e => setGrossWeight(e.target.value)}
+            <TextField label="Weight *" size="small" value={grossWeight}
+              onChange={e => { setGrossWeight(e.target.value); setFormErrors(p => ({ ...p, grossWeight: false })); }}
+              error={!!formErrors.grossWeight}
               InputProps={{ endAdornment: <InputAdornment position="end"><Typography variant="caption" color="text.secondary">g</Typography></InputAdornment> }}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }} />
-            
-            <FormControl size="small" fullWidth>
-              <InputLabel>Condition *</InputLabel>
-              <Select value={condition} label="Condition *" onChange={e => setCondition(e.target.value)} sx={{ borderRadius: 2 }}>
-                {['Excellent','Very Good','Good','Fair','Poor'].map(v => <MenuItem key={v} value={v}>{v}</MenuItem>)}
-              </Select>
-            </FormControl>
 
             <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'flex-start' }}>
               <TextField label="Spot Price/gr" size="small" sx={{ flex: 1, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
@@ -1097,251 +1192,285 @@ export default function JewelryIntakeScreen({
           </Box>{/* end scrollable form */}
         </Box>{/* end left column */}
 
-        {/* ── MIDDLE: Description preview + gems ── */}
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto', p: 2, gap: 2 }}>
+        {/* ── MIDDLE: Gem tabs ── */}
+        <Paper sx={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 0, overflow: 'hidden', borderLeft: '1px solid #e8e8e8', borderRight: '1px solid #e8e8e8' }}>
 
-          {/* Primary Gem */}
-          <Paper sx={{ borderRadius: 2, overflow: 'hidden', border: `1px solid ${primaryGem ? GREEN + '55' : '#e0e0e0'}` }}>
-            {/* Header */}
-            <Box sx={{ px: 2, py: 1.25, bgcolor: primaryGem ? GREEN + '14' : '#fafafa', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e8e8e8' }}>
-              <Box>
-                <Typography fontWeight={700} fontSize={13}>Primary Gem</Typography>
-                <Typography variant="caption" color="text.secondary">Only one primary gem entry</Typography>
+          {/* Tab bar */}
+          <Tabs value={gemTab} onChange={(_, v) => setGemTab(v)}
+            sx={{
+              borderBottom: '1px solid #e0e0e0', minHeight: 44, flexShrink: 0,
+              '& .MuiTabs-indicator': { bgcolor: GREEN },
+            }}>
+            <Tab label="Primary Gem" disableRipple
+              sx={{ textTransform: 'none', fontSize: 13, fontWeight: 600, minHeight: 44,
+                color: gemTab === 0 ? GREEN : 'text.secondary',
+                '&.Mui-selected': { color: GREEN } }} />
+            <Tab label={`Secondary Gems${secondaryGems.length ? ` (${secondaryGems.length})` : ''}`}
+              disabled={!primaryGem} disableRipple
+              sx={{ textTransform: 'none', fontSize: 13, fontWeight: 600, minHeight: 44,
+                color: gemTab === 1 ? GREEN : 'text.secondary',
+                '&.Mui-selected': { color: GREEN } }} />
+          </Tabs>
+
+          {/* ── Tab 0: Primary Gem ── */}
+          {gemTab === 0 && (
+            <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+              {/* Action row */}
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Box>
+                  <Typography fontWeight={700} fontSize={14}>Primary Gem</Typography>
+                  <Typography variant="caption" color="text.secondary">Only one primary gem entry</Typography>
+                </Box>
+                <Button size="small" variant="outlined"
+                  startIcon={<MuiIcons.Edit sx={{ fontSize: 13 }} />}
+                  onClick={() => setPrimaryGemDialogOpen(true)}
+                  sx={{ textTransform: 'none', fontSize: 12, borderRadius: 1.5, color: GREEN, borderColor: GREEN + '60' }}>
+                  {primaryGem ? 'Edit' : 'Add'}
+                </Button>
               </Box>
-              <Button size="small" startIcon={<MuiIcons.Edit sx={{ fontSize: 12 }} />}
-                onClick={() => setPrimaryGemDialogOpen(true)}
-                sx={{ textTransform: 'none', fontSize: 11, borderRadius: 1.5, color: GREEN, border: `1px solid ${GREEN}40` }}>
-                {primaryGem ? 'Edit' : 'Add'}
-              </Button>
-            </Box>
 
-            {primaryGem ? (
-              <Box sx={{ p: 1.75 }}>
-                {/* Image + title + weight */}
-                <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', mb: 1.25 }}>
-                  {/* Gem image */}
-                  {(primaryGem.shapeImage || primaryGem.stoneTypeImage || primaryGem.stoneShapeImage) ? (
-                    <Box component="img"
-                      src={primaryGem.gemType === 'diamond' ? primaryGem.shapeImage : (primaryGem.stoneTypeImage || primaryGem.stoneShapeImage)}
-                      alt={primaryGem.shape || primaryGem.stoneType}
-                      sx={{ width: 52, height: 52, objectFit: 'contain', flexShrink: 0 }} />
-                  ) : (
-                    <Box sx={{ width: 52, height: 52, borderRadius: 1.5, bgcolor: '#e8eaf6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <MuiIcons.Diamond sx={{ color: '#5c6bc0', fontSize: 28 }} />
+              {primaryGem ? (
+                <>
+                  {/* Image + title + weight */}
+                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 1.25 }}>
+                    {(primaryGem.shapeImage || primaryGem.stoneTypeImage || primaryGem.stoneShapeImage) ? (
+                      <Box component="img"
+                        src={primaryGem.gemType === 'diamond' ? primaryGem.shapeImage : (primaryGem.stoneTypeImage || primaryGem.stoneShapeImage)}
+                        alt={primaryGem.shape || primaryGem.stoneType}
+                        sx={{ width: 70, height: 70, objectFit: 'contain', flexShrink: 0 }} />
+                    ) : (
+                      <Box sx={{ width: 70, height: 70, borderRadius: 2, bgcolor: '#e8eaf6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <MuiIcons.Diamond sx={{ color: '#5c6bc0', fontSize: 42 }} />
+                      </Box>
+                    )}
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                        <Typography fontWeight={700} fontSize={18} color={GREEN}>
+                          {primaryGem.gemType === 'diamond' ? 'Diamond' : (primaryGem.stoneName || 'Gemstone')}
+                        </Typography>
+                        {primaryGem.labGrown && (
+                          <Chip label="Lab Grown" size="small" sx={{ height: 20, fontSize: 11, bgcolor: '#e8f5e9', color: GREEN }} />
+                        )}
+                      </Box>
+                      <Typography variant="body2" color="text.secondary">
+                        {primaryGem.gemType === 'diamond'
+                          ? `${primaryGem.shape || ''}${primaryGem.cut ? ` · ${primaryGem.cut} Cut` : ''}`
+                          : `${primaryGem.stoneColor || ''}${primaryGem.stoneShape ? ` · ${primaryGem.stoneShape}` : ''}`}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: 'center', flexShrink: 0, bgcolor: GREEN + '10', borderRadius: 2, px: 2, py: 1 }}>
+                      <Typography variant="caption" color="text.secondary" display="block">Weight</Typography>
+                      <Typography fontWeight={700} fontSize={18} lineHeight={1.1} color={GREEN}>
+                        {primaryGem.caratWeight || '0'} ct
+                      </Typography>
+                    </Box>
+                  </Box>
+
+                  {/* Details grid */}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, border: '1px solid #eeeeee', borderRadius: 1.5, overflow: 'hidden', mb: 1 }}>
+                    {(primaryGem.gemType === 'diamond' ? [
+                      ['Color',   `${primaryGem.color || '—'}${primaryGem.exactColor ? ` (${primaryGem.exactColor})` : ''}`],
+                      ['Clarity', primaryGem.clarity  || '—'],
+                      ['Cut',     primaryGem.cut       || '—'],
+                      ['Qty',     primaryGem.quantity  || '—'],
+                      ['Size',    primaryGem.size      || '—'],
+                      ['Lab Grown', primaryGem.labGrown ? 'Yes' : 'No'],
+                    ] : [
+                      ['Type',      primaryGem.stoneType  || '—'],
+                      ['Shape',     primaryGem.stoneShape || '—'],
+                      ['Qty',       primaryGem.quantity   || '—'],
+                      ['Width',     primaryGem.stoneWidth  ? `${primaryGem.stoneWidth} mm` : '—'],
+                      ['Depth',     primaryGem.stoneDepth  ? `${primaryGem.stoneDepth} mm` : '—'],
+                      ['Authentic', primaryGem.authentic   ? 'Yes' : 'No'],
+                    ]).map(([k, v], i) => (
+                      <Box key={k} sx={{ display: 'flex', justifyContent: 'space-between', px: 1.5, py: 0.75,
+                        bgcolor: i % 2 === 0 ? '#fafafa' : 'white', borderBottom: '1px solid #f0f0f0' }}>
+                        <Typography variant="body2" color="text.secondary">{k}</Typography>
+                        <Typography variant="body2" fontWeight={500}>{v}</Typography>
+                      </Box>
+                    ))}
+                  </Box>
+
+                  {primaryGem.estValue && (
+                    <Box sx={{ pt: 0.75, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="body2" color="text.secondary">Estimated Gem Value</Typography>
+                      <Typography fontWeight={700} fontSize={16} color={GREEN}>$ {primaryGem.estValue}</Typography>
                     </Box>
                   )}
-                  {/* Name + subtitle */}
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
-                      <Typography fontWeight={700} fontSize={14} color={GREEN}>
-                        {primaryGem.gemType === 'diamond' ? 'Diamond' : (primaryGem.stoneName || 'Gemstone')}
-                      </Typography>
-                      {primaryGem.labGrown && (
-                        <Chip label="Lab Grown" size="small" sx={{ height: 18, fontSize: 10, bgcolor: '#e8f5e9', color: GREEN }} />
-                      )}
-                    </Box>
-                    <Typography variant="caption" color="text.secondary">
-                      {primaryGem.gemType === 'diamond'
-                        ? `${primaryGem.shape || ''}${primaryGem.cut ? ` · ${primaryGem.cut} Cut` : ''}`
-                        : `${primaryGem.stoneColor || ''}${primaryGem.stoneShape ? ` · ${primaryGem.stoneShape}` : ''}`
-                      }
-                    </Typography>
-                  </Box>
-                  {/* Weight callout */}
-                  <Box sx={{ textAlign: 'center', flexShrink: 0 }}>
-                    <Typography variant="caption" color="text.secondary" display="block">Weight</Typography>
-                    <Typography fontWeight={800} fontSize={20} lineHeight={1.1} color={GREEN}>
-                      {primaryGem.caratWeight || '0'}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">ct</Typography>
-                  </Box>
+                </>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 220, gap: 1 }}>
+                  <MuiIcons.Diamond sx={{ color: '#d0d0d0', fontSize: 56 }} />
+                  <Typography variant="body1" color="text.secondary" fontWeight={500}>No primary gem added</Typography>
+                  <Typography variant="body2" color="text.disabled">Click Add to get started</Typography>
                 </Box>
+              )}
 
-                {/* Details grid */}
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, border: '1px solid #f0f0f0', borderRadius: 1, overflow: 'hidden' }}>
-                  {(primaryGem.gemType === 'diamond' ? [
-                    ['Color',   `${primaryGem.color || '—'}${primaryGem.exactColor ? ` (${primaryGem.exactColor})` : ''}`],
-                    ['Clarity', primaryGem.clarity  || '—'],
-                    ['Qty',     primaryGem.quantity  || '—'],
-                    ['Size',    primaryGem.size      || '—'],
-                  ] : [
-                    ['Color',     primaryGem.stoneColor  || '—'],
-                    ['Qty',       primaryGem.quantity     || '—'],
-                    ['Width',     primaryGem.stoneWidth   ? `${primaryGem.stoneWidth} mm`  : '—'],
-                    ['Depth',     primaryGem.stoneDepth   ? `${primaryGem.stoneDepth} mm`  : '—'],
-                    ['Authentic', primaryGem.authentic    ? 'Yes' : 'No'],
-                  ]).map(([k, v], i) => (
-                    <Box key={k} sx={{ display: 'flex', justifyContent: 'space-between', px: 1, py: 0.5,
-                      bgcolor: i % 2 === 0 ? '#fafafa' : 'white',
-                      borderBottom: '1px solid #f0f0f0' }}>
-                      <Typography variant="caption" color="text.secondary">{k}</Typography>
-                      <Typography variant="caption" fontWeight={600}>{v}</Typography>
-                    </Box>
-                  ))}
-                </Box>
-
-                {primaryGem.estValue && (
-                  <Box sx={{ mt: 1.25, pt: 1, borderTop: '1px solid #e8e8e8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Typography variant="caption" color="text.secondary">Estimated Gem Value</Typography>
-                    <Typography fontWeight={700} fontSize={15} color={GREEN}>$ {primaryGem.estValue}</Typography>
-                  </Box>
-                )}
-              </Box>
-            ) : (
-              <Box sx={{ p: 2.5, textAlign: 'center' }}>
-                <MuiIcons.Diamond sx={{ color: '#bdbdbd', fontSize: 34, mb: 0.5 }} />
-                <Typography variant="body2" color="text.secondary">No primary gem added</Typography>
-                <Typography variant="caption" color="text.disabled">Click Add to get started</Typography>
-              </Box>
-            )}
-
-            <GemEntryDialog
-              open={primaryGemDialogOpen}
-              onClose={() => setPrimaryGemDialogOpen(false)}
-              onSave={handleSavePrimaryGem}
-              title="Primary Gem"
-              initial={primaryGem}
-            />
-          </Paper>
-
-          {/* Secondary Gems */}
-          <Paper sx={{ p: 2, borderRadius: 2, flex: 1 }}>
-            <Box sx={{ mb: 1.5 }}>
-              <Typography fontWeight={700} fontSize={13}>Secondary Gem(s)</Typography>
-              <Typography variant="caption" color="text.secondary">(May be included in description even if no value)</Typography>
+              <GemEntryDialog
+                open={primaryGemDialogOpen}
+                onClose={() => setPrimaryGemDialogOpen(false)}
+                onSave={handleSavePrimaryGem}
+                title="Primary Gem"
+                initial={primaryGem}
+              />
             </Box>
+          )}
 
-            {secondaryGems.length === 0 ? (
-              <Box sx={{ border: '1px dashed #e0e0e0', borderRadius: 1.5, p: 1.5, textAlign: 'center', mb: 1 }}>
-                <Typography variant="caption" color="text.disabled">No secondary gems added</Typography>
-              </Box>
-            ) : (
-              <Box sx={{ border: '1px solid #e0e0e0', borderRadius: 1.5, overflow: 'hidden', mb: 1 }}>
-                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 40px 80px 80px 80px 80px', gap: 1, px: 1.5, py: 0.75, bgcolor: '#f8f9fa', borderBottom: '1px solid #e0e0e0' }}>
-                  {['Type / Name','Qty','Shape','Carat','Value',''].map(h => (
-                    <Typography key={h} variant="caption" fontWeight={700} color="text.secondary">{h}</Typography>
-                  ))}
+          {/* ── Tab 1: Secondary Gems ── */}
+          {gemTab === 1 && (
+            <Box sx={{ flex: 1, overflow: 'auto', p: 2.5 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Box>
+                  <Typography fontWeight={700} fontSize={14}>Secondary Gems</Typography>
+                  <Typography variant="caption" color="text.secondary">May be included even if no value</Typography>
                 </Box>
-                {secondaryGems.map((gem, i) => (
-                  <Box key={i} sx={{ display: 'grid', gridTemplateColumns: '1fr 40px 80px 80px 80px 80px', gap: 1, px: 1.5, py: 0.75, borderBottom: i < secondaryGems.length - 1 ? '1px solid #f0f0f0' : 'none', alignItems: 'center' }}>
-                    <Box>
-                      <Typography variant="caption" fontWeight={600}>{gem.gemType === 'diamond' ? 'Diamond' : gem.stoneName || 'Stone'}</Typography>
-                      {gem.color && <Typography variant="caption" color="text.secondary" display="block">{gem.color}</Typography>}
-                    </Box>
-                    <Typography variant="caption">{gem.quantity}</Typography>
-                    <Typography variant="caption">{gem.shape || '—'}</Typography>
-                    <Typography variant="caption">{gem.caratWeight || '—'} ct</Typography>
-                    <Typography variant="caption">{gem.estValue ? `$${gem.estValue}` : '—'}</Typography>
-                    <Box sx={{ display: 'flex', gap: 0 }}>
-                      <IconButton size="small" onClick={() => handleEditSecGem(i)}><MuiIcons.Edit sx={{ fontSize: 14 }} /></IconButton>
-                      <IconButton size="small" color="error" onClick={() => handleDeleteSecGem(i)}><MuiIcons.Delete sx={{ fontSize: 14 }} /></IconButton>
-                    </Box>
-                  </Box>
-                ))}
+                <Button size="small" variant="outlined"
+                  startIcon={<MuiIcons.Add sx={{ fontSize: 13 }} />}
+                  onClick={handleAddSecGem}
+                  sx={{ textTransform: 'none', fontSize: 12, borderRadius: 1.5, color: GREEN, borderColor: GREEN + '60' }}>
+                  Add Gem
+                </Button>
               </Box>
-            )}
 
-            <Button size="small" variant="outlined"
-              startIcon={<MuiIcons.Add sx={{ fontSize: 13 }} />}
-              onClick={handleAddSecGem}
-              sx={{ textTransform: 'none', fontSize: 12, borderRadius: 1.5 }}>
-              Add Gem
-            </Button>
+              {secondaryGems.length === 0 ? (
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 200, gap: 1 }}>
+                  <MuiIcons.Spa sx={{ color: '#d0d0d0', fontSize: 48 }} />
+                  <Typography variant="body1" color="text.secondary" fontWeight={500}>No secondary gems added</Typography>
+                  <Typography variant="body2" color="text.disabled">Click Add Gem to include one</Typography>
+                </Box>
+              ) : (
+                <Table size="small" sx={{ borderRadius: 1.5, overflow: 'hidden', border: '1px solid #e0e0e0' }}>
+                  <TableHead>
+                    <TableRow sx={{ bgcolor: '#f8f9fa' }}>
+                      <TableCell sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary', py: 0.75 }}>Gem</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary', py: 0.75 }}>Qty</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary', py: 0.75 }}>Shape</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary', py: 0.75 }}>Weight</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary', py: 0.75 }}>Value</TableCell>
+                      <TableCell sx={{ py: 0.75 }} />
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {secondaryGems.map((gem, i) => (
+                      <TableRow key={i} sx={{ bgcolor: i % 2 === 0 ? 'white' : '#fafafa', '&:last-child td': { border: 0 } }}>
+                        <TableCell sx={{ py: 0.75 }}>
+                          <Typography variant="body2" fontWeight={600}>
+                            {gem.gemType === 'diamond' ? 'Diamond' : gem.stoneName || 'Stone'}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {gem.gemType === 'diamond' ? gem.color || '' : gem.stoneColor || ''}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center" sx={{ py: 0.75 }}>{gem.quantity}</TableCell>
+                        <TableCell align="center" sx={{ py: 0.75 }}>
+                          {gem.gemType === 'diamond' ? (gem.shape || '—') : (gem.stoneShape || '—')}
+                        </TableCell>
+                        <TableCell align="center" sx={{ py: 0.75 }}>{gem.caratWeight || gem.weight || '—'} ct</TableCell>
+                        <TableCell align="center" sx={{ py: 0.75 }}>{gem.estValue ? `$${gem.estValue}` : '—'}</TableCell>
+                        <TableCell align="right" sx={{ py: 0.75, whiteSpace: 'nowrap' }}>
+                          <IconButton size="small" onClick={() => handleEditSecGem(i)}><MuiIcons.Edit sx={{ fontSize: 15 }} /></IconButton>
+                          <IconButton size="small" color="error" onClick={() => handleDeleteSecGem(i)}><MuiIcons.Delete sx={{ fontSize: 15 }} /></IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
 
-            <GemEntryDialog
-              open={secGemDialogOpen}
-              onClose={() => setSecGemDialogOpen(false)}
-              onSave={handleSaveSecGem}
-              title={editingSecIdx !== null ? 'Edit Secondary Gem' : 'Add Secondary Gem'}
-              initial={editingSecIdx !== null ? secondaryGems[editingSecIdx] : null}
-            />
-          </Paper>
-        </Box>
+              <GemEntryDialog
+                open={secGemDialogOpen}
+                onClose={() => setSecGemDialogOpen(false)}
+                onSave={handleSaveSecGem}
+                title={editingSecIdx !== null ? 'Edit Secondary Gem' : 'Add Secondary Gem'}
+                initial={editingSecIdx !== null ? secondaryGems[editingSecIdx] : null}
+              />
+            </Box>
+          )}
+        </Paper>
 
         {/* ── RIGHT: Pricing ── */}
-        <Box sx={{ width: 290, bgcolor: 'white', borderLeft: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', overflow: 'auto', p: 2, gap: 1.75, flexShrink: 0 }}>
+        <Box sx={{ width: 300, bgcolor: 'white', borderLeft: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', overflow: 'auto', p: 2, gap: 1.5, flexShrink: 0 }}>
 
           <Typography fontWeight={800} fontSize={14} letterSpacing={0.5}>PRICING</Typography>
 
-          {/* Spot price */}
+          {/* Component estimated values table */}
           <Box>
-            <Typography variant="body2" fontWeight={600} mb={0.75}>Spot Price</Typography>
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-              <Box>
-                <Typography variant="caption" color="text.secondary">Per Gram *</Typography>
-                <TextField size="small" fullWidth value={spotPrice} onChange={e => setSpotPrice(e.target.value)}
-                  InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
-                  sx={{ mt: 0.5, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }} />
-              </Box>
-              <Box>
-                <Typography variant="caption" color="text.secondary">Per Ounce *</Typography>
-                <TextField size="small" fullWidth
-                  value={spotPrice ? (parseFloat(spotPrice) * 31.1035).toFixed(2) : ''}
-                  InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment>, readOnly: true }}
-                  sx={{ mt: 0.5, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }} />
-              </Box>
-            </Box>
-          </Box>
-
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <Box>
-              <Typography variant="body2" color="text.secondary" display="inline">Melt Value </Typography>
-              <Typography variant="caption" color="text.disabled">(Metal Only)</Typography>
-            </Box>
-            <Typography variant="body2" fontWeight={600}>{estMetalValue ? `$ ${estMetalValue}` : '—'}</Typography>
-          </Box>
-
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <Box>
-              <Typography variant="body2" color="text.secondary" display="inline">Suggested Retail </Typography>
-              <Typography variant="caption" color="text.disabled">(from formula)</Typography>
-            </Box>
-            <Typography variant="body2" fontWeight={600}>$ 946.00</Typography>
-          </Box>
-
-          <Divider />
-
-          {/* Price calculation table */}
-          <Box>
-            <Typography fontWeight={700} fontSize={11} letterSpacing={0.5} color="text.secondary" mb={0.75}>PRICE CALCULATION</Typography>
+            <Typography fontWeight={700} fontSize={11} letterSpacing={0.5} color="text.secondary" mb={0.75}>ESTIMATED VALUE BY COMPONENT</Typography>
             <Box sx={{ border: '1px solid #e0e0e0', borderRadius: 1.5, overflow: 'hidden' }}>
               {/* Header */}
-              <Box sx={{ display: 'grid', gridTemplateColumns: '72px 44px 60px 40px 58px', gap: 0.5, px: 1, py: 0.75, bgcolor: '#f8f9fa', borderBottom: '1px solid #e0e0e0' }}>
-                {['Component','Buy/Trade %','Buy/Trade Value','Pawn %','Pawn Value'].map(h => (
-                  <Typography key={h} variant="caption" fontWeight={700} color="text.secondary" sx={{ fontSize: 10, lineHeight: 1.2 }}>{h}</Typography>
-                ))}
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto', px: 1.25, py: 0.75, bgcolor: '#f8f9fa', borderBottom: '1px solid #e0e0e0' }}>
+                <Typography variant="caption" fontWeight={700} color="text.secondary" fontSize={11}>Component</Typography>
+                <Typography variant="caption" fontWeight={700} color="text.secondary" fontSize={11}>Est. Value</Typography>
               </Box>
               {[
-                { label: 'Metal',          buyPct: 70, buyVal: 298.00, pawnPct: 50, pawnVal: 213.00 },
-                { label: 'Diamonds',       buyPct: 75, buyVal: 180.00, pawnPct: 55, pawnVal: 132.00 },
-                { label: 'Stones / Other', buyPct: 0,  buyVal: 0.00,  pawnPct: 0,  pawnVal: 0.00  },
-              ].map(row => (
-                <Box key={row.label} sx={{ display: 'grid', gridTemplateColumns: '72px 44px 60px 40px 58px', gap: 0.5, px: 1, py: 0.75, borderBottom: '1px solid #f0f0f0', alignItems: 'center' }}>
-                  <Typography variant="caption" fontSize={11}>{row.label}</Typography>
+                { label: 'Metal',     val: compMetalVal,   set: setCompMetalVal },
+                { label: 'Diamonds',  val: compDiamondVal, set: setCompDiamondVal },
+                { label: 'Stones',    val: compStoneVal,   set: setCompStoneVal },
+              ].map((row, i) => (
+                <Box key={row.label} sx={{ display: 'grid', gridTemplateColumns: '1fr auto', px: 1.25, py: 0.5, borderBottom: '1px solid #f0f0f0', alignItems: 'center' }}>
+                  <Typography variant="caption" fontSize={12}>{row.label}</Typography>
+                  <TextField
+                    size="small" value={row.val}
+                    onChange={e => row.set(e.target.value)}
+                    placeholder="—"
+                    InputProps={{ startAdornment: <InputAdornment position="start"><Typography variant="caption">$</Typography></InputAdornment> }}
+                    inputProps={{ inputMode: 'decimal', style: { width: 64, padding: '3px 4px', fontSize: 12 } }}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1, fontSize: 12 }, '& .MuiInputAdornment-root': { mr: 0.25 } }}
+                  />
+                </Box>
+              ))}
+              {/* Total row */}
+              {(() => {
+                const total = (parseFloat(compMetalVal) || 0) + (parseFloat(compDiamondVal) || 0) + (parseFloat(compStoneVal) || 0);
+                return (
+                  <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto', px: 1.25, py: 0.75, bgcolor: '#f8f9fa', alignItems: 'center' }}>
+                    <Typography variant="caption" fontWeight={700} fontSize={12}>Total</Typography>
+                    <Typography variant="caption" fontWeight={700} fontSize={12} sx={{ pr: 0.5 }}>
+                      {total > 0 ? `$ ${total.toFixed(2)}` : '—'}
+                    </Typography>
+                  </Box>
+                );
+              })()}
+            </Box>
+          </Box>
+
+          {/* Suggested transaction values */}
+          <Box>
+            <Typography fontWeight={700} fontSize={11} letterSpacing={0.5} color="text.secondary" mb={0.75}>SUGGESTED TRANSACTION VALUES</Typography>
+            <Box sx={{ border: '1px solid #e0e0e0', borderRadius: 1.5, overflow: 'hidden' }}>
+              {/* Header */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: '70px 52px 1fr', px: 1.25, py: 0.75, bgcolor: '#f8f9fa', borderBottom: '1px solid #e0e0e0', gap: 1 }}>
+                <Typography variant="caption" fontWeight={700} color="text.secondary" fontSize={11}>Type</Typography>
+                <Typography variant="caption" fontWeight={700} color="text.secondary" fontSize={11}>%</Typography>
+                <Typography variant="caption" fontWeight={700} color="text.secondary" fontSize={11}>Value</Typography>
+              </Box>
+              {[
+                { label: 'Pawn', pct: pawnPct, setPct: setPawnPct, val: pawnVal, setVal: setPawnVal },
+                { label: 'Buy',  pct: buyPct,  setPct: setBuyPct,  val: buyVal,  setVal: setBuyVal  },
+                { label: 'Melt', pct: meltPct, setPct: setMeltPct, val: meltVal, setVal: setMeltVal },
+              ].map((row, i) => (
+                <Box key={row.label} sx={{ display: 'grid', gridTemplateColumns: '70px 52px 1fr', px: 1.25, py: 0.5, borderBottom: i < 2 ? '1px solid #f0f0f0' : 'none', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="caption" fontSize={12} fontWeight={600}>{row.label}</Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-                    <TextField size="small" defaultValue={row.buyPct}
-                      sx={{ width: 32, '& .MuiInputBase-input': { p: '2px 4px', fontSize: 11, textAlign: 'center' }, '& .MuiOutlinedInput-root': { borderRadius: 1 } }} />
+                    <TextField
+                      size="small" value={row.pct}
+                      onChange={e => row.setPct(e.target.value)}
+                      inputProps={{ inputMode: 'decimal', style: { width: 30, padding: '3px 4px', fontSize: 11, textAlign: 'center' } }}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1, fontSize: 11 } }}
+                    />
                     <Typography variant="caption" color="text.secondary">%</Typography>
                   </Box>
-                  <Typography variant="caption" fontWeight={500} fontSize={11}>$ {row.buyVal.toFixed(2)}</Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-                    <TextField size="small" defaultValue={row.pawnPct}
-                      sx={{ width: 32, '& .MuiInputBase-input': { p: '2px 4px', fontSize: 11, textAlign: 'center' }, '& .MuiOutlinedInput-root': { borderRadius: 1 } }} />
-                    <Typography variant="caption" color="text.secondary">%</Typography>
-                  </Box>
-                  <Typography variant="caption" fontWeight={500} fontSize={11}>$ {row.pawnVal.toFixed(2)}</Typography>
+                  <TextField
+                    size="small" value={row.val}
+                    onChange={e => row.setVal(e.target.value)}
+                    placeholder="—"
+                    InputProps={{ startAdornment: <InputAdornment position="start"><Typography variant="caption">$</Typography></InputAdornment> }}
+                    inputProps={{ inputMode: 'decimal', style: { width: 56, padding: '3px 4px', fontSize: 12 } }}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1, fontSize: 12 }, '& .MuiInputAdornment-root': { mr: 0.25 } }}
+                  />
                 </Box>
               ))}
             </Box>
-          </Box>
-
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="body2" fontWeight={600} fontSize={12}>Suggested Buy/Trade Total</Typography>
-            <Typography variant="body2" fontWeight={700}>$ 478.00</Typography>
-          </Box>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="body2" fontWeight={600} fontSize={12}>Suggested Pawn Total</Typography>
-            <Typography variant="body2" fontWeight={700}>$ 345.00</Typography>
           </Box>
 
           <Divider />
@@ -1375,6 +1504,8 @@ export default function JewelryIntakeScreen({
           Back to Results
         </Button>
         <Button size="small" variant="contained" onClick={handleSave}
+          disabled={isCameraEnabled && images.length === 0}
+          title={isCameraEnabled && images.length === 0 ? 'A photo is required before saving' : undefined}
           sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN } }}>
           Save Item to Ticket
         </Button>
