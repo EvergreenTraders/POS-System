@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import config from '../config';
 import {
   Box, Typography, Paper, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
-  CircularProgress,
+  CircularProgress, Menu, MenuItem, Dialog, DialogContent, DialogActions,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
@@ -80,7 +80,7 @@ function commitPawnTicketId() {
   localStorage.removeItem(PENDING_KEY);
 }
 
-export default function PawnTransactionScreen({ customer, customerStats: initialStats, onClose }) {
+export default function PawnTransactionScreen({ customer, customerStats: initialStats, onClose, onConvertTo }) {
   const [ticketId]                        = useState(() => generatePawnTicketId());
   const [itemSearch, setItemSearch]       = useState('');
   const [ticketNote, setTicketNote]       = useState('');
@@ -92,6 +92,15 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [intakeOpen, setIntakeOpen]       = useState(false);
   const [intakeEntry, setIntakeEntry]     = useState('');
   const [parsedValues,    setParsedValues]    = useState(null);
+  const [editingItem,     setEditingItem]     = useState(null);
+  const [photoTargetId,    setPhotoTargetId]    = useState(null);
+  const [convertAnchor,    setConvertAnchor]    = useState(null);
+  const [convertRow,       setConvertRow]       = useState(null);
+  const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
+  const [cameraStream,     setCameraStream]     = useState(null);
+  const [isCamReady,       setIsCamReady]       = useState(false);
+  const [pawnFilter,       setPawnFilter]       = useState('active');
+  const cameraVideoRef = useRef(null);
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
   const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
@@ -131,7 +140,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
       .catch(err => console.error('Failed to load customer pawn stats:', err));
 
     setLoadingPawns(true);
-    axios.get(`${config.apiUrl}/customers/${customer.id}/pawns`, { headers })
+    axios.get(`${config.apiUrl}/customers/${customer.id}/pawns?status=all`, { headers })
       .then(res => setActivePawns(res.data))
       .catch(err => console.error('Failed to load customer pawns:', err))
       .finally(() => setLoadingPawns(false));
@@ -155,7 +164,51 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
 
   const handleDeleteItem = (id) => setPawnItems(prev => prev.filter(i => i.id !== id));
 
-  const handleAddItem = (item) => setPawnItems(prev => [...prev, item]);
+  const openItemCamera = (itemId) => {
+    setPhotoTargetId(itemId);
+    setIsCamReady(false);
+    setCameraDialogOpen(true);
+  };
+
+  const handleCameraDialogEntered = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      setCameraStream(stream);
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error('Camera error:', err);
+      closeItemCamera();
+    }
+  };
+
+  const captureItemPhoto = () => {
+    const video = cameraVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const url = URL.createObjectURL(file);
+      setPawnItems(prev => prev.map(item =>
+        item.id === photoTargetId
+          ? { ...item, images: [...(item.images || []), { url, file, isPrimary: !(item.images?.length), type: 'capture' }] }
+          : item
+      ));
+      closeItemCamera();
+    }, 'image/jpeg', 0.9);
+  };
+
+  const closeItemCamera = () => {
+    if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); setCameraStream(null); }
+    setIsCamReady(false);
+    setCameraDialogOpen(false);
+    setPhotoTargetId(null);
+  };
 
   const openIntake = () => {
     const text  = itemSearch.trim();
@@ -171,21 +224,38 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
 
   const handleIntakeBack = (dest) => {
     setIntakeOpen(false);
+    setEditingItem(null);
     if (dest === 'transactions') onClose();
   };
 
+  const makePartNumber = (seqNum) => {
+    const tid = String(ticketId ?? '').replace(/\D/g, '').padStart(8, '0');
+    return `PT-${tid}-${String(seqNum).padStart(2, '0')}`;
+  };
+
   const handleIntakeSave = (item) => {
-    handleAddItem(item);
+    setPawnItems(prev => {
+      const seq = prev.length + 1;
+      return [...prev, { ...item, part_number: makePartNumber(seq) }];
+    });
     setItemSearch('');
     setIntakeOpen(false);
   };
 
   const handleIntakeSaveAndAdd = (item) => {
-    handleAddItem(item);
+    setPawnItems(prev => {
+      const seq = prev.length + 1;
+      return [...prev, { ...item, part_number: makePartNumber(seq) }];
+    });
     setItemSearch('');
-    // reopen intake fresh
     setIntakeEntry('');
     setIntakeOpen(true);
+  };
+
+  const handleIntakeUpdate = (item) => {
+    setPawnItems(prev => prev.map(i => i.id === item.id ? { ...item, part_number: i.part_number } : i));
+    setEditingItem(null);
+    setIntakeOpen(false);
   };
 
   const STAT_BOXES = [
@@ -201,19 +271,21 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
         customer={customer}
         ticketId={ticketId}
         initialEntry={intakeEntry}
-        parsedValues={parsedValues}
+        parsedValues={editingItem ? null : parsedValues}
+        editItem={editingItem}
         onBack={handleIntakeBack}
         onSaveItem={handleIntakeSave}
         onSaveAndAddAnother={handleIntakeSaveAndAdd}
+        onUpdateItem={handleIntakeUpdate}
       />
     );
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
 
       {/* Breadcrumb */}
-      <Box sx={{ bgcolor: PURPLE, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+      <Box sx={{ bgcolor: PURPLE, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
         <Typography variant="body2" fontWeight={400} sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }} onClick={onClose}>
           Transactions
         </Typography>
@@ -224,7 +296,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
       </Box>
 
       {/* ── TOP: two equal halves ── */}
-      <Box sx={{ display: 'flex', gap: 1.5, p: 1.5, pb: 1.5, flexShrink: 0 }}>
+      <Box sx={{ display: 'flex', gap: 1.5, p: 1.5 }}>
 
         {/* Left half — customer info + pawn stats */}
         <Paper sx={{ flex: 1, p: 2, borderRadius: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
@@ -270,9 +342,20 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
 
         {/* Right half — Active Pawns */}
         <Paper sx={{ flex: 1, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <Box sx={{ px: 2, py: 1.25, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
-            <Typography fontWeight={700} fontSize={13}>Active Pawns</Typography>
-            <Typography variant="caption" color={PURPLE} sx={{ cursor: 'pointer', textDecoration: 'underline' }}>View All Pawns</Typography>
+          <Box sx={{ px: 2, py: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
+            <Typography fontWeight={700} fontSize={13}>Pawn History</Typography>
+            <Box sx={{ display: 'flex', gap: 0.5 }}>
+              {[{ label: 'Active', value: 'active' }, { label: 'Redeemed', value: 'redeemed' }, { label: 'Forfeited', value: 'forfeited' }].map(({ label, value }) => (
+                <Chip key={value} label={label} size="small" onClick={() => setPawnFilter(value)}
+                  sx={{ cursor: 'pointer', height: 22, fontSize: 11,
+                    bgcolor: pawnFilter === value ? PURPLE : 'transparent',
+                    color: pawnFilter === value ? 'white' : 'text.secondary',
+                    border: `1px solid ${pawnFilter === value ? PURPLE : '#e0e0e0'}`,
+                    '& .MuiChip-label': { px: 1 },
+                    '&:hover': { bgcolor: pawnFilter === value ? PURPLE : '#f3e8ff' },
+                  }} />
+              ))}
+            </Box>
           </Box>
 
           {/* Table header */}
@@ -297,60 +380,66 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
             ) : activePawns.length === 0 ? (
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 3, gap: 0.5 }}>
                 <MuiIcons.Inventory2 sx={{ fontSize: 28, color: '#e0e0e0' }} />
-                <Typography variant="caption" color="text.secondary">No active pawns on file</Typography>
+                <Typography variant="caption" color="text.secondary">No pawn history on file</Typography>
               </Box>
-            ) : (
-              activePawns.map((pawn, idx) => (
+            ) : (() => {
+              const filtered = activePawns.filter(p => {
+                if (pawnFilter === 'active')   return p.status === 'ACTIVE' || p.status === 'OVERDUE';
+                if (pawnFilter === 'redeemed') return p.status === 'REDEEMED';
+                if (pawnFilter === 'forfeited') return p.status === 'FORFEITED';
+                return true;
+              });
+              if (filtered.length === 0) return (
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 3, gap: 0.5 }}>
+                  <MuiIcons.Inventory2 sx={{ fontSize: 28, color: '#e0e0e0' }} />
+                  <Typography variant="caption" color="text.secondary">No {pawnFilter} pawns on file</Typography>
+                </Box>
+              );
+              return filtered.map((pawn, idx) => (
                 <Box key={idx} sx={{
                   display: 'grid', gridTemplateColumns: '120px 1fr 80px 150px',
                   gap: 1, px: 2, py: 0.9, borderBottom: '1px solid #f0f0f0', alignItems: 'center',
                   '&:hover': { bgcolor: '#f9f9f9' },
                 }}>
-
-                  {/* Ticket # */}
                   <Typography variant="caption" color={PURPLE} fontWeight={600} sx={{ cursor: 'pointer' }}>
                     {pawn.ticket}
                   </Typography>
-
-                  {/* Item — badge inline so row height stays consistent */}
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
-                    {pawn.overdue && (
-                      <Chip
-                        label="OVERDUE"
-                        size="small"
-                        icon={<MuiIcons.Warning sx={{ fontSize: '10px !important', color: '#dc2626 !important' }} />}
-                        sx={{ height: 16, fontSize: 9, fontWeight: 700, bgcolor: '#fee2e2', color: '#dc2626', flexShrink: 0, '& .MuiChip-label': { px: 0.5 } }}
-                      />
+                    {pawn.status === 'OVERDUE' && (
+                      <Chip label="OVERDUE" size="small" icon={<MuiIcons.Warning sx={{ fontSize: '10px !important', color: '#dc2626 !important' }} />}
+                        sx={{ height: 16, fontSize: 9, fontWeight: 700, bgcolor: '#fee2e2', color: '#dc2626', flexShrink: 0, '& .MuiChip-label': { px: 0.5 } }} />
+                    )}
+                    {pawn.status === 'REDEEMED' && (
+                      <Chip label="REDEEMED" size="small"
+                        sx={{ height: 16, fontSize: 9, fontWeight: 700, bgcolor: '#e8f5e9', color: '#2e7d32', flexShrink: 0, '& .MuiChip-label': { px: 0.5 } }} />
+                    )}
+                    {pawn.status === 'FORFEITED' && (
+                      <Chip label="FORFEITED" size="small"
+                        sx={{ height: 16, fontSize: 9, fontWeight: 700, bgcolor: '#fce4ec', color: '#c62828', flexShrink: 0, '& .MuiChip-label': { px: 0.5 } }} />
                     )}
                     <Typography variant="caption" noWrap sx={{ minWidth: 0 }}>{pawn.item}</Typography>
                   </Box>
-
-                  {/* Amount */}
-                  <Typography variant="caption" fontWeight={600} sx={{ textAlign: 'center' }}>
-                    {pawn.amount}
-                  </Typography>
-
-                  {/* Due Date */}
+                  <Typography variant="caption" fontWeight={600} sx={{ textAlign: 'center' }}>{pawn.amount}</Typography>
                   <Box sx={{ textAlign: 'center' }}>
                     <Typography variant="caption" display="block" color={pawn.overdue ? '#dc2626' : 'text.primary'} fontWeight={500}>
                       {pawn.dueDate}
                     </Typography>
-                    <Typography sx={{ fontSize: 10, color: pawn.overdue ? '#dc2626' : 'text.secondary' }}>
-                      {pawn.daysInfo}
-                    </Typography>
+                    {pawn.daysInfo && (
+                      <Typography sx={{ fontSize: 10, color: pawn.overdue ? '#dc2626' : 'text.secondary' }}>{pawn.daysInfo}</Typography>
+                    )}
                   </Box>
                 </Box>
-              ))
-            )}
+              ));
+            })()}
           </Box>
         </Paper>
       </Box>
 
-      {/* ── BELOW: full-width column ── */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, px: 1.5, pb: 1.5, overflow: 'hidden', minHeight: 0 }}>
+      {/* ── Scrollable content ── */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, px: 1.5, pb: 1.5 }}>
 
         {/* Search bar */}
-        <Paper sx={{ px: 1.5, py: 1, borderRadius: 2, flexShrink: 0, display: 'flex', gap: 1, alignItems: 'center' }}>
+        <Paper sx={{ px: 1.5, py: 1, borderRadius: 2, display: 'flex', gap: 1, alignItems: 'center' }}>
           <TextField
             fullWidth size="small"
             placeholder="Scan / Search / Describe Item"
@@ -378,55 +467,73 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           </Button>
         </Paper>
 
-        {/* Items being pawned table */}
-        <Paper sx={{ flex: 1, borderRadius: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <Box sx={{ px: 2, pt: 1.25, pb: 1, flexShrink: 0 }}>
+        {/* Items being pawned table — grows with content */}
+        <Paper sx={{ borderRadius: 2 }}>
+          <Box sx={{ px: 2, pt: 1.25, pb: 1 }}>
             <Typography fontWeight={700} fontSize={14}>Items Being Pawned</Typography>
           </Box>
 
-          <Box sx={{ display: 'grid', gridTemplateColumns: COL, gap: 1, px: 2, py: 0.75, bgcolor: '#f8f9fa', borderTop: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
-            {['Part #', 'Photo', 'Category', 'Item', 'Serial #', 'Qty', 'Size', 'Pawn Amount', 'Actions'].map(h => (
-              <Typography key={h} variant="caption" fontWeight={600} color="text.secondary">{h}</Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: COL, gap: 1, px: 2, py: 0.75, bgcolor: '#f8f9fa', borderTop: '1px solid #e0e0e0', borderBottom: '1px solid #e0e0e0' }}>
+            {[
+              { label: 'Part #',      align: 'left'   },
+              { label: 'Photo',       align: 'left'   },
+              { label: 'Category',    align: 'left'   },
+              { label: 'Item',        align: 'left'   },
+              { label: 'Serial #',    align: 'left'   },
+              { label: 'Qty',         align: 'center' },
+              { label: 'Size',        align: 'center' },
+              { label: 'Pawn Amount', align: 'left'   },
+              { label: 'Actions',     align: 'right'  },
+            ].map(({ label, align }) => (
+              <Typography key={label} variant="caption" fontWeight={700} color="text.secondary" sx={{ textAlign: align }}>{label}</Typography>
             ))}
           </Box>
 
-          <Box sx={{ flex: 1, overflowY: 'auto' }}>
-            {pawnItems.length === 0 ? (
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 1 }}>
-                <MuiIcons.AddBox sx={{ fontSize: 36, opacity: 0.2 }} />
-                <Typography variant="body2" color="text.secondary">Search or scan items above to add them to this pawn ticket</Typography>
-              </Box>
-            ) : (
-              pawnItems.map((row, idx) => (
-                <Box key={row.id} sx={{ display: 'grid', gridTemplateColumns: COL, gap: 1, px: 2, py: 0.875, borderBottom: '1px solid #f0f0f0', alignItems: 'center', '&:hover': { bgcolor: '#fafafa' } }}>
-                  <Typography variant="caption" fontWeight={500} color="text.secondary">
-                    {String(idx + 1).padStart(2, '0')}
-                  </Typography>
-                  <Box sx={{ width: 38, height: 38, borderRadius: 1, bgcolor: '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <MuiIcons.Image sx={{ fontSize: 20, color: '#bdbdbd' }} />
-                  </Box>
-                  <Typography variant="caption">{row.category}</Typography>
-                  <Typography variant="caption" fontWeight={500}>{row.item}</Typography>
-                  <Typography variant="caption" color="text.secondary">{row.serial}</Typography>
-                  <Typography variant="caption" align="center">{row.qty}</Typography>
-                  <Typography variant="caption" align="center">{row.size || '—'}</Typography>
-                  <Typography variant="caption" fontWeight={600}>{fmt(row.amount)}</Typography>
-                  <Box sx={{ display: 'flex', gap: 0 }}>
-                    <IconButton size="small"><MuiIcons.Edit sx={{ fontSize: 15 }} /></IconButton>
-                    <IconButton size="small"><MuiIcons.PhotoCamera sx={{ fontSize: 15 }} /></IconButton>
-                    <IconButton size="small"><MuiIcons.Receipt sx={{ fontSize: 15 }} /></IconButton>
-                    <IconButton size="small" color="error" onClick={() => handleDeleteItem(row.id)}>
-                      <MuiIcons.Delete sx={{ fontSize: 15 }} />
+          {pawnItems.length === 0 ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 5, gap: 1 }}>
+              <MuiIcons.AddBox sx={{ fontSize: 36, opacity: 0.2 }} />
+              <Typography variant="body2" color="text.secondary">Search or scan items above to add them to this pawn ticket</Typography>
+            </Box>
+          ) : (
+            pawnItems.map((row, idx) => (
+              <Box key={row.id} sx={{ display: 'grid', gridTemplateColumns: COL, gap: 1, px: 2, py: 0.875, borderBottom: '1px solid #f0f0f0', alignItems: 'center', '&:hover': { bgcolor: '#fafafa' } }}>
+                <Typography variant="caption" fontWeight={600} color={PURPLE} sx={{ fontFamily: 'monospace', fontSize: 11 }}>
+                  {row.part_number || String(idx + 1).padStart(2, '0')}
+                </Typography>
+                {(() => {
+                  const thumb = row.images?.find(i => i.isPrimary)?.url || row.images?.[0]?.url;
+                  return thumb ? (
+                    <Box component="img" src={thumb} alt="Item"
+                      sx={{ width: 38, height: 38, borderRadius: 1, objectFit: 'cover', cursor: 'pointer' }}
+                      onClick={() => openItemCamera(row.id)} />
+                  ) : (
+                    <IconButton size="small"
+                      sx={{ width: 38, height: 38, borderRadius: 1, bgcolor: '#f0f0f0', color: '#9e9e9e', '&:hover': { bgcolor: '#e3f2fd', color: '#1976d2' } }}
+                      onClick={() => openItemCamera(row.id)}>
+                      <MuiIcons.PhotoCamera sx={{ fontSize: 18 }} />
                     </IconButton>
-                  </Box>
+                  );
+                })()}
+                <Typography variant="caption">{row.category}</Typography>
+                <Typography variant="caption" fontWeight={500}>{row.item}</Typography>
+                <Typography variant="caption" color="text.secondary">{row.serial || '—'}</Typography>
+                <Typography variant="caption" align="center">{row.qty}</Typography>
+                <Typography variant="caption" align="center">{row.size || '—'}</Typography>
+                <Typography variant="caption" fontWeight={700} color="#2e7d32">{fmt(row.amount)}</Typography>
+                <Box sx={{ display: 'flex', gap: 0, alignItems: 'center' }}>
+                  <IconButton size="small" sx={{ color: PURPLE }} onClick={() => { setEditingItem(row); setIntakeOpen(true); }}><MuiIcons.Edit sx={{ fontSize: 15 }} /></IconButton>
+                  <IconButton size="small" title="Convert" sx={{ color: '#555' }} onClick={(e) => { setConvertAnchor(e.currentTarget); setConvertRow(row); }}><MuiIcons.SwapHoriz sx={{ fontSize: 15 }} /></IconButton>
+                  <IconButton size="small" color="error" onClick={() => handleDeleteItem(row.id)}>
+                    <MuiIcons.Delete sx={{ fontSize: 15 }} />
+                  </IconButton>
                 </Box>
-              ))
-            )}
-          </Box>
+              </Box>
+            ))
+          )}
         </Paper>
 
-        {/* Bottom three panels — full width */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1.5, flexShrink: 0 }}>
+        {/* Bottom three panels */}
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1.5 }}>
 
           {/* Pawn Terms */}
           <Paper sx={{ p: 1.75, borderRadius: 2 }}>
@@ -447,13 +554,9 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
               </Box>
             ))}
             <Box sx={{ display: 'flex', gap: 0.75, mt: 1.25 }}>
-              <Button size="small" variant="outlined" fullWidth sx={{ fontSize: 11, borderRadius: 1.5, textTransform: 'none' }}>
-                Select Pawn Terms
-              </Button>
+              <Button size="small" variant="outlined" fullWidth sx={{ fontSize: 11, borderRadius: 1.5, textTransform: 'none' }}>Select Pawn Terms</Button>
               <Button size="small" variant="outlined" fullWidth startIcon={<MuiIcons.Settings sx={{ fontSize: 12 }} />}
-                sx={{ fontSize: 11, borderRadius: 1.5, textTransform: 'none' }}>
-                Customize Terms
-              </Button>
+                sx={{ fontSize: 11, borderRadius: 1.5, textTransform: 'none' }}>Customize Terms</Button>
             </Box>
           </Paper>
 
@@ -467,7 +570,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
               { label: 'Total Pawn Amount:', value: fmt(totalPawnAmount) },
               { label: 'Interest (2%):',     value: fmt(interestAmt)    },
               { label: 'Insurance (2%):',    value: fmt(insuranceAmt)   },
-              { label: 'Storage Fee:',        value: fmt(storageFee)    },
+              { label: 'Storage Fee:',       value: fmt(storageFee)     },
             ].map(r => (
               <Box key={r.label} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                 <Typography variant="caption" color="text.secondary">{r.label}</Typography>
@@ -495,8 +598,8 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
         </Box>
       </Box>
 
-      {/* ── Bottom action bar ── */}
-      <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, flexShrink: 0 }}>
+      {/* ── Bottom action bar — sticky ── */}
+      <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
           <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
             Ticket Note
@@ -539,6 +642,38 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           Checkout Now
         </Button>
       </Paper>
+
+      {/* Camera dialog for item photos */}
+      <Dialog open={cameraDialogOpen} onClose={closeItemCamera} maxWidth="sm" fullWidth
+        TransitionProps={{ onEntered: handleCameraDialogEntered }}>
+        <DialogContent sx={{ p: 1.5, bgcolor: '#000' }}>
+          <video ref={cameraVideoRef} autoPlay playsInline onCanPlay={() => setIsCamReady(true)}
+            style={{ width: '100%', borderRadius: 8, display: 'block' }} />
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'space-between', px: 2 }}>
+          <Button onClick={closeItemCamera} color="inherit">Cancel</Button>
+          <Button variant="contained" onClick={captureItemPhoto} disabled={!isCamReady}
+            startIcon={<MuiIcons.PhotoCamera />}
+            sx={{ bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK }, textTransform: 'none' }}>
+            Capture
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Convert menu */}
+      <Menu anchorEl={convertAnchor} open={Boolean(convertAnchor)} onClose={() => { setConvertAnchor(null); setConvertRow(null); }}>
+        <Typography variant="caption" color="text.secondary" sx={{ px: 2, pt: 1, pb: 0.5, display: 'block', fontWeight: 600, letterSpacing: 0.5 }}>
+          CONVERT TO
+        </Typography>
+        <MenuItem onClick={() => { onConvertTo?.({ type: 'buy', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
+          <MuiIcons.ShoppingCart sx={{ fontSize: 16, mr: 1.5, color: '#1976d2' }} />
+          <Typography variant="body2">Buy Ticket</Typography>
+        </MenuItem>
+        <MenuItem onClick={() => { onConvertTo?.({ type: 'trade', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
+          <MuiIcons.CompareArrows sx={{ fontSize: 16, mr: 1.5, color: '#388e3c' }} />
+          <Typography variant="body2">Trade Ticket</Typography>
+        </MenuItem>
+      </Menu>
     </Box>
   );
 }

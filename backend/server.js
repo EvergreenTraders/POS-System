@@ -9026,6 +9026,10 @@ app.get('/api/customers/:id/pawn/stats', async (req, res) => {
 
 app.get('/api/customers/:id/pawns', async (req, res) => {
   const { id } = req.params;
+  const { status } = req.query;
+  const statusFilter = status === 'all'
+    ? `pt.status IN ('ACTIVE', 'OVERDUE', 'REDEEMED', 'FORFEITED')`
+    : `pt.status IN ('ACTIVE', 'OVERDUE')`;
   try {
     const result = await pool.query(`
       SELECT
@@ -9038,20 +9042,24 @@ app.get('/api/customers/:id/pawns', async (req, res) => {
       FROM pawn_ticket pt
       JOIN transactions t ON t.transaction_id = pt.transaction_id
       JOIN jewelry j ON j.item_id = pt.item_id
-      WHERE t.customer_id = $1 AND pt.status IN ('ACTIVE', 'OVERDUE')
+      WHERE t.customer_id = $1 AND ${statusFilter}
       ORDER BY
-        CASE WHEN pt.due_date < CURRENT_DATE THEN 0 ELSE 1 END ASC,
+        CASE WHEN pt.status = 'OVERDUE'   THEN 0
+             WHEN pt.status = 'ACTIVE'    THEN 1
+             WHEN pt.status = 'REDEEMED'  THEN 2
+             ELSE 3 END,
         pt.due_date ASC
     `, [id]);
 
     const today = new Date();
     const pawns = result.rows.map(row => ({
       ticket:     row.pawn_ticket_id,
+      status:     row.status,
       item:       row.item_description || '—',
       amount:     row.pawn_amount ? `$${parseFloat(row.pawn_amount).toFixed(2)}` : '—',
       dueDate:    row.due_date ? new Date(row.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
-      overdue:    row.due_date ? new Date(row.due_date) < today : false,
-      daysInfo:   row.due_date ? (() => {
+      overdue:    row.status === 'OVERDUE',
+      daysInfo:   row.due_date && row.status !== 'REDEEMED' && row.status !== 'FORFEITED' ? (() => {
         const diff = Math.round((new Date(row.due_date) - today) / (1000 * 60 * 60 * 24));
         return diff < 0 ? `(${Math.abs(diff)} day${Math.abs(diff) !== 1 ? 's' : ''} overdue)` : `(in ${diff} day${diff !== 1 ? 's' : ''})`;
       })() : '',

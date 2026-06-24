@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box, Typography, Paper, Button, IconButton, TextField, Select, MenuItem,
-  FormControl, InputLabel, Chip, Divider, Checkbox, FormControlLabel,
+  FormControl, InputLabel, FormHelperText, Chip, Divider, Checkbox, FormControlLabel,
   InputAdornment, Dialog, DialogContent, DialogActions, DialogTitle,
   Tabs, Tab, Table, TableHead, TableBody, TableRow, TableCell,
 } from '@mui/material';
@@ -437,9 +437,11 @@ export default function JewelryIntakeScreen({
   ticketId,
   initialEntry = '',
   parsedValues = null,
+  editItem = null,
   onBack,
   onSaveItem,
   onSaveAndAddAnother,
+  onUpdateItem,
 }) {
   const [images,            setImages]            = useState([]);
   const [selectedImg,       setSelectedImg]       = useState(0);
@@ -453,6 +455,7 @@ export default function JewelryIntakeScreen({
   const videoRef          = useRef(null);
   const pendingPurityRef  = useRef(null);
   const parsedAppliedRef  = useRef(false);
+  const editAppliedRef    = useRef(false);
   // Metal lookup data from API
   const [preciousMetalTypes,    setPreciousMetalTypes]    = useState([]);
   const [metalCategories,       setMetalCategories]       = useState([]);
@@ -495,7 +498,7 @@ export default function JewelryIntakeScreen({
   const [buyVal,   setBuyVal]   = useState('');
   const [meltVal,  setMeltVal]  = useState('');
 
-  const parsedParts = [category, colour, metal, purity.purity].filter(Boolean);
+  const parsedParts = [category, colour, metal, purity.purity || String(purity.value || '')].filter(Boolean);
 
   const breadcrumbs = [
     { label: 'Transactions',                    onClick: () => onBack('transactions') },
@@ -695,6 +698,88 @@ export default function JewelryIntakeScreen({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [metalCategories, metalColors, preciousMetalTypes]);
 
+  // Apply editItem fields once API data is loaded
+  useEffect(() => {
+    if (!editItem || editAppliedRef.current) return;
+    if (!metalCategories.length || !preciousMetalTypes.length) return;
+    editAppliedRef.current = true;
+
+    setItemName(editItem.item || '');
+    setCategory(editItem.metal_category || '');
+    setColour(editItem.jewelry_color || '');
+    setGrossWeight(String(editItem.metal_weight || ''));
+    setSpotPrice(String(editItem.metal_spot_price || ''));
+    setEstMetalValue(String(editItem.est_metal_value || ''));
+    setIsMetalValueManual(true);
+    setPaidAmount(String(editItem.paid_amount || ''));
+    setMode(editItem.mode || 'unique');
+    setImages(editItem.images || []);
+
+    const metalValue = editItem.precious_metal_type || '';
+    if (metalValue) {
+      const typeObj = preciousMetalTypes.find(t => t.type === metalValue);
+      setMetal(metalValue);
+      setMetalTypeId(typeObj?.id ?? null);
+      const isPtPd = metalValue === 'Platinum' || metalValue === 'Palladium';
+      pendingPurityRef.current = isPtPd ? editItem.purity_value : editItem.metal_purity;
+    }
+
+    if (editItem.primary_gem_category === 'diamond') {
+      setPrimaryGem({
+        gemType: 'diamond',
+        shape: editItem.primary_gem_shape || '',
+        clarity: editItem.primary_gem_clarity || '',
+        color: editItem.primary_gem_color || '',
+        exactColor: editItem.primary_gem_exact_color || '',
+        cut: editItem.primary_gem_cut || '',
+        caratWeight: String(editItem.primary_gem_weight || ''),
+        size: editItem.primary_gem_size || '',
+        quantity: editItem.primary_gem_quantity || 1,
+        labGrown: editItem.primary_gem_lab_grown || false,
+        estValue: String(editItem.primary_gem_value || ''),
+      });
+    } else if (editItem.primary_gem_category === 'stone') {
+      setPrimaryGem({
+        gemType: 'stone',
+        stoneShape: editItem.primary_gem_shape || '',
+        stoneType: editItem.primary_gem_type || '',
+        stoneColor: editItem.primary_gem_color || '',
+        caratWeight: String(editItem.primary_gem_weight || ''),
+        quantity: editItem.primary_gem_quantity || 1,
+        authentic: editItem.primary_gem_authentic || false,
+        estValue: String(editItem.primary_gem_value || ''),
+      });
+    }
+
+    if (editItem.secondary_gems?.length) {
+      setSecondaryGems(editItem.secondary_gems.map(gem =>
+        gem.secondary_gem_category === 'diamond' ? {
+          gemType: 'diamond',
+          shape: gem.secondary_gem_shape || '',
+          clarity: gem.secondary_gem_clarity || '',
+          color: gem.secondary_gem_color || '',
+          exactColor: gem.secondary_gem_exact_color || '',
+          cut: gem.secondary_gem_cut || '',
+          caratWeight: String(gem.secondary_gem_weight || ''),
+          size: gem.secondary_gem_size || '',
+          quantity: gem.secondary_gem_quantity || 1,
+          labGrown: gem.secondary_gem_lab_grown || false,
+          estValue: String(gem.secondary_gem_value || ''),
+        } : {
+          gemType: 'stone',
+          stoneShape: gem.secondary_gem_shape || '',
+          stoneType: gem.secondary_gem_type || '',
+          stoneColor: gem.secondary_gem_color || '',
+          caratWeight: String(gem.secondary_gem_weight || ''),
+          quantity: gem.secondary_gem_quantity || 1,
+          authentic: gem.secondary_gem_authentic || false,
+          estValue: String(gem.secondary_gem_value || ''),
+        }
+      ));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editItem, metalCategories, preciousMetalTypes]);
+
   // Apply pending purity once purities are loaded for selected metal
   useEffect(() => {
     if (!pendingPurityRef.current || !metalPurities.length) return;
@@ -860,43 +945,130 @@ export default function JewelryIntakeScreen({
   // ──────────────────────────────────────────────────────────────────────────
   const [formErrors, setFormErrors] = useState({});
 
-  function validateMetal() {
+  useEffect(() => {
+    if (images.length > 0 && formErrors.photo) setFormErrors(p => ({ ...p, photo: false }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [images.length]);
+
+  function validate() {
     const errs = {};
     if (!category)      errs.category = true;
     if (!metal)         errs.metal    = true;
-    if (!purity.purity) errs.purity   = true;
+    const isPtPd = metal === 'Platinum' || metal === 'Palladium';
+    if (isPtPd ? !(parseFloat(purity.value) > 0) : !purity.purity) errs.purity = true;
     if (!grossWeight || parseFloat(grossWeight) <= 0) errs.grossWeight = true;
+    if (isCameraEnabled && images.length === 0) errs.photo = true;
     setFormErrors(errs);
     return Object.keys(errs).length === 0;
   }
 
-  function handleSave() {
-    if (!validateMetal()) return;
-    const item = {
-      id:           Date.now(),
-      item:         itemName,
+  function buildItem() {
+    const primaryGemFields = !primaryGem ? {} :
+      primaryGem.gemType === 'diamond' ? {
+        primary_gem_shape:       primaryGem.shape        || '',
+        primary_gem_clarity:     primaryGem.clarity      || '',
+        primary_gem_color:       primaryGem.color        || '',
+        primary_gem_exact_color: primaryGem.exactColor   || '',
+        primary_gem_cut:         primaryGem.cut          || '',
+        primary_gem_weight:      parseFloat(primaryGem.caratWeight) || 0,
+        primary_gem_size:        primaryGem.size         || '',
+        primary_gem_quantity:    primaryGem.quantity      || 1,
+        primary_gem_lab_grown:   primaryGem.labGrown     || false,
+        primary_gem_value:       primaryGem.estValue      || 0,
+      } : {
+        primary_gem_shape:    primaryGem.stoneShape  || '',
+        primary_gem_type:     primaryGem.stoneType   || '',
+        primary_gem_color:    primaryGem.stoneColor  || '',
+        primary_gem_weight:   parseFloat(primaryGem.caratWeight) || 0,
+        primary_gem_quantity: primaryGem.quantity     || 1,
+        primary_gem_authentic:primaryGem.authentic    || false,
+        primary_gem_value:    primaryGem.estValue      || 0,
+      };
+
+    const secondary_gems = secondaryGems.map(gem =>
+      gem.gemType === 'diamond' ? {
+        secondary_gem_category:    'diamond',
+        secondary_gem_shape:       gem.shape       || '',
+        secondary_gem_clarity:     gem.clarity     || '',
+        secondary_gem_color:       gem.color       || '',
+        secondary_gem_exact_color: gem.exactColor  || '',
+        secondary_gem_cut:         gem.cut         || '',
+        secondary_gem_weight:      parseFloat(gem.caratWeight) || 0,
+        secondary_gem_size:        gem.size        || '',
+        secondary_gem_quantity:    gem.quantity    || 1,
+        secondary_gem_lab_grown:   gem.labGrown    || false,
+        secondary_gem_value:       gem.estValue    || 0,
+      } : {
+        secondary_gem_category: 'stone',
+        secondary_gem_shape:    gem.stoneShape  || '',
+        secondary_gem_type:     gem.stoneType   || '',
+        secondary_gem_color:    gem.stoneColor  || '',
+        secondary_gem_weight:   parseFloat(gem.caratWeight) || 0,
+        secondary_gem_quantity: gem.quantity    || 1,
+        secondary_gem_authentic:gem.authentic   || false,
+        secondary_gem_value:    gem.estValue    || 0,
+      }
+    );
+
+    const purityLabel = purity.purity || String(purity.value || '');
+    const shortDesc = [purityLabel, grossWeight ? `${grossWeight}g` : '', metal === 'Gold' ? colour : '', metal, category].filter(Boolean).join(' ');
+    const longDesc  = [
+      shortDesc,
+      primaryGem?.gemType === 'diamond' ? `${primaryGem.shape || ''} Diamond`.trim() : (primaryGem?.stoneName || ''),
+      secondaryGems.length ? `with ${secondaryGems.length} secondary gem${secondaryGems.length > 1 ? 's' : ''}` : '',
+    ].filter(Boolean).join(' · ');
+
+    return {
+      id:             editItem ? editItem.id : Date.now(),
+      item:           itemName || shortDesc,
       category,
-      metal,
-      colour,
-      purity:       purity.purity,
-      purity_value: parseFloat(purity.value) || 0,
-      amount:       parseFloat(paidAmount) || 0,
-      qty:          1,
-      serial:       '',
+      serial:         '',
+      qty:            1,
+      amount:         parseFloat(pawnVal) || parseFloat(paidAmount) || 0,
+      // Metal
+      precious_metal_type: metal,
+      metal_category:      category,
+      jewelry_color:       metal === 'Gold' ? colour : '',
+      metal_purity:        purity.purity || String(purity.value || ''),
+      purity_value:        parseFloat(purity.value) || 0,
+      metal_weight:        parseFloat(grossWeight)  || 0,
+      metal_spot_price:    parseFloat(spotPrice)    || 0,
+      est_metal_value:     estMetalValue            || 0,
+      // Primary gem
+      primary_gem_category: primaryGem?.gemType || null,
+      ...primaryGemFields,
+      // Secondary gems
+      secondary_gems,
+      // Price estimates
+      pawn_price:   parseFloat(pawnVal)  || 0,
+      buy_price:    parseFloat(buyVal)   || 0,
+      melt_value:   parseFloat(meltVal)  || 0,
+      paid_amount:  parseFloat(paidAmount) || 0,
+      price_estimates: {
+        pawn: parseFloat(pawnVal)  || 0,
+        buy:  parseFloat(buyVal)   || 0,
+        melt: parseFloat(meltVal)  || 0,
+      },
+      // Images — preserve File objects for upload
+      images: images.map(img => ({ url: img.url, isPrimary: img.isPrimary || false, file: img.file, type: img.type })),
+      // Descriptions
+      short_desc: shortDesc,
+      long_desc:  longDesc,
+      // Metadata
+      sourceEstimator: 'jewelry',
+      mode,
     };
-    onSaveItem(item);
+  }
+
+  function handleSave() {
+    if (!validate()) return;
+    if (editItem && onUpdateItem) onUpdateItem(buildItem());
+    else onSaveItem(buildItem());
   }
 
   function handleSaveAndAdd() {
-    if (!validateMetal()) return;
-    const item = {
-      id:       Date.now(),
-      item:     itemName,
-      category,
-      amount:   parseFloat(paidAmount) || 0,
-      qty:      1,
-      serial:   '',
-    };
+    if (!validate()) return;
+    const item = buildItem();
     if (onSaveAndAddAnother) onSaveAndAddAnother(item);
     else onSaveItem(item);
   }
@@ -976,7 +1148,7 @@ export default function JewelryIntakeScreen({
           <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
 
           {/* Photo section — half width */}
-          <Paper sx={{ width: '50%', flexShrink: 0, borderRadius: 2, overflow: 'hidden', border: isCameraEnabled && images.length === 0 ? '1px solid #d32f2f' : '1px solid #e0e0e0' }}>
+          <Paper sx={{ width: '50%', flexShrink: 0, borderRadius: 2, overflow: 'hidden', border: formErrors.photo ? '1px solid #d32f2f' : '1px solid #e0e0e0' }}>
 
             {/* Display area — compact when empty, taller when showing content */}
             <Box sx={{ display: 'flex', height: (showCamera || images.length > 0) ? 210 : 90, bgcolor: '#f7f7f7', transition: 'height 0.2s' }}>
@@ -1038,7 +1210,7 @@ export default function JewelryIntakeScreen({
 
             {/* Buttons */}
             <input id="jewelry-upload-input" type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleFileUpload} />
-            <Box sx={{ display: 'flex', gap: 1, p: 1.25 }}>
+            <Box sx={{ display: 'flex', gap: 1, p: 1.25, alignItems: 'center' }}>
               <Button size="small"
                 variant={showCamera ? 'outlined' : 'contained'}
                 startIcon={<MuiIcons.PhotoCamera sx={{ fontSize: 13 }} />}
@@ -1052,6 +1224,11 @@ export default function JewelryIntakeScreen({
                 sx={{ textTransform: 'none', fontSize: 12, borderRadius: 1.5 }}>
                 Upload
               </Button>
+              {formErrors.photo && (
+                <Typography variant="caption" color="error" sx={{ ml: 0.5, display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                  <MuiIcons.ErrorOutline sx={{ fontSize: 13 }} /> Photo required
+                </Typography>
+              )}
             </Box>
 
             {/* Image popup dialog */}
@@ -1117,12 +1294,14 @@ export default function JewelryIntakeScreen({
               <Select value={category} label="Category *" onChange={e => { setCategory(e.target.value); setFormErrors(p => ({ ...p, category: false })); }} sx={{ borderRadius: 2 }}>
                 {metalCategories.map(c => <MenuItem key={c.id} value={c.category}>{c.category}</MenuItem>)}
               </Select>
+              {formErrors.category && <FormHelperText>Required</FormHelperText>}
             </FormControl>
             <FormControl size="small" fullWidth error={!!formErrors.metal}>
               <InputLabel>Metal *</InputLabel>
               <Select value={metal} label="Metal *" onChange={e => { handleMetalChange(e.target.value); setFormErrors(p => ({ ...p, metal: false })); }} sx={{ borderRadius: 2 }}>
                 {preciousMetalTypes.map(t => <MenuItem key={t.id} value={t.type}>{t.type}</MenuItem>)}
               </Select>
+              {formErrors.metal && <FormHelperText>Required</FormHelperText>}
             </FormControl>
 
             <Box sx={{ display: 'flex', gap: 0.75 }}>
@@ -1143,6 +1322,7 @@ export default function JewelryIntakeScreen({
                       </MenuItem>
                     ))}
                 </Select>
+                {formErrors.purity && <FormHelperText>Required</FormHelperText>}
               </FormControl>
               {metal !== 'Platinum' && metal !== 'Palladium' && (
                 <TextField size="small" label="Value" sx={{ width: 80, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
@@ -1164,6 +1344,7 @@ export default function JewelryIntakeScreen({
             <TextField label="Weight *" size="small" value={grossWeight}
               onChange={e => { setGrossWeight(e.target.value); setFormErrors(p => ({ ...p, grossWeight: false })); }}
               error={!!formErrors.grossWeight}
+              helperText={formErrors.grossWeight ? 'Required' : ''}
               InputProps={{ endAdornment: <InputAdornment position="end"><Typography variant="caption" color="text.secondary">g</Typography></InputAdornment> }}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }} />
 
@@ -1475,12 +1656,7 @@ export default function JewelryIntakeScreen({
 
           <Divider />
 
-          <Box>
-            <Typography variant="body2" fontWeight={600} mb={0.75}>Paid Amount *</Typography>
-            <TextField size="small" fullWidth value={paidAmount} onChange={e => setPaidAmount(e.target.value)}
-              InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }} />
-          </Box>
+
         </Box>
       </Box>
 
@@ -1495,6 +1671,21 @@ export default function JewelryIntakeScreen({
           </Button>
         </Box>
         <Box sx={{ flex: 1 }} />
+        {Object.values(formErrors).some(Boolean) && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mr: 1, px: 1.5, py: 0.5, bgcolor: '#fff5f5', border: '1px solid #ffcdd2', borderRadius: 1.5 }}>
+            <MuiIcons.ErrorOutline sx={{ fontSize: 14, color: '#d32f2f' }} />
+            <Typography variant="caption" color="error" fontWeight={500}>
+              Required:{' '}
+              {[
+                formErrors.category    && 'Category',
+                formErrors.metal       && 'Metal',
+                formErrors.purity      && 'Purity',
+                formErrors.grossWeight && 'Weight',
+                formErrors.photo       && 'Photo',
+              ].filter(Boolean).join(', ')}
+            </Typography>
+          </Box>
+        )}
         <Button size="small" variant="outlined" color="inherit" onClick={() => onBack('pawn')}
           sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
           Cancel
@@ -1504,8 +1695,6 @@ export default function JewelryIntakeScreen({
           Back to Results
         </Button>
         <Button size="small" variant="contained" onClick={handleSave}
-          disabled={isCameraEnabled && images.length === 0}
-          title={isCameraEnabled && images.length === 0 ? 'A photo is required before saving' : undefined}
           sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN } }}>
           Save Item to Ticket
         </Button>
