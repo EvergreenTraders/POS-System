@@ -6,7 +6,7 @@ import {
   Box, Typography, Paper, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   CircularProgress, Menu, MenuItem, Dialog, DialogTitle, DialogContent, DialogActions,
-  Select, InputLabel, FormControl, Grid, Alert,
+  Select, InputLabel, FormControl, Grid, Alert, Snackbar,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
@@ -113,6 +113,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [mgmtError,        setMgmtError]        = useState('');
   const [mgmtLoading,      setMgmtLoading]      = useState(false);
   const [isCamReady,       setIsCamReady]       = useState(false);
+  const [snackbar,         setSnackbar]         = useState({ open: false, message: '', severity: 'success' });
   const [pawnFilter,       setPawnFilter]       = useState('active');
   const cameraVideoRef = useRef(null);
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
@@ -173,7 +174,12 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     ? new Date(stats.first_pawn_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : '—';
 
-  const totalPawnAmount = pawnItems.reduce((s, i) => s + i.amount, 0);
+  const autoTotalPawnAmount = pawnItems.reduce((s, i) => s + i.amount, 0);
+  const [totalPawnOverride, setTotalPawnOverride] = useState(null);
+
+  useEffect(() => { setTotalPawnOverride(null); }, [pawnItems]);
+
+  const totalPawnAmount = totalPawnOverride ?? autoTotalPawnAmount;
   const interestRate    = parseFloat(pawnConfig?.interest_rate)  || 0;
   const insuranceRate   = parseFloat(pawnConfig?.insurance_rate) || 0;
   const termDays        = parseInt(pawnConfig?.term_days)        || 0;
@@ -192,6 +198,54 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const initials = `${customer?.first_name?.[0] ?? ''}${customer?.last_name?.[0] ?? ''}`.toUpperCase();
 
   const handleDeleteItem = (id) => setPawnItems(prev => prev.filter(i => i.id !== id));
+
+  const handleSaveAsQuote = async () => {
+    if (!customer?.id) {
+      setSnackbar({ open: true, message: 'Please select a customer before saving as quote', severity: 'error' });
+      return;
+    }
+    if (pawnItems.length === 0) {
+      setSnackbar({ open: true, message: 'No items to save as quote', severity: 'warning' });
+      return;
+    }
+    const token = localStorage.getItem('token');
+    const employeeId = JSON.parse(atob(token.split('.')[1])).id;
+
+    try {
+      const formData = new FormData();
+      const imageMetadata = [];
+
+      // Collect image files from all items and build metadata
+      const itemsForSubmit = pawnItems.map((item, itemIndex) => {
+        const { images, ...rest } = item;
+        if (images && Array.isArray(images)) {
+          images.forEach((img, imgIndex) => {
+            if (img.file instanceof File) {
+              formData.append('images', img.file);
+              imageMetadata.push({ itemIndex, isPrimary: img.isPrimary || imgIndex === 0 });
+            }
+          });
+        }
+        return { ...rest, transaction_type: 'pawn' };
+      });
+
+      formData.append('items', JSON.stringify(itemsForSubmit));
+      formData.append('imageMetadata', JSON.stringify(imageMetadata));
+      formData.append('customer_id', customer.id);
+      formData.append('employee_id', employeeId);
+      formData.append('total_amount', totalPawnAmount);
+
+      const res = await axios.post(`${config.apiUrl}/quotes`, formData, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
+      });
+      setSnackbar({ open: true, message: `Quote ${res.data.quote_id} saved successfully. Valid for ${res.data.expires_in} days.`, severity: 'success' });
+      setPawnItems([]);
+      setTotalPawnOverride(null);
+    } catch (err) {
+      console.error('Error saving quote:', err);
+      setSnackbar({ open: true, message: 'Error saving quote. Please try again.', severity: 'error' });
+    }
+  };
 
   const handleMgmtApproval = async () => {
     if (!mgmtUsername || !mgmtPassword) {
@@ -660,9 +714,18 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
               <Typography fontWeight={700} fontSize={13}>Financial Summary</Typography>
             </Box>
             <Typography variant="caption" color="text.secondary">Total Pawn Amount</Typography>
-            <Typography fontWeight={800} fontSize={30} color={totalPawnAmount > 0 ? '#c62828' : 'text.disabled'} mt={0.5}>
-              {fmt(totalPawnAmount)}
-            </Typography>
+            <TextField
+              type="number"
+              size="small"
+              fullWidth
+              value={totalPawnOverride ?? autoTotalPawnAmount}
+              onChange={e => setTotalPawnOverride(e.target.value === '' ? null : parseFloat(e.target.value) || 0)}
+              inputProps={{ min: 0, step: 0.01, style: { fontWeight: 800, fontSize: 24, color: (totalPawnOverride ?? autoTotalPawnAmount) > 0 ? '#c62828' : undefined } }}
+              sx={{ mt: 0.5, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
+              InputProps={{
+                startAdornment: <InputAdornment position="start"><Typography fontWeight={700} color="text.secondary">$</Typography></InputAdornment>,
+              }}
+            />
           </Paper>
         </Box>
       </Box>
@@ -686,13 +749,9 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           label={<Typography variant="caption">Show on receipt</Typography>}
           sx={{ whiteSpace: 'nowrap', mr: 0 }}
         />
-        <IconButton size="small"><MuiIcons.ExpandMore /></IconButton>
         <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-        <Button size="small" variant="outlined" startIcon={<MuiIcons.PriceChange />}
-          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-          Set Total Pawn Amount
-        </Button>
         <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
+          onClick={handleSaveAsQuote}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
           Save as Quote
         </Button>
@@ -719,13 +778,14 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
               phone: customer.phone,
               tax_exempt: customer.tax_exempt
             } : null;
+            const scale = autoTotalPawnAmount > 0 ? totalPawnAmount / autoTotalPawnAmount : 1;
             const checkoutItems = pawnItems.map(item => ({
               ...item,
               transaction_type: 'pawn',
               pawnTicketId: ticketId,
               buyTicketId: ticketId,
-              price: item.amount,
-              value: item.amount,
+              price: item.amount * scale,
+              value: item.amount * scale,
               customer: customerObj,
             }));
             sessionStorage.setItem('checkoutItems', JSON.stringify(checkoutItems));
@@ -770,6 +830,17 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           <Typography variant="body2">Trade Ticket</Typography>
         </MenuItem>
       </Menu>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar(s => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={snackbar.severity} onClose={() => setSnackbar(s => ({ ...s, open: false }))} sx={{ width: '100%' }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
 
       {/* Manager Approval dialog */}
       <Dialog open={mgmtOpen} onClose={() => setMgmtOpen(false)} maxWidth="xs" fullWidth>

@@ -6080,12 +6080,17 @@ app.get('/api/quotes/:quote_id', async (req, res) => {
 });
 
 // Create a new quote
-app.post('/api/quotes', async (req, res) => {
+app.post('/api/quotes', uploadJewelryImages, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    
-    const { items, customer_id, employee_id, total_amount } = req.body;
+
+    const items        = JSON.parse(req.body.items        || '[]');
+    const imageMetadata = JSON.parse(req.body.imageMetadata || '[]');
+    const customer_id  = req.body.customer_id;
+    const employee_id  = req.body.employee_id;
+    const total_amount = req.body.total_amount;
+    const uploadedFiles = req.files || [];
     
     // Get the latest quote ID to generate the next sequential number
     const latestQuoteResult = await client.query(
@@ -6124,7 +6129,130 @@ app.post('/api/quotes', async (req, res) => {
       RETURNING *`,
       [quoteId, customer_id, employee_id, total_amount, expiresIn]
     );
-    
+
+    // Look up transaction_type_id for 'pawn'
+    const typeResult = await client.query(`SELECT id FROM transaction_type WHERE type = 'pawn' LIMIT 1`);
+    const pawnTypeId = typeResult.rows[0]?.id ?? 1;
+
+    // Build a global image index map: imageMetadata[n].itemIndex tells us which item each file belongs to
+    let globalFileIndex = 0;
+
+    // Insert each item into jewelry and quote_items
+    for (let i = 0; i < (items || []).length; i++) {
+      const item = items[i];
+      const seq = String(i + 1).padStart(2, '0');
+      const item_id = `${quoteId}-${seq}`;
+
+      // Save images for this item
+      const processedImages = [];
+      const itemImagesMeta = imageMetadata.filter(m => m.itemIndex === i);
+      for (let j = 0; j < itemImagesMeta.length; j++) {
+        const fileIdx = globalFileIndex + j;
+        if (fileIdx < uploadedFiles.length) {
+          const file = uploadedFiles[fileIdx];
+          const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+          const filename = `${item_id}-${j + 1}${ext}`;
+          const filepath = path.join(jewelryUploadDir, filename);
+          await fs.promises.writeFile(filepath, file.buffer);
+          processedImages.push({ url: `/uploads/jewelry/${filename}`, isPrimary: itemImagesMeta[j].isPrimary || j === 0 });
+        }
+      }
+      globalFileIndex += itemImagesMeta.length;
+
+      await client.query(`
+        INSERT INTO jewelry (
+          item_id, long_desc, short_desc, category, brand, vintage, stamps, images,
+          metal_weight, precious_metal_type, non_precious_metal_type, metal_purity, jewelry_color,
+          purity_value, est_metal_value,
+          primary_gem_type, primary_gem_category, primary_gem_size, primary_gem_quantity,
+          primary_gem_shape, primary_gem_weight, primary_gem_color, primary_gem_exact_color,
+          primary_gem_clarity, primary_gem_cut, primary_gem_lab_grown, primary_gem_authentic, primary_gem_value,
+          status, location, condition, metal_spot_price, notes, item_price, melt_value, total_weight, inventory_type
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+          $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,
+          $29,$30,$31,$32,$33,$34,$35,$36,$37
+        )`, [
+        item_id,
+        item.long_desc || '',
+        item.short_desc || '',
+        item.metal_category || '',
+        item.brand || '',
+        item.vintage || false,
+        item.stamps || '',
+        JSON.stringify(processedImages),
+        Math.max(parseFloat(item.metal_weight) || 0.001, 0.001),
+        item.precious_metal_type || null,
+        item.non_precious_metal_type || null,
+        item.metal_purity || null,
+        item.jewelry_color || null,
+        parseFloat(item.purity_value) || 0,
+        parseFloat(item.est_metal_value) || 0,
+        item.primary_gem_type || null,
+        item.primary_gem_category || null,
+        item.primary_gem_size || null,
+        parseInt(item.primary_gem_quantity) || 0,
+        item.primary_gem_shape || null,
+        parseFloat(item.primary_gem_weight) || 0,
+        item.primary_gem_color || null,
+        item.primary_gem_exact_color || null,
+        item.primary_gem_clarity || null,
+        item.primary_gem_cut || null,
+        item.primary_gem_lab_grown || false,
+        item.primary_gem_authentic || false,
+        parseFloat(item.primary_gem_value) || 0,
+        'QUOTED',
+        item.location || 'SOUTH STORE',
+        'GOOD',
+        item.metal_spot_price || null,
+        item.notes || null,
+        parseFloat(item.amount ?? item.price ?? 0),
+        parseFloat(item.melt_value) || 0,
+        Math.max(parseFloat(item.metal_weight) || 0.001, 0.001) +
+          (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
+          (item.secondary_gems || []).reduce((s, g) =>
+            s + (parseFloat(g.secondary_gem_weight) || 0) * (parseInt(g.secondary_gem_quantity) || 1), 0),
+        'jewelry'
+      ]);
+
+      // Insert secondary gems
+      if (item.secondary_gems && item.secondary_gems.length > 0) {
+        for (const gem of item.secondary_gems) {
+          await client.query(`
+            INSERT INTO jewelry_secondary_gems (
+              item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+              secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+              secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, [
+            item_id,
+            gem.secondary_gem_type || null,
+            gem.secondary_gem_category || null,
+            parseFloat(gem.secondary_gem_size) || null,
+            parseInt(gem.secondary_gem_quantity) || 0,
+            gem.secondary_gem_shape || null,
+            parseFloat(gem.secondary_gem_weight) || 0,
+            gem.secondary_gem_color || null,
+            gem.secondary_gem_exact_color || null,
+            gem.secondary_gem_clarity || null,
+            gem.secondary_gem_cut || null,
+            gem.secondary_gem_lab_grown || false,
+            gem.secondary_gem_authentic || false,
+            parseFloat(gem.secondary_gem_value) || 0
+          ]);
+        }
+      }
+
+      // Link to quote_items
+      await client.query(`
+        INSERT INTO quote_items (quote_id, item_id, transaction_type_id, item_price)
+        VALUES ($1, $2, $3, $4)`, [
+        quoteId,
+        item_id,
+        pawnTypeId,
+        parseFloat(item.amount ?? item.price ?? 0)
+      ]);
+    }
+
     await client.query('COMMIT');
     
     res.status(201).json({
@@ -6197,7 +6325,7 @@ app.put('/api/quotes/:id', async (req, res) => {
 app.get('/api/quotes/:quote_id/items', async (req, res) => {
   try {
     const { quote_id } = req.params;
-    
+
     const query = `
       SELECT
         qi.item_id,
