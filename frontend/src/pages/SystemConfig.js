@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Container,
   Typography,
@@ -91,8 +92,9 @@ function TabPanel({ children, value, index }) {
 
 function SystemConfig() {
   const { user } = useAuth();
+  const location = useLocation();
   const isManagerOrOwner = user?.role === 'Store Manager' || user?.role === 'Store Owner';
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState(location.state?.initialTab ?? 0);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
@@ -224,9 +226,11 @@ function SystemConfig() {
   const [spotPrices, setSpotPrices] = useState({});
   const [pawnConfig, setPawnConfig] = useState({
     interest_rate: 0.00,
+    insurance_rate: 0.00,
     term_days: 30,
     frequency_days: 30,
-    forfeiture_mode: 'manual'
+    forfeiture_mode: 'manual',
+    storage_fee: 10.00
   });
   const [caratConversion, setCaratConversion] = useState(null);
   const [isCaratConversionEnabled, setIsCaratConversionEnabled] = useState(false);
@@ -752,10 +756,12 @@ function SystemConfig() {
         const response = await axios.get(`${API_BASE_URL}/pawn-config`);
         if (response.data) {
           setPawnConfig({
-            interest_rate: parseFloat(response.data.interest_rate) || 0.00,
-            term_days: parseInt(response.data.term_days) || 30,
-            frequency_days: parseInt(response.data.frequency_days) || 30,
-            forfeiture_mode: response.data.forfeiture_mode || 'manual'
+            interest_rate:  parseFloat(response.data.interest_rate)  || 0.00,
+            insurance_rate: parseFloat(response.data.insurance_rate) || 0.00,
+            term_days:      parseInt(response.data.term_days)        || 30,
+            frequency_days: parseInt(response.data.frequency_days)   || 30,
+            forfeiture_mode: response.data.forfeiture_mode || 'manual',
+            storage_fee:    parseFloat(response.data.storage_fee)    ?? 10.00
           });
         }
       } catch (error) {
@@ -1472,10 +1478,12 @@ const handleTabChange = (event, newValue) => {
       // Save pawn configuration
       try {
         const pawnConfigPayload = {
-          interest_rate: parseFloat(pawnConfig.interest_rate),
-          term_days: parseInt(pawnConfig.term_days),
+          interest_rate:  parseFloat(pawnConfig.interest_rate),
+          insurance_rate: parseFloat(pawnConfig.insurance_rate),
+          term_days:      parseInt(pawnConfig.term_days),
           frequency_days: parseInt(pawnConfig.frequency_days),
-          forfeiture_mode: pawnConfig.forfeiture_mode
+          forfeiture_mode: pawnConfig.forfeiture_mode,
+          storage_fee:    parseFloat(pawnConfig.storage_fee)
         };
         await axios.put(`${API_BASE_URL}/pawn-config`, pawnConfigPayload);
       } catch (pawnError) {
@@ -1647,10 +1655,12 @@ const handleTabChange = (event, newValue) => {
     // Auto-save to database
     try {
       const response = await axios.put(`${API_BASE_URL}/pawn-config`, {
-        interest_rate: parseFloat(updatedConfig.interest_rate),
-        term_days: parseInt(updatedConfig.term_days),
+        interest_rate:  parseFloat(updatedConfig.interest_rate),
+        insurance_rate: parseFloat(updatedConfig.insurance_rate),
+        term_days:      parseInt(updatedConfig.term_days),
         frequency_days: parseInt(updatedConfig.frequency_days),
-        forfeiture_mode: updatedConfig.forfeiture_mode
+        forfeiture_mode: updatedConfig.forfeiture_mode,
+        storage_fee:    parseFloat(updatedConfig.storage_fee)
       });
 
       setSnackbar({
@@ -4347,7 +4357,7 @@ const handleTabChange = (event, newValue) => {
               Pawn Configuration
             </Typography>
             <Grid container spacing={2}>
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={12} sm={4}>
                 <TextField
                   label="Interest Rate (%)"
                   type="number"
@@ -4358,7 +4368,18 @@ const handleTabChange = (event, newValue) => {
                   helperText="Interest rate charged per period"
                 />
               </Grid>
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="Insurance Rate (%)"
+                  type="number"
+                  value={pawnConfig.insurance_rate}
+                  onChange={(e) => handlePawnConfigChange('insurance_rate', e.target.value)}
+                  fullWidth
+                  inputProps={{ min: 0, max: 100, step: 0.01 }}
+                  helperText="Insurance rate per pawn term"
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
                 <TextField
                   select
                   label="Term (Days)"
@@ -4374,7 +4395,7 @@ const handleTabChange = (event, newValue) => {
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={12} sm={6}>
                 <TextField
                   select
                   label="Frequency (Days)"
@@ -4390,7 +4411,7 @@ const handleTabChange = (event, newValue) => {
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={12} sm={6}>
                 <TextField
                   select
                   label="Forfeiture Mode"
@@ -4402,6 +4423,17 @@ const handleTabChange = (event, newValue) => {
                   <MenuItem value="manual">Manual</MenuItem>
                   <MenuItem value="automatic">Automatic</MenuItem>
                 </TextField>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="Storage Fee ($)"
+                  type="number"
+                  value={pawnConfig.storage_fee}
+                  onChange={(e) => handlePawnConfigChange('storage_fee', e.target.value)}
+                  fullWidth
+                  inputProps={{ min: 0, step: 0.01 }}
+                  helperText="Flat storage fee per pawn"
+                />
               </Grid>
             </Grid>
           </ConfigSection>

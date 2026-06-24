@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
 import {
   Box, Typography, Paper, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
-  CircularProgress, Menu, MenuItem, Dialog, DialogContent, DialogActions,
+  CircularProgress, Menu, MenuItem, Dialog, DialogTitle, DialogContent, DialogActions,
+  Select, InputLabel, FormControl, Grid, Alert,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
+import { useAuth } from '../context/AuthContext';
 
 const PURPLE      = '#6d28d9';
 const PURPLE_DARK = '#5b21b6';
@@ -81,10 +84,13 @@ function commitPawnTicketId() {
 }
 
 export default function PawnTransactionScreen({ customer, customerStats: initialStats, onClose, onConvertTo }) {
+  const navigate = useNavigate();
+  const { user: currentUser } = useAuth();
   const [ticketId]                        = useState(() => generatePawnTicketId());
   const [itemSearch, setItemSearch]       = useState('');
   const [ticketNote, setTicketNote]       = useState('');
   const [showOnReceipt, setShowOnReceipt] = useState(false);
+  const [pawnConfig, setPawnConfig]       = useState(null);
   const [pawnItems, setPawnItems]         = useState([]);
   const [activePawns, setActivePawns]     = useState([]);
   const [stats, setStats]                 = useState(initialStats);
@@ -98,6 +104,14 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [convertRow,       setConvertRow]       = useState(null);
   const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
   const [cameraStream,     setCameraStream]     = useState(null);
+  const [customizeOpen,    setCustomizeOpen]    = useState(false);
+  const [localConfig,      setLocalConfig]      = useState(null);
+  const [savingConfig,     setSavingConfig]     = useState(false);
+  const [mgmtOpen,         setMgmtOpen]         = useState(false);
+  const [mgmtUsername,     setMgmtUsername]     = useState('');
+  const [mgmtPassword,     setMgmtPassword]     = useState('');
+  const [mgmtError,        setMgmtError]        = useState('');
+  const [mgmtLoading,      setMgmtLoading]      = useState(false);
   const [isCamReady,       setIsCamReady]       = useState(false);
   const [pawnFilter,       setPawnFilter]       = useState('active');
   const cameraVideoRef = useRef(null);
@@ -132,6 +146,12 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   }, []);
 
   useEffect(() => {
+    axios.get(`${config.apiUrl}/pawn-config`)
+      .then(res => setPawnConfig(res.data))
+      .catch(err => console.error('Failed to load pawn config:', err));
+  }, []);
+
+  useEffect(() => {
     if (!customer?.id) return;
     const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
 
@@ -154,15 +174,52 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     : '—';
 
   const totalPawnAmount = pawnItems.reduce((s, i) => s + i.amount, 0);
-  const interestAmt     = totalPawnAmount * 0.02;
-  const insuranceAmt    = totalPawnAmount * 0.02;
-  const storageFee      = totalPawnAmount > 0 ? 10 : 0;
+  const interestRate    = parseFloat(pawnConfig?.interest_rate)  || 0;
+  const insuranceRate   = parseFloat(pawnConfig?.insurance_rate) || 0;
+  const termDays        = parseInt(pawnConfig?.term_days)        || 0;
+  const storageFee      = parseFloat(pawnConfig?.storage_fee)    || 0;
+  const interestAmt     = totalPawnAmount * interestRate  / 100;
+  const insuranceAmt    = totalPawnAmount * insuranceRate / 100;
   const totalToRedeem   = totalPawnAmount + interestAmt + insuranceAmt + storageFee;
+
+  const dueDate = pawnConfig && termDays > 0 ? (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + termDays);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  })() : '—';
 
   const fmt      = (n) => `$${n.toFixed(2)}`;
   const initials = `${customer?.first_name?.[0] ?? ''}${customer?.last_name?.[0] ?? ''}`.toUpperCase();
 
   const handleDeleteItem = (id) => setPawnItems(prev => prev.filter(i => i.id !== id));
+
+  const handleMgmtApproval = async () => {
+    if (!mgmtUsername || !mgmtPassword) {
+      setMgmtError('Please enter both username and password');
+      return;
+    }
+    setMgmtLoading(true);
+    setMgmtError('');
+    try {
+      const res = await axios.post(`${config.apiUrl}/auth/login`, {
+        identifier: mgmtUsername,
+        password: mgmtPassword
+      });
+      const user = res.data.user;
+      if (user.role !== 'Store Manager' && user.role !== 'Store Owner') {
+        setMgmtError('Only Store Managers or Store Owners can approve this');
+        setMgmtLoading(false);
+        return;
+      }
+      setMgmtOpen(false);
+      setLocalConfig({ ...pawnConfig });
+      setCustomizeOpen(true);
+    } catch (err) {
+      setMgmtError(err.response?.data?.error || 'Invalid credentials');
+    } finally {
+      setMgmtLoading(false);
+    }
+  };
 
   const openItemCamera = (itemId) => {
     setPhotoTargetId(itemId);
@@ -541,22 +598,34 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
               <MuiIcons.Description sx={{ color: '#3949ab', fontSize: 18 }} />
               <Typography fontWeight={700} fontSize={13}>Pawn Terms</Typography>
             </Box>
-            {[
-              { label: 'Term (Hours):', value: 'Standard 62-Day Pawn', valueColor: '#2e7d32' },
-              { label: 'Interest:',     value: '2%' },
-              { label: 'Insurance:',    value: '2%' },
-              { label: 'Storage Fee:',  value: '$10.00' },
-              { label: 'Due Date:',     value: 'Jul 29, 2026', valueColor: '#2e7d32' },
+            {!pawnConfig ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}><CircularProgress size={18} /></Box>
+            ) : [
+              { label: 'Term:',        value: `${termDays}-Day Pawn`,                     valueColor: '#2e7d32' },
+              { label: 'Interest:',    value: `${interestRate}%`                                                },
+              { label: 'Insurance:',   value: insuranceRate > 0 ? `${insuranceRate}%` : '—'                    },
+              { label: 'Storage Fee:', value: storageFee > 0 ? fmt(storageFee) : '—'                          },
+              { label: 'Due Date:',    value: dueDate,                                    valueColor: '#2e7d32' },
             ].map(r => (
               <Box key={r.label} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                 <Typography variant="caption" color="text.secondary">{r.label}</Typography>
                 <Typography variant="caption" fontWeight={500} color={r.valueColor ?? 'text.primary'}>{r.value}</Typography>
               </Box>
             ))}
-            <Box sx={{ display: 'flex', gap: 0.75, mt: 1.25 }}>
-              <Button size="small" variant="outlined" fullWidth sx={{ fontSize: 11, borderRadius: 1.5, textTransform: 'none' }}>Select Pawn Terms</Button>
+            <Box sx={{ mt: 1.25 }}>
               <Button size="small" variant="outlined" fullWidth startIcon={<MuiIcons.Settings sx={{ fontSize: 12 }} />}
-                sx={{ fontSize: 11, borderRadius: 1.5, textTransform: 'none' }}>Customize Terms</Button>
+                onClick={() => {
+                  const role = currentUser?.role;
+                  if (role === 'Store Manager' || role === 'Store Owner') {
+                    setLocalConfig({ ...pawnConfig });
+                    setCustomizeOpen(true);
+                  } else {
+                    setMgmtUsername(''); setMgmtPassword(''); setMgmtError(''); setMgmtOpen(true);
+                  }
+                }}
+                sx={{ fontSize: 11, borderRadius: 1.5, textTransform: 'none' }}>
+                Customize Terms
+              </Button>
             </Box>
           </Paper>
 
@@ -567,10 +636,10 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
               <Typography fontWeight={700} fontSize={13}>Redemption Details</Typography>
             </Box>
             {[
-              { label: 'Total Pawn Amount:', value: fmt(totalPawnAmount) },
-              { label: 'Interest (2%):',     value: fmt(interestAmt)    },
-              { label: 'Insurance (2%):',    value: fmt(insuranceAmt)   },
-              { label: 'Storage Fee:',       value: fmt(storageFee)     },
+              { label: 'Total Pawn Amount:',          value: fmt(totalPawnAmount) },
+              { label: `Interest (${interestRate}%):`, value: fmt(interestAmt)   },
+              ...(insuranceRate > 0 ? [{ label: `Insurance (${insuranceRate}%):`, value: fmt(insuranceAmt) }] : []),
+              ...(storageFee > 0 ? [{ label: 'Storage Fee:', value: fmt(storageFee) }] : []),
             ].map(r => (
               <Box key={r.label} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                 <Typography variant="caption" color="text.secondary">{r.label}</Typography>
@@ -579,7 +648,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
             ))}
             <Divider sx={{ my: 0.75 }} />
             <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography variant="caption" fontWeight={700} color="#2e7d32">Total Cost to Redeem:</Typography>
+              <Typography variant="caption" fontWeight={700} color="#2e7d32">Total to Redeem:</Typography>
               <Typography variant="caption" fontWeight={700} color="#2e7d32">{fmt(totalToRedeem)}</Typography>
             </Box>
           </Paper>
@@ -674,6 +743,155 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           <Typography variant="body2">Trade Ticket</Typography>
         </MenuItem>
       </Menu>
+
+      {/* Manager Approval dialog */}
+      <Dialog open={mgmtOpen} onClose={() => setMgmtOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <MuiIcons.AdminPanelSettings sx={{ color: '#f59e0b', fontSize: 22 }} />
+          <Typography fontWeight={700} fontSize={15}>Manager Approval Required</Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="info" sx={{ fontSize: 12 }}>
+              A Store Manager or Store Owner must approve changes to pawn terms.
+            </Alert>
+            <TextField
+              label="Manager Username"
+              fullWidth size="small"
+              value={mgmtUsername}
+              onChange={(e) => setMgmtUsername(e.target.value)}
+              autoFocus autoComplete="off"
+            />
+            <TextField
+              label="Manager Password"
+              type="password"
+              fullWidth size="small"
+              value={mgmtPassword}
+              onChange={(e) => setMgmtPassword(e.target.value)}
+              autoComplete="off"
+              onKeyDown={(e) => { if (e.key === 'Enter') handleMgmtApproval(); }}
+            />
+            {mgmtError && <Alert severity="error" sx={{ fontSize: 12 }}>{mgmtError}</Alert>}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setMgmtOpen(false)} sx={{ textTransform: 'none' }}>Cancel</Button>
+          <Button variant="contained" disabled={mgmtLoading} onClick={handleMgmtApproval}
+            sx={{ textTransform: 'none', bgcolor: '#f59e0b', '&:hover': { bgcolor: '#d97706' } }}>
+            {mgmtLoading ? <CircularProgress size={16} sx={{ color: '#fff' }} /> : 'Verify'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Customize Pawn Terms dialog */}
+      <Dialog open={customizeOpen} onClose={() => setCustomizeOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ pb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <MuiIcons.Settings sx={{ color: PURPLE, fontSize: 20 }} />
+          <Typography fontWeight={700} fontSize={15}>Customize Pawn Terms</Typography>
+        </DialogTitle>
+        <DialogContent sx={{ pt: 1 }}>
+          {localConfig && (
+            <Grid container spacing={2} sx={{ mt: 0.5 }}>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="Interest Rate (%)"
+                  type="number"
+                  value={localConfig.interest_rate}
+                  onChange={(e) => setLocalConfig(c => ({ ...c, interest_rate: e.target.value }))}
+                  fullWidth size="small"
+                  inputProps={{ min: 0, max: 100, step: 0.01 }}
+                  helperText="Per pawn term"
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="Insurance Rate (%)"
+                  type="number"
+                  value={localConfig.insurance_rate}
+                  onChange={(e) => setLocalConfig(c => ({ ...c, insurance_rate: e.target.value }))}
+                  fullWidth size="small"
+                  inputProps={{ min: 0, max: 100, step: 0.01 }}
+                  helperText="Per pawn term"
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="Storage Fee ($)"
+                  type="number"
+                  value={localConfig.storage_fee}
+                  onChange={(e) => setLocalConfig(c => ({ ...c, storage_fee: e.target.value }))}
+                  fullWidth size="small"
+                  inputProps={{ min: 0, step: 0.01 }}
+                  helperText="Flat fee per pawn"
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Term (Days)</InputLabel>
+                  <Select
+                    label="Term (Days)"
+                    value={localConfig.term_days}
+                    onChange={(e) => setLocalConfig(c => ({ ...c, term_days: e.target.value }))}
+                  >
+                    {[15, 30, 45, 60, 90, 120, 180].map(d => <MenuItem key={d} value={d}>{d}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Frequency (Days)</InputLabel>
+                  <Select
+                    label="Frequency (Days)"
+                    value={localConfig.frequency_days}
+                    onChange={(e) => setLocalConfig(c => ({ ...c, frequency_days: e.target.value }))}
+                  >
+                    {[15, 30, 45, 60, 90, 120, 180].map(d => <MenuItem key={d} value={d}>{d}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Forfeiture Mode</InputLabel>
+                  <Select
+                    label="Forfeiture Mode"
+                    value={localConfig.forfeiture_mode}
+                    onChange={(e) => setLocalConfig(c => ({ ...c, forfeiture_mode: e.target.value }))}
+                  >
+                    <MenuItem value="manual">Manual</MenuItem>
+                    <MenuItem value="automatic">Automatic</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+            </Grid>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setCustomizeOpen(false)} sx={{ textTransform: 'none' }}>Cancel</Button>
+          <Button variant="contained" disabled={savingConfig}
+            onClick={async () => {
+              setSavingConfig(true);
+              try {
+                await axios.put(`${config.apiUrl}/pawn-config`, {
+                  interest_rate:  parseFloat(localConfig.interest_rate),
+                  insurance_rate: parseFloat(localConfig.insurance_rate),
+                  term_days:      parseInt(localConfig.term_days),
+                  frequency_days: parseInt(localConfig.frequency_days),
+                  forfeiture_mode: localConfig.forfeiture_mode,
+                  storage_fee:    parseFloat(localConfig.storage_fee)
+                });
+                setPawnConfig({ ...localConfig });
+                setCustomizeOpen(false);
+              } catch (err) {
+                console.error('Failed to save pawn config:', err);
+              } finally {
+                setSavingConfig(false);
+              }
+            }}
+            sx={{ textTransform: 'none', bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}>
+            {savingConfig ? <CircularProgress size={16} sx={{ color: '#fff' }} /> : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

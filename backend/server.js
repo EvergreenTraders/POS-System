@@ -320,6 +320,13 @@ pool.query(`
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_bank BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('transfer_allowed_bank migration:', err.message));
+
+pool.query(`
+  ALTER TABLE pawn_config ADD COLUMN IF NOT EXISTS insurance_rate NUMERIC(5,2) NOT NULL DEFAULT 0.00
+`).catch(err => console.error('pawn_config insurance_rate migration:', err.message));
+pool.query(`
+  ALTER TABLE pawn_config ADD COLUMN IF NOT EXISTS storage_fee NUMERIC(10,2) NOT NULL DEFAULT 10.00
+`).catch(err => console.error('pawn_config storage_fee migration:', err.message));
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_store BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('transfer_allowed_store migration:', err.message));
@@ -8470,12 +8477,13 @@ app.get('/api/pawn-config', async (req, res) => {
     const result = await pool.query('SELECT * FROM pawn_config LIMIT 1');
 
     if (result.rows.length === 0) {
-      // Return default values if no config exists
       return res.json({
         interest_rate: 0.00,
+        insurance_rate: 0.00,
         term_days: 30,
         frequency_days: 30,
-        forfeiture_mode: 'manual'
+        forfeiture_mode: 'manual',
+        storage_fee: 10.00
       });
     }
 
@@ -8490,7 +8498,7 @@ app.get('/api/pawn-config', async (req, res) => {
 app.put('/api/pawn-config', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { interest_rate, term_days, frequency_days, forfeiture_mode } = req.body;
+    const { interest_rate, insurance_rate, term_days, frequency_days, forfeiture_mode, storage_fee } = req.body;
 
     await client.query('BEGIN');
 
@@ -8499,16 +8507,14 @@ app.put('/api/pawn-config', async (req, res) => {
 
     let result;
     if (checkResult.rows.length === 0) {
-      // Insert new config
       result = await client.query(
-        'INSERT INTO pawn_config (interest_rate, term_days, frequency_days, forfeiture_mode) VALUES ($1, $2, $3, $4) RETURNING *',
-        [interest_rate, term_days, frequency_days, forfeiture_mode || 'manual']
+        'INSERT INTO pawn_config (interest_rate, insurance_rate, term_days, frequency_days, forfeiture_mode, storage_fee) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+        [interest_rate, insurance_rate || 0, term_days, frequency_days, forfeiture_mode || 'manual', storage_fee ?? 10.00]
       );
     } else {
-      // Update existing config
       result = await client.query(
-        'UPDATE pawn_config SET interest_rate = $1, term_days = $2, frequency_days = $3, forfeiture_mode = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5 RETURNING *',
-        [interest_rate, term_days, frequency_days, forfeiture_mode || 'manual', checkResult.rows[0].id]
+        'UPDATE pawn_config SET interest_rate = $1, insurance_rate = $2, term_days = $3, frequency_days = $4, forfeiture_mode = $5, storage_fee = $6, updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
+        [interest_rate, insurance_rate || 0, term_days, frequency_days, forfeiture_mode || 'manual', storage_fee ?? 10.00, checkResult.rows[0].id]
       );
     }
 
