@@ -7869,13 +7869,13 @@ app.post('/api/pawn-ticket', async (req, res) => {
 
     const result = await client.query(insertQuery, [
       pawn_ticket_id,
-      transaction_id || null,
-      item_id || null,
-      term_days || 90,
-      interest_rate || 2.9,
-      insurance_rate || 1.0,
-      frequency_days || 30,
-      due_date || null
+      transaction_id ?? null,
+      item_id ?? null,
+      term_days ?? 90,
+      interest_rate ?? 2.9,
+      insurance_rate ?? 0,
+      frequency_days ?? 30,
+      due_date ?? null
     ]);
 
     await client.query('COMMIT');
@@ -8988,6 +8988,38 @@ app.get('/api/customers/search', async (req, res) => {
     } finally {
         client.release();
     }
+});
+
+app.get('/api/customers/:id/stats', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        (
+          SELECT COUNT(DISTINCT pt.pawn_ticket_id)
+          FROM pawn_ticket pt
+          JOIN transactions t ON pt.transaction_id = t.transaction_id
+          WHERE t.customer_id = $1 AND pt.status = 'ACTIVE'
+        ) AS active_pawns,
+        COALESCE((
+          SELECT SUM(p.amount * CASE WHEN t.total_amount < 0 THEN 1 ELSE -1 END)
+          FROM payments p
+          JOIN transactions t ON p.transaction_id = t.transaction_id
+          WHERE t.customer_id = $1 AND p.payment_method = 'store_credit'
+        ), 0) AS store_credit
+    `, [id]);
+
+    const row = result.rows[0];
+    res.json({
+      active_pawns:    parseInt(row.active_pawns)    || 0,
+      active_layaways: 0,
+      open_repairs:    0,
+      store_credit:    parseFloat(row.store_credit)  || 0,
+    });
+  } catch (err) {
+    console.error('Error fetching customer stats:', err);
+    res.status(500).json({ error: 'Failed to fetch customer stats' });
+  }
 });
 
 app.get('/api/customers/:id/pawn/stats', async (req, res) => {

@@ -143,6 +143,7 @@ function Checkout() {
   const [pawnConfig, setPawnConfig] = useState({
     term_days: 90,
     interest_rate: 2.9,
+    insurance_rate: 0,
     frequency_days: 30
   });
 
@@ -357,9 +358,10 @@ function Checkout() {
           headers: { Authorization: `Bearer ${token}` }
         });
         setPawnConfig({
-          term_days: parseInt(response.data.term_days) || 90,
-          interest_rate: parseFloat(response.data.interest_rate) || 2.9,
-          frequency_days: parseInt(response.data.frequency_days) || 30
+          term_days:      parseInt(response.data.term_days)        || 90,
+          interest_rate:  parseFloat(response.data.interest_rate)  || 2.9,
+          insurance_rate: parseFloat(response.data.insurance_rate) || 0,
+          frequency_days: parseInt(response.data.frequency_days)   || 30,
         });
       } catch (error) {
         console.error('Error fetching pawn config:', error);
@@ -1392,14 +1394,14 @@ function Checkout() {
                 await axios.post(
                   `${config.apiUrl}/pawn-ticket`,
                   {
-                    pawn_ticket_id: pawnTicketId,
-                    transaction_id: realTransactionId,
-                    item_id: itemId,
-                    // Store pawn config values frozen at time of pawn creation
-                    term_days: pawnConfig.term_days,
-                    interest_rate: pawnConfig.interest_rate,
-                    frequency_days: pawnConfig.frequency_days,
-                    due_date: dueDateStr
+                    pawn_ticket_id:  pawnTicketId,
+                    transaction_id:  realTransactionId,
+                    item_id:         itemId,
+                    term_days:       pawnConfig.term_days,
+                    interest_rate:   pawnConfig.interest_rate,
+                    insurance_rate:  pawnConfig.insurance_rate,
+                    frequency_days:  pawnConfig.frequency_days,
+                    due_date:        dueDateStr
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }

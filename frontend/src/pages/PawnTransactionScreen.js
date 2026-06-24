@@ -706,7 +706,34 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           Add to Workspace
         </Button>
         <Button size="small" variant="contained" endIcon={<MuiIcons.ArrowForward />}
-          onClick={() => { commitPawnTicketId(); }}
+          disabled={pawnItems.length === 0}
+          onClick={() => {
+            if (pawnItems.length === 0) return;
+            commitPawnTicketId();
+            const customerObj = customer ? {
+              id: customer.id,
+              first_name: customer.first_name,
+              last_name: customer.last_name,
+              name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+              email: customer.email,
+              phone: customer.phone,
+              tax_exempt: customer.tax_exempt
+            } : null;
+            const checkoutItems = pawnItems.map(item => ({
+              ...item,
+              transaction_type: 'pawn',
+              pawnTicketId: ticketId,
+              buyTicketId: ticketId,
+              price: item.amount,
+              value: item.amount,
+              customer: customerObj,
+            }));
+            sessionStorage.setItem('checkoutItems', JSON.stringify(checkoutItems));
+            if (customerObj) sessionStorage.setItem('selectedCustomer', JSON.stringify(customerObj));
+            navigate('/checkout', {
+              state: { items: checkoutItems, allCartItems: checkoutItems, customer: customerObj, from: 'cart' }
+            });
+          }}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}>
           Checkout Now
         </Button>
