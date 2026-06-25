@@ -99,6 +99,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [ticketNote, setTicketNote]       = useState(existingPawnData?.ticketNote || '');
   const [showOnReceipt, setShowOnReceipt] = useState(existingPawnData?.showOnReceipt || false);
   const [pawnConfig, setPawnConfig]       = useState(null);
+  const [itemSizes, setItemSizes]         = useState([]);
   const [pawnItems, setPawnItems]         = useState(existingPawnData?.pawnItems || []);
   const [activePawns, setActivePawns]     = useState([]);
   const [stats, setStats]                 = useState(initialStats);
@@ -160,9 +161,14 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   }, []);
 
   useEffect(() => {
-    axios.get(`${config.apiUrl}/pawn-config`)
+    const token = localStorage.getItem('token');
+    const headers = { Authorization: `Bearer ${token}` };
+    axios.get(`${config.apiUrl}/pawn-config`, { headers })
       .then(res => setPawnConfig(res.data))
       .catch(err => console.error('Failed to load pawn config:', err));
+    axios.get(`${config.apiUrl}/item-sizes`, { headers })
+      .then(res => setItemSizes(res.data))
+      .catch(err => console.error('Failed to load item sizes:', err));
   }, []);
 
   useEffect(() => {
@@ -225,7 +231,8 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const interestRate    = parseFloat(pawnConfig?.interest_rate)  || 0;
   const insuranceRate   = parseFloat(pawnConfig?.insurance_rate) || 0;
   const termDays        = parseInt(pawnConfig?.term_days)        || 0;
-  const storageFee      = parseFloat(pawnConfig?.storage_fee)    || 0;
+  const itemStorageFeeTotal = pawnItems.reduce((sum, item) => sum + (parseFloat(item.storage_fee) || 0), 0);
+  const storageFee      = itemStorageFeeTotal > 0 ? itemStorageFeeTotal : (parseFloat(pawnConfig?.storage_fee) || 0);
   const interestAmt     = totalPawnAmount * interestRate  / 100;
   const insuranceAmt    = totalPawnAmount * insuranceRate / 100;
   const totalToRedeem   = totalPawnAmount + interestAmt + insuranceAmt + storageFee;
@@ -240,6 +247,15 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const initials = `${customer?.first_name?.[0] ?? ''}${customer?.last_name?.[0] ?? ''}`.toUpperCase();
 
   const handleDeleteItem = (id) => setPawnItems(prev => prev.filter(i => i.id !== id));
+
+  const handleItemSizeChange = (id, sizeName) => {
+    const sizeObj = itemSizes.find(s => s.name === sizeName);
+    setPawnItems(prev => prev.map(item =>
+      item.id === id
+        ? { ...item, size: sizeName, storage_fee: sizeObj ? parseFloat(sizeObj.storage_fee) : 0 }
+        : item
+    ));
+  };
 
   const handleEditCustomer = () => {
     if (!customer) return;
@@ -780,7 +796,19 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
                 <Typography variant="caption" fontWeight={500}>{row.item}</Typography>
                 <Typography variant="caption" color="text.secondary">{row.serial || '—'}</Typography>
                 <Typography variant="caption" align="center">{row.qty}</Typography>
-                <Typography variant="caption" align="center">{row.size || '—'}</Typography>
+                <FormControl size="small" sx={{ minWidth: 80 }}>
+                  <Select
+                    value={row.size || ''}
+                    displayEmpty
+                    onChange={e => handleItemSizeChange(row.id, e.target.value)}
+                    sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
+                  >
+                    <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
+                    {itemSizes.map(s => (
+                      <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
                 <Typography variant="caption" fontWeight={700} color="#2e7d32">{fmt(row.amount)}</Typography>
                 <Box sx={{ display: 'flex', gap: 0, alignItems: 'center' }}>
                   <IconButton size="small" sx={{ color: PURPLE }} onClick={() => { setEditingItem(row); setIntakeOpen(true); }}><MuiIcons.Edit sx={{ fontSize: 15 }} /></IconButton>

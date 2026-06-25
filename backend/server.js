@@ -8668,6 +8668,16 @@ app.put('/api/pawn-config', async (req, res) => {
   }
 });
 
+app.get('/api/item-sizes', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM item_size ORDER BY storage_fee ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching item sizes:', err);
+    res.status(500).json({ error: 'Failed to fetch item sizes' });
+  }
+});
+
 // Pawn History Endpoints
 
 // Get pawn history for a specific pawn ticket
