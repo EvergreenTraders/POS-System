@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import config from '../config';
 import {
   Box, Typography, Paper, Grid, Avatar, Button, IconButton, Chip,
-  Divider, TextField, InputAdornment, Badge, Tooltip, Stack, Snackbar, Alert
+  Divider, TextField, InputAdornment, Badge, Tooltip, Stack, Snackbar, Alert,
+  Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
@@ -15,18 +16,21 @@ const GREEN_LIGHT = '#2d6a4f';
 
 const PAWN_ACCENT = '#6a1b9a';
 
-function PawnTransactionCard({ tx }) {
+function PawnTransactionCard({ tx, pawnIcon, pawnColor, onOpen, onVoid }) {
   const totalPawnAmount = Number(tx.totalPawnAmount) || 0;
   const costToRedeem = Number(tx.costToRedeem) || 0;
   const fmt = (n) => `$${Number(n).toFixed(2)}`;
+  const overduePawnCount = tx.overduePawnCount ?? 0;
+  const accent = pawnColor || PAWN_ACCENT;
+  const PawnIconComponent = pawnIcon ? (MuiIcons[pawnIcon] ?? MuiIcons.Casino) : MuiIcons.Casino;
 
   return (
     <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${PAWN_ACCENT}` }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography sx={{ fontSize: 18, lineHeight: 1, color: PAWN_ACCENT }}>♟</Typography>
-          <Typography fontWeight={700} fontSize={13} color={PAWN_ACCENT}>PAWN</Typography>
+          <PawnIconComponent sx={{ fontSize: 20, color: accent }} />
+          <Typography fontWeight={700} fontSize={13} color={accent}>PAWN</Typography>
           <Chip label="Active" size="small" sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: '#1565c0', color: '#fff' }} />
         </Box>
         <IconButton size="small"><MuiIcons.MoreVert fontSize="small" /></IconButton>
@@ -93,12 +97,14 @@ function PawnTransactionCard({ tx }) {
 
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
+            onClick={onOpen}
             sx={{ flex: 1, fontSize: 11 }}>
             Open
           </Button>
-          <Button size="small" variant="outlined" sx={{ minWidth: 40, px: 0.5, fontSize: 11 }}>
-            <MuiIcons.MoreHoriz sx={{ fontSize: 16 }} />
-          </Button>
+          <IconButton size="small" color="error" onClick={onVoid}
+            sx={{ border: '1px solid', borderColor: 'error.main', borderRadius: 1 }}>
+            <MuiIcons.Block fontSize="small" />
+          </IconButton>
         </Box>
       </Box>
     </Paper>
@@ -124,14 +130,72 @@ function TransactionTypeButton({ label, icon, color, onClick }) {
   );
 }
 
+// ── Workspace localStorage helpers (mirrors CustomerTicket.js pattern) ────────
+
+const WORKSPACE_EXPIRY_MS = 24 * 60 * 60 * 1000;
+
+function saveWorkspaceForId(customerId, transactions) {
+  try {
+    const key = customerId ? `workspace_${customerId}` : 'workspace_global';
+    localStorage.setItem(key, JSON.stringify({ transactions, timestamp: Date.now() }));
+  } catch (e) {
+    console.error('Error saving workspace:', e);
+  }
+}
+
+function loadWorkspaceForId(customerId) {
+  try {
+    const key = customerId ? `workspace_${customerId}` : 'workspace_global';
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.timestamp) {
+      if (Date.now() - parsed.timestamp > WORKSPACE_EXPIRY_MS) {
+        localStorage.removeItem(key);
+        return null;
+      }
+      return parsed.transactions;
+    }
+    return null;
+  } catch (e) {
+    console.error('Error loading workspace:', e);
+    return null;
+  }
+}
+
+function cleanupExpiredWorkspaces() {
+  try {
+    const now = Date.now();
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('workspace_'))
+      .forEach(key => {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(key));
+          if (parsed?.timestamp && now - parsed.timestamp > WORKSPACE_EXPIRY_MS) {
+            localStorage.removeItem(key);
+          }
+        } catch (e) { /* skip invalid entries */ }
+      });
+  } catch (e) {
+    console.error('Error cleaning up expired workspaces:', e);
+  }
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ModernTransactions() {
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
+  const [openingTxId, setOpeningTxId]     = useState(null);
+  const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
   const [noCustomerWarning, setNoCustomerWarning] = useState(false);
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
+
+  // Refs for localStorage persistence (mirrors CustomerTicket.js pattern)
+  const customerIdRef = useRef(undefined);
+  const workspaceTransactionsRef = useRef(workspaceTransactions);
+  const initialLoadCompleteRef = useRef(false);
 
   // Customer state
   const [customer, setCustomer] = useState(null);
@@ -146,6 +210,47 @@ export default function ModernTransactions() {
       .then(res => setTransactionTypes(res.data))
       .catch(err => console.error('Failed to load transaction types:', err));
   }, []);
+
+  // Clean up expired workspace entries on mount
+  useEffect(() => { cleanupExpiredWorkspaces(); }, []);
+
+  // On customer change: save old customer's workspace, load new customer's workspace
+  useEffect(() => {
+    const prevId = customerIdRef.current;
+    const newId = customer?.id;
+    const customerChanged = prevId !== newId;
+
+    if (!initialLoadCompleteRef.current || customerChanged) {
+      if (customerChanged && prevId !== undefined) {
+        saveWorkspaceForId(prevId, workspaceTransactionsRef.current);
+      }
+      const saved = loadWorkspaceForId(newId);
+      setWorkspaceTransactions(saved || []);
+      customerIdRef.current = newId;
+      initialLoadCompleteRef.current = true;
+    }
+  }, [customer?.id]);
+
+  // Keep ref in sync and auto-save to localStorage whenever workspace changes
+  useEffect(() => {
+    workspaceTransactionsRef.current = workspaceTransactions;
+    if (initialLoadCompleteRef.current) {
+      saveWorkspaceForId(customer?.id, workspaceTransactions);
+    }
+  }, [workspaceTransactions, customer?.id]);
+
+  // When customerStats loads, refresh overduePawnCount on all PAWN cards in the workspace
+  // (handles stale localStorage cards and race conditions during card creation)
+  useEffect(() => {
+    if (!customerStats) return;
+    setWorkspaceTransactions(prev =>
+      prev.map(tx =>
+        tx.type === 'PAWN'
+          ? { ...tx, overduePawnCount: customerStats.overdue_pawns ?? 0 }
+          : tx
+      )
+    );
+  }, [customerStats]);
 
   const handleCustomerSearch = async (query) => {
     setCustomerSearch(query);
@@ -167,11 +272,12 @@ export default function ModernTransactions() {
 
   const handleSelectCustomer = async (c) => {
     setCustomer(c);
+    setCustomerStats(null);
     setCustomerSearch('');
     setCustomerResults([]);
     setShowResults(false);
     try {
-      const res = await axios.get(`${config.apiUrl}/customers/${c.id}/stats`, {
+      const res = await axios.get(`${config.apiUrl}/customers/${c.id}/pawn/stats`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
       setCustomerStats(res.data);
@@ -184,10 +290,26 @@ export default function ModernTransactions() {
   const handleClearCustomer = () => { setCustomer(null); setCustomerStats(null); };
 
   const handleAddPawnToWorkspace = (pawnData) => {
-    setWorkspaceTransactions(prev => [
-      ...prev,
-      { id: Date.now(), type: 'PAWN', ...pawnData },
-    ]);
+    setWorkspaceTransactions(prev => {
+      if (openingTxId) {
+        return prev.map(tx => tx.id === openingTxId ? { ...tx, ...pawnData } : tx);
+      }
+      return [...prev, { id: Date.now(), type: 'PAWN', ...pawnData }];
+    });
+    setOpeningTxId(null);
+  };
+
+  const handleConfirmVoid = () => {
+    if (!voidConfirm) return;
+    if (voidConfirm.ticketId) {
+      const voided = JSON.parse(localStorage.getItem('voidedPawnTickets') || '[]');
+      if (!voided.includes(voidConfirm.ticketId)) {
+        voided.push(voidConfirm.ticketId);
+        localStorage.setItem('voidedPawnTickets', JSON.stringify(voided));
+      }
+    }
+    setWorkspaceTransactions(prev => prev.filter(t => t.id !== voidConfirm.id));
+    setVoidConfirm(null);
   };
 
   const summaryLines = workspaceTransactions.map(tx => {
@@ -215,12 +337,14 @@ export default function ModernTransactions() {
   };
 
   if (pawnOpen) {
+    const existingPawnData = openingTxId ? workspaceTransactions.find(t => t.id === openingTxId) : null;
     return (
       <PawnTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => setPawnOpen(false)}
+        onClose={() => { setPawnOpen(false); setOpeningTxId(null); }}
         onAddToWorkspace={handleAddPawnToWorkspace}
+        existingPawnData={existingPawnData}
       />
     );
   }
@@ -456,7 +580,13 @@ export default function ModernTransactions() {
                 {workspaceTransactions.map(tx => (
                   <Grid item xs={12} sm={6} md={4} key={tx.id}>
                     {tx.type === 'PAWN' ? (
-                      <PawnTransactionCard tx={tx} />
+                      <PawnTransactionCard
+                        tx={tx}
+                        pawnIcon={transactionTypes.find(t => t.type === 'pawn')?.icon}
+                        pawnColor={transactionTypes.find(t => t.type === 'pawn')?.color}
+                        onOpen={() => { setOpeningTxId(tx.id); setPawnOpen(true); }}
+                        onVoid={() => setVoidConfirm(tx)}
+                      />
                     ) : null}
                   </Grid>
                 ))}
@@ -585,6 +715,19 @@ export default function ModernTransactions() {
           Please select a customer before opening a pawn ticket.
         </Alert>
       </Snackbar>
+
+      <Dialog open={!!voidConfirm} onClose={() => setVoidConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Void Pawn Ticket?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Ticket <strong>{voidConfirm?.ticketId}</strong> will be permanently voided and cannot be used again.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setVoidConfirm(null)}>Cancel</Button>
+          <Button variant="contained" color="error" onClick={handleConfirmVoid}>Void Ticket</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

@@ -9156,7 +9156,7 @@ app.get('/api/customers/:id/pawn/stats', async (req, res) => {
     const result = await pool.query(`
       SELECT
         COUNT(DISTINCT j.item_id) FILTER (WHERE pt.status = 'ACTIVE' AND j.status = 'PAWN') AS active_pawns,
-        COUNT(DISTINCT j.item_id) FILTER (WHERE pt.status = 'ACTIVE' AND j.status = 'PAWN' AND pt.due_date < CURRENT_DATE) AS overdue_pawns,
+        COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'OVERDUE' OR (pt.status = 'ACTIVE' AND pt.due_date IS NOT NULL AND pt.due_date < CURRENT_DATE)) AS overdue_pawns,
         COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'FORFEITED') AS forfeited_pawns,
         COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'REDEEMED') AS redeemed_pawns,
         MIN(t.transaction_date) AS first_pawn_date

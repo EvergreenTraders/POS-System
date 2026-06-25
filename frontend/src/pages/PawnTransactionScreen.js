@@ -69,14 +69,20 @@ function parsePawnDescription(parts, categoryCodeMap, colorCodeMap, metalTypeCod
 }
 
 function generatePawnTicketId() {
-  // Reuse an uncommitted ticket ID if one exists (e.g. user cancelled before saving)
+  const voided = JSON.parse(localStorage.getItem('voidedPawnTickets') || '[]');
+
+  // Reuse uncommitted ticket if not voided
   const pending = localStorage.getItem(PENDING_KEY);
-  if (pending) return pending;
+  if (pending && !voided.includes(pending)) return pending;
+  if (pending) localStorage.removeItem(PENDING_KEY); // pending was voided, discard it
 
   let last = parseInt(localStorage.getItem(COUNTER_KEY) || '0');
-  last += 1;
+  let id;
+  do {
+    last += 1;
+    id = `PT-${last.toString().padStart(8, '0')}`;
+  } while (voided.includes(id));
   localStorage.setItem(COUNTER_KEY, last.toString());
-  const id = `PT-${last.toString().padStart(8, '0')}`;
   localStorage.setItem(PENDING_KEY, id);
   return id;
 }
@@ -85,15 +91,15 @@ function commitPawnTicketId() {
   localStorage.removeItem(PENDING_KEY);
 }
 
-export default function PawnTransactionScreen({ customer, customerStats: initialStats, onClose, onConvertTo, onAddToWorkspace }) {
+export default function PawnTransactionScreen({ customer, customerStats: initialStats, onClose, onConvertTo, onAddToWorkspace, existingPawnData }) {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
-  const [ticketId]                        = useState(() => generatePawnTicketId());
+  const [ticketId]                        = useState(() => existingPawnData?.ticketId || generatePawnTicketId());
   const [itemSearch, setItemSearch]       = useState('');
   const [ticketNote, setTicketNote]       = useState('');
   const [showOnReceipt, setShowOnReceipt] = useState(false);
   const [pawnConfig, setPawnConfig]       = useState(null);
-  const [pawnItems, setPawnItems]         = useState([]);
+  const [pawnItems, setPawnItems]         = useState(existingPawnData?.pawnItems || []);
   const [activePawns, setActivePawns]     = useState([]);
   const [stats, setStats]                 = useState(initialStats);
   const [loadingPawns, setLoadingPawns]   = useState(false);
@@ -157,6 +163,11 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
       .catch(err => console.error('Failed to load pawn config:', err));
   }, []);
 
+  // Sync if parent's customerStats prop arrives after this component mounts
+  useEffect(() => {
+    if (initialStats != null) setStats(prev => prev ?? initialStats);
+  }, [initialStats]);
+
   useEffect(() => {
     if (!customer?.id) return;
     const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
@@ -180,9 +191,18 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     : '—';
 
   const autoTotalPawnAmount = pawnItems.reduce((s, i) => s + i.amount, 0);
-  const [totalPawnOverride, setTotalPawnOverride] = useState(null);
+  const initialOverride = existingPawnData
+    ? (existingPawnData.totalPawnAmount !== existingPawnData.pawnItems?.reduce((s, i) => s + i.amount, 0)
+        ? existingPawnData.totalPawnAmount
+        : null)
+    : null;
+  const [totalPawnOverride, setTotalPawnOverride] = useState(initialOverride);
+  const isFirstRender = useRef(true);
 
-  useEffect(() => { setTotalPawnOverride(null); }, [pawnItems]);
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    setTotalPawnOverride(null);
+  }, [pawnItems]);
 
   const totalPawnAmount = totalPawnOverride ?? autoTotalPawnAmount;
   const interestRate    = parseFloat(pawnConfig?.interest_rate)  || 0;
