@@ -386,6 +386,11 @@ pool.query(`ALTER TABLE jewelry ALTER COLUMN item_id TYPE VARCHAR(30)`)
 pool.query(`ALTER TABLE jewelry_secondary_gems ALTER COLUMN item_id TYPE VARCHAR(30)`)
   .catch(err => console.error('jewelry_secondary_gems item_id length migration:', err.message));
 
+pool.query(`ALTER TABLE pawn_ticket ADD COLUMN IF NOT EXISTS ticket_note TEXT`)
+  .catch(err => console.error('pawn_ticket ticket_note migration:', err.message));
+pool.query(`ALTER TABLE pawn_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE`)
+  .catch(err => console.error('pawn_ticket show_on_receipt migration:', err.message));
+
 // Fix unique_active_connection: replace table constraint with partial index
 // Allows multiple historical (is_active = FALSE) rows per employee/session
 pool.query(`ALTER TABLE drawer_session_connections DROP CONSTRAINT IF EXISTS unique_active_connection`)
@@ -7957,7 +7962,7 @@ app.get('/api/pawn-ticket', async (req, res) => {
 app.post('/api/pawn-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date } = req.body;
+    const { pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date, ticket_note, show_on_receipt } = req.body;
 
     // Validate required fields
     if (!pawn_ticket_id) {
@@ -7990,8 +7995,8 @@ app.post('/api/pawn-ticket', async (req, res) => {
 
     // Insert new pawn_ticket record with pawn config values frozen at time of creation
     const insertQuery = `
-      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date, ticket_note, show_on_receipt)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *
     `;
 
@@ -8003,7 +8008,9 @@ app.post('/api/pawn-ticket', async (req, res) => {
       interest_rate ?? 2.9,
       insurance_rate ?? 0,
       frequency_days ?? 30,
-      due_date ?? null
+      due_date ?? null,
+      ticket_note ?? null,
+      show_on_receipt ?? false
     ]);
 
     await client.query('COMMIT');
@@ -9289,6 +9296,8 @@ app.get('/api/pawn-tickets/:ticketId/receipt-data', async (req, res) => {
       customer_phone:   first.customer_phone,
       customer_id:      first.customer_id,
       employee_name:    first.employee_name,
+      ticket_note:      first.ticket_note || null,
+      show_on_receipt:  first.show_on_receipt || false,
       items,
     });
   } catch (err) {

@@ -30,8 +30,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useWorkingDate } from '../context/WorkingDateContext';
 import { Avatar } from '@mui/material';
-import { pdf } from '@react-pdf/renderer';
-import PawnTicketTemplate from '../components/PawnTicketTemplate';
+import { openPawnReceiptPDF } from '../utils/pawnReceiptUtils';
 import config from '../config';
 import { injectPDFScript } from '../utils/printUtils';
 
@@ -247,6 +246,12 @@ function TransactionJournals() {
       return;
     }
 
+    // Pawn receipts use the shared utility — same output as PawnTransactionScreen
+    if (isPawnTicket) {
+      await openPawnReceiptPDF(ticketId);
+      return;
+    }
+
     // Determine if this is a sale transaction
     const isSaleTransaction = isSaleTicket || ticketItems.some(item =>
       item.transaction_type?.toLowerCase() === 'sale'
@@ -275,136 +280,13 @@ function TransactionJournals() {
       console.error('Error fetching business info:', error);
     }
 
-    // Get pawn ticket details if this is a pawn ticket
-    const pawnTicketData = isPawnTicket ? pawnTickets.find(pt => pt.pawn_ticket_id === ticketId) : null;
-
-    // Use stored values from pawn_ticket if available, otherwise fetch from pawn-config
-    let termDays = 90; // Default value
-    let configInterestRate = 2.9; // Default value
-    let frequencyDays = 30; // Default value
-    let storedDueDate = null;
-
-    if (pawnTicketData && (pawnTicketData.term_days || pawnTicketData.interest_rate || pawnTicketData.due_date)) {
-      // Use stored values from pawn_ticket (frozen at time of pawn creation)
-      termDays = parseInt(pawnTicketData.term_days) || 90;
-      configInterestRate = parseFloat(pawnTicketData.interest_rate) || 2.9;
-      frequencyDays = parseInt(pawnTicketData.frequency_days) || 30;
-      storedDueDate = pawnTicketData.due_date;
-    } else {
-      // Fallback to current pawn config for older tickets without stored values
-      try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_BASE_URL}/pawn-config`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        termDays = parseInt(response.data.term_days) || 90;
-        configInterestRate = parseFloat(response.data.interest_rate) || 2.9;
-        frequencyDays = parseInt(response.data.frequency_days) || 30;
-      } catch (error) {
-        console.error('Error fetching pawn config:', error);
-      }
-    }
-
-    // Calculate total and due date
     const totalAmount = ticketItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0)), 0);
     const transactionDate = selectedTransaction ? new Date(selectedTransaction.created_at) : new Date();
-    const formattedDate = transactionDate.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    });
-    const formattedTime = transactionDate.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    const formattedDate = transactionDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    const formattedTime = transactionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 
-    // Use stored due_date if available, otherwise calculate from transaction date + term_days
-    let dueDate;
-    if (storedDueDate) {
-      const dueDateObj = new Date(storedDueDate);
-      dueDate = dueDateObj.toLocaleDateString('en-US', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      });
-    } else {
-      const dueDateObj = new Date(transactionDate);
-      dueDateObj.setDate(dueDateObj.getDate() + termDays);
-      dueDate = dueDateObj.toLocaleDateString('en-US', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      });
-    }
-
-    // Calculate fees based on pawn_config values
-    // Principal amount is the sum of all item prices from jewelry table
-    const principalAmount = totalAmount;
-    const appraisalFee = 0;
-
-    // Calculate number of interest periods (how many frequency_days periods fit in term_days)
-    const interestPeriods = Math.ceil(termDays / frequencyDays);
-
-    // Calculate interest: principal × (interest_rate / 100) × periods
-    const interestAmount = principalAmount * (configInterestRate / 100) * interestPeriods;
-
-    // Calculate insurance: principal × 1% × periods
-    const insuranceCost = principalAmount * 0.01 * interestPeriods;
-
-    const totalCostOfBorrowing = appraisalFee + interestAmount + insuranceCost;
-
-    // Extension cost for one additional frequency period (interest + insurance)
-    const extensionCost = principalAmount * (configInterestRate / 100) + (principalAmount * 0.01);
-
-    // Total amount to redeem (principal + all fees)
-    const totalRedemptionAmount = principalAmount + totalCostOfBorrowing;
-
-    // For pawn tickets, generate PDF using template
     // For buy/sale tickets, use simple HTML receipt
-    if (isPawnTicket) {
-      // Get legal terms for pawn
-      const legalTerms = receiptConfig.pawn_receipt;
-
-      // Generate PDF using template (only for pawn)
-      const pdfDocument = (
-        <PawnTicketTemplate
-          ticketType="pawn"
-          businessName={businessName}
-          businessAddress={businessAddress}
-          businessPhone={businessPhone}
-          businessLogo={businessLogo}
-          businessLogoMimetype={businessLogoMimetype}
-          customerName={selectedTransaction?.customer_name}
-          customerAddress={selectedTransaction?.customer_address}
-          customerPhone={selectedTransaction?.customer_phone}
-          customerID={selectedTransaction?.customer_id}
-          employeeName={selectedTransaction?.employee_name}
-          ticketId={ticketId}
-          formattedDate={formattedDate}
-          formattedTime={formattedTime}
-          dueDate={dueDate}
-          ticketItems={ticketItems}
-          principalAmount={principalAmount}
-          appraisalFee={appraisalFee}
-          interestRate={configInterestRate}
-          interestAmount={interestAmount}
-          insuranceCost={insuranceCost}
-          extensionCost={extensionCost}
-          totalCostOfBorrowing={totalCostOfBorrowing}
-          totalRedemptionAmount={totalRedemptionAmount}
-          legalTerms={legalTerms}
-          termDays={termDays}
-          frequencyDays={frequencyDays}
-        />
-      );
-
-      // Generate PDF blob and open in new tab
-      const blob = await pdf(pdfDocument).toBlob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } else {
-      // For buy/sale tickets, use simple HTML receipt
-      const receiptHTML = `
+    const receiptHTML = `
         <!DOCTYPE html>
         <html>
         <head>
@@ -586,7 +468,6 @@ function TransactionJournals() {
       const pdfReadyHTML = injectPDFScript(receiptHTML, `ticket_${ticketId}`);
       printWindow.document.write(pdfReadyHTML);
       printWindow.document.close();
-    }
   };
 
   const handlePrintTransaction = async () => {

@@ -47,9 +47,13 @@ import {
   Switch,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import PaymentIcon from '@mui/icons-material/Payment';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import CreditCardIcon from '@mui/icons-material/CreditCard';
+
+const PURPLE = '#6a1b9a';
+const PURPLE_DARK = '#4a148c';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -1321,6 +1325,9 @@ function Checkout() {
             dueDate.setDate(dueDate.getDate() + pawnConfig.term_days);
             const dueDateStr = dueDate.toISOString().split('T')[0];
 
+            const ticketNote = itemsForTicket[0]?.ticket_note || null;
+            const showOnReceipt = itemsForTicket[0]?.show_on_receipt || false;
+
             for (const item of itemsForTicket) {
               try {
                 let itemId = null;
@@ -1340,7 +1347,9 @@ function Checkout() {
                     interest_rate:   pawnConfig.interest_rate,
                     insurance_rate:  pawnConfig.insurance_rate,
                     frequency_days:  pawnConfig.frequency_days,
-                    due_date:        dueDateStr
+                    due_date:        dueDateStr,
+                    ticket_note:     ticketNote,
+                    show_on_receipt: showOnReceipt
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }
@@ -1664,6 +1673,34 @@ function Checkout() {
             clearCart();
           }
 
+          // After successful pawn checkout, remove the card(s) from the workspace localStorage
+          const pawnCheckoutCompleted = checkoutItems.length > 0 &&
+            checkoutItems.every(i => (i.transaction_type || '').toLowerCase() === 'pawn');
+          if (pawnCheckoutCompleted) {
+            const customerId = selectedCustomer?.id;
+            const checkedOutTicketIds = new Set(
+              checkoutItems
+                .filter(i => (i.transaction_type || '').toLowerCase() === 'pawn')
+                .map(i => i.pawnTicketId || i.buyTicketId)
+                .filter(Boolean)
+            );
+            if (customerId && checkedOutTicketIds.size > 0) {
+              try {
+                const key = `workspace_${customerId}`;
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const filtered = (parsed.transactions || []).filter(
+                    tx => !(tx.type === 'PAWN' && checkedOutTicketIds.has(tx.ticketId))
+                  );
+                  localStorage.setItem(key, JSON.stringify({ ...parsed, transactions: filtered }));
+                }
+              } catch (e) {
+                console.error('Error clearing pawn workspace entry:', e);
+              }
+            }
+          }
+
           // Display success message and navigate
           setLoading(false);
           setSnackbar({
@@ -1750,6 +1787,27 @@ const handleBackToEstimation = () => {
       // Go back to coins bullions estimator
       navigate('/bullion-estimator');
     } else if (location.state?.from === 'cart') {
+      // Check if this is a pawn-only checkout — navigate back to pawn screen
+      const isPawnCheckout = checkoutItems.length > 0 &&
+        checkoutItems.every(item => (item.transaction_type || '').toLowerCase() === 'pawn');
+
+      if (isPawnCheckout) {
+        const firstItem = checkoutItems[0];
+        const ticketId = firstItem.pawnTicketId || firstItem.buyTicketId;
+        const customerId = firstItem.customer?.id;
+        const totalPawnAmount = checkoutItems.reduce((s, i) => s + (parseFloat(i.price || i.value) || 0), 0);
+        sessionStorage.setItem('pendingPawnReturn', JSON.stringify({
+          customerId,
+          ticketId,
+          pawnItems: checkoutItems,
+          totalPawnAmount,
+          ticketNote: firstItem.ticket_note || '',
+          showOnReceipt: firstItem.show_on_receipt || false,
+        }));
+        navigate('/modern-transactions', { state: { returnToPawn: true } });
+        return;
+      }
+
       // If fully paid, filter out items that were checked out
       // Otherwise, use all cart items as is
       let itemsToKeep;
@@ -1777,10 +1835,10 @@ const handleBackToEstimation = () => {
         }
         return item; // Already in correct format
       });
-      
+
       // Save formatted items to session storage
       sessionStorage.setItem('cartItems', JSON.stringify(formattedCartItems));
-      
+
       navigate('/customer-ticket', {
         state: {
           from: 'checkout',
@@ -1854,10 +1912,35 @@ const handleBackToEstimation = () => {
     });
   };
 
-  return (
-    <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
+  const isPawnCheckout = checkoutItems.length > 0 &&
+    checkoutItems.every(item => (item.transaction_type || '').toLowerCase() === 'pawn');
 
+  const breadcrumbSource = isPawnCheckout
+    ? 'Pawn Transaction'
+    : location.state?.from === 'coinsbullions'
+    ? 'Coins & Bullions'
+    : location.state?.from === 'cart'
+    ? 'Cart'
+    : 'Estimator';
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
+
+      {/* Breadcrumb — matches PawnTransactionScreen style */}
+      <Box sx={{ bgcolor: PURPLE, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Typography
+          variant="body2"
+          fontWeight={400}
+          sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
+          onClick={handleBackToEstimation}
+        >
+          {breadcrumbSource}
+        </Typography>
+        <ChevronRightIcon sx={{ fontSize: 16, opacity: 0.6 }} />
+        <Typography variant="body2" fontWeight={700}>Checkout</Typography>
+      </Box>
+
+    <Box sx={{ p: 1.5, flex: 1 }}>
         <Grid container spacing={3}>
           {/* Left side: Customer Details and Order Summary stacked */}
           <Grid item xs={12} md={8}>
@@ -2290,7 +2373,15 @@ const handleBackToEstimation = () => {
 
               {/* Action Buttons */}
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 3 }}>
-<Button
+                <Button
+                  variant="outlined"
+                  startIcon={<ArrowBackIcon />}
+                  onClick={handleBackToEstimation}
+                  sx={{ borderColor: PURPLE, color: PURPLE, '&:hover': { borderColor: PURPLE_DARK, bgcolor: '#f3e5f5' } }}
+                >
+                  Cancel
+                </Button>
+                <Button
                   variant="contained"
                   startIcon={<PaymentIcon />}
                   onClick={() => handleSubmit()}
@@ -2766,7 +2857,7 @@ const handleBackToEstimation = () => {
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </Container>
+    </Box>
   );
 }
 

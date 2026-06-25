@@ -259,6 +259,36 @@ export default function ModernTransactions() {
     );
   }, [customerStats]);
 
+  // Restore pawn screen after returning from Checkout (user pressed Cancel/Back)
+  useEffect(() => {
+    if (!location.state?.returnToPawn) return;
+    const raw = sessionStorage.getItem('pendingPawnReturn');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingPawnReturn');
+    const { customerId, ticketId, pawnItems, totalPawnAmount, ticketNote, showOnReceipt } = pending;
+    if (!customerId) return;
+    (async () => {
+      try {
+        const [custRes, statsRes] = await Promise.all([
+          axios.get(`${config.apiUrl}/customers/${customerId}`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          }),
+          axios.get(`${config.apiUrl}/customers/${customerId}/pawn/stats`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          }),
+        ]);
+        setCustomer(custRes.data);
+        setCustomerStats(statsRes.data);
+        setRestoredPawnData({ ticketId, pawnItems, totalPawnAmount, ticketNote, showOnReceipt });
+        setPawnOpen(true);
+      } catch (err) {
+        console.error('Failed to restore pawn session after checkout cancel:', err);
+      }
+    })();
+  }, [location.state]);
+
   // Restore pawn screen after returning from CustomerEditor
   useEffect(() => {
     if (!location.state?.customerUpdated) return;

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
-import { pdf } from '@react-pdf/renderer';
 import config from '../config';
+import { openPawnReceiptPDF } from '../utils/pawnReceiptUtils';
 import {
   Box, Typography, Paper, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
@@ -11,11 +11,10 @@ import {
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
-import PawnTicketTemplate from '../components/PawnTicketTemplate';
 import { useAuth } from '../context/AuthContext';
 
-const PURPLE      = '#6d28d9';
-const PURPLE_DARK = '#5b21b6';
+const PURPLE      = '#6a1b9a';
+const PURPLE_DARK = '#4a148c';
 
 const COL = '130px 52px 110px 1fr 130px 46px 70px 100px 110px';
 
@@ -97,8 +96,8 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const { user: currentUser } = useAuth();
   const [ticketId]                        = useState(() => existingPawnData?.ticketId || generatePawnTicketId());
   const [itemSearch, setItemSearch]       = useState('');
-  const [ticketNote, setTicketNote]       = useState('');
-  const [showOnReceipt, setShowOnReceipt] = useState(false);
+  const [ticketNote, setTicketNote]       = useState(existingPawnData?.ticketNote || '');
+  const [showOnReceipt, setShowOnReceipt] = useState(existingPawnData?.showOnReceipt || false);
   const [pawnConfig, setPawnConfig]       = useState(null);
   const [pawnItems, setPawnItems]         = useState(existingPawnData?.pawnItems || []);
   const [activePawns, setActivePawns]     = useState([]);
@@ -349,71 +348,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const handleTicketClick = async (ticketId) => {
     setReceiptLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
-      const [receiptRes, bizRes, pawnConfigRes] = await Promise.all([
-        axios.get(`${config.apiUrl}/pawn-tickets/${ticketId}/receipt-data`, { headers }),
-        axios.get(`${config.apiUrl}/business-info`, { headers }),
-        axios.get(`${config.apiUrl}/pawn-config`, { headers }),
-      ]);
-      const r = receiptRes.data;
-      const biz = bizRes.data;
-      const pc = pawnConfigRes.data;
-
-      const termDays     = parseInt(r.term_days)     || parseInt(pc.term_days)     || 90;
-      const interestRate = parseFloat(r.interest_rate) || parseFloat(pc.interest_rate) || 2.9;
-      const freqDays     = parseInt(r.frequency_days) || parseInt(pc.frequency_days)  || 30;
-      const principal    = r.items.reduce((s, i) => s + i.item_price, 0);
-      const periods      = Math.ceil(termDays / freqDays);
-      const interestAmt  = principal * (interestRate / 100) * periods;
-      const insuranceCost = principal * 0.01 * periods;
-      const totalCost    = interestAmt + insuranceCost;
-      const extCost      = principal * (interestRate / 100) + principal * 0.01;
-
-      const txDate = new Date(r.transaction_date);
-      const formattedDate = txDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
-      const formattedTime = txDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-
-      let dueDate = '—';
-      if (r.due_date) {
-        dueDate = new Date(r.due_date).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-      }
-
-      const pdfDoc = (
-        <PawnTicketTemplate
-          ticketType="pawn"
-          businessName={biz.business_name || ''}
-          businessAddress={biz.address || ''}
-          businessPhone={biz.phone || ''}
-          businessLogo={biz.logo || ''}
-          businessLogoMimetype={biz.logo_mimetype || ''}
-          customerName={r.customer_name}
-          customerAddress={r.customer_address}
-          customerPhone={r.customer_phone}
-          customerID={r.customer_id}
-          employeeName={r.employee_name}
-          ticketId={ticketId}
-          formattedDate={formattedDate}
-          formattedTime={formattedTime}
-          dueDate={dueDate}
-          ticketItems={r.items}
-          principalAmount={principal}
-          appraisalFee={0}
-          interestRate={interestRate}
-          interestAmount={interestAmt}
-          insuranceCost={insuranceCost}
-          extensionCost={extCost}
-          totalCostOfBorrowing={totalCost}
-          totalRedemptionAmount={principal + totalCost}
-          legalTerms={pc.pawn_receipt || ''}
-          termDays={termDays}
-          frequencyDays={freqDays}
-        />
-      );
-
-      const blob = await pdf(pdfDoc).toBlob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      await openPawnReceiptPDF(ticketId);
     } catch (err) {
       console.error('Error generating receipt:', err);
       setSnackbar({ open: true, message: 'Failed to generate receipt', severity: 'error' });
@@ -835,7 +770,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
                       onClick={() => openItemCamera(row.id)} />
                   ) : (
                     <IconButton size="small"
-                      sx={{ width: 38, height: 38, borderRadius: 1, bgcolor: '#f0f0f0', color: '#9e9e9e', '&:hover': { bgcolor: '#e3f2fd', color: '#1976d2' } }}
+                      sx={{ width: 38, height: 38, borderRadius: 1, bgcolor: '#f0f0f0', color: '#9e9e9e', '&:hover': { bgcolor: '#ede7f6', color: PURPLE } }}
                       onClick={() => openItemCamera(row.id)}>
                       <MuiIcons.PhotoCamera sx={{ fontSize: 18 }} />
                     </IconButton>
@@ -1031,6 +966,8 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
               price: item.amount * scale,
               value: item.amount * scale,
               customer: customerObj,
+              ticket_note: ticketNote || null,
+              show_on_receipt: showOnReceipt,
             }));
             sessionStorage.setItem('checkoutItems', JSON.stringify(checkoutItems));
             if (customerObj) sessionStorage.setItem('selectedCustomer', JSON.stringify(customerObj));
@@ -1068,7 +1005,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           CONVERT TO
         </Typography>
         <MenuItem onClick={() => { onConvertTo?.({ type: 'buy', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
-          <MuiIcons.ShoppingCart sx={{ fontSize: 16, mr: 1.5, color: '#1976d2' }} />
+          <MuiIcons.ShoppingCart sx={{ fontSize: 16, mr: 1.5, color: PURPLE }} />
           <Typography variant="body2">Buy Ticket</Typography>
         </MenuItem>
         <MenuItem onClick={() => { onConvertTo?.({ type: 'trade', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
