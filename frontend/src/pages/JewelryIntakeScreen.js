@@ -438,6 +438,7 @@ export default function JewelryIntakeScreen({
   initialEntry = '',
   parsedValues = null,
   editItem = null,
+  readOnly = false,
   onBack,
   onSaveItem,
   onSaveAndAddAnother,
@@ -1074,7 +1075,7 @@ export default function JewelryIntakeScreen({
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', bgcolor: '#f5f6fa', overflow: 'hidden', ...(readOnly && { pointerEvents: 'none', userSelect: 'none' }) }}>
 
       {/* Breadcrumb bar */}
       <Box sx={{ bgcolor: GREEN, color: 'white', px: 2.5, py: 1, display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
@@ -1148,7 +1149,7 @@ export default function JewelryIntakeScreen({
           <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
 
           {/* Photo section — half width */}
-          <Paper sx={{ width: '50%', flexShrink: 0, borderRadius: 2, overflow: 'hidden', border: formErrors.photo ? '1px solid #d32f2f' : '1px solid #e0e0e0' }}>
+          <Paper sx={{ width: '50%', flexShrink: 0, borderRadius: 2, overflow: 'hidden', border: formErrors.photo ? '1px solid #d32f2f' : '1px solid #e0e0e0', pointerEvents: 'auto', userSelect: 'auto' }}>
 
             {/* Display area — compact when empty, taller when showing content */}
             <Box sx={{ display: 'flex', height: (showCamera || images.length > 0) ? 210 : 90, bgcolor: '#f7f7f7', transition: 'height 0.2s' }}>
@@ -1374,7 +1375,7 @@ export default function JewelryIntakeScreen({
         </Box>{/* end left column */}
 
         {/* ── MIDDLE: Gem tabs ── */}
-        <Paper sx={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 0, overflow: 'hidden', borderLeft: '1px solid #e8e8e8', borderRight: '1px solid #e8e8e8' }}>
+        <Paper sx={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 0, overflow: 'hidden', borderLeft: '1px solid #e8e8e8', borderRight: '1px solid #e8e8e8', pointerEvents: 'auto', userSelect: 'auto' }}>
 
           {/* Tab bar */}
           <Tabs value={gemTab} onChange={(_, v) => setGemTab(v)}
@@ -1387,7 +1388,7 @@ export default function JewelryIntakeScreen({
                 color: gemTab === 0 ? GREEN : 'text.secondary',
                 '&.Mui-selected': { color: GREEN } }} />
             <Tab label={`Secondary Gems${secondaryGems.length ? ` (${secondaryGems.length})` : ''}`}
-              disabled={!primaryGem} disableRipple
+              disabled={readOnly ? secondaryGems.length === 0 : !primaryGem} disableRipple
               sx={{ textTransform: 'none', fontSize: 13, fontWeight: 600, minHeight: 44,
                 color: gemTab === 1 ? GREEN : 'text.secondary',
                 '&.Mui-selected': { color: GREEN } }} />
@@ -1402,12 +1403,14 @@ export default function JewelryIntakeScreen({
                   <Typography fontWeight={700} fontSize={14}>Primary Gem</Typography>
                   <Typography variant="caption" color="text.secondary">Only one primary gem entry</Typography>
                 </Box>
-                <Button size="small" variant="outlined"
-                  startIcon={<MuiIcons.Edit sx={{ fontSize: 13 }} />}
-                  onClick={() => setPrimaryGemDialogOpen(true)}
-                  sx={{ textTransform: 'none', fontSize: 12, borderRadius: 1.5, color: GREEN, borderColor: GREEN + '60' }}>
-                  {primaryGem ? 'Edit' : 'Add'}
-                </Button>
+                {!readOnly && (
+                  <Button size="small" variant="outlined"
+                    startIcon={<MuiIcons.Edit sx={{ fontSize: 13 }} />}
+                    onClick={() => setPrimaryGemDialogOpen(true)}
+                    sx={{ textTransform: 'none', fontSize: 12, borderRadius: 1.5, color: GREEN, borderColor: GREEN + '60' }}>
+                    {primaryGem ? 'Edit' : 'Add'}
+                  </Button>
+                )}
               </Box>
 
               {primaryGem ? (
@@ -1505,12 +1508,14 @@ export default function JewelryIntakeScreen({
                   <Typography fontWeight={700} fontSize={14}>Secondary Gems</Typography>
                   <Typography variant="caption" color="text.secondary">May be included even if no value</Typography>
                 </Box>
-                <Button size="small" variant="outlined"
-                  startIcon={<MuiIcons.Add sx={{ fontSize: 13 }} />}
-                  onClick={handleAddSecGem}
-                  sx={{ textTransform: 'none', fontSize: 12, borderRadius: 1.5, color: GREEN, borderColor: GREEN + '60' }}>
-                  Add Gem
-                </Button>
+                {!readOnly && (
+                  <Button size="small" variant="outlined"
+                    startIcon={<MuiIcons.Add sx={{ fontSize: 13 }} />}
+                    onClick={handleAddSecGem}
+                    sx={{ textTransform: 'none', fontSize: 12, borderRadius: 1.5, color: GREEN, borderColor: GREEN + '60' }}>
+                    Add Gem
+                  </Button>
+                )}
               </Box>
 
               {secondaryGems.length === 0 ? (
@@ -1528,7 +1533,7 @@ export default function JewelryIntakeScreen({
                       <TableCell align="center" sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary', py: 0.75 }}>Shape</TableCell>
                       <TableCell align="center" sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary', py: 0.75 }}>Weight</TableCell>
                       <TableCell align="center" sx={{ fontWeight: 700, fontSize: 12, color: 'text.secondary', py: 0.75 }}>Value</TableCell>
-                      <TableCell sx={{ py: 0.75 }} />
+                      {!readOnly && <TableCell sx={{ py: 0.75 }} />}
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -1548,10 +1553,12 @@ export default function JewelryIntakeScreen({
                         </TableCell>
                         <TableCell align="center" sx={{ py: 0.75 }}>{gem.caratWeight || gem.weight || '—'} ct</TableCell>
                         <TableCell align="center" sx={{ py: 0.75 }}>{gem.estValue ? `$${gem.estValue}` : '—'}</TableCell>
-                        <TableCell align="right" sx={{ py: 0.75, whiteSpace: 'nowrap' }}>
-                          <IconButton size="small" onClick={() => handleEditSecGem(i)}><MuiIcons.Edit sx={{ fontSize: 15 }} /></IconButton>
-                          <IconButton size="small" color="error" onClick={() => handleDeleteSecGem(i)}><MuiIcons.Delete sx={{ fontSize: 15 }} /></IconButton>
-                        </TableCell>
+                        {!readOnly && (
+                          <TableCell align="right" sx={{ py: 0.75, whiteSpace: 'nowrap' }}>
+                            <IconButton size="small" onClick={() => handleEditSecGem(i)}><MuiIcons.Edit sx={{ fontSize: 15 }} /></IconButton>
+                            <IconButton size="small" color="error" onClick={() => handleDeleteSecGem(i)}><MuiIcons.Delete sx={{ fontSize: 15 }} /></IconButton>
+                          </TableCell>
+                        )}
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1661,17 +1668,25 @@ export default function JewelryIntakeScreen({
       </Box>
 
       {/* Bottom action bar */}
-      <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="body2" fontWeight={600} color="text.secondary">Initial Route:</Typography>
-          <Typography variant="body2">Jewellery Triage &gt; Gold</Typography>
-          <Button size="small" variant="outlined" startIcon={<MuiIcons.Edit sx={{ fontSize: 12 }} />}
-            sx={{ textTransform: 'none', fontSize: 12, borderRadius: 1.5, py: 0.25, borderColor: '#ccc', color: 'text.primary' }}>
-            Change
-          </Button>
-        </Box>
+      <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0, pointerEvents: 'auto', userSelect: 'auto' }}>
+        {!readOnly && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2" fontWeight={600} color="text.secondary">Initial Route:</Typography>
+            <Typography variant="body2">Jewellery Triage &gt; Gold</Typography>
+            <Button size="small" variant="outlined" startIcon={<MuiIcons.Edit sx={{ fontSize: 12 }} />}
+              sx={{ textTransform: 'none', fontSize: 12, borderRadius: 1.5, py: 0.25, borderColor: '#ccc', color: 'text.primary' }}>
+              Change
+            </Button>
+          </Box>
+        )}
+        {readOnly && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 1.5, py: 0.5, bgcolor: '#f3e8ff', border: '1px solid #d8b4fe', borderRadius: 1.5 }}>
+            <MuiIcons.Visibility sx={{ fontSize: 14, color: '#7c3aed' }} />
+            <Typography variant="caption" color="#7c3aed" fontWeight={600}>View Only — fields are not editable</Typography>
+          </Box>
+        )}
         <Box sx={{ flex: 1 }} />
-        {Object.values(formErrors).some(Boolean) && (
+        {!readOnly && Object.values(formErrors).some(Boolean) && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mr: 1, px: 1.5, py: 0.5, bgcolor: '#fff5f5', border: '1px solid #ffcdd2', borderRadius: 1.5 }}>
             <MuiIcons.ErrorOutline sx={{ fontSize: 14, color: '#d32f2f' }} />
             <Typography variant="caption" color="error" fontWeight={500}>
@@ -1686,18 +1701,27 @@ export default function JewelryIntakeScreen({
             </Typography>
           </Box>
         )}
-        <Button size="small" variant="outlined" color="inherit" onClick={() => onBack('pawn')}
-          sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-          Cancel
-        </Button>
-        <Button size="small" variant="outlined" onClick={() => onBack('pawn')}
-          sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-          Back to Results
-        </Button>
-        <Button size="small" variant="contained" onClick={handleSave}
-          sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN } }}>
-          Save Item to Ticket
-        </Button>
+        {readOnly ? (
+          <Button size="small" variant="outlined" color="inherit" onClick={() => onBack && onBack('pawn')}
+            sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+            Close
+          </Button>
+        ) : (
+          <>
+            <Button size="small" variant="outlined" color="inherit" onClick={() => onBack('pawn')}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Cancel
+            </Button>
+            <Button size="small" variant="outlined" onClick={() => onBack('pawn')}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Back to Results
+            </Button>
+            <Button size="small" variant="contained" onClick={handleSave}
+              sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: DARK_GREEN } }}>
+              Save Item to Ticket
+            </Button>
+          </>
+        )}
       </Paper>
     </Box>
   );

@@ -9200,6 +9200,7 @@ app.get('/api/customers/:id/pawns', async (req, res) => {
     const result = await pool.query(`
       SELECT
         pt.pawn_ticket_id,
+        pt.item_id,
         pt.due_date,
         pt.status,
         j.short_desc AS item_description,
@@ -9220,6 +9221,7 @@ app.get('/api/customers/:id/pawns', async (req, res) => {
     const today = new Date();
     const pawns = result.rows.map(row => ({
       ticket:     row.pawn_ticket_id,
+      item_id:    row.item_id,
       status:     row.status,
       item:       row.item_description || '—',
       amount:     row.pawn_amount ? `$${parseFloat(row.pawn_amount).toFixed(2)}` : '—',
@@ -9235,6 +9237,63 @@ app.get('/api/customers/:id/pawns', async (req, res) => {
   } catch (err) {
     console.error('Error fetching customer pawns:', err);
     res.status(500).json({ error: 'Failed to fetch customer pawns' });
+  }
+});
+
+app.get('/api/pawn-tickets/:ticketId/receipt-data', async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const result = await pool.query(`
+      SELECT
+        pt.*,
+        j.short_desc       AS item_description,
+        j.long_desc        AS item_long_desc,
+        j.item_price       AS pawn_amount,
+        j.images           AS item_images,
+        t.created_at       AS transaction_date,
+        c.first_name || ' ' || c.last_name AS customer_name,
+        c.address_line1    AS customer_address,
+        c.phone            AS customer_phone,
+        c.id               AS customer_id,
+        e.first_name || ' ' || e.last_name AS employee_name
+      FROM pawn_ticket pt
+      JOIN transactions t ON t.transaction_id = pt.transaction_id
+      JOIN jewelry j      ON j.item_id = pt.item_id
+      JOIN customers c    ON c.id = t.customer_id
+      LEFT JOIN employees e ON e.employee_id = t.employee_id
+      WHERE pt.pawn_ticket_id = $1
+    `, [ticketId]);
+
+    if (!result.rows.length) return res.status(404).json({ error: 'Ticket not found' });
+
+    // All rows share the same ticket/customer/employee — group items
+    const first = result.rows[0];
+    const items = result.rows.map(r => ({
+      item_id: r.item_id,
+      description: r.item_long_desc || r.item_description || '',
+      item_price: parseFloat(r.pawn_amount) || 0,
+      images: r.item_images || [],
+    }));
+
+    res.json({
+      pawn_ticket_id:   first.pawn_ticket_id,
+      transaction_date: first.transaction_date,
+      due_date:         first.due_date,
+      term_days:        first.term_days,
+      interest_rate:    first.interest_rate,
+      insurance_rate:   first.insurance_rate,
+      frequency_days:   first.frequency_days,
+      status:           first.status,
+      customer_name:    first.customer_name,
+      customer_address: first.customer_address,
+      customer_phone:   first.customer_phone,
+      customer_id:      first.customer_id,
+      employee_name:    first.employee_name,
+      items,
+    });
+  } catch (err) {
+    console.error('Error fetching pawn receipt data:', err);
+    res.status(500).json({ error: 'Failed to fetch receipt data' });
   }
 });
 

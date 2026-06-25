@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { pdf } from '@react-pdf/renderer';
 import config from '../config';
 import {
   Box, Typography, Paper, Avatar, Button, IconButton, Chip,
@@ -10,6 +11,7 @@ import {
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
+import PawnTicketTemplate from '../components/PawnTicketTemplate';
 import { useAuth } from '../context/AuthContext';
 
 const PURPLE      = '#6d28d9';
@@ -115,6 +117,9 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [isCamReady,       setIsCamReady]       = useState(false);
   const [snackbar,         setSnackbar]         = useState({ open: false, message: '', severity: 'success' });
   const [pawnFilter,       setPawnFilter]       = useState('active');
+  const [itemViewOpen,     setItemViewOpen]     = useState(false);
+  const [itemViewData,     setItemViewData]     = useState(null);
+  const [receiptLoading,   setReceiptLoading]   = useState(false);
   const cameraVideoRef = useRef(null);
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
@@ -275,6 +280,117 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     }
   };
 
+  const handleTicketClick = async (ticketId) => {
+    setReceiptLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
+      const [receiptRes, bizRes, pawnConfigRes] = await Promise.all([
+        axios.get(`${config.apiUrl}/pawn-tickets/${ticketId}/receipt-data`, { headers }),
+        axios.get(`${config.apiUrl}/business-info`, { headers }),
+        axios.get(`${config.apiUrl}/pawn-config`, { headers }),
+      ]);
+      const r = receiptRes.data;
+      const biz = bizRes.data;
+      const pc = pawnConfigRes.data;
+
+      const termDays     = parseInt(r.term_days)     || parseInt(pc.term_days)     || 90;
+      const interestRate = parseFloat(r.interest_rate) || parseFloat(pc.interest_rate) || 2.9;
+      const freqDays     = parseInt(r.frequency_days) || parseInt(pc.frequency_days)  || 30;
+      const principal    = r.items.reduce((s, i) => s + i.item_price, 0);
+      const periods      = Math.ceil(termDays / freqDays);
+      const interestAmt  = principal * (interestRate / 100) * periods;
+      const insuranceCost = principal * 0.01 * periods;
+      const totalCost    = interestAmt + insuranceCost;
+      const extCost      = principal * (interestRate / 100) + principal * 0.01;
+
+      const txDate = new Date(r.transaction_date);
+      const formattedDate = txDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+      const formattedTime = txDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+      let dueDate = '—';
+      if (r.due_date) {
+        dueDate = new Date(r.due_date).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+      }
+
+      const pdfDoc = (
+        <PawnTicketTemplate
+          ticketType="pawn"
+          businessName={biz.business_name || ''}
+          businessAddress={biz.address || ''}
+          businessPhone={biz.phone || ''}
+          businessLogo={biz.logo || ''}
+          businessLogoMimetype={biz.logo_mimetype || ''}
+          customerName={r.customer_name}
+          customerAddress={r.customer_address}
+          customerPhone={r.customer_phone}
+          customerID={r.customer_id}
+          employeeName={r.employee_name}
+          ticketId={ticketId}
+          formattedDate={formattedDate}
+          formattedTime={formattedTime}
+          dueDate={dueDate}
+          ticketItems={r.items}
+          principalAmount={principal}
+          appraisalFee={0}
+          interestRate={interestRate}
+          interestAmount={interestAmt}
+          insuranceCost={insuranceCost}
+          extensionCost={extCost}
+          totalCostOfBorrowing={totalCost}
+          totalRedemptionAmount={principal + totalCost}
+          legalTerms={pc.pawn_receipt || ''}
+          termDays={termDays}
+          frequencyDays={freqDays}
+        />
+      );
+
+      const blob = await pdf(pdfDoc).toBlob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (err) {
+      console.error('Error generating receipt:', err);
+      setSnackbar({ open: true, message: 'Failed to generate receipt', severity: 'error' });
+    } finally {
+      setReceiptLoading(false);
+    }
+  };
+
+  const handleItemClick = async (pawn) => {
+    if (!pawn.item_id) {
+      setSnackbar({ open: true, message: 'Item details not available', severity: 'warning' });
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
+      const [itemRes, gemsRes] = await Promise.all([
+        axios.get(`${config.apiUrl}/jewelry/${pawn.item_id}`, { headers }),
+        axios.get(`${config.apiUrl}/jewelry_secondary_gems/${pawn.item_id}`, { headers }).catch(() => ({ data: [] })),
+      ]);
+      const item = itemRes.data;
+      const backendBase = config.apiUrl.replace('/api', '');
+      const images = (item.images || []).map(img => ({
+        ...img,
+        url: img.url?.startsWith('http') ? img.url : `${backendBase}${img.url}`,
+      }));
+      // Map jewelry DB fields to the shape JewelryIntakeScreen's editItem expects
+      setItemViewData({
+        ...item,
+        images,
+        mode: 'unique',
+        item: item.long_desc || item.short_desc || '',
+        metal_category: item.category || '',
+        paid_amount: item.item_price || '',
+        secondary_gems: gemsRes.data || [],
+      });
+      setItemViewOpen(true);
+    } catch (err) {
+      console.error('Error loading item:', err);
+      setSnackbar({ open: true, message: 'Failed to load item details', severity: 'error' });
+    }
+  };
+
   const openItemCamera = (itemId) => {
     setPhotoTargetId(itemId);
     setIsCamReady(false);
@@ -388,6 +504,16 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
         onSaveItem={handleIntakeSave}
         onSaveAndAddAnother={handleIntakeSaveAndAdd}
         onUpdateItem={handleIntakeUpdate}
+      />
+    );
+  }
+
+  if (itemViewOpen && itemViewData) {
+    return (
+      <JewelryIntakeScreen
+        readOnly
+        editItem={itemViewData}
+        onBack={() => { setItemViewOpen(false); setItemViewData(null); }}
       />
     );
   }
@@ -512,7 +638,9 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
                   gap: 1, px: 2, py: 0.9, borderBottom: '1px solid #f0f0f0', alignItems: 'center',
                   '&:hover': { bgcolor: '#f9f9f9' },
                 }}>
-                  <Typography variant="caption" color={PURPLE} fontWeight={600} sx={{ cursor: 'pointer' }}>
+                  <Typography variant="caption" color={PURPLE} fontWeight={600}
+                    sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                    onClick={() => handleTicketClick(pawn.ticket)}>
                     {pawn.ticket}
                   </Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
@@ -528,7 +656,11 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
                       <Chip label="FORFEITED" size="small"
                         sx={{ height: 16, fontSize: 9, fontWeight: 700, bgcolor: '#fce4ec', color: '#c62828', flexShrink: 0, '& .MuiChip-label': { px: 0.5 } }} />
                     )}
-                    <Typography variant="caption" noWrap sx={{ minWidth: 0 }}>{pawn.item}</Typography>
+                    <Typography variant="caption" noWrap
+                      sx={{ minWidth: 0, cursor: 'pointer', color: PURPLE, '&:hover': { textDecoration: 'underline' } }}
+                      onClick={() => handleItemClick(pawn)}>
+                      {pawn.item}
+                    </Typography>
                   </Box>
                   <Typography variant="caption" fontWeight={600} sx={{ textAlign: 'center' }}>{pawn.amount}</Typography>
                   <Box sx={{ textAlign: 'center' }}>
@@ -830,6 +962,15 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           <Typography variant="body2">Trade Ticket</Typography>
         </MenuItem>
       </Menu>
+
+      {receiptLoading && (
+        <Box sx={{ position: 'fixed', inset: 0, bgcolor: 'rgba(0,0,0,0.35)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Box sx={{ bgcolor: 'white', borderRadius: 2, px: 4, py: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+            <CircularProgress size={22} />
+            <Typography fontSize={14}>Generating receipt…</Typography>
+          </Box>
+        </Box>
+      )}
 
       <Snackbar
         open={snackbar.open}
