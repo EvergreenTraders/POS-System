@@ -11,127 +11,94 @@ import PawnTransactionScreen from './PawnTransactionScreen';
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 
-// ── Sample workspace transactions ────────────────────────────────────────────
-const SAMPLE_TRANSACTIONS = [
-  {
-    id: 1, type: 'SALE', status: 'Complete', statusColor: '#2e7d32',
-    subtitle: '3 items', total: '$687.58',
-    lines: [
-      { label: 'PS5 Console', value: '$499.00' },
-      { label: 'HDMI Cable', value: '$9.99' },
-      { label: 'Controller - Black', value: '$59.99' },
-      { label: 'Subtotal', value: '$568.98' },
-      { label: 'Tax (15%)', value: '$118.60' },
-      { label: 'Total', value: '$687.58', bold: true },
-    ],
-    accentColor: '#2e7d32',
-  },
-  {
-    id: 2, type: 'TRADE', status: 'Complete', statusColor: '#2e7d32',
-    subtitle: '1 in / 1 out', total: '$115.00',
-    lines: [
-      { label: 'Trading In', value: '', header: true },
-      { label: 'Xbox Series S', value: '-$150.00' },
-      { label: 'Buying', value: '', header: true },
-      { label: 'Nintendo Switch', value: '$250.00' },
-      { label: 'Trade-in Allowance', value: '-$150.00' },
-      { label: 'Sale Subtotal', value: '$250.00' },
-      { label: 'Taxable Difference', value: '$100.00' },
-      { label: 'Tax (15%)', value: '$15.00' },
-      { label: 'Net Due from Customer', value: '$115.00', bold: true },
-    ],
-    accentColor: '#1565c0',
-  },
-  {
-    id: 3, type: 'PAWN', status: 'Active', statusColor: '#1565c0',
-    subtitle: '1 item', total: null,
-    lines: [
-      { label: 'DeWalt Drill Kit', value: '', link: true },
-      { label: 'Loan: $100.00', value: '60 days', muted: true },
-      { label: 'Total Loan', value: '$100.00', bold: true },
-      { label: 'Due Date', value: 'Jul 29, 2026', bold: true },
-    ],
-    accentColor: '#6a1b9a',
-  },
-  {
-    id: 4, type: 'PAWN PAYMENT', status: 'Complete', statusColor: '#2e7d32',
-    subtitle: 'Ticket P12345', total: null,
-    lines: [
-      { label: 'Current Balance', value: '$180.00' },
-      { label: 'Payment Amount', value: '$25.00' },
-      { label: 'New Balance', value: '$155.00', bold: true },
-      { label: 'New Due Date', value: 'Jul 13, 2026' },
-    ],
-    accentColor: '#f9a825',
-  },
-  {
-    id: 5, type: 'REPAIR DROP-OFF', status: 'Active', statusColor: '#1565c0',
-    subtitle: 'Ticket R10025', total: null,
-    lines: [
-      { label: 'Item', value: 'Gold Chain' },
-      { label: 'Issue', value: 'Broken clasp' },
-      { label: 'Estimate', value: '$60.00' },
-      { label: 'Deposit', value: '$20.00' },
-      { label: 'Balance', value: '$40.00', bold: true },
-    ],
-    accentColor: '#bf360c',
-  },
-];
-
-const SUMMARY_LINES = [
-  { label: 'Sale Total',            value: '+ $687.58', color: '#2e7d32' },
-  { label: 'Trade (Net Due)',        value: '+ $115.00', color: '#2e7d32' },
-  { label: 'Pawn Loan (Payout)',     value: '- $100.00', color: '#c62828' },
-  { label: 'Pawn Payment',           value: '+ $25.00',  color: '#2e7d32' },
-  { label: 'Repair Deposit',         value: '+ $20.00',  color: '#2e7d32' },
-];
-
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function TransactionCard({ tx }) {
+const PAWN_ACCENT = '#6a1b9a';
+
+function PawnTransactionCard({ tx }) {
+  const totalPawnAmount = Number(tx.totalPawnAmount) || 0;
+  const costToRedeem = Number(tx.costToRedeem) || 0;
+  const fmt = (n) => `$${Number(n).toFixed(2)}`;
+
   return (
     <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
-      {/* Card header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${tx.accentColor}` }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${PAWN_ACCENT}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography fontWeight={700} fontSize={13} color={tx.accentColor}>{tx.type}</Typography>
-          <Chip label={tx.status} size="small" sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: tx.statusColor, color: '#fff' }} />
+          <Typography sx={{ fontSize: 18, lineHeight: 1, color: PAWN_ACCENT }}>♟</Typography>
+          <Typography fontWeight={700} fontSize={13} color={PAWN_ACCENT}>PAWN</Typography>
+          <Chip label="Active" size="small" sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: '#1565c0', color: '#fff' }} />
         </Box>
         <IconButton size="small"><MuiIcons.MoreVert fontSize="small" /></IconButton>
       </Box>
 
-      <Box sx={{ px: 1.5, pb: 1 }}>
-        <Typography variant="caption" color="text.secondary">{tx.subtitle}</Typography>
-        {tx.total && <Typography variant="body2" fontWeight={600} align="right" mb={0.5}>Total: {tx.total}</Typography>}
+      <Box sx={{ px: 1.5, pb: 1.25 }}>
+        <Typography variant="caption" color="text.secondary" display="block" mb={0.75}>
+          {tx.pawnItems?.length || 0} {(tx.pawnItems?.length || 0) === 1 ? 'item' : 'items'}
+        </Typography>
 
-        <Box sx={{ mt: 0.5 }}>
-          {tx.lines.map((line, i) => (
-            <Box key={i} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
-              <Typography
-                variant="caption"
-                sx={{
-                  color: line.muted ? 'text.secondary' : line.header ? 'text.secondary' : 'text.primary',
-                  fontStyle: line.header ? 'italic' : 'normal',
-                  fontWeight: line.bold ? 700 : 400,
-                  textDecoration: line.link ? 'underline' : 'none',
-                  cursor: line.link ? 'pointer' : 'default',
-                  color: line.link ? '#1565c0' : undefined,
-                }}
-              >
-                {line.label}
-              </Typography>
-              <Typography variant="caption" fontWeight={line.bold ? 700 : 400} color={line.muted ? 'text.secondary' : 'text.primary'}>
-                {line.value}
-              </Typography>
+        {/* Item rows */}
+        {(tx.pawnItems || []).map((item, i) => {
+          const thumb = item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url;
+          return (
+            <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.75, borderBottom: '1px solid #f0f0f0' }}>
+              {thumb ? (
+                <Box component="img" src={thumb} alt="" sx={{ width: 40, height: 40, borderRadius: 1, objectFit: 'cover', flexShrink: 0 }} />
+              ) : (
+                <Box sx={{ width: 40, height: 40, borderRadius: 1, bgcolor: '#f5f5f5', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <MuiIcons.Inventory2 sx={{ fontSize: 20, color: '#bdbdbd' }} />
+                </Box>
+              )}
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="caption" fontWeight={600} display="block" noWrap>{item.item}</Typography>
+                <Typography variant="caption" color="text.secondary">Pawn Amount: {fmt(item.amount)}</Typography>
+              </Box>
             </Box>
-          ))}
+          );
+        })}
+
+        <Divider sx={{ my: 1 }} />
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+          <Typography variant="caption">Total Pawn Amount</Typography>
+          <Typography variant="caption" fontWeight={600}>{fmt(totalPawnAmount)}</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Typography variant="caption">Due Date</Typography>
+          <Typography variant="caption" fontWeight={700}>{tx.dueDate || '—'}</Typography>
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-          <Button size="small" variant="outlined" startIcon={<MuiIcons.Edit />} sx={{ flex: 1, fontSize: 11 }}>Edit</Button>
-          {tx.type !== 'PAWN PAYMENT' && tx.type !== 'REPAIR DROP-OFF' && (
-            <Button size="small" variant="outlined" startIcon={<MuiIcons.Add />} sx={{ flex: 1, fontSize: 11 }}>Add Item</Button>
-          )}
+        <Divider sx={{ my: 1 }} />
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Typography variant="caption" fontWeight={600} color={PAWN_ACCENT}>Cost to Redeem</Typography>
+          <Typography variant="caption" fontWeight={700} color={PAWN_ACCENT}>{fmt(costToRedeem)}</Typography>
+        </Box>
+
+        <Divider sx={{ my: 1 }} />
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+          <Typography variant="caption" fontWeight={600} color="#c62828">Net Effect</Typography>
+          <Typography variant="caption" fontWeight={700} color="#c62828">-{fmt(totalPawnAmount)}</Typography>
+        </Box>
+
+        {tx.overduePawnCount > 0 && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, bgcolor: '#fef2f2', borderRadius: 1, px: 1, py: 0.75, mb: 1 }}>
+            <MuiIcons.Warning sx={{ fontSize: 15, color: '#dc2626', flexShrink: 0 }} />
+            <Typography variant="caption" color="#dc2626">
+              Customer has {tx.overduePawnCount} overdue {tx.overduePawnCount === 1 ? 'pawn' : 'pawns'}.
+            </Typography>
+          </Box>
+        )}
+
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
+            sx={{ flex: 1, fontSize: 11 }}>
+            Open
+          </Button>
+          <Button size="small" variant="outlined" sx={{ minWidth: 40, px: 0.5, fontSize: 11 }}>
+            <MuiIcons.MoreHoriz sx={{ fontSize: 16 }} />
+          </Button>
         </Box>
       </Box>
     </Paper>
@@ -164,6 +131,7 @@ export default function ModernTransactions() {
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
   const [noCustomerWarning, setNoCustomerWarning] = useState(false);
+  const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
 
   // Customer state
   const [customer, setCustomer] = useState(null);
@@ -215,6 +183,30 @@ export default function ModernTransactions() {
 
   const handleClearCustomer = () => { setCustomer(null); setCustomerStats(null); };
 
+  const handleAddPawnToWorkspace = (pawnData) => {
+    setWorkspaceTransactions(prev => [
+      ...prev,
+      { id: Date.now(), type: 'PAWN', ...pawnData },
+    ]);
+  };
+
+  const summaryLines = workspaceTransactions.map(tx => {
+    if (tx.type === 'PAWN') {
+      const count = tx.pawnItems?.length || 0;
+      return {
+        label: `Pawn Loan (${count} item${count !== 1 ? 's' : ''})`,
+        value: `-$${Number(tx.totalPawnAmount).toFixed(2)}`,
+        color: '#c62828',
+      };
+    }
+    return null;
+  }).filter(Boolean);
+
+  const netDue = workspaceTransactions.reduce((sum, tx) => {
+    if (tx.type === 'PAWN') return sum - Number(tx.totalPawnAmount);
+    return sum;
+  }, 0);
+
   const handleTransactionTypeClick = (type) => {
     if (type === 'pawn') {
       if (!customer) { setNoCustomerWarning(true); return; }
@@ -228,6 +220,7 @@ export default function ModernTransactions() {
         customer={customer}
         customerStats={customerStats}
         onClose={() => setPawnOpen(false)}
+        onAddToWorkspace={handleAddPawnToWorkspace}
       />
     );
   }
@@ -439,7 +432,7 @@ export default function ModernTransactions() {
           <Paper sx={{ px: { md: 2, xl: 1.5 }, py: { md: 1, xl: 0.75 }, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Typography fontWeight={700} fontSize={{ md: 13, xl: 11 }} letterSpacing={1}>TRANSACTION WORKSPACE</Typography>
-              <Badge badgeContent={5} color="primary" sx={{ '& .MuiBadge-badge': { position: 'relative', transform: 'none', ml: 0.5 } }}>
+              <Badge badgeContent={workspaceTransactions.length} color="primary" sx={{ '& .MuiBadge-badge': { position: 'relative', transform: 'none', ml: 0.5 } }}>
                 <Box />
               </Badge>
               <Typography variant="caption" color="text.secondary">Add, edit or remove transactions before checkout.</Typography>
@@ -452,13 +445,23 @@ export default function ModernTransactions() {
 
           {/* Transaction cards grid */}
           <Box sx={{ flex: 1, overflowY: 'auto' }}>
-            <Grid container spacing={{ md: 1.5, xl: 1 }}>
-              {SAMPLE_TRANSACTIONS.map(tx => (
-                <Grid item xs={12} sm={6} md={4} key={tx.id}>
-                  <TransactionCard tx={tx} />
-                </Grid>
-              ))}
-            </Grid>
+            {workspaceTransactions.length === 0 ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 1.5, color: 'text.secondary' }}>
+                <MuiIcons.Receipt sx={{ fontSize: 48, opacity: 0.15 }} />
+                <Typography variant="body2" color="text.secondary">No transactions in workspace yet.</Typography>
+                <Typography variant="caption" color="text.secondary">Use the buttons below to start a pawn, sale, or other transaction.</Typography>
+              </Box>
+            ) : (
+              <Grid container spacing={{ md: 1.5, xl: 1 }}>
+                {workspaceTransactions.map(tx => (
+                  <Grid item xs={12} sm={6} md={4} key={tx.id}>
+                    {tx.type === 'PAWN' ? (
+                      <PawnTransactionCard tx={tx} />
+                    ) : null}
+                  </Grid>
+                ))}
+              </Grid>
+            )}
           </Box>
 
         </Box>
@@ -472,7 +475,9 @@ export default function ModernTransactions() {
 
           {/* Scrollable: summary lines + net due + checkout + workspace status */}
           <Box sx={{ flex: 1, overflowY: 'auto', p: { md: 1.5, xl: 1 }, minHeight: 0 }}>
-            {SUMMARY_LINES.map((l, i) => (
+            {summaryLines.length === 0 ? (
+              <Typography variant="caption" color="text.secondary" fontStyle="italic">No transactions yet.</Typography>
+            ) : summaryLines.map((l, i) => (
               <Box key={i} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
                 <Typography variant="caption" color="text.secondary">{l.label}</Typography>
                 <Typography variant="caption" fontWeight={600} color={l.color}>{l.value}</Typography>
@@ -484,13 +489,15 @@ export default function ModernTransactions() {
             <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" mb={0.5}>
               NET DUE FROM CUSTOMER
             </Typography>
-            <Typography fontWeight={800} color={GREEN} mb={{ md: 2, xl: 1 }} sx={{ fontSize: { md: '1.5rem', xl: '1.2rem' } }}>$747.58</Typography>
+            <Typography fontWeight={800} color={netDue >= 0 ? GREEN : '#c62828'} mb={{ md: 2, xl: 1 }} sx={{ fontSize: { md: '1.5rem', xl: '1.2rem' } }}>
+              {netDue < 0 ? `-$${Math.abs(netDue).toFixed(2)}` : `$${netDue.toFixed(2)}`}
+            </Typography>
 
             <Typography variant="caption" color="text.secondary" display="block" mb={{ md: 1.5, xl: 0.75 }}>
               No payment has been entered yet.
             </Typography>
 
-            <Button fullWidth variant="contained" size="small"
+            <Button fullWidth variant="contained" size="small" disabled={workspaceTransactions.length === 0}
               sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, borderRadius: 2, fontWeight: 700, mb: { md: 2, xl: 1 } }}>
               Checkout / Payment
             </Button>
@@ -500,7 +507,12 @@ export default function ModernTransactions() {
             <Typography variant="caption" fontWeight={700} color="text.secondary" letterSpacing={1} display="block" mb={1}>
               WORKSPACE STATUS
             </Typography>
-            {[
+            {workspaceTransactions.length === 0 ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75 }}>
+                <MuiIcons.RadioButtonUnchecked sx={{ fontSize: 14, color: '#bdbdbd' }} />
+                <Typography variant="caption" color="text.secondary">No transactions added</Typography>
+              </Box>
+            ) : [
               'All required fields complete',
               'Customer linked to all transactions',
               'Ready to checkout',

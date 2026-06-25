@@ -85,7 +85,7 @@ function commitPawnTicketId() {
   localStorage.removeItem(PENDING_KEY);
 }
 
-export default function PawnTransactionScreen({ customer, customerStats: initialStats, onClose, onConvertTo }) {
+export default function PawnTransactionScreen({ customer, customerStats: initialStats, onClose, onConvertTo, onAddToWorkspace }) {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const [ticketId]                        = useState(() => generatePawnTicketId());
@@ -892,7 +892,24 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           Cancel
         </Button>
         <Button size="small" variant="outlined"
-          onClick={() => { commitPawnTicketId(); }}
+          disabled={pawnItems.length === 0}
+          onClick={() => {
+            if (pawnItems.length === 0) {
+              setSnackbar({ open: true, message: 'Add at least one item before adding to workspace', severity: 'warning' });
+              return;
+            }
+            commitPawnTicketId();
+            onAddToWorkspace?.({
+              ticketId,
+              customer,
+              pawnItems,
+              totalPawnAmount,
+              dueDate,
+              costToRedeem: totalToRedeem,
+              overduePawnCount,
+            });
+            onClose();
+          }}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
           Add to Workspace
         </Button>
