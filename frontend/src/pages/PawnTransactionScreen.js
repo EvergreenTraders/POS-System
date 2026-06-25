@@ -138,6 +138,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [quickAddRow, setQuickAddRow] = useState(null);
   const [rePawnSelectorOpen, setRePawnSelectorOpen] = useState(false);
   const [rePawnSelectedItem, setRePawnSelectedItem] = useState(null);
+  const [rePawnEditItemId,   setRePawnEditItemId]   = useState(null);
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
   const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
@@ -527,6 +528,13 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     setRePawnSelectedItem(null);
   };
 
+  const handleRePawnUpdate = (item) => {
+    setPawnItems(prev => prev.map(i => i.id === item.id ? { ...item, part_number: i.part_number } : i));
+    setRePawnSelectorOpen(false);
+    setRePawnSelectedItem(null);
+    setRePawnEditItemId(null);
+  };
+
   const openQuickAdd = () => {
     setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', storage_fee: 0 });
     setTimeout(() => quickDescRef.current?.focus(), 50);
@@ -582,16 +590,22 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   }
 
   if (rePawnSelectorOpen && rePawnSelectedItem) {
+    const isEditMode = !!rePawnEditItemId;
+    const editingRePawnItem = isEditMode ? pawnItems.find(i => i.id === rePawnEditItemId) : null;
     return (
       <RePawnIntakeScreen
         customer={customer}
         selectedItem={rePawnSelectedItem}
         stats={stats}
-        newPartNumber={makePartNumber(pawnItems.length + 1)}
-        onBack={() => setRePawnSelectedItem(null)}
-        onCancel={() => { setRePawnSelectorOpen(false); setRePawnSelectedItem(null); }}
-        onSaveItem={handleRePawnSave}
+        newPartNumber={editingRePawnItem?.part_number || makePartNumber(pawnItems.length + 1)}
+        onBack={isEditMode
+          ? () => { setRePawnSelectorOpen(false); setRePawnSelectedItem(null); setRePawnEditItemId(null); }
+          : () => setRePawnSelectedItem(null)
+        }
+        onCancel={() => { setRePawnSelectorOpen(false); setRePawnSelectedItem(null); setRePawnEditItemId(null); }}
+        onSaveItem={isEditMode ? handleRePawnUpdate : handleRePawnSave}
         onSaveAndAddAnother={handleRePawnSaveAndAdd}
+        backLabel={isEditMode ? 'Back to Pawn Ticket' : 'Back to Re-Pawn List'}
       />
     );
   }
@@ -900,7 +914,16 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
                   </FormControl>
                   <Typography variant="caption" fontWeight={700} color="#2e7d32">{fmt(row.amount)}</Typography>
                   <Box sx={{ display: 'flex', gap: 0, alignItems: 'center', justifyContent: 'flex-end' }}>
-                    <IconButton size="small" sx={{ color: PURPLE }} onClick={() => { setEditingItem(row); setIntakeOpen(true); }}><MuiIcons.Edit sx={{ fontSize: 15 }} /></IconButton>
+                    <IconButton size="small" sx={{ color: PURPLE }} onClick={() => {
+                      if (row.isRePawn) {
+                        setRePawnSelectedItem(row);
+                        setRePawnSelectorOpen(true);
+                        setRePawnEditItemId(row.id);
+                      } else {
+                        setEditingItem(row);
+                        setIntakeOpen(true);
+                      }
+                    }}><MuiIcons.Edit sx={{ fontSize: 15 }} /></IconButton>
                     <IconButton size="small" title="Convert" sx={{ color: '#555' }} onClick={(e) => { setConvertAnchor(e.currentTarget); setConvertRow(row); }}><MuiIcons.SwapHoriz sx={{ fontSize: 15 }} /></IconButton>
                     <IconButton size="small" color="error" onClick={() => handleDeleteItem(row.id)}>
                       <MuiIcons.Delete sx={{ fontSize: 15 }} />

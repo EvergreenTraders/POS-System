@@ -29,15 +29,21 @@ export default function RePawnIntakeScreen({
   onCancel,
   onSaveItem,
   onSaveAndAddAnother,
+  backLabel = 'Back to Re-Pawn List',
 }) {
-  const [pawnHistory,   setPawnHistory]   = useState([]);
+  // In edit mode, selectedItem is the already-built row which may carry a previously captured intake photo
+  const intakeImage = selectedItem?.images?.find(img => img.file instanceof File);
+
+  const [pawnHistory,    setPawnHistory]    = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
-  const [condition,     setCondition]     = useState('');
-  const [verification,  setVerification]  = useState({});
-  const [photoPreview,  setPhotoPreview]  = useState(null);
-  const [notes,         setNotes]         = useState('');
-  const [pawnAmount,    setPawnAmount]    = useState(
-    String(parseFloat(selectedItem?.item_price || 0).toFixed(2))
+  const [condition,      setCondition]      = useState(selectedItem?.condition || '');
+  const [verification,   setVerification]   = useState(selectedItem?.verification || {});
+  const [photoFile,      setPhotoFile]      = useState(intakeImage?.file || null);
+  const [photoPreview,   setPhotoPreview]   = useState(intakeImage?.url  || null);
+  const [notes,          setNotes]          = useState(selectedItem?.notes || '');
+  const [saveTried,      setSaveTried]      = useState(false);
+  const [pawnAmount,     setPawnAmount]     = useState(
+    String(parseFloat(selectedItem?.amount || selectedItem?.item_price || 0).toFixed(2))
   );
   const photoInputRef  = useRef(null);
   const cameraInputRef = useRef(null);
@@ -77,6 +83,7 @@ export default function RePawnIntakeScreen({
   const handlePhotoChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
   };
 
@@ -96,11 +103,26 @@ export default function RePawnIntakeScreen({
     qty:         1,
     condition,
     notes,
+    verification,
     isRePawn:    true,
     sourceEstimator: 'jewelry',
+    // Preserve original server images for the "Previous Item" thumbnail on re-edit
+    sourceImages: selectedItem.sourceImages || selectedItem.images || [],
+    // Only the intake photo goes into images (used by checkout for upload)
+    images: photoFile ? [{ url: photoPreview, file: photoFile, isPrimary: true }] : [],
   });
 
+  const allVerified  = VERIFY_ITEMS.every(v => !!verification[v]);
+  const canSave      = !!photoPreview && !!condition && allVerified;
+
+  const missingItems = [
+    !photoPreview  && 'Intake photo',
+    !condition     && 'Condition',
+    !allVerified   && 'All verification checkboxes',
+  ].filter(Boolean);
+
   const handleSave = (andAddAnother = false) => {
+    if (!canSave) { setSaveTried(true); return; }
     const item = buildItem();
     if (andAddAnother) onSaveAndAddAnother(item);
     else onSaveItem(item);
@@ -112,12 +134,17 @@ export default function RePawnIntakeScreen({
     : '—';
 
   const thumb = (() => {
-    const raw = Array.isArray(selectedItem?.images) && selectedItem.images[0]?.url;
+    // sourceImages holds the original server images; images holds the intake photo blob
+    const imgs = selectedItem?.sourceImages || selectedItem?.images || [];
+    const preferred = imgs.find(i => !i.file) || imgs[0]; // prefer server image over blob
+    const raw = preferred?.url;
     if (!raw) return null;
     return raw.startsWith('http') ? raw : `${backendBase}${raw}`;
   })();
 
-  const itemLabel = selectedItem?.ticket_status === 'FORFEITED' ? 'Forfeited' : 'Redeemed';
+  const isSaleSource = selectedItem?.source_type === 'sale';
+  const itemLabel = isSaleSource ? 'Purchased'
+    : selectedItem?.ticket_status === 'FORFEITED' ? 'Forfeited' : 'Redeemed';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
@@ -157,18 +184,20 @@ export default function RePawnIntakeScreen({
                 <Typography variant="body2" fontWeight={700} fontFamily="monospace">{selectedItem?.last_ticket_id || '—'}</Typography>
               </Box>
               <Box>
-                <Typography variant="caption" color="text.secondary" display="block">Last Pawn Date</Typography>
+                <Typography variant="caption" color="text.secondary" display="block">{isSaleSource ? 'Purchase Date' : 'Last Pawn Date'}</Typography>
                 <Typography variant="body2" fontWeight={600}>{fmtDate(selectedItem?.last_pawn_date)}</Typography>
               </Box>
-              <Box>
-                <Typography variant="caption" color="text.secondary" display="block">Last {itemLabel}</Typography>
-                <Typography variant="body2" fontWeight={600}>{fmtDate(selectedItem?.last_status_date)}</Typography>
-              </Box>
+              {!isSaleSource && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">Last {itemLabel}</Typography>
+                  <Typography variant="body2" fontWeight={600}>{fmtDate(selectedItem?.last_status_date)}</Typography>
+                </Box>
+              )}
             </Box>
             <Divider sx={{ my: 1 }} />
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
               <Box>
-                <Typography variant="caption" color="text.secondary" display="block">Previous Pawn Amount</Typography>
+                <Typography variant="caption" color="text.secondary" display="block">{isSaleSource ? 'Purchase Price' : 'Previous Pawn Amount'}</Typography>
                 <Typography variant="body2" fontWeight={700} color="#2e7d32">{fmt(selectedItem?.item_price)}</Typography>
               </Box>
               <Box>
@@ -249,8 +278,10 @@ export default function RePawnIntakeScreen({
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
               {/* Photo capture */}
               <Box>
-                <Typography variant="caption" fontWeight={600} display="block" sx={{ mb: 0.75 }}>Current Intake Photo</Typography>
-                <Box sx={{ border: `1.5px dashed ${PURPLE}60`, borderRadius: 2, height: 112, display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1, overflow: 'hidden', bgcolor: '#fafafa' }}>
+                <Typography variant="caption" fontWeight={600} display="block" sx={{ mb: 0.75 }}>
+                  Current Intake Photo <Typography component="span" color="error" variant="caption">*</Typography>
+                </Typography>
+                <Box sx={{ border: `1.5px dashed ${saveTried && !photoPreview ? '#d32f2f' : photoPreview ? '#2e7d32' : `${PURPLE}60`}`, borderRadius: 2, height: 112, display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1, overflow: 'hidden', bgcolor: saveTried && !photoPreview ? '#fff8f8' : '#fafafa' }}>
                   {photoPreview ? (
                     <Box component="img" src={photoPreview} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
@@ -278,22 +309,24 @@ export default function RePawnIntakeScreen({
 
               {/* Condition + Verification checkboxes */}
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
-                <FormControl size="small" fullWidth>
-                  <InputLabel>Condition</InputLabel>
-                  <Select value={condition} label="Condition" onChange={e => setCondition(e.target.value)} sx={{ borderRadius: 1.5 }}>
+                <FormControl size="small" fullWidth error={saveTried && !condition}>
+                  <InputLabel>Condition <span style={{ color: '#d32f2f' }}>*</span></InputLabel>
+                  <Select value={condition} label="Condition *" onChange={e => setCondition(e.target.value)} sx={{ borderRadius: 1.5 }}>
                     {CONDITIONS.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
                   </Select>
                 </FormControl>
 
 
                 <Box>
-                  <Typography variant="caption" fontWeight={600} display="block" sx={{ mb: 0.5 }}>Verification</Typography>
+                  <Typography variant="caption" fontWeight={600} display="block" sx={{ mb: 0.5, color: saveTried && !allVerified ? 'error.main' : 'inherit' }}>
+                    Verification <Typography component="span" color="error" variant="caption">*</Typography>
+                  </Typography>
                   {VERIFY_ITEMS.map(v => (
                     <FormControlLabel key={v}
                       control={<Checkbox size="small" checked={!!verification[v]}
                         onChange={e => setVerification(vr => ({ ...vr, [v]: e.target.checked }))}
-                        sx={{ py: 0.2, color: PURPLE, '&.Mui-checked': { color: PURPLE } }} />}
-                      label={<Typography variant="caption">{v}</Typography>}
+                        sx={{ py: 0.2, color: saveTried && !verification[v] ? 'error.main' : PURPLE, '&.Mui-checked': { color: PURPLE } }} />}
+                      label={<Typography variant="caption" color={saveTried && !verification[v] ? 'error' : 'inherit'}>{v}</Typography>}
                       sx={{ display: 'flex', m: 0 }}
                     />
                   ))}
@@ -376,7 +409,9 @@ export default function RePawnIntakeScreen({
             {histStats && (
               <Box sx={{ mb: 1.5, p: 1.25, bgcolor: '#f3e5f5', borderRadius: 1.5 }}>
                 <Typography fontWeight={800} fontSize={18} color={PURPLE}>
-                  {fmt(histStats.min)} – {fmt(histStats.max)}
+                  {histStats.min === histStats.max
+                    ? fmt(histStats.min)
+                    : `${fmt(histStats.min)} – ${fmt(histStats.max)}`}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">Based on this item's pawn history.</Typography>
               </Box>
@@ -414,22 +449,32 @@ export default function RePawnIntakeScreen({
       </Box>
 
       {/* Footer action bar */}
-      <Box sx={{ px: 2, py: 1.5, borderTop: '1px solid #e0e0e0', bgcolor: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button variant="outlined" startIcon={<MuiIcons.Close />} onClick={onCancel}
-            sx={{ textTransform: 'none', borderRadius: 2, borderColor: '#ccc', color: 'text.secondary', '&:hover': { borderColor: '#999' } }}>
-            Cancel
-          </Button>
-          <Button variant="outlined" startIcon={<MuiIcons.ArrowBack />} onClick={onBack}
-            sx={{ textTransform: 'none', borderRadius: 2, borderColor: '#ccc', color: 'text.secondary', '&:hover': { borderColor: '#999' } }}>
-            Back to Re-Pawn List
-          </Button>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button variant="contained" startIcon={<MuiIcons.CheckCircle />} onClick={() => handleSave(false)}
-            sx={{ textTransform: 'none', borderRadius: 2, bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}>
-            Save Item to Ticket
-          </Button>
+      <Box sx={{ borderTop: '1px solid #e0e0e0', bgcolor: 'white' }}>
+        {missingItems.length > 0 && (
+          <Box sx={{ px: 2, py: 0.75, bgcolor: '#fff3e0', borderBottom: '1px solid #ffe0b2', display: 'flex', alignItems: 'center', gap: 1 }}>
+            <MuiIcons.Warning sx={{ fontSize: 16, color: '#e65100', flexShrink: 0 }} />
+            <Typography variant="caption" color="#e65100" fontWeight={600}>
+              Missing: {missingItems.join(' · ')}
+            </Typography>
+          </Box>
+        )}
+        <Box sx={{ px: 2, py: 1.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button variant="outlined" startIcon={<MuiIcons.Close />} onClick={onCancel}
+              sx={{ textTransform: 'none', borderRadius: 2, borderColor: '#ccc', color: 'text.secondary', '&:hover': { borderColor: '#999' } }}>
+              Cancel
+            </Button>
+            <Button variant="outlined" startIcon={<MuiIcons.ArrowBack />} onClick={onBack}
+              sx={{ textTransform: 'none', borderRadius: 2, borderColor: '#ccc', color: 'text.secondary', '&:hover': { borderColor: '#999' } }}>
+              {backLabel}
+            </Button>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button variant="contained" startIcon={<MuiIcons.CheckCircle />} onClick={() => handleSave(false)}
+              sx={{ textTransform: 'none', borderRadius: 2, bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}>
+              Save Item to Ticket
+            </Button>
+          </Box>
         </Box>
       </Box>
     </Box>

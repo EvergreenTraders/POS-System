@@ -89,12 +89,12 @@ export default function RePawnSelector({ customer, onBack, onSelectItem }) {
                     </Typography>
                     <Box sx={{ display: 'flex', gap: 2.5, mt: 0.5 }}>
                       <Typography variant="caption">
-                        Last Amount: <strong>${parseFloat(item.item_price || 0).toFixed(2)}</strong>
+                        {item.source_type === 'sale' ? 'Sale Price' : 'Last Amount'}: <strong>${parseFloat(item.item_price || 0).toFixed(2)}</strong>
                       </Typography>
                       <Typography variant="caption">
-                        Last Pawned: <strong>{fmtDate(item.last_pawn_date)}</strong>
+                        {item.source_type === 'sale' ? 'Purchased' : 'Last Pawned'}: <strong>{fmtDate(item.last_pawn_date)}</strong>
                       </Typography>
-                      {item.last_status_date && (
+                      {item.source_type !== 'sale' && item.last_status_date && (
                         <Typography variant="caption">
                           {item.ticket_status === 'FORFEITED' ? 'Forfeited' : 'Redeemed'}: <strong>{fmtDate(item.last_status_date)}</strong>
                         </Typography>
@@ -105,8 +105,12 @@ export default function RePawnSelector({ customer, onBack, onSelectItem }) {
                     label={item.ticket_status}
                     size="small"
                     sx={{
-                      bgcolor: item.ticket_status === 'REDEEMED' ? '#e8f5e9' : '#fce4ec',
-                      color:   item.ticket_status === 'REDEEMED' ? '#2e7d32' : '#c62828',
+                      bgcolor: item.ticket_status === 'REDEEMED'  ? '#e8f5e9'
+                             : item.ticket_status === 'PURCHASED' ? '#e3f2fd'
+                             : '#fce4ec',
+                      color:   item.ticket_status === 'REDEEMED'  ? '#2e7d32'
+                             : item.ticket_status === 'PURCHASED' ? '#1565c0'
+                             : '#c62828',
                       fontWeight: 700, fontSize: 11, mr: 1, flexShrink: 0,
                     }}
                   />

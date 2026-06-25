@@ -9352,42 +9352,61 @@ app.get('/api/customers/:id/repawn-candidates', async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(`
-      SELECT DISTINCT ON (j.item_id)
-        j.item_id,
-        j.short_desc,
-        j.long_desc,
-        j.category,
-        j.images,
-        j.item_price,
-        j.brand,
-        j.jewelry_color,
-        j.metal_purity,
-        j.serial_number,
-        j.part_number,
-        j.metal_weight,
-        j.precious_metal_type,
-        j.non_precious_metal_type,
-        j.purity_value,
-        j.est_metal_value,
-        j.metal_spot_price,
-        pt.pawn_ticket_id  AS last_ticket_id,
-        t.transaction_date AS last_pawn_date,
-        pt.status          AS ticket_status,
-        COALESCE(
-          (SELECT ph.action_date
-           FROM pawn_history ph
-           WHERE ph.pawn_ticket_id = pt.pawn_ticket_id
-             AND ph.action_type IN ('REDEEM', 'FORFEIT')
-           ORDER BY ph.action_date DESC
-           LIMIT 1),
-          pt.updated_at
-        ) AS last_status_date
-      FROM pawn_ticket pt
-      JOIN transactions t ON t.transaction_id = pt.transaction_id
-      JOIN jewelry j      ON j.item_id = pt.item_id
-      WHERE t.customer_id = $1
-        AND pt.status IN ('REDEEMED', 'FORFEITED')
-      ORDER BY j.item_id, t.transaction_date DESC
+      SELECT DISTINCT ON (item_id)
+        item_id, short_desc, long_desc, category, images, item_price,
+        brand, jewelry_color, metal_purity, serial_number, part_number,
+        metal_weight, precious_metal_type, non_precious_metal_type,
+        purity_value, est_metal_value, metal_spot_price,
+        last_ticket_id, last_pawn_date, ticket_status, last_status_date,
+        source_type
+      FROM (
+        -- Previously pawned items the customer redeemed or forfeited
+        SELECT
+          1 AS priority,
+          j.item_id, j.short_desc, j.long_desc, j.category, j.images,
+          j.item_price, j.brand, j.jewelry_color, j.metal_purity,
+          j.serial_number, j.part_number, j.metal_weight,
+          j.precious_metal_type, j.non_precious_metal_type,
+          j.purity_value, j.est_metal_value, j.metal_spot_price,
+          pt.pawn_ticket_id  AS last_ticket_id,
+          t.transaction_date AS last_pawn_date,
+          pt.status          AS ticket_status,
+          COALESCE(
+            (SELECT ph.action_date
+             FROM pawn_history ph
+             WHERE ph.pawn_ticket_id = pt.pawn_ticket_id
+               AND ph.action_type IN ('REDEEM', 'FORFEIT')
+             ORDER BY ph.action_date DESC LIMIT 1),
+            pt.updated_at
+          ) AS last_status_date,
+          'pawn' AS source_type
+        FROM pawn_ticket pt
+        JOIN transactions t ON t.transaction_id = pt.transaction_id
+        JOIN jewelry j      ON j.item_id = pt.item_id
+        WHERE t.customer_id = $1
+          AND pt.status IN ('REDEEMED', 'FORFEITED')
+
+        UNION ALL
+
+        -- Items the customer purchased from the store via a sale ticket
+        SELECT
+          2 AS priority,
+          j.item_id, j.short_desc, j.long_desc, j.category, j.images,
+          j.item_price, j.brand, j.jewelry_color, j.metal_purity,
+          j.serial_number, j.part_number, j.metal_weight,
+          j.precious_metal_type, j.non_precious_metal_type,
+          j.purity_value, j.est_metal_value, j.metal_spot_price,
+          st.sale_ticket_id  AS last_ticket_id,
+          t.transaction_date AS last_pawn_date,
+          'PURCHASED'        AS ticket_status,
+          t.transaction_date AS last_status_date,
+          'sale' AS source_type
+        FROM sale_ticket st
+        JOIN transactions t ON t.transaction_id = st.transaction_id
+        JOIN jewelry j      ON j.item_id = st.item_id
+        WHERE t.customer_id = $1
+      ) combined
+      ORDER BY item_id, priority ASC, last_pawn_date DESC
     `, [id]);
     res.json(result.rows);
   } catch (err) {
@@ -9405,12 +9424,18 @@ app.get('/api/jewelry/:itemId/repawn-history', async (req, res) => {
         t.transaction_date AS pawn_date,
         j.item_price       AS pawn_amount,
         pt.status,
-        ph.action_date     AS redeemed_date
+        COALESCE(
+          (SELECT ph.action_date
+           FROM pawn_history ph
+           WHERE ph.pawn_ticket_id = pt.pawn_ticket_id
+             AND ph.action_type IN ('REDEEM', 'FORFEIT')
+           ORDER BY ph.action_date DESC
+           LIMIT 1),
+          CASE WHEN pt.status IN ('REDEEMED', 'FORFEITED') THEN pt.updated_at ELSE NULL END
+        ) AS redeemed_date
       FROM pawn_ticket pt
       JOIN transactions t ON t.transaction_id = pt.transaction_id
       JOIN jewelry j      ON j.item_id = pt.item_id
-      LEFT JOIN pawn_history ph ON ph.pawn_ticket_id = pt.pawn_ticket_id
-        AND ph.action_type IN ('REDEEM', 'FORFEIT')
       WHERE pt.item_id = $1
       ORDER BY t.transaction_date ASC
     `, [itemId]);
