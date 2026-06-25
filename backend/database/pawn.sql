@@ -83,3 +83,35 @@ COMMENT ON COLUMN pawn_history.total_paid IS 'Total amount paid (interest + fee)
 COMMENT ON COLUMN pawn_history.previous_due_date IS 'Due date before the action';
 COMMENT ON COLUMN pawn_history.new_due_date IS 'New due date after the action (for extensions)';
 COMMENT ON COLUMN pawn_history.extension_days IS 'Number of days the loan was extended by';
+
+-- Item size lookup table — drives the size dropdown and per-item storage fee in pawn transactions
+CREATE TABLE IF NOT EXISTS item_size (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) UNIQUE NOT NULL,
+    storage_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE item_size ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE OR REPLACE FUNCTION update_item_size_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS update_item_size_timestamp ON item_size;
+CREATE TRIGGER update_item_size_timestamp
+    BEFORE UPDATE ON item_size
+    FOR EACH ROW
+    EXECUTE FUNCTION update_item_size_timestamp();
+
+INSERT INTO item_size (name, storage_fee) VALUES
+    ('Small',    10.00),
+    ('Medium',   15.00),
+    ('Large',    20.00),
+    ('Oversize', 30.00)
+ON CONFLICT (name) DO NOTHING;

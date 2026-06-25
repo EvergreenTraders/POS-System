@@ -43,7 +43,6 @@ BEGIN
     END IF;
 
     -- Stone Types Table
-    drop table if exists stone_types;
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_tables WHERE tablename = 'stone_types') THEN
         CREATE TABLE stone_types (
             id SERIAL PRIMARY KEY,

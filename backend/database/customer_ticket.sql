@@ -1,5 +1,3 @@
--- Drop old pawn_ticket table if it exists with old structure
-DROP TABLE IF EXISTS pawn_ticket CASCADE;
 
 -- Create pawn_ticket table matching buy_ticket and sale_ticket structure
 CREATE TABLE IF NOT EXISTS pawn_ticket (
@@ -14,7 +12,11 @@ CREATE TABLE IF NOT EXISTS pawn_ticket (
   insurance_rate DECIMAL(5,2) DEFAULT 1.0,
   frequency_days INTEGER DEFAULT 30,
   due_date DATE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  storage_fee NUMERIC(10,2) DEFAULT 0,
+  ticket_note TEXT,
+  show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 COMMENT ON COLUMN pawn_ticket.status IS 'Status of the pawn ticket: ACTIVE, REDEEMED, FORFEITED';
@@ -68,7 +70,53 @@ BEGIN
   ) THEN
     ALTER TABLE pawn_ticket ADD COLUMN insurance_rate DECIMAL(5,2) DEFAULT 1.0;
   END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'storage_fee'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN storage_fee NUMERIC(10,2) DEFAULT 0;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'ticket_note'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN ticket_note TEXT;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'show_on_receipt'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'updated_at'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW();
+  END IF;
 END $$;
+
+-- Backfill updated_at from created_at for rows that have none
+UPDATE pawn_ticket SET updated_at = created_at WHERE updated_at IS NULL;
+
+-- Auto-update trigger so every INSERT/UPDATE stamps updated_at
+CREATE OR REPLACE FUNCTION update_pawn_ticket_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS update_pawn_ticket_timestamp ON pawn_ticket;
+CREATE TRIGGER update_pawn_ticket_timestamp
+  BEFORE UPDATE ON pawn_ticket
+  FOR EACH ROW
+  EXECUTE FUNCTION update_pawn_ticket_timestamp();
 
 CREATE TABLE IF NOT EXISTS buy_ticket (
   id SERIAL PRIMARY KEY,

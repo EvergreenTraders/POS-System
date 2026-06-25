@@ -47,9 +47,13 @@ import {
   Switch,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import PaymentIcon from '@mui/icons-material/Payment';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import CreditCardIcon from '@mui/icons-material/CreditCard';
+
+const PURPLE = '#6a1b9a';
+const PURPLE_DARK = '#4a148c';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -143,6 +147,7 @@ function Checkout() {
   const [pawnConfig, setPawnConfig] = useState({
     term_days: 90,
     interest_rate: 2.9,
+    insurance_rate: 0,
     frequency_days: 30
   });
 
@@ -357,9 +362,10 @@ function Checkout() {
           headers: { Authorization: `Bearer ${token}` }
         });
         setPawnConfig({
-          term_days: parseInt(response.data.term_days) || 90,
-          interest_rate: parseFloat(response.data.interest_rate) || 2.9,
-          frequency_days: parseInt(response.data.frequency_days) || 30
+          term_days:      parseInt(response.data.term_days)        || 90,
+          interest_rate:  parseFloat(response.data.interest_rate)  || 2.9,
+          insurance_rate: parseFloat(response.data.insurance_rate) || 0,
+          frequency_days: parseInt(response.data.frequency_days)   || 30,
         });
       } catch (error) {
         console.error('Error fetching pawn config:', error);
@@ -1029,67 +1035,6 @@ function Checkout() {
             }
 
             createdJewelryItems = jewelryResponse.data;
-
-            // Push data to jewelry_secondary_gems for each created item
-            for (let i = 0; i < createdJewelryItems.length; i++) {
-              const item = createdJewelryItems[i];
-              const originalItem = itemsToPost[i];
-              
-              // Check if this item has secondary gem data that should be pushed
-              if ( 
-                  (originalItem.secondary_gems && originalItem.secondary_gems.length > 0)) {
-                try {
-                  if (originalItem.secondary_gems && originalItem.secondary_gems.length > 0) {
-                    
-                    // Send each secondary gem individually
-                    try {
-                      for (const gemData of originalItem.secondary_gems) {
-                        
-                        // Send the gem data
-                        await axios.post(
-                          `${config.apiUrl}/jewelry_secondary_gems`,
-                          {
-                            jewelry_id: item.item_id,
-                            ...gemData
-                          },
-                          { headers: { Authorization: `Bearer ${token}` } }
-                        );
-                      }
-                    } catch (error) {
-                      console.error(`Error adding secondary gems for item ${item.item_id}:`, error);
-                    }
-                  } else {
-                    // Fallback to legacy format for backward compatibility
-                    // Extract all secondary gem fields from the original item
-                    const secondaryGemData = {
-                      secondary_gem_type: originalItem.secondary_gem_type,
-                      secondary_gem_category: originalItem.secondary_gem_category,
-                      secondary_gem_size: originalItem.secondary_gem_size,
-                      secondary_gem_quantity: originalItem.secondary_gem_quantity,
-                      secondary_gem_shape: originalItem.secondary_gem_shape,
-                      secondary_gem_weight: originalItem.secondary_gem_weight,
-                      secondary_gem_color: originalItem.secondary_gem_color,
-                      secondary_gem_exact_color: originalItem.secondary_gem_exact_color,
-                      secondary_gem_clarity: originalItem.secondary_gem_clarity,
-                      secondary_gem_cut: originalItem.secondary_gem_cut,
-                      secondary_gem_lab_grown: originalItem.secondary_gem_lab_grown,
-                      secondary_gem_authentic: originalItem.secondary_gem_authentic,
-                      secondary_gem_value: originalItem.secondary_gem_value
-                    };
-                    
-                    // Push to jewelry_secondary_gems with the same item_id using the legacy endpoint
-                    await axios.put(
-                      `${config.apiUrl}/jewelry_secondary_gems/${item.item_id}`,
-                      secondaryGemData,
-                      { headers: { Authorization: `Bearer ${token}` } }
-                    );
-                  }
-                } catch (error) {
-                  console.error(`Error adding secondary gems for item ${item.item_id}:`, error);
-                  // Continue with transaction even if secondary gems fail
-                }
-              }
-            }
           }
 
           // Step 1b: Create hardgoods items (from Hardgoods estimator)
@@ -1380,6 +1325,9 @@ function Checkout() {
             dueDate.setDate(dueDate.getDate() + pawnConfig.term_days);
             const dueDateStr = dueDate.toISOString().split('T')[0];
 
+            const ticketNote = itemsForTicket[0]?.ticket_note || null;
+            const showOnReceipt = itemsForTicket[0]?.show_on_receipt || false;
+
             for (const item of itemsForTicket) {
               try {
                 let itemId = null;
@@ -1392,14 +1340,17 @@ function Checkout() {
                 await axios.post(
                   `${config.apiUrl}/pawn-ticket`,
                   {
-                    pawn_ticket_id: pawnTicketId,
-                    transaction_id: realTransactionId,
-                    item_id: itemId,
-                    // Store pawn config values frozen at time of pawn creation
-                    term_days: pawnConfig.term_days,
-                    interest_rate: pawnConfig.interest_rate,
-                    frequency_days: pawnConfig.frequency_days,
-                    due_date: dueDateStr
+                    pawn_ticket_id:  pawnTicketId,
+                    transaction_id:  realTransactionId,
+                    item_id:         itemId,
+                    term_days:       pawnConfig.term_days,
+                    interest_rate:   pawnConfig.interest_rate,
+                    insurance_rate:  pawnConfig.insurance_rate,
+                    frequency_days:  pawnConfig.frequency_days,
+                    due_date:        dueDateStr,
+                    ticket_note:     ticketNote,
+                    show_on_receipt: showOnReceipt,
+                    storage_fee:     item.storage_fee || 0
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }
@@ -1723,6 +1674,34 @@ function Checkout() {
             clearCart();
           }
 
+          // After successful pawn checkout, remove the card(s) from the workspace localStorage
+          const pawnCheckoutCompleted = checkoutItems.length > 0 &&
+            checkoutItems.every(i => (i.transaction_type || '').toLowerCase() === 'pawn');
+          if (pawnCheckoutCompleted) {
+            const customerId = selectedCustomer?.id;
+            const checkedOutTicketIds = new Set(
+              checkoutItems
+                .filter(i => (i.transaction_type || '').toLowerCase() === 'pawn')
+                .map(i => i.pawnTicketId || i.buyTicketId)
+                .filter(Boolean)
+            );
+            if (customerId && checkedOutTicketIds.size > 0) {
+              try {
+                const key = `workspace_${customerId}`;
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const filtered = (parsed.transactions || []).filter(
+                    tx => !(tx.type === 'PAWN' && checkedOutTicketIds.has(tx.ticketId))
+                  );
+                  localStorage.setItem(key, JSON.stringify({ ...parsed, transactions: filtered }));
+                }
+              } catch (e) {
+                console.error('Error clearing pawn workspace entry:', e);
+              }
+            }
+          }
+
           // Display success message and navigate
           setLoading(false);
           setSnackbar({
@@ -1809,6 +1788,27 @@ const handleBackToEstimation = () => {
       // Go back to coins bullions estimator
       navigate('/bullion-estimator');
     } else if (location.state?.from === 'cart') {
+      // Check if this is a pawn-only checkout — navigate back to pawn screen
+      const isPawnCheckout = checkoutItems.length > 0 &&
+        checkoutItems.every(item => (item.transaction_type || '').toLowerCase() === 'pawn');
+
+      if (isPawnCheckout) {
+        const firstItem = checkoutItems[0];
+        const ticketId = firstItem.pawnTicketId || firstItem.buyTicketId;
+        const customerId = firstItem.customer?.id;
+        const totalPawnAmount = checkoutItems.reduce((s, i) => s + (parseFloat(i.price || i.value) || 0), 0);
+        sessionStorage.setItem('pendingPawnReturn', JSON.stringify({
+          customerId,
+          ticketId,
+          pawnItems: checkoutItems,
+          totalPawnAmount,
+          ticketNote: firstItem.ticket_note || '',
+          showOnReceipt: firstItem.show_on_receipt || false,
+        }));
+        navigate('/modern-transactions', { state: { returnToPawn: true } });
+        return;
+      }
+
       // If fully paid, filter out items that were checked out
       // Otherwise, use all cart items as is
       let itemsToKeep;
@@ -1836,10 +1836,10 @@ const handleBackToEstimation = () => {
         }
         return item; // Already in correct format
       });
-      
+
       // Save formatted items to session storage
       sessionStorage.setItem('cartItems', JSON.stringify(formattedCartItems));
-      
+
       navigate('/customer-ticket', {
         state: {
           from: 'checkout',
@@ -1913,10 +1913,35 @@ const handleBackToEstimation = () => {
     });
   };
 
-  return (
-    <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
+  const isPawnCheckout = checkoutItems.length > 0 &&
+    checkoutItems.every(item => (item.transaction_type || '').toLowerCase() === 'pawn');
 
+  const breadcrumbSource = isPawnCheckout
+    ? 'Pawn Transaction'
+    : location.state?.from === 'coinsbullions'
+    ? 'Coins & Bullions'
+    : location.state?.from === 'cart'
+    ? 'Cart'
+    : 'Estimator';
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
+
+      {/* Breadcrumb — matches PawnTransactionScreen style */}
+      <Box sx={{ bgcolor: PURPLE, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Typography
+          variant="body2"
+          fontWeight={400}
+          sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
+          onClick={handleBackToEstimation}
+        >
+          {breadcrumbSource}
+        </Typography>
+        <ChevronRightIcon sx={{ fontSize: 16, opacity: 0.6 }} />
+        <Typography variant="body2" fontWeight={700}>Checkout</Typography>
+      </Box>
+
+    <Box sx={{ p: 1.5, flex: 1 }}>
         <Grid container spacing={3}>
           {/* Left side: Customer Details and Order Summary stacked */}
           <Grid item xs={12} md={8}>
@@ -2349,7 +2374,15 @@ const handleBackToEstimation = () => {
 
               {/* Action Buttons */}
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 3 }}>
-<Button
+                <Button
+                  variant="outlined"
+                  startIcon={<ArrowBackIcon />}
+                  onClick={handleBackToEstimation}
+                  sx={{ borderColor: PURPLE, color: PURPLE, '&:hover': { borderColor: PURPLE_DARK, bgcolor: '#f3e5f5' } }}
+                >
+                  Cancel
+                </Button>
+                <Button
                   variant="contained"
                   startIcon={<PaymentIcon />}
                   onClick={() => handleSubmit()}
@@ -2825,7 +2858,7 @@ const handleBackToEstimation = () => {
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </Container>
+    </Box>
   );
 }
 

@@ -298,7 +298,8 @@ const PawnTicketTemplate = ({
   totalRedemptionAmount,
   legalTerms,
   termDays,
-  frequencyDays
+  frequencyDays,
+  ticketNote
 }) => {
   // Use termDays from props, default to 62 if not provided
   const term = termDays || 62;
@@ -464,6 +465,14 @@ const PawnTicketTemplate = ({
 
             </View>
           </View>
+
+          {/* Ticket Note */}
+          {ticketNote ? (
+            <View style={{ borderTop: '1pt solid black', padding: 6 }}>
+              <Text style={{ fontSize: 6, fontWeight: 'bold', marginBottom: 2 }}>NOTE:</Text>
+              <Text style={{ fontSize: 7 }}>{ticketNote}</Text>
+            </View>
+          ) : null}
 
           {/* Bottom Section - Signatures (left) and Cost Info (right) */}
           <View style={{ flexDirection: 'row', borderTop: '2pt solid black' }}>

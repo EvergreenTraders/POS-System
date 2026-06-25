@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS jewelry (
     item_price DECIMAL(10,2),
 
     -- Status and tracking
+    serial_number VARCHAR(100),
     status VARCHAR(20) NOT NULL DEFAULT 'HOLD',
     location VARCHAR(50),
     condition VARCHAR(50),

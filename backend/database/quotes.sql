@@ -1,6 +1,3 @@
--- Drop existing quotes table
--- drop table if exists quotes cascade;
-
 -- Create quotes table with new structure
 CREATE TABLE IF NOT EXISTS quotes (
     id SERIAL PRIMARY KEY,

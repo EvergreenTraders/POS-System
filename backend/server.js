@@ -320,6 +320,13 @@ pool.query(`
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_bank BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('transfer_allowed_bank migration:', err.message));
+
+pool.query(`
+  ALTER TABLE pawn_config ADD COLUMN IF NOT EXISTS insurance_rate NUMERIC(5,2) NOT NULL DEFAULT 0.00
+`).catch(err => console.error('pawn_config insurance_rate migration:', err.message));
+pool.query(`
+  ALTER TABLE pawn_config ADD COLUMN IF NOT EXISTS storage_fee NUMERIC(10,2) NOT NULL DEFAULT 10.00
+`).catch(err => console.error('pawn_config storage_fee migration:', err.message));
 pool.query(`
   ALTER TABLE employees ADD COLUMN IF NOT EXISTS transfer_allowed_store BOOLEAN NOT NULL DEFAULT TRUE
 `).catch(err => console.error('transfer_allowed_store migration:', err.message));
@@ -378,6 +385,11 @@ pool.query(`ALTER TABLE jewelry ALTER COLUMN item_id TYPE VARCHAR(30)`)
   .catch(err => console.error('jewelry item_id length migration:', err.message));
 pool.query(`ALTER TABLE jewelry_secondary_gems ALTER COLUMN item_id TYPE VARCHAR(30)`)
   .catch(err => console.error('jewelry_secondary_gems item_id length migration:', err.message));
+
+pool.query(`ALTER TABLE pawn_ticket ADD COLUMN IF NOT EXISTS ticket_note TEXT`)
+  .catch(err => console.error('pawn_ticket ticket_note migration:', err.message));
+pool.query(`ALTER TABLE pawn_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE`)
+  .catch(err => console.error('pawn_ticket show_on_receipt migration:', err.message));
 
 // Fix unique_active_connection: replace table constraint with partial index
 // Allows multiple historical (is_active = FALSE) rows per employee/session
@@ -5550,7 +5562,7 @@ app.get('/api/metal_style_subcategory', async (req, res) => {
 // Diamond Shapes API Endpoint
 app.get('/api/diamond_shape', async (req, res) => {
   try {
-    const result = await pool.query('SELECT shape, description, image_path FROM diamond_shape');
+    const result = await pool.query('SELECT id, shape, description, image_path FROM diamond_shape ORDER BY id');
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching diamond shapes:', error);
@@ -6073,12 +6085,17 @@ app.get('/api/quotes/:quote_id', async (req, res) => {
 });
 
 // Create a new quote
-app.post('/api/quotes', async (req, res) => {
+app.post('/api/quotes', uploadJewelryImages, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    
-    const { items, customer_id, employee_id, total_amount } = req.body;
+
+    const items        = JSON.parse(req.body.items        || '[]');
+    const imageMetadata = JSON.parse(req.body.imageMetadata || '[]');
+    const customer_id  = req.body.customer_id;
+    const employee_id  = req.body.employee_id;
+    const total_amount = req.body.total_amount;
+    const uploadedFiles = req.files || [];
     
     // Get the latest quote ID to generate the next sequential number
     const latestQuoteResult = await client.query(
@@ -6117,7 +6134,130 @@ app.post('/api/quotes', async (req, res) => {
       RETURNING *`,
       [quoteId, customer_id, employee_id, total_amount, expiresIn]
     );
-    
+
+    // Look up transaction_type_id for 'pawn'
+    const typeResult = await client.query(`SELECT id FROM transaction_type WHERE type = 'pawn' LIMIT 1`);
+    const pawnTypeId = typeResult.rows[0]?.id ?? 1;
+
+    // Build a global image index map: imageMetadata[n].itemIndex tells us which item each file belongs to
+    let globalFileIndex = 0;
+
+    // Insert each item into jewelry and quote_items
+    for (let i = 0; i < (items || []).length; i++) {
+      const item = items[i];
+      const seq = String(i + 1).padStart(2, '0');
+      const item_id = `${quoteId}-${seq}`;
+
+      // Save images for this item
+      const processedImages = [];
+      const itemImagesMeta = imageMetadata.filter(m => m.itemIndex === i);
+      for (let j = 0; j < itemImagesMeta.length; j++) {
+        const fileIdx = globalFileIndex + j;
+        if (fileIdx < uploadedFiles.length) {
+          const file = uploadedFiles[fileIdx];
+          const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+          const filename = `${item_id}-${j + 1}${ext}`;
+          const filepath = path.join(jewelryUploadDir, filename);
+          await fs.promises.writeFile(filepath, file.buffer);
+          processedImages.push({ url: `/uploads/jewelry/${filename}`, isPrimary: itemImagesMeta[j].isPrimary || j === 0 });
+        }
+      }
+      globalFileIndex += itemImagesMeta.length;
+
+      await client.query(`
+        INSERT INTO jewelry (
+          item_id, long_desc, short_desc, category, brand, vintage, stamps, images,
+          metal_weight, precious_metal_type, non_precious_metal_type, metal_purity, jewelry_color,
+          purity_value, est_metal_value,
+          primary_gem_type, primary_gem_category, primary_gem_size, primary_gem_quantity,
+          primary_gem_shape, primary_gem_weight, primary_gem_color, primary_gem_exact_color,
+          primary_gem_clarity, primary_gem_cut, primary_gem_lab_grown, primary_gem_authentic, primary_gem_value,
+          status, location, condition, metal_spot_price, notes, item_price, melt_value, total_weight, inventory_type
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+          $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,
+          $29,$30,$31,$32,$33,$34,$35,$36,$37
+        )`, [
+        item_id,
+        item.long_desc || '',
+        item.short_desc || '',
+        item.metal_category || '',
+        item.brand || '',
+        item.vintage || false,
+        item.stamps || '',
+        JSON.stringify(processedImages),
+        Math.max(parseFloat(item.metal_weight) || 0.001, 0.001),
+        item.precious_metal_type || null,
+        item.non_precious_metal_type || null,
+        item.metal_purity || null,
+        item.jewelry_color || null,
+        parseFloat(item.purity_value) || 0,
+        parseFloat(item.est_metal_value) || 0,
+        item.primary_gem_type || null,
+        item.primary_gem_category || null,
+        item.primary_gem_size || null,
+        parseInt(item.primary_gem_quantity) || 0,
+        item.primary_gem_shape || null,
+        parseFloat(item.primary_gem_weight) || 0,
+        item.primary_gem_color || null,
+        item.primary_gem_exact_color || null,
+        item.primary_gem_clarity || null,
+        item.primary_gem_cut || null,
+        item.primary_gem_lab_grown || false,
+        item.primary_gem_authentic || false,
+        parseFloat(item.primary_gem_value) || 0,
+        'QUOTED',
+        item.location || 'SOUTH STORE',
+        'GOOD',
+        item.metal_spot_price || null,
+        item.notes || null,
+        parseFloat(item.amount ?? item.price ?? 0),
+        parseFloat(item.melt_value) || 0,
+        Math.max(parseFloat(item.metal_weight) || 0.001, 0.001) +
+          (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
+          (item.secondary_gems || []).reduce((s, g) =>
+            s + (parseFloat(g.secondary_gem_weight) || 0) * (parseInt(g.secondary_gem_quantity) || 1), 0),
+        'jewelry'
+      ]);
+
+      // Insert secondary gems
+      if (item.secondary_gems && item.secondary_gems.length > 0) {
+        for (const gem of item.secondary_gems) {
+          await client.query(`
+            INSERT INTO jewelry_secondary_gems (
+              item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+              secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+              secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, [
+            item_id,
+            gem.secondary_gem_type || null,
+            gem.secondary_gem_category || null,
+            parseFloat(gem.secondary_gem_size) || null,
+            parseInt(gem.secondary_gem_quantity) || 0,
+            gem.secondary_gem_shape || null,
+            parseFloat(gem.secondary_gem_weight) || 0,
+            gem.secondary_gem_color || null,
+            gem.secondary_gem_exact_color || null,
+            gem.secondary_gem_clarity || null,
+            gem.secondary_gem_cut || null,
+            gem.secondary_gem_lab_grown || false,
+            gem.secondary_gem_authentic || false,
+            parseFloat(gem.secondary_gem_value) || 0
+          ]);
+        }
+      }
+
+      // Link to quote_items
+      await client.query(`
+        INSERT INTO quote_items (quote_id, item_id, transaction_type_id, item_price)
+        VALUES ($1, $2, $3, $4)`, [
+        quoteId,
+        item_id,
+        pawnTypeId,
+        parseFloat(item.amount ?? item.price ?? 0)
+      ]);
+    }
+
     await client.query('COMMIT');
     
     res.status(201).json({
@@ -6190,7 +6330,7 @@ app.put('/api/quotes/:id', async (req, res) => {
 app.get('/api/quotes/:quote_id/items', async (req, res) => {
   try {
     const { quote_id } = req.params;
-    
+
     const query = `
       SELECT
         qi.item_id,
@@ -7063,6 +7203,8 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           primary_gem_lab_grown,
           primary_gem_authentic,
           primary_gem_value,
+          serial_number,
+          part_number,
           status,
           location,
           condition,
@@ -7072,7 +7214,7 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           melt_value,
           total_weight,
           inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)
         RETURNING *`;
 
       const jewelryValues = [
@@ -7104,6 +7246,8 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         item.primary_gem_lab_grown || false,
         item.primary_gem_authentic || false,
         parseFloat(item.primary_gem_value) || 0,
+        item.serial_number || null,
+        item_id,
         status,
         item.location || 'SOUTH STORE',
         'GOOD',
@@ -7261,6 +7405,8 @@ app.post('/api/jewelry', async (req, res) => {
           primary_gem_lab_grown,
           primary_gem_authentic,
           primary_gem_value,
+          serial_number,
+          part_number,
           status,
           location,
           condition,
@@ -7270,51 +7416,52 @@ app.post('/api/jewelry', async (req, res) => {
           melt_value,
           total_weight,
           inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)
         RETURNING *`;
 
       const jewelryValues = [
         item_id,                                              // 1
-        item.long_desc || '',                                    // 2
-        item.short_desc || '',                             // 3
-        item.metal_category || '',                                // 4
-        item.brand || '',                                       // 5
-        item.vintage || false,                                 // 6
-        item.stamps || '',                                     // 7
-        JSON.stringify(item.images || []),                      // 8
-        parseFloat(item.metal_weight) || 0,                       // 9
-        item.precious_metal_type || '',                           // 10
-        item.non_precious_metal_type || '',                       // 11
-        item.metal_purity || '',                                  // 12
-        item.jewelry_color || '',                                 // 13
-        parseFloat(item.purity_value) || 0,                // 14
-        parseFloat(item.est_metal_value) || 0,                       // 15
-        item.primary_gem_type || null,                             // 16
-        item.primary_gem_category || null,                      // 17
-        item.primary_gem_size || null,                             // 18
-        parseInt(item.primary_gem_quantity) || 0,                // 19
-        item.primary_gem_shape || null,                            // 20
-        parseFloat(item.primary_gem_weight) || 0,                // 21
-        item.primary_gem_color || null,                            // 22
-        item.primary_gem_exact_color || null,                      // 23
-        item.primary_gem_clarity || null,                          // 24
-        item.primary_gem_cut || null,                              // 25
-        item.primary_gem_lab_grown || false,                     // 26
-        item.primary_gem_authentic || false,                     // 27
-        parseFloat(item.primary_gem_value) || 0,                 // 28
-        status,         // 29
-        item.location || 'SOUTH STORE',          // 30
-        'GOOD',          // 31
-        item.metal_spot_price,  // 32
-        item.notes,  // 33
-        item.price,  // 34
-        item.melt_value,  // 35
-        // Calculate total weight: metal_weight + primary_gem_weight + sum(secondary_gem_weights)
-        (parseFloat(item.metal_weight) || 0) + 
+        item.long_desc || '',                                 // 2
+        item.short_desc || '',                                // 3
+        item.metal_category || '',                            // 4
+        item.brand || '',                                     // 5
+        item.vintage || false,                                // 6
+        item.stamps || '',                                    // 7
+        JSON.stringify(item.images || []),                    // 8
+        parseFloat(item.metal_weight) || 0,                   // 9
+        item.precious_metal_type || '',                       // 10
+        item.non_precious_metal_type || '',                   // 11
+        item.metal_purity || '',                              // 12
+        item.jewelry_color || '',                             // 13
+        parseFloat(item.purity_value) || 0,                   // 14
+        parseFloat(item.est_metal_value) || 0,                // 15
+        item.primary_gem_type || null,                        // 16
+        item.primary_gem_category || null,                    // 17
+        item.primary_gem_size || null,                        // 18
+        parseInt(item.primary_gem_quantity) || 0,             // 19
+        item.primary_gem_shape || null,                       // 20
+        parseFloat(item.primary_gem_weight) || 0,             // 21
+        item.primary_gem_color || null,                       // 22
+        item.primary_gem_exact_color || null,                 // 23
+        item.primary_gem_clarity || null,                     // 24
+        item.primary_gem_cut || null,                         // 25
+        item.primary_gem_lab_grown || false,                  // 26
+        item.primary_gem_authentic || false,                  // 27
+        parseFloat(item.primary_gem_value) || 0,              // 28
+        item.serial_number || null,                           // 29
+        item_id,                                              // 30 part_number = item_id
+        status,                                               // 31
+        item.location || 'SOUTH STORE',                       // 32
+        'GOOD',                                               // 33
+        item.metal_spot_price,                                // 34
+        item.notes,                                           // 35
+        item.price,                                           // 36
+        item.melt_value,                                      // 37
+        (parseFloat(item.metal_weight) || 0) +
         (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
-        (item.secondary_gems || []).reduce((sum, gem) => 
+        (item.secondary_gems || []).reduce((sum, gem) =>
           sum + (parseFloat(gem.secondary_gem_weight) || 0) * (parseInt(gem.secondary_gem_quantity) || 1), 0),
-        'jewelry'
+        'jewelry'                                             // 39
       ];
 
       const result = await client.query(jewelryQuery, jewelryValues);
@@ -7822,7 +7969,7 @@ app.get('/api/pawn-ticket', async (req, res) => {
 app.post('/api/pawn-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date } = req.body;
+    const { pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date, ticket_note, show_on_receipt, storage_fee } = req.body;
 
     // Validate required fields
     if (!pawn_ticket_id) {
@@ -7855,20 +8002,23 @@ app.post('/api/pawn-ticket', async (req, res) => {
 
     // Insert new pawn_ticket record with pawn config values frozen at time of creation
     const insertQuery = `
-      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date, ticket_note, show_on_receipt, storage_fee)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
     `;
 
     const result = await client.query(insertQuery, [
       pawn_ticket_id,
-      transaction_id || null,
-      item_id || null,
-      term_days || 90,
-      interest_rate || 2.9,
-      insurance_rate || 1.0,
-      frequency_days || 30,
-      due_date || null
+      transaction_id ?? null,
+      item_id ?? null,
+      term_days ?? 90,
+      interest_rate ?? 2.9,
+      insurance_rate ?? 0,
+      frequency_days ?? 30,
+      due_date ?? null,
+      ticket_note ?? null,
+      show_on_receipt ?? false,
+      storage_fee ?? 0
     ]);
 
     await client.query('COMMIT');
@@ -7941,7 +8091,7 @@ app.get('/api/pawn-transactions', async (req, res) => {
 // Update pawn ticket status
 app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
   const { pawn_ticket_id } = req.params;
-  const { status } = req.body;
+  const { status, performed_by, notes } = req.body;
 
   // Validate status
   const validStatuses = ['ACTIVE', 'REDEEMED', 'FORFEITED'];
@@ -7949,35 +8099,54 @@ app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
     return res.status(400).json({ error: 'Invalid status. Must be one of: ACTIVE, REDEEMED, FORFEITED' });
   }
 
-  try {
-    await pool.query('BEGIN');
+  // Map ticket status to pawn_history action_type
+  const actionTypeMap = { REDEEMED: 'REDEEM', FORFEITED: 'FORFEIT' };
+  const actionType = actionTypeMap[status] || null;
 
-    // Update pawn_ticket status
-    await pool.query(
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Update pawn_ticket status (trigger auto-sets updated_at)
+    await client.query(
       'UPDATE pawn_ticket SET status = $1 WHERE pawn_ticket_id = $2',
       [status, pawn_ticket_id]
     );
 
     // Determine jewelry status based on pawn_ticket status
-    // FORFEITED pawn tickets -> jewelry moves to IN_PROCESS (ready for resale)
-    // REDEEMED pawn tickets -> jewelry status is REDEEMED
-    // ACTIVE (ticket still open) -> jewelry status stays PAWN
+    // FORFEITED -> jewelry moves to IN_PROCESS (ready for resale)
+    // REDEEMED  -> jewelry status is REDEEMED
+    // ACTIVE    -> jewelry stays PAWN
     const jewelryStatus = status === 'FORFEITED' ? 'IN_PROCESS' : status === 'ACTIVE' ? 'PAWN' : status;
 
     // Update all jewelry items associated with this pawn ticket
-    const itemsResult = await pool.query(
+    const itemsResult = await client.query(
       'SELECT item_id FROM pawn_ticket WHERE pawn_ticket_id = $1',
       [pawn_ticket_id]
     );
 
     for (const row of itemsResult.rows) {
-      await pool.query(
+      await client.query(
         'UPDATE jewelry SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE item_id = $2',
         [jewelryStatus, row.item_id]
       );
     }
 
-    await pool.query('COMMIT');
+    // Guarantee a pawn_history audit entry for terminal status changes.
+    // Only insert if no entry of this action_type exists yet (avoids duplicates
+    // when Checkout.js also posts a richer entry separately).
+    if (actionType) {
+      await client.query(`
+        INSERT INTO pawn_history (pawn_ticket_id, action_type, performed_by, notes)
+        SELECT $1, $2, $3, $4
+        WHERE NOT EXISTS (
+          SELECT 1 FROM pawn_history
+          WHERE pawn_ticket_id = $1 AND action_type = $2
+        )
+      `, [pawn_ticket_id, actionType, performed_by || null, notes || null]);
+    }
+
+    await client.query('COMMIT');
 
     res.json({
       success: true,
@@ -7987,9 +8156,11 @@ app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
       jewelry_status: jewelryStatus
     });
   } catch (error) {
-    await pool.query('ROLLBACK');
+    await client.query('ROLLBACK');
     console.error('Error updating pawn ticket status:', error);
     res.status(500).json({ error: 'Failed to update pawn ticket status' });
+  } finally {
+    client.release();
   }
 });
 
@@ -8470,12 +8641,13 @@ app.get('/api/pawn-config', async (req, res) => {
     const result = await pool.query('SELECT * FROM pawn_config LIMIT 1');
 
     if (result.rows.length === 0) {
-      // Return default values if no config exists
       return res.json({
         interest_rate: 0.00,
+        insurance_rate: 0.00,
         term_days: 30,
         frequency_days: 30,
-        forfeiture_mode: 'manual'
+        forfeiture_mode: 'manual',
+        storage_fee: 10.00
       });
     }
 
@@ -8490,7 +8662,7 @@ app.get('/api/pawn-config', async (req, res) => {
 app.put('/api/pawn-config', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { interest_rate, term_days, frequency_days, forfeiture_mode } = req.body;
+    const { interest_rate, insurance_rate, term_days, frequency_days, forfeiture_mode, storage_fee } = req.body;
 
     await client.query('BEGIN');
 
@@ -8499,16 +8671,14 @@ app.put('/api/pawn-config', async (req, res) => {
 
     let result;
     if (checkResult.rows.length === 0) {
-      // Insert new config
       result = await client.query(
-        'INSERT INTO pawn_config (interest_rate, term_days, frequency_days, forfeiture_mode) VALUES ($1, $2, $3, $4) RETURNING *',
-        [interest_rate, term_days, frequency_days, forfeiture_mode || 'manual']
+        'INSERT INTO pawn_config (interest_rate, insurance_rate, term_days, frequency_days, forfeiture_mode, storage_fee) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+        [interest_rate, insurance_rate || 0, term_days, frequency_days, forfeiture_mode || 'manual', storage_fee ?? 10.00]
       );
     } else {
-      // Update existing config
       result = await client.query(
-        'UPDATE pawn_config SET interest_rate = $1, term_days = $2, frequency_days = $3, forfeiture_mode = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5 RETURNING *',
-        [interest_rate, term_days, frequency_days, forfeiture_mode || 'manual', checkResult.rows[0].id]
+        'UPDATE pawn_config SET interest_rate = $1, insurance_rate = $2, term_days = $3, frequency_days = $4, forfeiture_mode = $5, storage_fee = $6, updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
+        [interest_rate, insurance_rate || 0, term_days, frequency_days, forfeiture_mode || 'manual', storage_fee ?? 10.00, checkResult.rows[0].id]
       );
     }
 
@@ -8524,6 +8694,16 @@ app.put('/api/pawn-config', async (req, res) => {
     res.status(500).json({ error: 'Failed to update pawn configuration' });
   } finally {
     client.release();
+  }
+});
+
+app.get('/api/item-sizes', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM item_size ORDER BY storage_fee ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching item sizes:', err);
+    res.status(500).json({ error: 'Failed to fetch item sizes' });
   }
 });
 
@@ -8988,16 +9168,281 @@ app.get('/api/customers/:id/stats', async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(`
-      SELECT COUNT(DISTINCT j.item_id) AS active_pawns
-      FROM pawn_ticket pt
-      JOIN transactions t ON t.transaction_id = pt.transaction_id
-      JOIN jewelry j ON j.item_id = pt.item_id
-      WHERE t.customer_id = $1 AND pt.status = 'ACTIVE' AND j.status = 'PAWN'
+      SELECT
+        (
+          SELECT COUNT(DISTINCT pt.pawn_ticket_id)
+          FROM pawn_ticket pt
+          JOIN transactions t ON pt.transaction_id = t.transaction_id
+          WHERE t.customer_id = $1 AND pt.status = 'ACTIVE'
+        ) AS active_pawns,
+        COALESCE((
+          SELECT SUM(p.amount * CASE WHEN t.total_amount < 0 THEN 1 ELSE -1 END)
+          FROM payments p
+          JOIN transactions t ON p.transaction_id = t.transaction_id
+          WHERE t.customer_id = $1 AND p.payment_method = 'store_credit'
+        ), 0) AS store_credit
     `, [id]);
-    res.json({ active_pawns: parseInt(result.rows[0].active_pawns) || 0 });
+
+    const row = result.rows[0];
+    res.json({
+      active_pawns:    parseInt(row.active_pawns)    || 0,
+      active_layaways: 0,
+      open_repairs:    0,
+      store_credit:    parseFloat(row.store_credit)  || 0,
+    });
   } catch (err) {
     console.error('Error fetching customer stats:', err);
     res.status(500).json({ error: 'Failed to fetch customer stats' });
+  }
+});
+
+app.get('/api/customers/:id/pawn/stats', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'ACTIVE') AS active_pawns,
+        COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'OVERDUE' OR (pt.status = 'ACTIVE' AND pt.due_date IS NOT NULL AND pt.due_date < CURRENT_DATE)) AS overdue_pawns,
+        COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'FORFEITED') AS forfeited_pawns,
+        COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'REDEEMED') AS redeemed_pawns,
+        MIN(t.transaction_date) AS first_pawn_date
+      FROM transactions t
+      LEFT JOIN pawn_ticket pt ON pt.transaction_id = t.transaction_id
+      LEFT JOIN jewelry j ON j.item_id = pt.item_id
+      WHERE t.customer_id = $1
+        AND pt.pawn_ticket_id IS NOT NULL
+    `, [id]);
+
+    const row = result.rows[0];
+    const activePawns    = parseInt(row.active_pawns)    || 0;
+    const overduePawns   = parseInt(row.overdue_pawns)   || 0;
+    const forfeitedPawns = parseInt(row.forfeited_pawns) || 0;
+    const redeemedPawns  = parseInt(row.redeemed_pawns)  || 0;
+    const forfeitRatio   = (forfeitedPawns + redeemedPawns) > 0
+      ? Math.round((forfeitedPawns / (forfeitedPawns + redeemedPawns)) * 100)
+      : 0;
+
+    res.json({
+      active_pawns:    activePawns,
+      overdue_pawns:   overduePawns,
+      forfeited_pawns: forfeitedPawns,
+      redeemed_pawns:  redeemedPawns,
+      forfeit_ratio:   forfeitRatio,
+      first_pawn_date: row.first_pawn_date ?? null,
+    });
+  } catch (err) {
+    console.error('Error fetching customer stats:', err);
+    res.status(500).json({ error: 'Failed to fetch customer stats' });
+  }
+});
+
+app.get('/api/customers/:id/pawns', async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.query;
+  const statusFilter = status === 'all'
+    ? `pt.status IN ('ACTIVE', 'OVERDUE', 'REDEEMED', 'FORFEITED')`
+    : `pt.status IN ('ACTIVE', 'OVERDUE')`;
+  try {
+    const result = await pool.query(`
+      SELECT
+        pt.pawn_ticket_id,
+        pt.due_date,
+        pt.status,
+        STRING_AGG(j.short_desc, ', ' ORDER BY pt.id) AS item_description,
+        SUM(j.item_price)                              AS pawn_amount,
+        ARRAY_AGG(pt.item_id ORDER BY pt.id)           AS item_ids,
+        MIN(t.transaction_date)                        AS transaction_date
+      FROM pawn_ticket pt
+      JOIN transactions t ON t.transaction_id = pt.transaction_id
+      JOIN jewelry j      ON j.item_id = pt.item_id
+      WHERE t.customer_id = $1 AND ${statusFilter}
+      GROUP BY pt.pawn_ticket_id, pt.due_date, pt.status
+      ORDER BY
+        CASE WHEN pt.status = 'OVERDUE'   THEN 0
+             WHEN pt.status = 'ACTIVE'    THEN 1
+             WHEN pt.status = 'REDEEMED'  THEN 2
+             ELSE 3 END,
+        pt.due_date ASC
+    `, [id]);
+
+    const today = new Date();
+    const pawns = result.rows.map(row => ({
+      ticket:   row.pawn_ticket_id,
+      item_id:  (row.item_ids || [])[0] || null,
+      item_ids: row.item_ids || [],
+      status:   row.status,
+      item:     row.item_description || '—',
+      amount:   row.pawn_amount ? `$${parseFloat(row.pawn_amount).toFixed(2)}` : '—',
+      dueDate:  row.due_date ? new Date(row.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
+      overdue:  row.status === 'OVERDUE',
+      daysInfo: row.due_date && row.status !== 'REDEEMED' && row.status !== 'FORFEITED' ? (() => {
+        const diff = Math.round((new Date(row.due_date) - today) / (1000 * 60 * 60 * 24));
+        return diff < 0 ? `(${Math.abs(diff)} day${Math.abs(diff) !== 1 ? 's' : ''} overdue)` : `(in ${diff} day${diff !== 1 ? 's' : ''})`;
+      })() : '',
+    }));
+
+    res.json(pawns);
+  } catch (err) {
+    console.error('Error fetching customer pawns:', err);
+    res.status(500).json({ error: 'Failed to fetch customer pawns' });
+  }
+});
+
+app.get('/api/pawn-tickets/:ticketId/receipt-data', async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const result = await pool.query(`
+      SELECT
+        pt.*,
+        j.short_desc       AS item_description,
+        j.long_desc        AS item_long_desc,
+        j.item_price       AS pawn_amount,
+        j.images           AS item_images,
+        t.created_at       AS transaction_date,
+        c.first_name || ' ' || c.last_name AS customer_name,
+        c.address_line1    AS customer_address,
+        c.phone            AS customer_phone,
+        c.id               AS customer_id,
+        e.first_name || ' ' || e.last_name AS employee_name
+      FROM pawn_ticket pt
+      JOIN transactions t ON t.transaction_id = pt.transaction_id
+      JOIN jewelry j      ON j.item_id = pt.item_id
+      JOIN customers c    ON c.id = t.customer_id
+      LEFT JOIN employees e ON e.employee_id = t.employee_id
+      WHERE pt.pawn_ticket_id = $1
+    `, [ticketId]);
+
+    if (!result.rows.length) return res.status(404).json({ error: 'Ticket not found' });
+
+    // All rows share the same ticket/customer/employee — group items
+    const first = result.rows[0];
+    const items = result.rows.map(r => ({
+      item_id: r.item_id,
+      description: r.item_long_desc || r.item_description || '',
+      item_price: parseFloat(r.pawn_amount) || 0,
+      images: r.item_images || [],
+    }));
+
+    res.json({
+      pawn_ticket_id:   first.pawn_ticket_id,
+      transaction_date: first.transaction_date,
+      due_date:         first.due_date,
+      term_days:        first.term_days,
+      interest_rate:    first.interest_rate,
+      insurance_rate:   first.insurance_rate,
+      frequency_days:   first.frequency_days,
+      status:           first.status,
+      customer_name:    first.customer_name,
+      customer_address: first.customer_address,
+      customer_phone:   first.customer_phone,
+      customer_id:      first.customer_id,
+      employee_name:    first.employee_name,
+      ticket_note:      first.ticket_note || null,
+      show_on_receipt:  first.show_on_receipt || false,
+      storage_fee:      parseFloat(first.storage_fee) || 0,
+      items,
+    });
+  } catch (err) {
+    console.error('Error fetching pawn receipt data:', err);
+    res.status(500).json({ error: 'Failed to fetch receipt data' });
+  }
+});
+
+app.get('/api/customers/:id/repawn-candidates', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT ON (item_id)
+        item_id, short_desc, long_desc, category, images, item_price,
+        brand, jewelry_color, metal_purity, serial_number, part_number,
+        metal_weight, precious_metal_type, non_precious_metal_type,
+        purity_value, est_metal_value, metal_spot_price,
+        last_ticket_id, last_pawn_date, ticket_status, last_status_date,
+        source_type
+      FROM (
+        -- Previously pawned items the customer redeemed or forfeited
+        SELECT
+          1 AS priority,
+          j.item_id, j.short_desc, j.long_desc, j.category, j.images,
+          j.item_price, j.brand, j.jewelry_color, j.metal_purity,
+          j.serial_number, j.part_number, j.metal_weight,
+          j.precious_metal_type, j.non_precious_metal_type,
+          j.purity_value, j.est_metal_value, j.metal_spot_price,
+          pt.pawn_ticket_id  AS last_ticket_id,
+          t.transaction_date AS last_pawn_date,
+          pt.status          AS ticket_status,
+          COALESCE(
+            (SELECT ph.action_date
+             FROM pawn_history ph
+             WHERE ph.pawn_ticket_id = pt.pawn_ticket_id
+               AND ph.action_type IN ('REDEEM', 'FORFEIT')
+             ORDER BY ph.action_date DESC LIMIT 1),
+            pt.updated_at
+          ) AS last_status_date,
+          'pawn' AS source_type
+        FROM pawn_ticket pt
+        JOIN transactions t ON t.transaction_id = pt.transaction_id
+        JOIN jewelry j      ON j.item_id = pt.item_id
+        WHERE t.customer_id = $1
+          AND pt.status IN ('REDEEMED', 'FORFEITED')
+
+        UNION ALL
+
+        -- Items the customer purchased from the store via a sale ticket
+        SELECT
+          2 AS priority,
+          j.item_id, j.short_desc, j.long_desc, j.category, j.images,
+          j.item_price, j.brand, j.jewelry_color, j.metal_purity,
+          j.serial_number, j.part_number, j.metal_weight,
+          j.precious_metal_type, j.non_precious_metal_type,
+          j.purity_value, j.est_metal_value, j.metal_spot_price,
+          st.sale_ticket_id  AS last_ticket_id,
+          t.transaction_date AS last_pawn_date,
+          'PURCHASED'        AS ticket_status,
+          t.transaction_date AS last_status_date,
+          'sale' AS source_type
+        FROM sale_ticket st
+        JOIN transactions t ON t.transaction_id = st.transaction_id
+        JOIN jewelry j      ON j.item_id = st.item_id
+        WHERE t.customer_id = $1
+      ) combined
+      ORDER BY item_id, priority ASC, last_pawn_date DESC
+    `, [id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching repawn candidates:', err);
+    res.status(500).json({ error: 'Failed to fetch repawn candidates' });
+  }
+});
+
+app.get('/api/jewelry/:itemId/repawn-history', async (req, res) => {
+  const { itemId } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        pt.pawn_ticket_id,
+        t.transaction_date AS pawn_date,
+        j.item_price       AS pawn_amount,
+        pt.status,
+        COALESCE(
+          (SELECT ph.action_date
+           FROM pawn_history ph
+           WHERE ph.pawn_ticket_id = pt.pawn_ticket_id
+             AND ph.action_type IN ('REDEEM', 'FORFEIT')
+           ORDER BY ph.action_date DESC
+           LIMIT 1),
+          CASE WHEN pt.status IN ('REDEEMED', 'FORFEITED') THEN pt.updated_at ELSE NULL END
+        ) AS redeemed_date
+      FROM pawn_ticket pt
+      JOIN transactions t ON t.transaction_id = pt.transaction_id
+      JOIN jewelry j      ON j.item_id = pt.item_id
+      WHERE pt.item_id = $1
+      ORDER BY t.transaction_date ASC
+    `, [itemId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching repawn history:', err);
+    res.status(500).json({ error: 'Failed to fetch repawn history' });
   }
 });
 
