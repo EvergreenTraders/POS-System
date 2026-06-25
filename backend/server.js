@@ -8091,7 +8091,7 @@ app.get('/api/pawn-transactions', async (req, res) => {
 // Update pawn ticket status
 app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
   const { pawn_ticket_id } = req.params;
-  const { status } = req.body;
+  const { status, performed_by, notes } = req.body;
 
   // Validate status
   const validStatuses = ['ACTIVE', 'REDEEMED', 'FORFEITED'];
@@ -8099,35 +8099,54 @@ app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
     return res.status(400).json({ error: 'Invalid status. Must be one of: ACTIVE, REDEEMED, FORFEITED' });
   }
 
-  try {
-    await pool.query('BEGIN');
+  // Map ticket status to pawn_history action_type
+  const actionTypeMap = { REDEEMED: 'REDEEM', FORFEITED: 'FORFEIT' };
+  const actionType = actionTypeMap[status] || null;
 
-    // Update pawn_ticket status
-    await pool.query(
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Update pawn_ticket status (trigger auto-sets updated_at)
+    await client.query(
       'UPDATE pawn_ticket SET status = $1 WHERE pawn_ticket_id = $2',
       [status, pawn_ticket_id]
     );
 
     // Determine jewelry status based on pawn_ticket status
-    // FORFEITED pawn tickets -> jewelry moves to IN_PROCESS (ready for resale)
-    // REDEEMED pawn tickets -> jewelry status is REDEEMED
-    // ACTIVE (ticket still open) -> jewelry status stays PAWN
+    // FORFEITED -> jewelry moves to IN_PROCESS (ready for resale)
+    // REDEEMED  -> jewelry status is REDEEMED
+    // ACTIVE    -> jewelry stays PAWN
     const jewelryStatus = status === 'FORFEITED' ? 'IN_PROCESS' : status === 'ACTIVE' ? 'PAWN' : status;
 
     // Update all jewelry items associated with this pawn ticket
-    const itemsResult = await pool.query(
+    const itemsResult = await client.query(
       'SELECT item_id FROM pawn_ticket WHERE pawn_ticket_id = $1',
       [pawn_ticket_id]
     );
 
     for (const row of itemsResult.rows) {
-      await pool.query(
+      await client.query(
         'UPDATE jewelry SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE item_id = $2',
         [jewelryStatus, row.item_id]
       );
     }
 
-    await pool.query('COMMIT');
+    // Guarantee a pawn_history audit entry for terminal status changes.
+    // Only insert if no entry of this action_type exists yet (avoids duplicates
+    // when Checkout.js also posts a richer entry separately).
+    if (actionType) {
+      await client.query(`
+        INSERT INTO pawn_history (pawn_ticket_id, action_type, performed_by, notes)
+        SELECT $1, $2, $3, $4
+        WHERE NOT EXISTS (
+          SELECT 1 FROM pawn_history
+          WHERE pawn_ticket_id = $1 AND action_type = $2
+        )
+      `, [pawn_ticket_id, actionType, performed_by || null, notes || null]);
+    }
+
+    await client.query('COMMIT');
 
     res.json({
       success: true,
@@ -8137,9 +8156,11 @@ app.put('/api/pawn-ticket/:pawn_ticket_id/status', async (req, res) => {
       jewelry_status: jewelryStatus
     });
   } catch (error) {
-    await pool.query('ROLLBACK');
+    await client.query('ROLLBACK');
     console.error('Error updating pawn ticket status:', error);
     res.status(500).json({ error: 'Failed to update pawn ticket status' });
+  } finally {
+    client.release();
   }
 });
 
@@ -9324,6 +9345,79 @@ app.get('/api/pawn-tickets/:ticketId/receipt-data', async (req, res) => {
   } catch (err) {
     console.error('Error fetching pawn receipt data:', err);
     res.status(500).json({ error: 'Failed to fetch receipt data' });
+  }
+});
+
+app.get('/api/customers/:id/repawn-candidates', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT DISTINCT ON (j.item_id)
+        j.item_id,
+        j.short_desc,
+        j.long_desc,
+        j.category,
+        j.images,
+        j.item_price,
+        j.brand,
+        j.jewelry_color,
+        j.metal_purity,
+        j.serial_number,
+        j.part_number,
+        j.metal_weight,
+        j.precious_metal_type,
+        j.non_precious_metal_type,
+        j.purity_value,
+        j.est_metal_value,
+        j.metal_spot_price,
+        pt.pawn_ticket_id  AS last_ticket_id,
+        t.transaction_date AS last_pawn_date,
+        pt.status          AS ticket_status,
+        COALESCE(
+          (SELECT ph.action_date
+           FROM pawn_history ph
+           WHERE ph.pawn_ticket_id = pt.pawn_ticket_id
+             AND ph.action_type IN ('REDEEM', 'FORFEIT')
+           ORDER BY ph.action_date DESC
+           LIMIT 1),
+          pt.updated_at
+        ) AS last_status_date
+      FROM pawn_ticket pt
+      JOIN transactions t ON t.transaction_id = pt.transaction_id
+      JOIN jewelry j      ON j.item_id = pt.item_id
+      WHERE t.customer_id = $1
+        AND pt.status IN ('REDEEMED', 'FORFEITED')
+      ORDER BY j.item_id, t.transaction_date DESC
+    `, [id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching repawn candidates:', err);
+    res.status(500).json({ error: 'Failed to fetch repawn candidates' });
+  }
+});
+
+app.get('/api/jewelry/:itemId/repawn-history', async (req, res) => {
+  const { itemId } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        pt.pawn_ticket_id,
+        t.transaction_date AS pawn_date,
+        j.item_price       AS pawn_amount,
+        pt.status,
+        ph.action_date     AS redeemed_date
+      FROM pawn_ticket pt
+      JOIN transactions t ON t.transaction_id = pt.transaction_id
+      JOIN jewelry j      ON j.item_id = pt.item_id
+      LEFT JOIN pawn_history ph ON ph.pawn_ticket_id = pt.pawn_ticket_id
+        AND ph.action_type IN ('REDEEM', 'FORFEIT')
+      WHERE pt.item_id = $1
+      ORDER BY t.transaction_date ASC
+    `, [itemId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching repawn history:', err);
+    res.status(500).json({ error: 'Failed to fetch repawn history' });
   }
 });
 

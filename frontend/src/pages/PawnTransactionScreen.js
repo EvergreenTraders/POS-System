@@ -11,6 +11,8 @@ import {
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
+import RePawnSelector from './RePawnSelector';
+import RePawnIntakeScreen from './RePawnIntakeScreen';
 import { useAuth } from '../context/AuthContext';
 
 const PURPLE      = '#6a1b9a';
@@ -134,6 +136,8 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const quickSerialRef  = useRef(null);
   const quickAmtRef     = useRef(null);
   const [quickAddRow, setQuickAddRow] = useState(null);
+  const [rePawnSelectorOpen, setRePawnSelectorOpen] = useState(false);
+  const [rePawnSelectedItem, setRePawnSelectedItem] = useState(null);
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
   const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
@@ -506,6 +510,23 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     setIntakeOpen(false);
   };
 
+  const handleRePawnSave = (item) => {
+    setPawnItems(prev => {
+      const seq = prev.length + 1;
+      return [...prev, { ...item, part_number: makePartNumber(seq) }];
+    });
+    setRePawnSelectorOpen(false);
+    setRePawnSelectedItem(null);
+  };
+
+  const handleRePawnSaveAndAdd = (item) => {
+    setPawnItems(prev => {
+      const seq = prev.length + 1;
+      return [...prev, { ...item, part_number: makePartNumber(seq) }];
+    });
+    setRePawnSelectedItem(null);
+  };
+
   const openQuickAdd = () => {
     setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', storage_fee: 0 });
     setTimeout(() => quickDescRef.current?.focus(), 50);
@@ -549,6 +570,31 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     { icon: 'DonutLarge',    label: 'Forfeit Ratio',   value: `${forfeitRatio}%`, color: '#6d28d9', bg: '#f5f3ff' },
     { icon: 'CalendarMonth', label: 'First Pawn Date', value: firstPawnDate,      color: '#059669', bg: '#ecfdf5' },
   ];
+
+  if (rePawnSelectorOpen && !rePawnSelectedItem) {
+    return (
+      <RePawnSelector
+        customer={customer}
+        onBack={() => setRePawnSelectorOpen(false)}
+        onSelectItem={(item) => setRePawnSelectedItem(item)}
+      />
+    );
+  }
+
+  if (rePawnSelectorOpen && rePawnSelectedItem) {
+    return (
+      <RePawnIntakeScreen
+        customer={customer}
+        selectedItem={rePawnSelectedItem}
+        stats={stats}
+        newPartNumber={makePartNumber(pawnItems.length + 1)}
+        onBack={() => setRePawnSelectedItem(null)}
+        onCancel={() => { setRePawnSelectorOpen(false); setRePawnSelectedItem(null); }}
+        onSaveItem={handleRePawnSave}
+        onSaveAndAddAnother={handleRePawnSaveAndAdd}
+      />
+    );
+  }
 
   if (intakeOpen) {
     return (
@@ -781,6 +827,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
             Free-type Quick Add
           </Button>
           <Button variant="contained" startIcon={<MuiIcons.Refresh />}
+            onClick={() => { setRePawnSelectorOpen(true); setRePawnSelectedItem(null); }}
             sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}>
             Re-Pawn
           </Button>

@@ -1,6 +1,3 @@
--- Drop the old customer_headers_preferences table
-DROP TABLE IF EXISTS customer_headers_preferences CASCADE;
-
 -- Create a function to generate the customer_headers_preferences table dynamically
 DO $$
 DECLARE

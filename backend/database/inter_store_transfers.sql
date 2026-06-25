@@ -155,7 +155,6 @@ CREATE TRIGGER update_stores_timestamp
 
 -- Drop old view and denominations table (cleanup from previous version)
 DROP VIEW IF EXISTS pending_inter_store_transfers;
-DROP TABLE IF EXISTS inter_store_transfer_denominations;
 
 -- View for pending inter-store transfers (to be received)
 CREATE OR REPLACE VIEW pending_inter_store_transfers AS
