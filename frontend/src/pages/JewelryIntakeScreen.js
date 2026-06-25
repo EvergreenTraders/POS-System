@@ -465,6 +465,7 @@ export default function JewelryIntakeScreen({
   const [metalTypeId,           setMetalTypeId]           = useState(null);
 
   const [itemName,          setItemName]          = useState('');
+  const [serialNumber,      setSerialNumber]      = useState('');
   const [category,          setCategory]          = useState('');
   const [metal,             setMetal]             = useState('');
   const [purity,            setPurity]            = useState({ id: '', purity: '', value: '' });
@@ -706,6 +707,7 @@ export default function JewelryIntakeScreen({
     editAppliedRef.current = true;
 
     setItemName(editItem.item || '');
+    setSerialNumber(editItem.serial_number || editItem.serial || '');
     setCategory(editItem.metal_category || '');
     setColour(editItem.jewelry_color || '');
     setGrossWeight(String(editItem.metal_weight || ''));
@@ -1023,7 +1025,8 @@ export default function JewelryIntakeScreen({
       id:             editItem ? editItem.id : Date.now(),
       item:           itemName || shortDesc,
       category,
-      serial:         '',
+      serial:         serialNumber,
+      serial_number:  serialNumber,
       qty:            1,
       amount:         parseFloat(pawnVal) || parseFloat(paidAmount) || 0,
       // Metal
@@ -1281,6 +1284,9 @@ export default function JewelryIntakeScreen({
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
             <TextField label="Item *" value={itemName} onChange={e => setItemName(e.target.value)}
               size="small" fullWidth sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }} />
+            <TextField label="Serial Number" value={serialNumber} onChange={e => setSerialNumber(e.target.value)}
+              size="small" fullWidth disabled={readOnly}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }} />
             <FormControlLabel
               control={<Checkbox size="small" checked={suggestCatalog} onChange={e => setSuggestCatalog(e.target.checked)} sx={{ color: GREEN, '&.Mui-checked': { color: GREEN } }} />}
               label={<Typography variant="body2" fontSize={12}>Suggest add to catalog/template</Typography>}

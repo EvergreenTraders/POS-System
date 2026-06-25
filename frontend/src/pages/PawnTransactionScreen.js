@@ -16,7 +16,7 @@ import { useAuth } from '../context/AuthContext';
 const PURPLE      = '#6a1b9a';
 const PURPLE_DARK = '#4a148c';
 
-const COL = '130px 52px 110px 1fr 130px 46px 70px 100px 110px';
+const COL = '130px 52px 100px 1fr 110px 40px 95px 90px 100px';
 
 const PENDING_KEY  = 'pendingPTTicketId';
 const COUNTER_KEY  = 'lastPTTicketNumber';
@@ -129,7 +129,11 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [receiptLoading,   setReceiptLoading]   = useState(false);
   const [pawnRequiredFields,      setPawnRequiredFields]      = useState([]);
   const [customerValidationErrors, setCustomerValidationErrors] = useState([]);
-  const cameraVideoRef = useRef(null);
+  const cameraVideoRef  = useRef(null);
+  const quickDescRef    = useRef(null);
+  const quickSerialRef  = useRef(null);
+  const quickAmtRef     = useRef(null);
+  const [quickAddRow, setQuickAddRow] = useState(null);
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
   const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
@@ -502,6 +506,43 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
     setIntakeOpen(false);
   };
 
+  const openQuickAdd = () => {
+    setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', storage_fee: 0 });
+    setTimeout(() => quickDescRef.current?.focus(), 50);
+  };
+
+  const confirmQuickAdd = () => {
+    const desc = (quickAddRow?.description || '').trim();
+    if (!desc) { quickDescRef.current?.focus(); return; }
+    const amt = parseFloat(quickAddRow.amount) || 0;
+    setPawnItems(prev => {
+      const seq = prev.length + 1;
+      return [...prev, {
+        id:           `quick-${Date.now()}`,
+        part_number:  makePartNumber(seq),
+        item:         desc,
+        long_desc:    desc,
+        short_desc:   desc,
+        category:     quickAddRow.category || '',
+        metal_category: quickAddRow.category || '',
+        serial:       quickAddRow.serial || '',
+        serial_number: quickAddRow.serial || '',
+        qty:          1,
+        size:         quickAddRow.size || '',
+        storage_fee:  quickAddRow.storage_fee || 0,
+        amount:       amt,
+        price:        amt,
+        images:       [],
+        isQuickAdd:   true,
+        metal_weight: 0,
+      }];
+    });
+    setQuickAddRow({ description: '', category: '', serial: '', amount: '', size: '', storage_fee: 0 });
+    setTimeout(() => quickDescRef.current?.focus(), 50);
+  };
+
+  const cancelQuickAdd = () => setQuickAddRow(null);
+
   const STAT_BOXES = [
     { icon: 'Inventory2',    label: 'Active Pawns',    value: activePawnCount,    color: '#7c3aed', bg: '#f3e8ff' },
     { icon: 'Warning',       label: 'Overdue Pawns',   value: overduePawnCount,   color: '#d97706', bg: '#fff7ed' },
@@ -719,7 +760,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
         {/* Search bar */}
         <Paper sx={{ px: 1.5, py: 1, borderRadius: 2, display: 'flex', gap: 1, alignItems: 'center' }}>
           <TextField
-            fullWidth size="small"
+            size="small"
             placeholder="Scan / Search / Describe Item"
             value={itemSearch}
             onChange={e => setItemSearch(e.target.value)}
@@ -732,10 +773,10 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
                 </InputAdornment>
               ),
             }}
-            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+            sx={{ flex: 1, minWidth: 0, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
           />
           <Button variant="outlined" startIcon={<MuiIcons.AddCircleOutline />}
-            onClick={openIntake}
+            onClick={openQuickAdd}
             sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
             Free-type Quick Add
           </Button>
@@ -767,58 +808,150 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
             ))}
           </Box>
 
-          {pawnItems.length === 0 ? (
+          {pawnItems.length === 0 && !quickAddRow ? (
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 5, gap: 1 }}>
               <MuiIcons.AddBox sx={{ fontSize: 36, opacity: 0.2 }} />
               <Typography variant="body2" color="text.secondary">Search or scan items above to add them to this pawn ticket</Typography>
             </Box>
           ) : (
-            pawnItems.map((row, idx) => (
-              <Box key={row.id} sx={{ display: 'grid', gridTemplateColumns: COL, gap: 1, px: 2, py: 0.875, borderBottom: '1px solid #f0f0f0', alignItems: 'center', '&:hover': { bgcolor: '#fafafa' } }}>
-                <Typography variant="caption" fontWeight={600} color={PURPLE} sx={{ fontFamily: 'monospace', fontSize: 11 }}>
-                  {row.part_number || String(idx + 1).padStart(2, '0')}
-                </Typography>
-                {(() => {
-                  const thumb = row.images?.find(i => i.isPrimary)?.url || row.images?.[0]?.url;
-                  return thumb ? (
-                    <Box component="img" src={thumb} alt="Item"
-                      sx={{ width: 38, height: 38, borderRadius: 1, objectFit: 'cover', cursor: 'pointer' }}
-                      onClick={() => openItemCamera(row.id)} />
-                  ) : (
-                    <IconButton size="small"
-                      sx={{ width: 38, height: 38, borderRadius: 1, bgcolor: '#f0f0f0', color: '#9e9e9e', '&:hover': { bgcolor: '#ede7f6', color: PURPLE } }}
-                      onClick={() => openItemCamera(row.id)}>
-                      <MuiIcons.PhotoCamera sx={{ fontSize: 18 }} />
+            <>
+              {pawnItems.map((row, idx) => (
+                <Box key={row.id} sx={{ display: 'grid', gridTemplateColumns: COL, gap: 1, px: 2, py: 0.875, borderBottom: '1px solid #f0f0f0', alignItems: 'center', '&:hover': { bgcolor: '#fafafa' } }}>
+                  <Typography variant="caption" fontWeight={600} color={PURPLE} sx={{ fontFamily: 'monospace', fontSize: 11 }}>
+                    {row.part_number || String(idx + 1).padStart(2, '0')}
+                  </Typography>
+                  {(() => {
+                    const thumb = row.images?.find(i => i.isPrimary)?.url || row.images?.[0]?.url;
+                    return thumb ? (
+                      <Box component="img" src={thumb} alt="Item"
+                        sx={{ width: 38, height: 38, borderRadius: 1, objectFit: 'cover', cursor: 'pointer' }}
+                        onClick={() => openItemCamera(row.id)} />
+                    ) : (
+                      <IconButton size="small"
+                        sx={{ width: 38, height: 38, borderRadius: 1, bgcolor: '#f0f0f0', color: '#9e9e9e', '&:hover': { bgcolor: '#ede7f6', color: PURPLE } }}
+                        onClick={() => openItemCamera(row.id)}>
+                        <MuiIcons.PhotoCamera sx={{ fontSize: 18 }} />
+                      </IconButton>
+                    );
+                  })()}
+                  <Typography variant="caption">{row.category}</Typography>
+                  <Typography variant="caption" fontWeight={500}>{row.item}</Typography>
+                  <Typography variant="caption" color="text.secondary">{row.serial || '—'}</Typography>
+                  <Typography variant="caption" align="center">{row.qty}</Typography>
+                  <FormControl size="small" fullWidth>
+                    <Select
+                      value={row.size || ''}
+                      displayEmpty
+                      onChange={e => handleItemSizeChange(row.id, e.target.value)}
+                      sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
+                    >
+                      <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
+                      {itemSizes.map(s => (
+                        <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <Typography variant="caption" fontWeight={700} color="#2e7d32">{fmt(row.amount)}</Typography>
+                  <Box sx={{ display: 'flex', gap: 0, alignItems: 'center', justifyContent: 'flex-end' }}>
+                    <IconButton size="small" sx={{ color: PURPLE }} onClick={() => { setEditingItem(row); setIntakeOpen(true); }}><MuiIcons.Edit sx={{ fontSize: 15 }} /></IconButton>
+                    <IconButton size="small" title="Convert" sx={{ color: '#555' }} onClick={(e) => { setConvertAnchor(e.currentTarget); setConvertRow(row); }}><MuiIcons.SwapHoriz sx={{ fontSize: 15 }} /></IconButton>
+                    <IconButton size="small" color="error" onClick={() => handleDeleteItem(row.id)}>
+                      <MuiIcons.Delete sx={{ fontSize: 15 }} />
                     </IconButton>
-                  );
-                })()}
-                <Typography variant="caption">{row.category}</Typography>
-                <Typography variant="caption" fontWeight={500}>{row.item}</Typography>
-                <Typography variant="caption" color="text.secondary">{row.serial || '—'}</Typography>
-                <Typography variant="caption" align="center">{row.qty}</Typography>
-                <FormControl size="small" sx={{ minWidth: 80 }}>
-                  <Select
-                    value={row.size || ''}
-                    displayEmpty
-                    onChange={e => handleItemSizeChange(row.id, e.target.value)}
-                    sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
-                  >
-                    <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
-                    {itemSizes.map(s => (
-                      <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <Typography variant="caption" fontWeight={700} color="#2e7d32">{fmt(row.amount)}</Typography>
-                <Box sx={{ display: 'flex', gap: 0, alignItems: 'center' }}>
-                  <IconButton size="small" sx={{ color: PURPLE }} onClick={() => { setEditingItem(row); setIntakeOpen(true); }}><MuiIcons.Edit sx={{ fontSize: 15 }} /></IconButton>
-                  <IconButton size="small" title="Convert" sx={{ color: '#555' }} onClick={(e) => { setConvertAnchor(e.currentTarget); setConvertRow(row); }}><MuiIcons.SwapHoriz sx={{ fontSize: 15 }} /></IconButton>
-                  <IconButton size="small" color="error" onClick={() => handleDeleteItem(row.id)}>
-                    <MuiIcons.Delete sx={{ fontSize: 15 }} />
-                  </IconButton>
+                  </Box>
                 </Box>
-              </Box>
-            ))
+              ))}
+
+              {/* Inline quick-add row */}
+              {quickAddRow && (
+                <Box sx={{ display: 'grid', gridTemplateColumns: COL, gap: 1, px: 2, py: 0.75, alignItems: 'center', bgcolor: '#fdf8ff', borderLeft: `3px solid ${PURPLE}` }}>
+                  <Typography variant="caption" fontWeight={600} color={PURPLE} sx={{ fontFamily: 'monospace', fontSize: 11 }}>
+                    {makePartNumber(pawnItems.length + 1)}
+                  </Typography>
+                  <Box sx={{ width: 38, height: 38, borderRadius: 1, bgcolor: '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <MuiIcons.PhotoCamera sx={{ fontSize: 18, color: '#d0d0d0' }} />
+                  </Box>
+                  <TextField
+                    size="small"
+                    placeholder="Category…"
+                    value={quickAddRow.category}
+                    onChange={e => setQuickAddRow(r => ({ ...r, category: e.target.value }))}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); quickDescRef.current?.focus(); }
+                      if (e.key === 'Escape') cancelQuickAdd();
+                    }}
+                    sx={{ '& .MuiOutlinedInput-root': { fontSize: 12, borderRadius: 1.5 } }}
+                  />
+                  <TextField
+                    inputRef={quickDescRef}
+                    size="small"
+                    placeholder="Description…"
+                    value={quickAddRow.description}
+                    onChange={e => setQuickAddRow(r => ({ ...r, description: e.target.value }))}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); quickSerialRef.current?.focus(); }
+                      if (e.key === 'Escape') cancelQuickAdd();
+                    }}
+                    sx={{ '& .MuiOutlinedInput-root': { fontSize: 12, borderRadius: 1.5 } }}
+                  />
+                  <TextField
+                    inputRef={quickSerialRef}
+                    size="small"
+                    placeholder="Serial #…"
+                    value={quickAddRow.serial}
+                    onChange={e => setQuickAddRow(r => ({ ...r, serial: e.target.value }))}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); quickAmtRef.current?.focus(); }
+                      if (e.key === 'Escape') cancelQuickAdd();
+                    }}
+                    sx={{ '& .MuiOutlinedInput-root': { fontSize: 12, borderRadius: 1.5 } }}
+                  />
+                  <Typography variant="caption" align="center" color="text.secondary">1</Typography>
+                  <FormControl size="small" fullWidth>
+                    <Select
+                      value={quickAddRow.size || ''}
+                      displayEmpty
+                      onChange={e => {
+                        const sizeObj = itemSizes.find(s => s.name === e.target.value);
+                        setQuickAddRow(r => ({ ...r, size: e.target.value, storage_fee: sizeObj ? parseFloat(sizeObj.storage_fee) : 0 }));
+                      }}
+                      sx={{ fontSize: 11, '& .MuiSelect-select': { py: 0.5, px: 1 } }}
+                    >
+                      <MenuItem value=""><em style={{ fontSize: 11 }}>—</em></MenuItem>
+                      {itemSizes.map(s => (
+                        <MenuItem key={s.name} value={s.name} sx={{ fontSize: 12 }}>{s.name}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <TextField
+                    inputRef={quickAmtRef}
+                    size="small"
+                    type="number"
+                    placeholder="0.00"
+                    value={quickAddRow.amount}
+                    onChange={e => setQuickAddRow(r => ({ ...r, amount: e.target.value }))}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); confirmQuickAdd(); }
+                      if (e.key === 'Escape') cancelQuickAdd();
+                    }}
+                    InputProps={{ startAdornment: <InputAdornment position="start"><Typography sx={{ fontSize: 12, color: 'text.secondary' }}>$</Typography></InputAdornment> }}
+                    sx={{ '& .MuiOutlinedInput-root': { fontSize: 12, borderRadius: 1.5 } }}
+                  />
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                    <Tooltip title="Add item (Enter)">
+                      <IconButton size="small" sx={{ color: '#2e7d32' }} onClick={confirmQuickAdd}>
+                        <MuiIcons.CheckCircleOutline sx={{ fontSize: 18 }} />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Cancel (Esc)">
+                      <IconButton size="small" color="error" onClick={cancelQuickAdd}>
+                        <MuiIcons.Cancel sx={{ fontSize: 18 }} />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                </Box>
+              )}
+            </>
           )}
         </Paper>
 

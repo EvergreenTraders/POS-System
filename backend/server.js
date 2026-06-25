@@ -7203,6 +7203,8 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           primary_gem_lab_grown,
           primary_gem_authentic,
           primary_gem_value,
+          serial_number,
+          part_number,
           status,
           location,
           condition,
@@ -7212,7 +7214,7 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
           melt_value,
           total_weight,
           inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)
         RETURNING *`;
 
       const jewelryValues = [
@@ -7244,6 +7246,8 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         item.primary_gem_lab_grown || false,
         item.primary_gem_authentic || false,
         parseFloat(item.primary_gem_value) || 0,
+        item.serial_number || null,
+        item_id,
         status,
         item.location || 'SOUTH STORE',
         'GOOD',
@@ -7401,6 +7405,8 @@ app.post('/api/jewelry', async (req, res) => {
           primary_gem_lab_grown,
           primary_gem_authentic,
           primary_gem_value,
+          serial_number,
+          part_number,
           status,
           location,
           condition,
@@ -7410,51 +7416,52 @@ app.post('/api/jewelry', async (req, res) => {
           melt_value,
           total_weight,
           inventory_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)
         RETURNING *`;
 
       const jewelryValues = [
         item_id,                                              // 1
-        item.long_desc || '',                                    // 2
-        item.short_desc || '',                             // 3
-        item.metal_category || '',                                // 4
-        item.brand || '',                                       // 5
-        item.vintage || false,                                 // 6
-        item.stamps || '',                                     // 7
-        JSON.stringify(item.images || []),                      // 8
-        parseFloat(item.metal_weight) || 0,                       // 9
-        item.precious_metal_type || '',                           // 10
-        item.non_precious_metal_type || '',                       // 11
-        item.metal_purity || '',                                  // 12
-        item.jewelry_color || '',                                 // 13
-        parseFloat(item.purity_value) || 0,                // 14
-        parseFloat(item.est_metal_value) || 0,                       // 15
-        item.primary_gem_type || null,                             // 16
-        item.primary_gem_category || null,                      // 17
-        item.primary_gem_size || null,                             // 18
-        parseInt(item.primary_gem_quantity) || 0,                // 19
-        item.primary_gem_shape || null,                            // 20
-        parseFloat(item.primary_gem_weight) || 0,                // 21
-        item.primary_gem_color || null,                            // 22
-        item.primary_gem_exact_color || null,                      // 23
-        item.primary_gem_clarity || null,                          // 24
-        item.primary_gem_cut || null,                              // 25
-        item.primary_gem_lab_grown || false,                     // 26
-        item.primary_gem_authentic || false,                     // 27
-        parseFloat(item.primary_gem_value) || 0,                 // 28
-        status,         // 29
-        item.location || 'SOUTH STORE',          // 30
-        'GOOD',          // 31
-        item.metal_spot_price,  // 32
-        item.notes,  // 33
-        item.price,  // 34
-        item.melt_value,  // 35
-        // Calculate total weight: metal_weight + primary_gem_weight + sum(secondary_gem_weights)
-        (parseFloat(item.metal_weight) || 0) + 
+        item.long_desc || '',                                 // 2
+        item.short_desc || '',                                // 3
+        item.metal_category || '',                            // 4
+        item.brand || '',                                     // 5
+        item.vintage || false,                                // 6
+        item.stamps || '',                                    // 7
+        JSON.stringify(item.images || []),                    // 8
+        parseFloat(item.metal_weight) || 0,                   // 9
+        item.precious_metal_type || '',                       // 10
+        item.non_precious_metal_type || '',                   // 11
+        item.metal_purity || '',                              // 12
+        item.jewelry_color || '',                             // 13
+        parseFloat(item.purity_value) || 0,                   // 14
+        parseFloat(item.est_metal_value) || 0,                // 15
+        item.primary_gem_type || null,                        // 16
+        item.primary_gem_category || null,                    // 17
+        item.primary_gem_size || null,                        // 18
+        parseInt(item.primary_gem_quantity) || 0,             // 19
+        item.primary_gem_shape || null,                       // 20
+        parseFloat(item.primary_gem_weight) || 0,             // 21
+        item.primary_gem_color || null,                       // 22
+        item.primary_gem_exact_color || null,                 // 23
+        item.primary_gem_clarity || null,                     // 24
+        item.primary_gem_cut || null,                         // 25
+        item.primary_gem_lab_grown || false,                  // 26
+        item.primary_gem_authentic || false,                  // 27
+        parseFloat(item.primary_gem_value) || 0,              // 28
+        item.serial_number || null,                           // 29
+        item_id,                                              // 30 part_number = item_id
+        status,                                               // 31
+        item.location || 'SOUTH STORE',                       // 32
+        'GOOD',                                               // 33
+        item.metal_spot_price,                                // 34
+        item.notes,                                           // 35
+        item.price,                                           // 36
+        item.melt_value,                                      // 37
+        (parseFloat(item.metal_weight) || 0) +
         (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
-        (item.secondary_gems || []).reduce((sum, gem) => 
+        (item.secondary_gems || []).reduce((sum, gem) =>
           sum + (parseFloat(gem.secondary_gem_weight) || 0) * (parseInt(gem.secondary_gem_quantity) || 1), 0),
-        'jewelry'
+        'jewelry'                                             // 39
       ];
 
       const result = await client.query(jewelryQuery, jewelryValues);
@@ -9173,7 +9180,7 @@ app.get('/api/customers/:id/pawn/stats', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
-        COUNT(DISTINCT j.item_id) FILTER (WHERE pt.status = 'ACTIVE' AND j.status = 'PAWN') AS active_pawns,
+        COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'ACTIVE') AS active_pawns,
         COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'OVERDUE' OR (pt.status = 'ACTIVE' AND pt.due_date IS NOT NULL AND pt.due_date < CURRENT_DATE)) AS overdue_pawns,
         COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'FORFEITED') AS forfeited_pawns,
         COUNT(DISTINCT pt.pawn_ticket_id) FILTER (WHERE pt.status = 'REDEEMED') AS redeemed_pawns,
@@ -9218,16 +9225,17 @@ app.get('/api/customers/:id/pawns', async (req, res) => {
     const result = await pool.query(`
       SELECT
         pt.pawn_ticket_id,
-        pt.item_id,
         pt.due_date,
         pt.status,
-        j.short_desc AS item_description,
-        j.item_price AS pawn_amount,
-        t.transaction_date
+        STRING_AGG(j.short_desc, ', ' ORDER BY pt.id) AS item_description,
+        SUM(j.item_price)                              AS pawn_amount,
+        ARRAY_AGG(pt.item_id ORDER BY pt.id)           AS item_ids,
+        MIN(t.transaction_date)                        AS transaction_date
       FROM pawn_ticket pt
       JOIN transactions t ON t.transaction_id = pt.transaction_id
-      JOIN jewelry j ON j.item_id = pt.item_id
+      JOIN jewelry j      ON j.item_id = pt.item_id
       WHERE t.customer_id = $1 AND ${statusFilter}
+      GROUP BY pt.pawn_ticket_id, pt.due_date, pt.status
       ORDER BY
         CASE WHEN pt.status = 'OVERDUE'   THEN 0
              WHEN pt.status = 'ACTIVE'    THEN 1
@@ -9238,14 +9246,15 @@ app.get('/api/customers/:id/pawns', async (req, res) => {
 
     const today = new Date();
     const pawns = result.rows.map(row => ({
-      ticket:     row.pawn_ticket_id,
-      item_id:    row.item_id,
-      status:     row.status,
-      item:       row.item_description || '—',
-      amount:     row.pawn_amount ? `$${parseFloat(row.pawn_amount).toFixed(2)}` : '—',
-      dueDate:    row.due_date ? new Date(row.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
-      overdue:    row.status === 'OVERDUE',
-      daysInfo:   row.due_date && row.status !== 'REDEEMED' && row.status !== 'FORFEITED' ? (() => {
+      ticket:   row.pawn_ticket_id,
+      item_id:  (row.item_ids || [])[0] || null,
+      item_ids: row.item_ids || [],
+      status:   row.status,
+      item:     row.item_description || '—',
+      amount:   row.pawn_amount ? `$${parseFloat(row.pawn_amount).toFixed(2)}` : '—',
+      dueDate:  row.due_date ? new Date(row.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—',
+      overdue:  row.status === 'OVERDUE',
+      daysInfo: row.due_date && row.status !== 'REDEEMED' && row.status !== 'FORFEITED' ? (() => {
         const diff = Math.round((new Date(row.due_date) - today) / (1000 * 60 * 60 * 24));
         return diff < 0 ? `(${Math.abs(diff)} day${Math.abs(diff) !== 1 ? 's' : ''} overdue)` : `(in ${diff} day${diff !== 1 ? 's' : ''})`;
       })() : '',
