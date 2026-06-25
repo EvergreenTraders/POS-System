@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { pdf } from '@react-pdf/renderer';
 import config from '../config';
@@ -7,7 +7,7 @@ import {
   Box, Typography, Paper, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   CircularProgress, Menu, MenuItem, Dialog, DialogTitle, DialogContent, DialogActions,
-  Select, InputLabel, FormControl, Grid, Alert, Snackbar,
+  Select, InputLabel, FormControl, Grid, Alert, Snackbar, Tooltip,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
@@ -93,6 +93,7 @@ function commitPawnTicketId() {
 
 export default function PawnTransactionScreen({ customer, customerStats: initialStats, onClose, onConvertTo, onAddToWorkspace, existingPawnData }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user: currentUser } = useAuth();
   const [ticketId]                        = useState(() => existingPawnData?.ticketId || generatePawnTicketId());
   const [itemSearch, setItemSearch]       = useState('');
@@ -126,6 +127,8 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [itemViewOpen,     setItemViewOpen]     = useState(false);
   const [itemViewData,     setItemViewData]     = useState(null);
   const [receiptLoading,   setReceiptLoading]   = useState(false);
+  const [pawnRequiredFields,      setPawnRequiredFields]      = useState([]);
+  const [customerValidationErrors, setCustomerValidationErrors] = useState([]);
   const cameraVideoRef = useRef(null);
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
@@ -162,6 +165,21 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
       .then(res => setPawnConfig(res.data))
       .catch(err => console.error('Failed to load pawn config:', err));
   }, []);
+
+  useEffect(() => {
+    fetch(`${config.apiUrl}/customer-preferences/required-fields/pawn`)
+      .then(r => r.ok ? r.json() : { requiredFields: [] })
+      .then(data => setPawnRequiredFields(data.requiredFields || []))
+      .catch(() => setPawnRequiredFields([]));
+  }, []);
+
+  useEffect(() => {
+    if (!customer || pawnRequiredFields.length === 0) { setCustomerValidationErrors([]); return; }
+    const missing = pawnRequiredFields
+      .filter(f => { const v = customer[f]; return v === null || v === undefined || v === ''; })
+      .map(f => f.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '));
+    setCustomerValidationErrors(missing);
+  }, [customer, pawnRequiredFields]);
 
   // Sync if parent's customerStats prop arrives after this component mounts
   useEffect(() => {
@@ -223,6 +241,34 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const initials = `${customer?.first_name?.[0] ?? ''}${customer?.last_name?.[0] ?? ''}`.toUpperCase();
 
   const handleDeleteItem = (id) => setPawnItems(prev => prev.filter(i => i.id !== id));
+
+  const handleEditCustomer = () => {
+    if (!customer) return;
+    const formatDate = (d) => {
+      if (!d) return '';
+      if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+      const dt = new Date(d);
+      return isNaN(dt) ? '' : dt.toISOString().substring(0, 10);
+    };
+    // Persist pawn-in-progress so ModernTransactions can restore it on return
+    sessionStorage.setItem('pendingPawnState', JSON.stringify({
+      customerId: customer.id,
+      ticketId,
+      pawnItems,
+      totalPawnOverride: totalPawnOverride ?? null,
+    }));
+    navigate('/customer-editor', {
+      state: {
+        customer: {
+          ...customer,
+          id_expiry_date: formatDate(customer.id_expiry_date),
+          date_of_birth:  formatDate(customer.date_of_birth),
+        },
+        mode: 'edit',
+        returnTo: location.pathname,
+      },
+    });
+  };
 
   const handleSaveAsQuote = async () => {
     if (!customer?.id) {
@@ -563,7 +609,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
             <Avatar sx={{ width: 56, height: 56, bgcolor: '#e8eaf6', color: '#3949ab', fontSize: 22, fontWeight: 700, flexShrink: 0 }}>
               {initials}
             </Avatar>
-            <Box sx={{ minWidth: 0 }}>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
               <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
                 <Typography variant="caption" color="text.secondary">Pawn Ticket*</Typography>
                 <Typography variant="body2" fontWeight={700}>{ticketId}</Typography>
@@ -578,6 +624,24 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
                 </Box>
               )}
             </Box>
+            {customerValidationErrors.length > 0 && (
+              <Box sx={{ flexShrink: 0, maxWidth: 220, bgcolor: '#fff5f5', px: 1.25, py: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 0.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <MuiIcons.ErrorOutline sx={{ fontSize: 14, color: '#dc2626' }} />
+                    <Typography variant="caption" fontWeight={700} color="#dc2626">Missing fields</Typography>
+                  </Box>
+                  <Button size="small" color="error" variant="outlined" onClick={handleEditCustomer}
+                    startIcon={<MuiIcons.Edit sx={{ fontSize: 11 }} />}
+                    sx={{ fontSize: 10, py: 0.25, px: 0.75, minWidth: 0, lineHeight: 1.4 }}>
+                    Edit
+                  </Button>
+                </Box>
+                <Typography variant="caption" color="#dc2626" component="div">
+                  {customerValidationErrors.join(', ')}
+                </Typography>
+              </Box>
+            )}
           </Box>
 
           {/* Stat boxes — 4 equal columns */}
@@ -902,39 +966,50 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           sx={{ whiteSpace: 'nowrap', mr: 0 }}
         />
         <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-        <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
-          onClick={handleSaveAsQuote}
-          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-          Save as Quote
-        </Button>
+        <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
+          <span>
+            <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
+              disabled={customerValidationErrors.length > 0}
+              onClick={handleSaveAsQuote}
+              sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Save as Quote
+            </Button>
+          </span>
+        </Tooltip>
         <Button size="small" variant="outlined" color="error" onClick={onClose}
           sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
           Cancel
         </Button>
-        <Button size="small" variant="outlined"
-          disabled={pawnItems.length === 0}
-          onClick={() => {
-            if (pawnItems.length === 0) {
-              setSnackbar({ open: true, message: 'Add at least one item before adding to workspace', severity: 'warning' });
-              return;
-            }
-            commitPawnTicketId();
-            onAddToWorkspace?.({
-              ticketId,
-              customer,
-              pawnItems,
-              totalPawnAmount,
-              dueDate,
-              costToRedeem: totalToRedeem,
-              overduePawnCount,
-            });
-            onClose();
-          }}
-          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-          Add to Workspace
-        </Button>
+        <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
+          <span>
+            <Button size="small" variant="outlined"
+              disabled={pawnItems.length === 0 || customerValidationErrors.length > 0}
+              onClick={() => {
+                if (pawnItems.length === 0) {
+                  setSnackbar({ open: true, message: 'Add at least one item before adding to workspace', severity: 'warning' });
+                  return;
+                }
+                commitPawnTicketId();
+                onAddToWorkspace?.({
+                  ticketId,
+                  customer,
+                  pawnItems,
+                  totalPawnAmount,
+                  dueDate,
+                  costToRedeem: totalToRedeem,
+                  overduePawnCount,
+                });
+                onClose();
+              }}
+              sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+              Add to Workspace
+            </Button>
+          </span>
+        </Tooltip>
+        <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
+          <span>
         <Button size="small" variant="contained" endIcon={<MuiIcons.ArrowForward />}
-          disabled={pawnItems.length === 0}
+          disabled={pawnItems.length === 0 || customerValidationErrors.length > 0}
           onClick={() => {
             if (pawnItems.length === 0) return;
             commitPawnTicketId();
@@ -966,6 +1041,8 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
           sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: PURPLE, '&:hover': { bgcolor: PURPLE_DARK } }}>
           Checkout Now
         </Button>
+          </span>
+        </Tooltip>
       </Paper>
 
       {/* Camera dialog for item photos */}

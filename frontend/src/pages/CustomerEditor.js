@@ -239,9 +239,8 @@ const CustomerEditor = () => {
   };
 
   const handleCancel = () => {
-    // Navigate back to the previous page or home
     if (location.state?.returnTo) {
-      navigate(location.state.returnTo);
+      navigate(location.state.returnTo, { state: { customerUpdated: true } });
     } else {
       navigate('/');
     }

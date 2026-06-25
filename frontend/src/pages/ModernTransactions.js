@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
 import {
@@ -111,22 +112,25 @@ function PawnTransactionCard({ tx, pawnIcon, pawnColor, onOpen, onVoid }) {
   );
 }
 
-function TransactionTypeButton({ label, icon, color, onClick }) {
+function TransactionTypeButton({ label, icon, color, onClick, count }) {
   return (
-    <Paper
-      variant="outlined"
-      onClick={onClick}
-      sx={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        p: { md: 1, xl: 0.75 }, cursor: 'pointer', borderRadius: 2, borderColor: '#e0e0e0',
-        minWidth: { md: 70, xl: 60 },
-        '&:hover': { bgcolor: '#f5f5f5', borderColor: color },
-        transition: 'all 0.15s',
-      }}
-    >
-      <Box sx={{ color, mb: 0.25, '& svg': { fontSize: { md: 24, xl: 20 } } }}>{icon}</Box>
-      <Typography align="center" fontWeight={500} sx={{ fontSize: { md: 10, xl: 9 }, color }}>{label}</Typography>
-    </Paper>
+    <Badge badgeContent={count || 0} color="primary" overlap="rectangular"
+      sx={{ '& .MuiBadge-badge': { fontSize: 9, minWidth: 16, height: 16, top: 4, right: 4 } }}>
+      <Paper
+        variant="outlined"
+        onClick={onClick}
+        sx={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          p: { md: 1, xl: 0.75 }, cursor: 'pointer', borderRadius: 2, borderColor: '#e0e0e0',
+          minWidth: { md: 70, xl: 60 },
+          '&:hover': { bgcolor: '#f5f5f5', borderColor: color },
+          transition: 'all 0.15s',
+        }}
+      >
+        <Box sx={{ color, mb: 0.25, '& svg': { fontSize: { md: 24, xl: 20 } } }}>{icon}</Box>
+        <Typography align="center" fontWeight={500} sx={{ fontSize: { md: 10, xl: 9 }, color }}>{label}</Typography>
+      </Paper>
+    </Badge>
   );
 }
 
@@ -184,10 +188,12 @@ function cleanupExpiredWorkspaces() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ModernTransactions() {
+  const location = useLocation();
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
   const [openingTxId, setOpeningTxId]     = useState(null);
+  const [restoredPawnData, setRestoredPawnData] = useState(null);
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
   const [noCustomerWarning, setNoCustomerWarning] = useState(false);
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
@@ -200,6 +206,7 @@ export default function ModernTransactions() {
   // Customer state
   const [customer, setCustomer] = useState(null);
   const [customerStats, setCustomerStats] = useState(null);
+  const [customerLoading, setCustomerLoading] = useState(false);
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerResults, setCustomerResults] = useState([]);
   const [searchingCustomer, setSearchingCustomer] = useState(false);
@@ -252,6 +259,36 @@ export default function ModernTransactions() {
     );
   }, [customerStats]);
 
+  // Restore pawn screen after returning from CustomerEditor
+  useEffect(() => {
+    if (!location.state?.customerUpdated) return;
+    const raw = sessionStorage.getItem('pendingPawnState');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingPawnState');
+    const { customerId, ticketId, pawnItems, totalPawnOverride } = pending;
+    if (!customerId) return;
+    (async () => {
+      try {
+        const [custRes, statsRes] = await Promise.all([
+          axios.get(`${config.apiUrl}/customers/${customerId}`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          }),
+          axios.get(`${config.apiUrl}/customers/${customerId}/pawn/stats`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          }),
+        ]);
+        setCustomer(custRes.data);
+        setCustomerStats(statsRes.data);
+        setRestoredPawnData({ ticketId, pawnItems, totalPawnOverride });
+        setPawnOpen(true);
+      } catch (err) {
+        console.error('Failed to restore pawn session after customer edit:', err);
+      }
+    })();
+  }, [location.state]);
+
   const handleCustomerSearch = async (query) => {
     setCustomerSearch(query);
     if (!query.trim()) { setCustomerResults([]); setShowResults(false); return; }
@@ -271,19 +308,29 @@ export default function ModernTransactions() {
   };
 
   const handleSelectCustomer = async (c) => {
-    setCustomer(c);
     setCustomerStats(null);
     setCustomerSearch('');
     setCustomerResults([]);
     setShowResults(false);
+    setCustomerLoading(true);
+    // Show name immediately while full record loads
+    setCustomer({ id: c.id, first_name: c.first_name, last_name: c.last_name });
     try {
-      const res = await axios.get(`${config.apiUrl}/customers/${c.id}/pawn/stats`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-      });
-      setCustomerStats(res.data);
+      const [fullRes, statsRes] = await Promise.all([
+        axios.get(`${config.apiUrl}/customers/${c.id}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        }),
+        axios.get(`${config.apiUrl}/customers/${c.id}/pawn/stats`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        }),
+      ]);
+      setCustomer(fullRes.data);
+      setCustomerStats(statsRes.data);
     } catch (err) {
-      console.error('Failed to fetch customer stats:', err);
+      console.error('Failed to fetch customer data:', err);
       setCustomerStats(null);
+    } finally {
+      setCustomerLoading(false);
     }
   };
 
@@ -332,18 +379,21 @@ export default function ModernTransactions() {
   const handleTransactionTypeClick = (type) => {
     if (type === 'pawn') {
       if (!customer) { setNoCustomerWarning(true); return; }
+      if (customerLoading) return;
       setPawnOpen(true);
     }
   };
 
   if (pawnOpen) {
-    const existingPawnData = openingTxId ? workspaceTransactions.find(t => t.id === openingTxId) : null;
+    const existingPawnData = openingTxId
+      ? workspaceTransactions.find(t => t.id === openingTxId)
+      : restoredPawnData;
     return (
       <PawnTransactionScreen
         customer={customer}
         customerStats={customerStats}
-        onClose={() => { setPawnOpen(false); setOpeningTxId(null); }}
-        onAddToWorkspace={handleAddPawnToWorkspace}
+        onClose={() => { setPawnOpen(false); setOpeningTxId(null); setRestoredPawnData(null); }}
+        onAddToWorkspace={(data) => { handleAddPawnToWorkspace(data); setRestoredPawnData(null); }}
         existingPawnData={existingPawnData}
       />
     );
@@ -666,6 +716,7 @@ export default function ModernTransactions() {
           <Box sx={{ display: 'flex', gap: { md: 1, xl: 0.75 }, flexWrap: 'wrap' }}>
             {transactionTypes.map(t => {
               const IconComponent = MuiIcons[t.icon] ?? MuiIcons.Add;
+              const count = workspaceTransactions.filter(tx => tx.type === t.type.toUpperCase()).length;
               return (
                 <TransactionTypeButton
                   key={t.id}
@@ -673,6 +724,7 @@ export default function ModernTransactions() {
                   icon={<IconComponent />}
                   color={t.color ?? '#607d8b'}
                   onClick={() => handleTransactionTypeClick(t.type)}
+                  count={count}
                 />
               );
             })}
