@@ -1349,7 +1349,8 @@ function Checkout() {
                     frequency_days:  pawnConfig.frequency_days,
                     due_date:        dueDateStr,
                     ticket_note:     ticketNote,
-                    show_on_receipt: showOnReceipt
+                    show_on_receipt: showOnReceipt,
+                    storage_fee:     item.storage_fee || 0
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }

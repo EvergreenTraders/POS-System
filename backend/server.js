@@ -7962,7 +7962,7 @@ app.get('/api/pawn-ticket', async (req, res) => {
 app.post('/api/pawn-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date, ticket_note, show_on_receipt } = req.body;
+    const { pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date, ticket_note, show_on_receipt, storage_fee } = req.body;
 
     // Validate required fields
     if (!pawn_ticket_id) {
@@ -7995,8 +7995,8 @@ app.post('/api/pawn-ticket', async (req, res) => {
 
     // Insert new pawn_ticket record with pawn config values frozen at time of creation
     const insertQuery = `
-      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date, ticket_note, show_on_receipt)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date, ticket_note, show_on_receipt, storage_fee)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
     `;
 
@@ -8010,7 +8010,8 @@ app.post('/api/pawn-ticket', async (req, res) => {
       frequency_days ?? 30,
       due_date ?? null,
       ticket_note ?? null,
-      show_on_receipt ?? false
+      show_on_receipt ?? false,
+      storage_fee ?? 0
     ]);
 
     await client.query('COMMIT');
@@ -9308,6 +9309,7 @@ app.get('/api/pawn-tickets/:ticketId/receipt-data', async (req, res) => {
       employee_name:    first.employee_name,
       ticket_note:      first.ticket_note || null,
       show_on_receipt:  first.show_on_receipt || false,
+      storage_fee:      parseFloat(first.storage_fee) || 0,
       items,
     });
   } catch (err) {

@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS pawn_ticket (
   insurance_rate DECIMAL(5,2) DEFAULT 1.0,
   frequency_days INTEGER DEFAULT 30,
   due_date DATE,
+  storage_fee NUMERIC(10,2) DEFAULT 0,
+  ticket_note TEXT,
+  show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -67,6 +70,27 @@ BEGIN
     WHERE table_name = 'pawn_ticket' AND column_name = 'insurance_rate'
   ) THEN
     ALTER TABLE pawn_ticket ADD COLUMN insurance_rate DECIMAL(5,2) DEFAULT 1.0;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'storage_fee'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN storage_fee NUMERIC(10,2) DEFAULT 0;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'ticket_note'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN ticket_note TEXT;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'pawn_ticket' AND column_name = 'show_on_receipt'
+  ) THEN
+    ALTER TABLE pawn_ticket ADD COLUMN show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE;
   END IF;
 END $$;
 
