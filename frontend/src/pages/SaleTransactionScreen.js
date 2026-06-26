@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
 import {
@@ -64,6 +64,19 @@ async function syncSaleTicketCounter() {
   }
 }
 
+function getCustomerImageUrl(customer) {
+  if (!customer?.image) return null;
+  const img = customer.image;
+  if (typeof img === 'object' && img.type === 'Buffer' && img.data) {
+    const base64 = btoa(
+      new Uint8Array(img.data).reduce((d, b) => d + String.fromCharCode(b), '')
+    );
+    return `data:image/jpeg;base64,${base64}`;
+  }
+  if (typeof img === 'string') return img;
+  return null;
+}
+
 function getItemImage(item) {
   if (!item?.images) return null;
   const imgs = Array.isArray(item.images)
@@ -72,7 +85,12 @@ function getItemImage(item) {
   return imgs.find(i => i.is_primary || i.isPrimary)?.url || imgs[0]?.url || null;
 }
 
-function QtyCell({ value, onChange }) {
+function QtyCell({ value, onChange, disabled }) {
+  if (disabled) {
+    return (
+      <Typography fontSize={13} fontWeight={600} sx={{ width: 40, textAlign: 'center', color: 'text.disabled' }}>1</Typography>
+    );
+  }
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
       <Box
@@ -103,6 +121,7 @@ export default function SaleTransactionScreen({
   existingSaleData,
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user: currentUser } = useAuth();
   const { setCustomer: setCartCustomer } = useCart();
 
@@ -210,17 +229,18 @@ export default function SaleTransactionScreen({
         axios.get(`${config.apiUrl}/hardgoods?sellable_status=SELLABLE`, { headers }),
         axios.get(`${config.apiUrl}/jewelry?sellable_status=SELLABLE`,   { headers }),
       ]);
+      const addedIds = new Set(saleItems.map(i => i.item_id));
       const hardgoods = (hgRes.status === 'fulfilled' ? hgRes.value.data : [])
         .filter(item => {
           const text = `${item.long_desc || ''} ${item.short_desc || ''} ${item.item_id || ''}`.toLowerCase();
-          return text.includes(q);
+          return text.includes(q) && !addedIds.has(item.item_id);
         })
         .slice(0, 10)
         .map(item => ({ ...item, _type: 'hardgoods' }));
       const jewelry = (jwRes.status === 'fulfilled' ? jwRes.value.data : [])
         .filter(item => {
           const text = `${item.long_desc || ''} ${item.short_desc || ''} ${item.item_id || ''}`.toLowerCase();
-          return text.includes(q);
+          return text.includes(q) && !addedIds.has(item.item_id);
         })
         .slice(0, 5)
         .map(item => ({ ...item, _type: 'jewelry' }));
@@ -252,6 +272,8 @@ export default function SaleTransactionScreen({
       quantity: 1,
       discount: 0,
       images: invItem.images || [],
+      protectionPlan: false,
+      accessories: [],
     };
     setSaleItems(prev => [...prev, newItem]);
     setItemSearch('');
@@ -264,8 +286,37 @@ export default function SaleTransactionScreen({
   const handleQtyChange    = (lineId, qty) => setSaleItems(prev => prev.map(i => i._lineId === lineId ? { ...i, quantity: qty } : i));
   const handleDiscountChange = (lineId, disc) => setSaleItems(prev => prev.map(i => i._lineId === lineId ? { ...i, discount: parseFloat(disc) || 0 } : i));
 
+  const [accessoryInputs, setAccessoryInputs] = useState({});
+
+  const handleToggleProtectionPlan = (lineId) =>
+    setSaleItems(prev => prev.map(i => i._lineId === lineId ? { ...i, protectionPlan: !i.protectionPlan } : i));
+
+  const handleToggleAccessoryInput = (lineId) =>
+    setAccessoryInputs(prev => ({
+      ...prev,
+      [lineId]: prev[lineId]?.open ? null : { open: true, name: '', price: '' },
+    }));
+
+  const handleAccessoryInputChange = (lineId, field, value) =>
+    setAccessoryInputs(prev => ({ ...prev, [lineId]: { ...prev[lineId], [field]: value } }));
+
+  const handleAddAccessory = (lineId) => {
+    const inp = accessoryInputs[lineId];
+    if (!inp?.name?.trim()) return;
+    const acc = { id: Date.now() + Math.random(), name: inp.name.trim(), price: parseFloat(inp.price) || 0 };
+    setSaleItems(prev => prev.map(i => i._lineId === lineId ? { ...i, accessories: [...(i.accessories || []), acc] } : i));
+    setAccessoryInputs(prev => ({ ...prev, [lineId]: { open: true, name: '', price: '' } }));
+  };
+
+  const handleRemoveAccessory = (lineId, accId) =>
+    setSaleItems(prev => prev.map(i => i._lineId === lineId ? { ...i, accessories: (i.accessories || []).filter(a => a.id !== accId) } : i));
+
   // Order totals
-  const subtotal     = saleItems.reduce((s, i) => s + i.price * i.quantity, 0);
+  const subtotal = saleItems.reduce((s, i) => {
+    const ppAmt  = i.protectionPlan ? i.price * 0.15 : 0;
+    const accAmt = (i.accessories || []).reduce((as, a) => as + a.price, 0);
+    return s + i.price * i.quantity + ppAmt + accAmt;
+  }, 0);
   const itemDiscounts = saleItems.reduce((s, i) => s + i.discount * i.quantity, 0);
   const totalDiscount = itemDiscounts + globalDiscount;
   const taxableAmount = Math.max(0, subtotal - totalDiscount);
@@ -290,7 +341,7 @@ export default function SaleTransactionScreen({
       return isNaN(dt) ? '' : dt.toISOString().substring(0, 10);
     };
     sessionStorage.setItem('pendingSaleState', JSON.stringify({
-      customerId: customer.id, ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount,
+      customerId: customer.id, customer, ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount,
     }));
     navigate('/customer-editor', {
       state: {
@@ -300,7 +351,7 @@ export default function SaleTransactionScreen({
           date_of_birth:  formatDate(customer.date_of_birth),
         },
         mode: 'edit',
-        returnTo: '/modern-transactions',
+        returnTo: location.pathname,
       },
     });
   };
@@ -463,60 +514,142 @@ export default function SaleTransactionScreen({
 
               {/* Item rows */}
               {saleItems.map(item => {
-                const thumb    = getItemImage(item);
+                const thumb     = getItemImage(item);
                 const lineTotal = (item.price - item.discount) * item.quantity;
+                const ppAmt     = item.price * 0.15;
+                const accInp    = accessoryInputs[item._lineId];
+                const ROW_SX    = { display: 'grid', gridTemplateColumns: '52px 1fr 120px 90px 90px 90px 100px 110px', px: 1.5, alignItems: 'center' };
                 return (
-                  <Box
-                    key={item._lineId}
-                    sx={{
-                      display: 'grid',
-                      gridTemplateColumns: '52px 1fr 120px 90px 90px 90px 100px 110px',
-                      px: 1.5, py: 1.25, borderBottom: '1px solid #f0f0f0',
-                      alignItems: 'center', '&:hover': { bgcolor: '#fafff9' },
-                    }}
-                  >
-                    <Box>
-                      {thumb ? (
-                        <Box component="img" src={thumb} alt="" sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }} />
-                      ) : (
-                        <Box sx={{ width: 40, height: 40, bgcolor: '#f5f5f5', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <MuiIcons.Inventory2 sx={{ fontSize: 22, color: '#d0d0d0' }} />
+                  <Box key={item._lineId}>
+                    {/* Main row */}
+                    <Box sx={{ ...ROW_SX, py: 1.25, alignItems: 'center', borderBottom: '1px solid #f5f5f5', '&:hover': { bgcolor: '#fafff9' } }}>
+                      <Box>
+                        {thumb ? (
+                          <Box component="img" src={thumb} alt="" sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }} />
+                        ) : (
+                          <Box sx={{ width: 40, height: 40, bgcolor: '#f5f5f5', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <MuiIcons.Inventory2 sx={{ fontSize: 22, color: '#d0d0d0' }} />
+                          </Box>
+                        )}
+                      </Box>
+                      <Typography fontSize={13} fontWeight={600} lineHeight={1.3}>{item.name}</Typography>
+                      <Typography fontSize={12} color="text.secondary">{item.sku}</Typography>
+                      <QtyCell value={item.quantity} onChange={qty => handleQtyChange(item._lineId, qty)} disabled={item.inventory_type === 'jewelry'} />
+                      <Typography fontSize={13} fontWeight={500}>{item.price.toFixed(2)}</Typography>
+                      <Box
+                        component="input" type="number" min={0}
+                        value={item.discount || ''} placeholder="0.00"
+                        onChange={e => handleDiscountChange(item._lineId, e.target.value)}
+                        style={{ width: 70, border: '1px solid #e0e0e0', borderRadius: 4, padding: '3px 6px', fontSize: 13, color: item.discount > 0 ? '#c62828' : 'inherit' }}
+                      />
+                      <Typography fontSize={13} fontWeight={600}>{lineTotal.toFixed(2)}</Typography>
+                      <Box sx={{ display: 'flex', gap: 0.25 }}>
+                        <Tooltip title="Edit price">
+                          <IconButton size="small" sx={{ color: '#1565c0' }}><MuiIcons.Edit sx={{ fontSize: 17 }} /></IconButton>
+                        </Tooltip>
+                        <Tooltip title="Delete">
+                          <IconButton size="small" color="error" onClick={() => handleRemoveItem(item._lineId)}>
+                            <MuiIcons.Delete sx={{ fontSize: 17 }} />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </Box>
+
+                    {/* Protection Plan + Accessories pill buttons */}
+                    <Box sx={{ display: 'flex', gap: 1, px: 1.5, py: 0.75, bgcolor: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+                      <Button size="small" variant="outlined"
+                        startIcon={<MuiIcons.Security sx={{ fontSize: 13 }} />}
+                        onClick={() => handleToggleProtectionPlan(item._lineId)}
+                        sx={{
+                          borderRadius: 10, fontSize: 11, py: 0.25, textTransform: 'none',
+                          color: item.protectionPlan ? '#fff' : GREEN,
+                          borderColor: GREEN,
+                          bgcolor: item.protectionPlan ? GREEN : 'transparent',
+                          '&:hover': { bgcolor: item.protectionPlan ? GREEN_DARK : '#e8f5e9', borderColor: GREEN },
+                        }}>
+                        {item.protectionPlan ? 'Protection Plan ✓' : 'Add Protection Plan'}
+                      </Button>
+                      <Button size="small" variant="outlined"
+                        startIcon={<MuiIcons.LocalOffer sx={{ fontSize: 13 }} />}
+                        onClick={() => handleToggleAccessoryInput(item._lineId)}
+                        sx={{
+                          borderRadius: 10, fontSize: 11, py: 0.25, textTransform: 'none',
+                          color: accInp?.open ? GREEN : 'text.secondary',
+                          borderColor: accInp?.open ? GREEN : '#bdbdbd',
+                          '&:hover': { borderColor: GREEN, color: GREEN },
+                        }}>
+                        Accessories{(item.accessories || []).length > 0 ? ` (${item.accessories.length})` : ''}
+                      </Button>
+                    </Box>
+
+                    {/* Protection Plan sub-row */}
+                    {item.protectionPlan && (
+                      <Box sx={{ ...ROW_SX, py: 0.75, bgcolor: '#f0f7ff', borderTop: '1px solid #e3f0ff', borderBottom: '1px solid #e3f0ff' }}>
+                        <Box />
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <MuiIcons.Security sx={{ fontSize: 13, color: '#1565c0' }} />
+                          <Typography fontSize={12} color="#1565c0" fontStyle="italic">Protection Plan (15%)</Typography>
                         </Box>
-                      )}
-                    </Box>
-                    <Typography fontSize={13} fontWeight={600} lineHeight={1.3}>{item.name}</Typography>
-                    <Typography fontSize={12} color="text.secondary">{item.sku}</Typography>
-                    <QtyCell value={item.quantity} onChange={qty => handleQtyChange(item._lineId, qty)} />
-                    <Typography fontSize={13} fontWeight={500}>{item.price.toFixed(2)}</Typography>
-                    <Box
-                      component="input"
-                      type="number"
-                      min={0}
-                      value={item.discount || ''}
-                      placeholder="0.00"
-                      onChange={e => handleDiscountChange(item._lineId, e.target.value)}
-                      style={{ width: 70, border: '1px solid #e0e0e0', borderRadius: 4, padding: '3px 6px', fontSize: 13, color: item.discount > 0 ? '#c62828' : 'inherit' }}
-                    />
-                    <Typography fontSize={13} fontWeight={600}>{lineTotal.toFixed(2)}</Typography>
-                    <Box sx={{ display: 'flex', gap: 0.25 }}>
-                      <Tooltip title="View">
-                        <IconButton size="small" sx={{ color: GREEN }}><MuiIcons.Visibility sx={{ fontSize: 17 }} /></IconButton>
-                      </Tooltip>
-                      <Tooltip title="Edit price">
-                        <IconButton size="small" sx={{ color: '#1565c0' }}><MuiIcons.Edit sx={{ fontSize: 17 }} /></IconButton>
-                      </Tooltip>
-                      <Tooltip title="Tag">
-                        <IconButton size="small" sx={{ color: '#607d8b' }}><MuiIcons.LocalOffer sx={{ fontSize: 17 }} /></IconButton>
-                      </Tooltip>
-                      <Tooltip title="Swap">
-                        <IconButton size="small" sx={{ color: '#607d8b' }}><MuiIcons.SwapVert sx={{ fontSize: 17 }} /></IconButton>
-                      </Tooltip>
-                      <Tooltip title="Remove">
-                        <IconButton size="small" color="error" onClick={() => handleRemoveItem(item._lineId)}>
-                          <MuiIcons.Delete sx={{ fontSize: 17 }} />
+                        <Typography fontSize={12} color="text.secondary">—</Typography>
+                        <Typography fontSize={12} color="text.secondary">1</Typography>
+                        <Typography fontSize={12} color="#1565c0">{ppAmt.toFixed(2)}</Typography>
+                        <Typography fontSize={12} color="text.secondary">—</Typography>
+                        <Typography fontSize={12} color="#1565c0" fontWeight={600}>{ppAmt.toFixed(2)}</Typography>
+                        <IconButton size="small" color="error" onClick={() => handleToggleProtectionPlan(item._lineId)}>
+                          <MuiIcons.Close sx={{ fontSize: 14 }} />
                         </IconButton>
-                      </Tooltip>
-                    </Box>
+                      </Box>
+                    )}
+
+                    {/* Accessory sub-rows */}
+                    {(item.accessories || []).map(acc => (
+                      <Box key={acc.id} sx={{ ...ROW_SX, py: 0.75, bgcolor: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+                        <Box />
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <MuiIcons.Extension sx={{ fontSize: 13, color: '#607d8b' }} />
+                          <Typography fontSize={12} color="text.secondary" fontStyle="italic">{acc.name}</Typography>
+                        </Box>
+                        <Typography fontSize={12} color="text.secondary">—</Typography>
+                        <Typography fontSize={12} color="text.secondary">1</Typography>
+                        <Typography fontSize={12}>{acc.price.toFixed(2)}</Typography>
+                        <Typography fontSize={12} color="text.secondary">—</Typography>
+                        <Typography fontSize={12} fontWeight={600}>{acc.price.toFixed(2)}</Typography>
+                        <IconButton size="small" color="error" onClick={() => handleRemoveAccessory(item._lineId, acc.id)}>
+                          <MuiIcons.Close sx={{ fontSize: 14 }} />
+                        </IconButton>
+                      </Box>
+                    ))}
+
+                    {/* Add Accessory inline input */}
+                    {accInp?.open && (
+                      <Box sx={{ ...ROW_SX, py: 0.75, bgcolor: '#fffde7', borderBottom: '1px solid #fff9c4' }}>
+                        <Box />
+                        <Box component="input" placeholder="Accessory name"
+                          value={accInp.name}
+                          onChange={e => handleAccessoryInputChange(item._lineId, 'name', e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleAddAccessory(item._lineId)}
+                          style={{ fontSize: 12, border: '1px solid #e0e0e0', borderRadius: 4, padding: '3px 6px', width: '90%' }}
+                        />
+                        <Box />
+                        <Box />
+                        <Box component="input" placeholder="0.00" type="number" min={0}
+                          value={accInp.price}
+                          onChange={e => handleAccessoryInputChange(item._lineId, 'price', e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleAddAccessory(item._lineId)}
+                          style={{ width: 70, fontSize: 12, border: '1px solid #e0e0e0', borderRadius: 4, padding: '3px 6px' }}
+                        />
+                        <Box />
+                        <Box />
+                        <Box sx={{ display: 'flex', gap: 0.25 }}>
+                          <IconButton size="small" sx={{ color: GREEN }} onClick={() => handleAddAccessory(item._lineId)}>
+                            <MuiIcons.Check sx={{ fontSize: 14 }} />
+                          </IconButton>
+                          <IconButton size="small" color="error" onClick={() => handleToggleAccessoryInput(item._lineId)}>
+                            <MuiIcons.Close sx={{ fontSize: 14 }} />
+                          </IconButton>
+                        </Box>
+                      </Box>
+                    )}
                   </Box>
                 );
               })}
@@ -550,14 +683,17 @@ export default function SaleTransactionScreen({
 
             {/* Customer header */}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: customerValidationErrors.length > 0 ? 1 : 1.5 }}>
-              <Avatar sx={{ bgcolor: '#e8f5e9', color: GREEN, width: 32, height: 32 }}>
+              <Avatar src={getCustomerImageUrl(customer) || undefined} sx={{ bgcolor: '#e8f5e9', color: GREEN, width: 32, height: 32 }}>
                 <MuiIcons.Person sx={{ fontSize: 18 }} />
               </Avatar>
-              <Typography fontWeight={700} fontSize={14} color="text.secondary">Customer</Typography>
-              <Box sx={{ flex: 1 }} />
-              <Typography fontWeight={700} fontSize={13} color={GREEN} noWrap>
-                {customer ? `${customer.first_name} ${customer.last_name}` : 'Walk-in Customer'}
-              </Typography>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography fontWeight={700} fontSize={13} color={GREEN} noWrap>
+                  {customer ? `${customer.first_name} ${customer.last_name}` : 'Walk-in Customer'}
+                </Typography>
+                {customer?.phone && (
+                  <Typography fontSize={11} color="text.secondary" noWrap>{customer.phone}</Typography>
+                )}
+              </Box>
               <IconButton size="small" onClick={handleEditCustomer} disabled={!customer}>
                 <MuiIcons.Edit sx={{ fontSize: 15, color: GREEN }} />
               </IconButton>

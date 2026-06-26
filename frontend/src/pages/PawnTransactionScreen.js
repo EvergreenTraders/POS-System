@@ -676,6 +676,9 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
                 </Box>
               )}
             </Box>
+            <IconButton size="small" onClick={handleEditCustomer} disabled={!customer}>
+              <MuiIcons.Edit sx={{ fontSize: 15, color: '#3949ab' }} />
+            </IconButton>
             {customerValidationErrors.length > 0 && (
               <Box sx={{ flexShrink: 0, maxWidth: 220, bgcolor: '#fff5f5', px: 1.25, py: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 0.5 }}>

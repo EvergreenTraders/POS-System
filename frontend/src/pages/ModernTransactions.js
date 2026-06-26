@@ -161,19 +161,42 @@ function SaleTransactionCard({ tx, saleIcon, saleColor, onOpen, onVoid }) {
         {/* Item rows */}
         {shownItems.map((item, i) => {
           const thumb = item.images?.find(img => img.is_primary || img.isPrimary)?.url || item.images?.[0]?.url;
+          const ppAmt = item.protectionPlan ? item.price * 0.15 : 0;
+          const accs  = item.accessories || [];
           return (
-            <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.75, borderBottom: '1px solid #f0f0f0' }}>
-              {thumb ? (
-                <Box component="img" src={thumb} alt="" sx={{ width: 40, height: 40, borderRadius: 1, objectFit: 'cover', flexShrink: 0 }} />
-              ) : (
-                <Box sx={{ width: 40, height: 40, borderRadius: 1, bgcolor: '#f5f5f5', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <MuiIcons.Inventory2 sx={{ fontSize: 20, color: '#bdbdbd' }} />
+            <Box key={i} sx={{ borderBottom: '1px solid #f0f0f0' }}>
+              {/* Item row */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.75 }}>
+                {thumb ? (
+                  <Box component="img" src={thumb} alt="" sx={{ width: 40, height: 40, borderRadius: 1, objectFit: 'cover', flexShrink: 0 }} />
+                ) : (
+                  <Box sx={{ width: 40, height: 40, borderRadius: 1, bgcolor: '#f5f5f5', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <MuiIcons.Inventory2 sx={{ fontSize: 20, color: '#bdbdbd' }} />
+                  </Box>
+                )}
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="caption" fontWeight={600} display="block" noWrap>{item.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">{fmt(item.price * (item.quantity || 1))}</Typography>
+                </Box>
+              </Box>
+
+              {/* Protection Plan sub-row */}
+              {item.protectionPlan && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, pl: 1, py: 0.4, bgcolor: '#f0f7ff' }}>
+                  <MuiIcons.Security sx={{ fontSize: 12, color: '#1565c0' }} />
+                  <Typography fontSize={11} color="#1565c0" fontStyle="italic" flex={1}>Protection Plan (15%)</Typography>
+                  <Typography fontSize={11} color="#1565c0" fontWeight={600}>{fmt(ppAmt)}</Typography>
                 </Box>
               )}
-              <Box sx={{ minWidth: 0 }}>
-                <Typography variant="caption" fontWeight={600} display="block" noWrap>{item.name}</Typography>
-                <Typography variant="caption" color="text.secondary">{fmt(item.price * (item.quantity || 1))}</Typography>
-              </Box>
+
+              {/* Accessory sub-rows */}
+              {accs.map(acc => (
+                <Box key={acc.id} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, pl: 6, py: 0.4, bgcolor: '#fafafa' }}>
+                  <MuiIcons.Extension sx={{ fontSize: 12, color: '#607d8b' }} />
+                  <Typography fontSize={11} color="text.secondary" fontStyle="italic" flex={1} noWrap>{acc.name}</Typography>
+                  <Typography fontSize={11} fontWeight={600}>{fmt(acc.price)}</Typography>
+                </Box>
+              ))}
             </Box>
           );
         })}
@@ -433,6 +456,28 @@ export default function ModernTransactions() {
         console.error('Failed to restore pawn session after customer edit:', err);
       }
     })();
+  }, [location.state]);
+
+  // Restore sale screen after returning from CustomerEditor
+  useEffect(() => {
+    if (!location.state?.customerUpdated) return;
+    const raw = sessionStorage.getItem('pendingSaleState');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingSaleState');
+    const { customerId, customer: savedCustomer, ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount } = pending;
+    if (!customerId) return;
+    // Open immediately with saved customer so there's no empty-screen flash
+    if (savedCustomer) setCustomer(savedCustomer);
+    setExistingSaleData({ ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount });
+    setSaleOpen(true);
+    // Refresh customer in background to pick up any edits just made
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after sale edit:', err));
   }, [location.state]);
 
   const handleCustomerSearch = async (query) => {
