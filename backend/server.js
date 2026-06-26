@@ -9367,17 +9367,18 @@ app.get('/api/customers/:id/sales/stats', async (req, res) => {
     const result = await pool.query(`
       SELECT
         COUNT(DISTINCT st.sale_ticket_id) AS total_sales_count,
-        COALESCE(SUM(t.total_amount), 0)  AS total_sales_amount,
+        COALESCE(SUM(t.total_amount), 0) AS total_sales_amount,
         COALESCE((
           SELECT SUM(p.amount * CASE WHEN t2.total_amount < 0 THEN 1 ELSE -1 END)
           FROM payments p
           JOIN transactions t2 ON p.transaction_id = t2.transaction_id
           WHERE t2.customer_id = $1 AND p.payment_method = 'store_credit'
         ), 0) AS store_credit
-      FROM sale_ticket st
+      FROM (
+        SELECT DISTINCT sale_ticket_id, transaction_id FROM sale_ticket
+      ) st
       JOIN transactions t ON st.transaction_id = t.transaction_id
-      WHERE t.customer_id = $1
-        AND t.total_amount > 0
+      WHERE t.customer_id = $1 AND t.total_amount > 0
     `, [id]);
 
     const row = result.rows[0];
