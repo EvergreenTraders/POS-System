@@ -33,15 +33,21 @@ function PawnTransactionCard({ tx, pawnIcon, pawnColor, onOpen, onVoid }) {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <PawnIconComponent sx={{ fontSize: 20, color: accent }} />
           <Typography fontWeight={700} fontSize={13} color={accent}>PAWN</Typography>
-          <Chip label="Active" size="small" sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: '#1565c0', color: '#fff' }} />
         </Box>
-        <IconButton size="small"><MuiIcons.MoreVert fontSize="small" /></IconButton>
+        <Chip label={tx.ticketId} size="small"
+          sx={{ fontWeight: 700, fontSize: 11, height: 20, bgcolor: '#f5f5f5', border: '1px solid #e0e0e0' }} />
       </Box>
 
       <Box sx={{ px: 1.5, pb: 1.25 }}>
-        <Typography variant="caption" color="text.secondary" display="block" mb={0.75}>
-          {tx.pawnItems?.length || 0} {(tx.pawnItems?.length || 0) === 1 ? 'item' : 'items'}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75 }}>
+          <Chip
+            icon={<MuiIcons.ShoppingBag sx={{ fontSize: 14 }} />}
+            label={`${tx.pawnItems?.length || 0} ${(tx.pawnItems?.length || 0) === 1 ? 'item' : 'items'}`}
+            size="small"
+            sx={{ fontSize: 12, height: 24, bgcolor: '#e3f2fd', color: '#1565c0', '& .MuiChip-icon': { color: '#1565c0' } }}
+          />
+          <Chip label="Active" size="small" sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: '#1565c0', color: '#fff' }} />
+        </Box>
 
         {/* Item rows */}
         {(tx.pawnItems || []).map((item, i) => {
@@ -113,37 +119,101 @@ function PawnTransactionCard({ tx, pawnIcon, pawnColor, onOpen, onVoid }) {
   );
 }
 
-function SaleTransactionCard({ tx, onOpen, onVoid }) {
+function SaleTransactionCard({ tx, saleIcon, saleColor, onOpen, onVoid }) {
   const fmt = (n) => `$${Number(n).toFixed(2)}`;
-  const itemCount = tx.saleItems?.length || 0;
+  const accent = saleColor || GREEN;
+  const SaleIconComponent = saleIcon ? (MuiIcons[saleIcon] ?? MuiIcons.ShoppingCart) : MuiIcons.ShoppingCart;
+  const items = tx.saleItems || [];
+  const itemCount = items.length;
+  const subtotal = tx.subtotal || items.reduce((s, i) => s + i.price * (i.quantity || 1), 0);
+  const itemDiscounts = tx.itemDiscounts || items.reduce((s, i) => s + (i.discount || 0) * (i.quantity || 1), 0);
+  const totalDiscount = itemDiscounts + (tx.globalDiscount || 0);
+  const taxAmt = tx.taxAmt || 0;
+  const total = tx.total || 0;
+  const SHOW = 2;
+  const shownItems = items.slice(0, SHOW);
+  const moreCount = itemCount - SHOW;
+
   return (
     <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: '4px solid #1a472a' }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <MuiIcons.ShoppingCart sx={{ fontSize: 20, color: '#1a472a' }} />
-          <Typography fontWeight={700} fontSize={13} color="#1a472a">SALE</Typography>
-          <Chip label="Pending" size="small" sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: '#e8f5e9', color: '#1a472a' }} />
+          <SaleIconComponent sx={{ fontSize: 20, color: accent }} />
+          <Typography fontWeight={700} fontSize={13} color={accent}>SALE</Typography>
         </Box>
-        <IconButton size="small"><MuiIcons.MoreVert fontSize="small" /></IconButton>
+        <Chip label={tx.ticketId} size="small"
+          sx={{ fontWeight: 700, fontSize: 11, height: 20, bgcolor: '#f5f5f5', border: '1px solid #e0e0e0' }} />
       </Box>
+
       <Box sx={{ px: 1.5, pb: 1.25 }}>
-        <Typography variant="caption" color="text.secondary" display="block" mb={0.75}>
-          {tx.ticketId} · {itemCount} {itemCount === 1 ? 'item' : 'items'}
-        </Typography>
-        {(tx.saleItems || []).slice(0, 3).map((item, i) => (
-          <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, borderBottom: '1px solid #f0f0f0' }}>
-            <Typography variant="caption" fontWeight={600} noWrap flex={1}>{item.name}</Typography>
-            <Typography variant="caption" color="text.secondary">{fmt(item.price * item.quantity)}</Typography>
-          </Box>
-        ))}
-        <Divider sx={{ my: 1 }} />
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-          <Typography variant="caption" fontWeight={600} color="#1a472a">Total</Typography>
-          <Typography variant="caption" fontWeight={700} color="#1a472a">{fmt(tx.total || 0)}</Typography>
+        {/* Items count + Active chip */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75 }}>
+          <Chip
+            icon={<MuiIcons.ShoppingBag sx={{ fontSize: 14 }} />}
+            label={`${itemCount} ${itemCount === 1 ? 'item' : 'items'}`}
+            size="small"
+            sx={{ fontSize: 12, height: 24, bgcolor: '#e3f2fd', color: '#1565c0', '& .MuiChip-icon': { color: '#1565c0' } }}
+          />
+          <Chip label="Active" size="small" sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: '#1565c0', color: '#fff' }} />
         </Box>
+
+        {/* Item rows */}
+        {shownItems.map((item, i) => {
+          const thumb = item.images?.find(img => img.is_primary || img.isPrimary)?.url || item.images?.[0]?.url;
+          return (
+            <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.75, borderBottom: '1px solid #f0f0f0' }}>
+              {thumb ? (
+                <Box component="img" src={thumb} alt="" sx={{ width: 40, height: 40, borderRadius: 1, objectFit: 'cover', flexShrink: 0 }} />
+              ) : (
+                <Box sx={{ width: 40, height: 40, borderRadius: 1, bgcolor: '#f5f5f5', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <MuiIcons.Inventory2 sx={{ fontSize: 20, color: '#bdbdbd' }} />
+                </Box>
+              )}
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="caption" fontWeight={600} display="block" noWrap>{item.name}</Typography>
+                <Typography variant="caption" color="text.secondary">{fmt(item.price * (item.quantity || 1))}</Typography>
+              </Box>
+            </Box>
+          );
+        })}
+        {moreCount > 0 && (
+          <Typography fontSize={13} color="#1565c0" sx={{ cursor: 'pointer', mt: 0.25 }} onClick={onOpen}>
+            + {moreCount} more {moreCount === 1 ? 'item' : 'items'}
+          </Typography>
+        )}
+
+        <Divider sx={{ my: 1.25 }} />
+
+        {/* Financials */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.4 }}>
+          <Typography fontSize={13} color="text.secondary">Subtotal:</Typography>
+          <Typography fontSize={13}>{fmt(subtotal)}</Typography>
+        </Box>
+        {totalDiscount > 0 && (
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.4 }}>
+            <Typography fontSize={13} color="text.secondary">Discounts:</Typography>
+            <Typography fontSize={13} color="error.main">-{fmt(totalDiscount)}</Typography>
+          </Box>
+        )}
+        {taxAmt > 0 && (
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.4 }}>
+            <Typography fontSize={13} color="text.secondary">Tax:</Typography>
+            <Typography fontSize={13}>{fmt(taxAmt)}</Typography>
+          </Box>
+        )}
+        <Divider sx={{ my: 1 }} />
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+          <Typography variant="caption" fontWeight={600} color="#1a472a">Net Effect</Typography>
+          <Typography variant="caption" fontWeight={700} color="#1a472a">+{fmt(total)}</Typography>
+        </Box>
+
+        {/* Action buttons */}
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
-            onClick={onOpen} sx={{ flex: 1, fontSize: 11 }}>
+            onClick={onOpen}
+            sx={{ flex: 1, fontSize: 11 }}>
             Open
           </Button>
           <IconButton size="small" color="error" onClick={onVoid}
@@ -753,6 +823,8 @@ export default function ModernTransactions() {
                     ) : tx.type === 'SALE' ? (
                       <SaleTransactionCard
                         tx={tx}
+                        saleIcon={transactionTypes.find(t => t.type === 'sale')?.icon}
+                        saleColor={transactionTypes.find(t => t.type === 'sale')?.color}
                         onOpen={() => { setExistingSaleData(tx); setSaleOpen(true); }}
                         onVoid={() => setVoidConfirm(tx)}
                       />

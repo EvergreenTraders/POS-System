@@ -312,7 +312,7 @@ export default function SaleTransactionScreen({
 
   const handleAddToWorkspace = () => {
     if (saleItems.length === 0) { showSnackbar('Add at least one item before adding to workspace', 'warning'); return; }
-    onAddToWorkspace?.({ ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount, total, subtotal });
+    onAddToWorkspace?.({ ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount, total, subtotal, taxAmt, itemDiscounts, customer });
   };
 
   const handleCheckoutNow = () => {
