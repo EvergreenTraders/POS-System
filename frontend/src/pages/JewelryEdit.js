@@ -1954,7 +1954,11 @@ function JewelryEdit() {
 
   // Handlers
   const handleBackToInventory = () => {
-    navigate(-1);
+    if (location.state?.returnTo === 'sale-ticket') {
+      navigate('/modern-transactions', { state: { returnToSale: true } });
+    } else {
+      navigate(-1);
+    }
   };
 
   const handleProcessItem = async () => {
@@ -2306,6 +2310,22 @@ function JewelryEdit() {
   }
 
   return (
+    <Box>
+    {location.state?.returnTo === 'sale-ticket' && (
+      <Box sx={{ bgcolor: '#1a472a', color: '#fff', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Typography variant="body2" fontWeight={400} sx={{ cursor: 'pointer', opacity: 0.7, '&:hover': { opacity: 1 } }}
+          onClick={() => navigate('/modern-transactions')}>
+          Transactions
+        </Typography>
+        <Typography variant="body2">›</Typography>
+        <Typography variant="body2" fontWeight={400} sx={{ cursor: 'pointer', opacity: 0.7, '&:hover': { opacity: 1 } }}
+          onClick={() => navigate('/modern-transactions', { state: { returnToSale: true } })}>
+          Sale Ticket
+        </Typography>
+        <Typography variant="body2">›</Typography>
+        <Typography variant="body2" fontWeight={600}>View Item</Typography>
+      </Box>
+    )}
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       {/* Gem Estimator Dialog */}
       <Dialog
@@ -5604,6 +5624,7 @@ function JewelryEdit() {
       </Dialog>
     
     </Container>
+    </Box>
   );
 }
 

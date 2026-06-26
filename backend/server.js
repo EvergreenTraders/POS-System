@@ -369,34 +369,12 @@ pool.query(`
   ALTER TABLE transactions ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
 `).catch(err => console.error('transactions store_id migration:', err.message));
 
+pool.query(`
+  ALTER TABLE sale_ticket ADD COLUMN IF NOT EXISTS item_discount NUMERIC(10,2) NOT NULL DEFAULT 0;
+  ALTER TABLE sale_ticket ADD COLUMN IF NOT EXISTS global_discount NUMERIC(10,2) NOT NULL DEFAULT 0;
+`).catch(err => console.error('sale_ticket discount migration:', err.message));
 
-pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'`)
-  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_hardgoods_images ON hardgoods USING GIN (images)`))
-  .catch(err => console.error('hardgoods images migration:', err.message));
 
-pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'HOLD'`)
-  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_hardgoods_status ON hardgoods(status)`))
-  .catch(err => console.error('hardgoods status migration:', err.message));
-
-pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS item_price NUMERIC(10,2)`)
-  .catch(err => console.error('hardgoods item_price migration:', err.message));
-
-pool.query(`ALTER TABLE jewelry ALTER COLUMN item_id TYPE VARCHAR(30)`)
-  .catch(err => console.error('jewelry item_id length migration:', err.message));
-pool.query(`ALTER TABLE jewelry_secondary_gems ALTER COLUMN item_id TYPE VARCHAR(30)`)
-  .catch(err => console.error('jewelry_secondary_gems item_id length migration:', err.message));
-
-pool.query(`ALTER TABLE pawn_ticket ADD COLUMN IF NOT EXISTS ticket_note TEXT`)
-  .catch(err => console.error('pawn_ticket ticket_note migration:', err.message));
-pool.query(`ALTER TABLE pawn_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE`)
-  .catch(err => console.error('pawn_ticket show_on_receipt migration:', err.message));
-
-// Fix unique_active_connection: replace table constraint with partial index
-// Allows multiple historical (is_active = FALSE) rows per employee/session
-pool.query(`ALTER TABLE drawer_session_connections DROP CONSTRAINT IF EXISTS unique_active_connection`)
-  .then(() => pool.query(`DROP INDEX IF EXISTS unique_active_connection`))
-  .then(() => pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS unique_active_connection ON drawer_session_connections (session_id, employee_id) WHERE is_active = TRUE`))
-  .catch(err => console.error('unique_active_connection migration:', err.message));
 
 app.post('/api/auth/login', async (req, res) => {
   try {
@@ -6275,6 +6253,77 @@ app.post('/api/quotes', uploadJewelryImages, async (req, res) => {
   }
 });
 
+// POST /api/quotes/sale — save a sale ticket as a quote.
+// Items already exist in inventory; link them via quote_items (FK constraint dropped).
+app.post('/api/quotes/sale', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Ensure quote_type column exists.
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_type VARCHAR(10) DEFAULT 'pawn'`);
+    // Drop the FK on quote_items.item_id so hardgoods item IDs can be stored.
+    await client.query(`ALTER TABLE quote_items DROP CONSTRAINT IF EXISTS quote_items_item_id_fkey`);
+
+    const { customer_id, employee_id, total_amount, items, ticket_id } = req.body;
+    const parsedItems = typeof items === 'string' ? JSON.parse(items) : (items || []);
+
+    if (!customer_id || !employee_id) {
+      return res.status(400).json({ error: 'customer_id and employee_id are required' });
+    }
+
+    // Generate next quote ID
+    const latestResult = await client.query(
+      "SELECT quote_id FROM quotes WHERE quote_id LIKE 'QT%' ORDER BY quote_id DESC LIMIT 1"
+    );
+    let nextNumber = 1;
+    if (latestResult.rows.length > 0) {
+      nextNumber = parseInt(latestResult.rows[0].quote_id.slice(2)) + 1;
+    }
+    const quoteId = `QT${nextNumber.toString().padStart(3, '0')}`;
+
+    // Get expiration period
+    const configResult = await client.query('SELECT days FROM quote_expiration LIMIT 1');
+    const expiresIn = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
+
+    // Look up sale transaction_type_id
+    const typeResult = await client.query(`SELECT id FROM transaction_type WHERE type = 'sale' LIMIT 1`);
+    const saleTypeId = typeResult.rows[0]?.id ?? null;
+
+    // Insert quote record
+    const quoteResult = await client.query(
+      `INSERT INTO quotes (quote_id, customer_id, employee_id, total_amount, expires_in, days_remaining, quote_type, created_at)
+       VALUES ($1, $2, $3, $4, $5, $5, 'sale', CURRENT_TIMESTAMP) RETURNING *`,
+      [quoteId, customer_id, employee_id, parseFloat(total_amount) || 0, expiresIn]
+    );
+
+    // Insert each sale item into quote_items and mark it as not sellable
+    for (const item of parsedItems) {
+      await client.query(
+        `INSERT INTO quote_items (quote_id, item_id, transaction_type_id, item_price)
+         VALUES ($1, $2, $3, $4)`,
+        [quoteId, item.item_id, saleTypeId, parseFloat(item.price) || 0]
+      );
+      // Prevent the item from appearing in search results while it is quoted
+      const invType = (item.inventory_type || '').toLowerCase();
+      const table = invType === 'jewelry' ? 'jewelry' : 'hardgoods';
+      await client.query(
+        `UPDATE ${table} SET sellable_status = 'NOT_SELLABLE' WHERE item_id = $1`,
+        [item.item_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ ...quoteResult.rows[0], quote_id: quoteId, expires_in: expiresIn });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating sale quote:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.put('/api/quotes/:id', async (req, res) => {
   const client = await pool.connect();
   try {
@@ -6331,6 +6380,35 @@ app.get('/api/quotes/:quote_id/items', async (req, res) => {
   try {
     const { quote_id } = req.params;
 
+    // Check quote type first
+    const quoteTypeResult = await pool.query(
+      `SELECT COALESCE(quote_type, 'pawn') AS quote_type FROM quotes WHERE quote_id = $1`,
+      [quote_id]
+    );
+    const quoteType = quoteTypeResult.rows[0]?.quote_type || 'pawn';
+
+    if (quoteType === 'sale') {
+      const saleQuery = `
+        SELECT
+          qi.item_id,
+          qi.item_price,
+          'sale' AS transaction_type,
+          COALESCE(h.short_desc, h.long_desc, j.short_desc, j.long_desc) AS description,
+          NULL::NUMERIC AS metal_spot_price,
+          NULL::NUMERIC AS metal_weight,
+          NULL::TEXT    AS metal_purity,
+          NULL::NUMERIC AS purity_value
+        FROM quote_items qi
+        LEFT JOIN hardgoods h ON qi.item_id = h.item_id
+        LEFT JOIN jewelry   j ON qi.item_id = j.item_id
+        WHERE qi.quote_id = $1
+        ORDER BY qi.id
+      `;
+      const result = await pool.query(saleQuery, [quote_id]);
+      return res.json(result.rows);
+    }
+
+    // Default pawn quote: existing behaviour
     const query = `
       SELECT
         qi.item_id,
@@ -6365,13 +6443,24 @@ app.delete('/api/quotes/:quote_id/items/:item_id', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // First delete the quote item
-    const deleteItemQuery = 'DELETE FROM quote_items WHERE quote_id = $1 AND item_id = $2';
-    await client.query(deleteItemQuery, [quote_id, item_id]);
+    // Check quote type — sale quotes reference existing inventory, don't delete the item
+    const quoteTypeResult = await client.query(
+      `SELECT COALESCE(quote_type, 'pawn') AS quote_type FROM quotes WHERE quote_id = $1`,
+      [quote_id]
+    );
+    const quoteType = quoteTypeResult.rows[0]?.quote_type || 'pawn';
 
-    // Then delete from jewelry
-    const deleteJewelryQuery = 'DELETE FROM jewelry WHERE item_id = $1';
-    await client.query(deleteJewelryQuery, [item_id]);
+    // Delete the quote_items row
+    await client.query('DELETE FROM quote_items WHERE quote_id = $1 AND item_id = $2', [quote_id, item_id]);
+
+    if (quoteType === 'sale') {
+      // Item belongs to real inventory — restore sellable status in whichever table holds it
+      await client.query(`UPDATE hardgoods SET sellable_status = 'SELLABLE' WHERE item_id = $1`, [item_id]);
+      await client.query(`UPDATE jewelry   SET sellable_status = 'SELLABLE' WHERE item_id = $1`, [item_id]);
+    } else {
+      // Pawn quote — item was created just for the quote, delete it entirely
+      await client.query('DELETE FROM jewelry WHERE item_id = $1', [item_id]);
+    }
 
     // Then update the quote's total amount
     const updateTotalQuery = `
@@ -6405,19 +6494,28 @@ app.delete('/api/quotes/:quote_id', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Get all item_ids associated with this quote
-    const itemIdsQuery = 'SELECT item_id FROM quote_items WHERE quote_id = $1';
-    const itemIdsResult = await client.query(itemIdsQuery, [quote_id]);
+    // Get quote type and all item_ids
+    const quoteRow = await client.query(
+      `SELECT COALESCE(quote_type, 'pawn') AS quote_type FROM quotes WHERE quote_id = $1`,
+      [quote_id]
+    );
+    const quoteType = quoteRow.rows[0]?.quote_type || 'pawn';
+
+    const itemIdsResult = await client.query('SELECT item_id FROM quote_items WHERE quote_id = $1', [quote_id]);
     const itemIds = itemIdsResult.rows.map(row => row.item_id);
 
-    // First delete all quote items
-    const deleteItemsQuery = 'DELETE FROM quote_items WHERE quote_id = $1';
-    await client.query(deleteItemsQuery, [quote_id]);
+    // Delete all quote_items rows
+    await client.query('DELETE FROM quote_items WHERE quote_id = $1', [quote_id]);
 
-    // Then delete the jewelry items
     if (itemIds.length > 0) {
-      const deleteJewelryQuery = 'DELETE FROM jewelry WHERE item_id = ANY($1)';
-      await client.query(deleteJewelryQuery, [itemIds]);
+      if (quoteType === 'sale') {
+        // Restore sellable status on real inventory items
+        await client.query(`UPDATE hardgoods SET sellable_status = 'SELLABLE' WHERE item_id = ANY($1)`, [itemIds]);
+        await client.query(`UPDATE jewelry   SET sellable_status = 'SELLABLE' WHERE item_id = ANY($1)`, [itemIds]);
+      } else {
+        // Pawn quote — items were created solely for the quote, remove them
+        await client.query('DELETE FROM jewelry WHERE item_id = ANY($1)', [itemIds]);
+      }
     }
 
     // Finally delete the quote
@@ -7864,6 +7962,28 @@ app.post('/api/buy-ticket', async (req, res) => {
 });
 
 // Sale Ticket API Endpoints
+
+// Returns the highest numeric sequence found in sale_ticket_id so the client
+// can keep its localStorage counter ahead of the DB and never reuse an ID.
+app.get('/api/sale-ticket/last-id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT sale_ticket_id
+      FROM sale_ticket
+      WHERE sale_ticket_id ~ '^ST-[0-9]+$'
+      ORDER BY CAST(SUBSTRING(sale_ticket_id FROM 4) AS INTEGER) DESC
+      LIMIT 1
+    `);
+    if (result.rows.length === 0) return res.json({ last_number: 0, last_id: null });
+    const lastId = result.rows[0].sale_ticket_id;
+    const num    = parseInt(lastId.replace('ST-', ''), 10);
+    res.json({ last_number: num, last_id: lastId });
+  } catch (err) {
+    console.error('Error fetching last sale ticket id:', err);
+    res.status(500).json({ error: 'Failed to fetch last sale ticket id' });
+  }
+});
+
 app.get('/api/sale-ticket', async (req, res) => {
   try {
     const { sale_ticket_id, transaction_id } = req.query;
@@ -7892,7 +8012,7 @@ app.get('/api/sale-ticket', async (req, res) => {
 app.post('/api/sale-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { sale_ticket_id, transaction_id, item_id, quantity, inventory_type } = req.body;
+    const { sale_ticket_id, transaction_id, item_id, quantity, inventory_type, ticket_note, show_on_receipt, protection_plan, item_discount, global_discount } = req.body;
 
     // Validate required fields
     if (!sale_ticket_id) {
@@ -7915,8 +8035,8 @@ app.post('/api/sale-ticket', async (req, res) => {
 
     // Insert new sale_ticket record
     const insertQuery = `
-      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity, inventory_type)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity, inventory_type, ticket_note, show_on_receipt, protection_plan, item_discount, global_discount)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *
     `;
 
@@ -7925,7 +8045,12 @@ app.post('/api/sale-ticket', async (req, res) => {
       transaction_id || null,
       item_id || null,
       quantity || 1,
-      resolvedInventoryType
+      resolvedInventoryType,
+      ticket_note ?? null,
+      show_on_receipt ?? false,
+      protection_plan ?? 0,
+      item_discount ?? 0,
+      global_discount ?? 0,
     ]);
 
     await client.query('COMMIT');
@@ -9236,6 +9361,38 @@ app.get('/api/customers/:id/pawn/stats', async (req, res) => {
   }
 });
 
+app.get('/api/customers/:id/sales/stats', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(DISTINCT st.sale_ticket_id) AS total_sales_count,
+        COALESCE(SUM(t.total_amount), 0) AS total_sales_amount,
+        COALESCE((
+          SELECT SUM(p.amount * CASE WHEN t2.total_amount < 0 THEN 1 ELSE -1 END)
+          FROM payments p
+          JOIN transactions t2 ON p.transaction_id = t2.transaction_id
+          WHERE t2.customer_id = $1 AND p.payment_method = 'store_credit'
+        ), 0) AS store_credit
+      FROM (
+        SELECT DISTINCT sale_ticket_id, transaction_id FROM sale_ticket
+      ) st
+      JOIN transactions t ON st.transaction_id = t.transaction_id
+      WHERE t.customer_id = $1 AND t.total_amount > 0
+    `, [id]);
+
+    const row = result.rows[0];
+    res.json({
+      total_sales_count:  parseInt(row.total_sales_count)    || 0,
+      total_sales_amount: parseFloat(row.total_sales_amount) || 0,
+      store_credit:       parseFloat(row.store_credit)       || 0,
+    });
+  } catch (err) {
+    console.error('Error fetching customer sales stats:', err);
+    res.status(500).json({ error: 'Failed to fetch customer sales stats' });
+  }
+});
+
 app.get('/api/customers/:id/pawns', async (req, res) => {
   const { id } = req.params;
   const { status } = req.query;
@@ -10077,7 +10234,12 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             EXISTS (
               SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = bt.item_id
-            ) as has_secondary_gems
+            ) as has_secondary_gems,
+            NULL::TEXT as ticket_note,
+            FALSE as show_on_receipt,
+            0::NUMERIC as protection_plan,
+            0::NUMERIC as item_discount,
+            0::NUMERIC as global_discount
           FROM buy_ticket bt
           LEFT JOIN jewelry j ON bt.item_id = j.item_id
             AND COALESCE(bt.inventory_type, 'JW') = 'JW'
@@ -10112,7 +10274,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.jewelry_color,
             j.metal_spot_price,
             j.est_metal_value,
-            COALESCE(j.item_price, hg.cost_price) as item_price,
+            COALESCE(j.item_price, hg.item_price, hg.retail_price) as item_price,
             COALESCE(j.images, hg.images) as images,
             COALESCE(j.status, hg.status) as item_status,
             j.primary_gem_type,
@@ -10131,7 +10293,12 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             EXISTS (
               SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = st.item_id
-            ) as has_secondary_gems
+            ) as has_secondary_gems,
+            st.ticket_note,
+            st.show_on_receipt,
+            st.protection_plan,
+            st.item_discount,
+            st.global_discount
           FROM sale_ticket st
           LEFT JOIN jewelry j ON st.item_id = j.item_id
             AND COALESCE(st.inventory_type, 'JW') = 'JW'
@@ -10182,7 +10349,12 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             EXISTS (
               SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = pt.item_id
-            ) as has_secondary_gems
+            ) as has_secondary_gems,
+            pt.ticket_note,
+            pt.show_on_receipt,
+            0::NUMERIC as protection_plan,
+            0::NUMERIC as item_discount,
+            0::NUMERIC as global_discount
           FROM pawn_ticket pt
           LEFT JOIN jewelry j ON pt.item_id = j.item_id
           WHERE pt.transaction_id = $1

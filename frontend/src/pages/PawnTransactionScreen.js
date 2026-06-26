@@ -113,6 +113,7 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [photoTargetId,    setPhotoTargetId]    = useState(null);
   const [convertAnchor,    setConvertAnchor]    = useState(null);
   const [convertRow,       setConvertRow]       = useState(null);
+  const [transactionTypes, setTransactionTypes] = useState([]);
   const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
   const [cameraStream,     setCameraStream]     = useState(null);
   const [customizeOpen,    setCustomizeOpen]    = useState(false);
@@ -142,6 +143,12 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
   const [categoryCodeMap, setCategoryCodeMap] = useState({});
   const [colorCodeMap,    setColorCodeMap]    = useState({});
   const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
+
+  useEffect(() => {
+    axios.get(`${config.apiUrl}/transaction-types`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      .then(res => setTransactionTypes(res.data))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const fetchCodeMaps = async () => {
@@ -676,6 +683,9 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
                 </Box>
               )}
             </Box>
+            <IconButton size="small" onClick={handleEditCustomer} disabled={!customer}>
+              <MuiIcons.Edit sx={{ fontSize: 15, color: '#3949ab' }} />
+            </IconButton>
             {customerValidationErrors.length > 0 && (
               <Box sx={{ flexShrink: 0, maxWidth: 220, bgcolor: '#fff5f5', px: 1.25, py: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 0.5 }}>
@@ -1235,14 +1245,24 @@ export default function PawnTransactionScreen({ customer, customerStats: initial
         <Typography variant="caption" color="text.secondary" sx={{ px: 2, pt: 1, pb: 0.5, display: 'block', fontWeight: 600, letterSpacing: 0.5 }}>
           CONVERT TO
         </Typography>
-        <MenuItem onClick={() => { onConvertTo?.({ type: 'buy', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
-          <MuiIcons.ShoppingCart sx={{ fontSize: 16, mr: 1.5, color: PURPLE }} />
-          <Typography variant="body2">Buy Ticket</Typography>
-        </MenuItem>
-        <MenuItem onClick={() => { onConvertTo?.({ type: 'trade', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
-          <MuiIcons.CompareArrows sx={{ fontSize: 16, mr: 1.5, color: '#388e3c' }} />
-          <Typography variant="body2">Trade Ticket</Typography>
-        </MenuItem>
+        {(() => {
+          const buy   = transactionTypes.find(t => t.type === 'buy')   ?? {};
+          const trade = transactionTypes.find(t => t.type === 'trade') ?? {};
+          const BuyIcon   = MuiIcons[buy.icon]   ?? MuiIcons.ShoppingCart;
+          const TradeIcon = MuiIcons[trade.icon] ?? MuiIcons.CompareArrows;
+          return (
+            <>
+              <MenuItem onClick={() => { onConvertTo?.({ type: 'buy', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
+                <BuyIcon sx={{ fontSize: 16, mr: 1.5, color: buy.color ?? PURPLE }} />
+                <Typography variant="body2">Buy Ticket</Typography>
+              </MenuItem>
+              <MenuItem onClick={() => { onConvertTo?.({ type: 'trade', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
+                <TradeIcon sx={{ fontSize: 16, mr: 1.5, color: trade.color ?? '#388e3c' }} />
+                <Typography variant="body2">Trade Ticket</Typography>
+              </MenuItem>
+            </>
+          );
+        })()}
       </Menu>
 
       {receiptLoading && (
