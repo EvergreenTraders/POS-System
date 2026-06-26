@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
 import {
@@ -326,6 +326,7 @@ function cleanupExpiredWorkspaces() {
 
 export default function ModernTransactions() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
@@ -791,9 +792,20 @@ export default function ModernTransactions() {
                     Select Customer
                   </Button>
                   <Button fullWidth variant="outlined" size="small"
-                    startIcon={<MuiIcons.Visibility fontSize="small" />}
+                    startIcon={<MuiIcons.Edit fontSize="small" />}
+                    onClick={() => navigate('/customer-editor', {
+                      state: {
+                        customer: {
+                          ...customer,
+                          id_expiry_date: customer.id_expiry_date ? new Date(customer.id_expiry_date).toISOString().substring(0, 10) : '',
+                          date_of_birth:  customer.date_of_birth  ? new Date(customer.date_of_birth).toISOString().substring(0, 10)  : '',
+                        },
+                        mode: 'edit',
+                        returnTo: location.pathname,
+                      },
+                    })}
                     sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
-                    View Customer
+                    Edit Customer
                   </Button>
                   <Button fullWidth variant="outlined" size="small" color="error"
                     onClick={handleClearCustomer}
@@ -856,8 +868,9 @@ export default function ModernTransactions() {
               <Divider />
               <Button fullWidth variant="outlined" size="small"
                 startIcon={<MuiIcons.PersonAdd fontSize="small" />}
+                onClick={() => navigate('/customer-editor', { state: { mode: 'create', returnTo: location.pathname } })}
                 sx={{ borderRadius: 2, fontSize: 11, justifyContent: 'flex-start' }}>
-                Create New Customer
+                New Customer
               </Button>
               <Button fullWidth variant="outlined" size="small"
                 startIcon={<MuiIcons.QrCode2 fontSize="small" />}
@@ -879,10 +892,6 @@ export default function ModernTransactions() {
               </Badge>
               <Typography variant="caption" color="text.secondary">Add, edit or remove transactions before checkout.</Typography>
             </Box>
-            <Button variant="contained" size="small" startIcon={<MuiIcons.Add />} endIcon={<MuiIcons.ExpandMore />}
-              sx={{ bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, borderRadius: 2, fontSize: 12 }}>
-              Add Transaction
-            </Button>
           </Paper>
 
           {/* Transaction cards grid */}
