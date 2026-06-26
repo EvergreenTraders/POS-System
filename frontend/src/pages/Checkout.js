@@ -1534,7 +1534,9 @@ function Checkout() {
             if (transactionType === 'sale' && item.item_id && item.fromInventory) {
               try {
                 const basePrice = parseFloat(item.price) || 0;
-                const endpoint = (item.fromHardgoodsInventory || item._type === 'hardgoods')
+                const isHardgoods = item.fromHardgoodsInventory || item._type === 'hardgoods'
+                  || (item.inventory_type || '').toLowerCase() === 'hardgoods';
+                const endpoint = isHardgoods
                   ? `${config.apiUrl}/hardgoods/${item.item_id}/status`
                   : `${config.apiUrl}/jewelry/${item.item_id}/status`;
 
@@ -1695,6 +1697,29 @@ function Checkout() {
             console.error('Error removing checked out items from cart:', error);
             // Fallback to clearing everything on error
             clearCart();
+          }
+
+          // After successful sale checkout, remove the sale card from workspace localStorage
+          const saleCheckoutCompleted = checkoutSource === 'sale-ticket' &&
+            checkoutItems.some(i => (i.transaction_type || '').toLowerCase() === 'sale');
+          if (saleCheckoutCompleted) {
+            const customerId = selectedCustomer?.id;
+            const saleTicketId = checkoutItems.find(i => i.buyTicketId)?.buyTicketId;
+            if (customerId && saleTicketId) {
+              try {
+                const key = `workspace_${customerId}`;
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const filtered = (parsed.transactions || []).filter(
+                    tx => !(tx.type === 'SALE' && tx.ticketId === saleTicketId)
+                  );
+                  localStorage.setItem(key, JSON.stringify({ ...parsed, transactions: filtered }));
+                }
+              } catch (e) {
+                console.error('Error clearing sale workspace entry:', e);
+              }
+            }
           }
 
           // After successful pawn checkout, remove the card(s) from the workspace localStorage

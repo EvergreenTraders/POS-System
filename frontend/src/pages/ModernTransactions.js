@@ -657,6 +657,11 @@ export default function ModernTransactions() {
         customerStats={customerStats}
         onClose={() => { setSaleOpen(false); setExistingSaleData(null); }}
         onAddToWorkspace={handleAddSaleToWorkspace}
+        onRemoveFromWorkspace={(ticketId) => {
+          setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'SALE' && t.ticketId === ticketId)));
+          setSaleOpen(false);
+          setExistingSaleData(null);
+        }}
         existingSaleData={existingSaleData}
       />
     );

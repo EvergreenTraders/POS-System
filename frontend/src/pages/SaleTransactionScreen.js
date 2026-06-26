@@ -118,6 +118,7 @@ export default function SaleTransactionScreen({
   customerStats,
   onClose,
   onAddToWorkspace,
+  onRemoveFromWorkspace,
   existingSaleData,
 }) {
   const navigate = useNavigate();
@@ -369,9 +370,46 @@ export default function SaleTransactionScreen({
     });
   };
 
-  const handleSaveAsQuote = () => {
+  const handleSaveAsQuote = async () => {
+    if (!customer?.id) { showSnackbar('Please select a customer before saving as quote', 'error'); return; }
     if (saleItems.length === 0) { showSnackbar('Add at least one item to save as quote', 'warning'); return; }
-    showSnackbar('Save as Quote coming soon', 'info');
+
+    const token = localStorage.getItem('token');
+    const employeeId = JSON.parse(atob(token.split('.')[1])).id;
+
+    try {
+      const itemsPayload = saleItems.map(item => ({
+        item_id: item.item_id,
+        inventory_type: item.inventory_type,
+        name: item.name,
+        price: item.price,
+        quantity: item.quantity,
+        discount: resolveDiscAmt(item),
+        protectionPlan: item.protectionPlan || false,
+        globalDiscount,
+      }));
+
+      const res = await axios.post(
+        `${config.apiUrl}/quotes/sale`,
+        {
+          customer_id: customer.id,
+          employee_id: employeeId,
+          total_amount: total,
+          items: itemsPayload,
+          ticket_id: ticketId,
+          ticket_note: ticketNote || null,
+          show_on_receipt: showOnReceipt,
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      showSnackbar(`Quote ${res.data.quote_id} saved successfully. Valid for ${res.data.expires_in} days.`, 'success');
+      onRemoveFromWorkspace?.(ticketId);
+      setTimeout(() => onClose?.(), 1200);
+    } catch (err) {
+      console.error('Error saving quote:', err);
+      showSnackbar('Error saving quote. Please try again.', 'error');
+    }
   };
 
   const handleAddToWorkspace = () => {
@@ -850,16 +888,12 @@ export default function SaleTransactionScreen({
         <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
 
         {/* Save as Quote */}
-        <Tooltip title={customerValidationErrors.length > 0 ? `Missing customer fields: ${customerValidationErrors.join(', ')}` : ''} arrow>
-          <span>
-            <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
-              disabled={customerValidationErrors.length > 0}
-              onClick={handleSaveAsQuote}
-              sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
-              Save as Quote
-            </Button>
-          </span>
-        </Tooltip>
+        <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
+          disabled={saleItems.length === 0}
+          onClick={handleSaveAsQuote}
+          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+          Save as Quote
+        </Button>
 
         {/* Cancel — always enabled */}
         <Button size="small" variant="outlined" color="error" onClick={onClose}

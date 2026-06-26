@@ -738,12 +738,16 @@ function QuoteManager() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {quoteItems.map((item) => (
+                    {quoteItems.map((item) => {
+                      const isSaleItem = item.transaction_type === 'sale';
+                      return (
                       <TableRow key={item.item_id}>
                         <TableCell>{item.item_id}</TableCell>
                         <TableCell>{item.description}</TableCell>
                         <TableCell>
-                          {editingItem?.item_id === item.item_id ? (
+                          {isSaleItem ? (
+                            'Sale'
+                          ) : editingItem?.item_id === item.item_id ? (
                             <Select
                               size="small"
                               value={editingItem.transaction_type}
@@ -761,13 +765,13 @@ function QuoteManager() {
                           )}
                         </TableCell>
                         <TableCell align="right">
-                          {editingItem?.item_id === item.item_id ? (
+                          {!isSaleItem && editingItem?.item_id === item.item_id ? (
                             <TextField
                               type="number"
                               size="small"
                               value={editingItem.item_price}
                               onChange={handlePriceChange}
-                              inputProps={{ 
+                              inputProps={{
                                 step: "0.01",
                                 min: "0"
                               }}
@@ -784,7 +788,7 @@ function QuoteManager() {
                           )}
                         </TableCell>
                         <TableCell align="right">
-  {editingItem?.item_id === item.item_id ? (
+  {isSaleItem ? '—' : editingItem?.item_id === item.item_id ? (
     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
       <RadioGroup
         row
@@ -979,7 +983,7 @@ function QuoteManager() {
 
                         </TableCell>
                       </TableRow>
-                    ))}
+                    );})}
                     <TableRow>
                       <TableCell colSpan={5} align="right">
                         <strong>Total Amount:</strong>
