@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import {
   Box,
@@ -50,6 +50,7 @@ function TabPanel({ children, value, index }) {
 function HardgoodsEdit() {
   const { itemId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { enqueueSnackbar } = useSnackbar();
 
   const [loading, setLoading] = useState(true);
@@ -425,12 +426,31 @@ function HardgoodsEdit() {
     );
   }
 
+  const fromSaleTicket = location.state?.returnTo === 'sale-ticket';
+
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
+      {/* ── Breadcrumb (sale ticket context) ── */}
+      {fromSaleTicket && (
+        <Box sx={{ bgcolor: '#1a472a', color: '#fff', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+          <Typography variant="body2" fontWeight={400} sx={{ cursor: 'pointer', opacity: 0.7, '&:hover': { opacity: 1 } }}
+            onClick={() => navigate('/modern-transactions')}>
+            Transactions
+          </Typography>
+          <Typography variant="body2">›</Typography>
+          <Typography variant="body2" fontWeight={400} sx={{ cursor: 'pointer', opacity: 0.7, '&:hover': { opacity: 1 } }}
+            onClick={() => navigate('/modern-transactions', { state: { returnToSale: true } })}>
+            Sale Ticket
+          </Typography>
+          <Typography variant="body2">›</Typography>
+          <Typography variant="body2" fontWeight={600}>View Item</Typography>
+        </Box>
+      )}
+
       {/* ── Header bar ── */}
       <Paper elevation={1} sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-        <IconButton onClick={() => navigate(-1)} size="small">
+        <IconButton onClick={() => fromSaleTicket ? navigate('/modern-transactions', { state: { returnToSale: true } }) : navigate(-1)} size="small">
           <ArrowBackIcon />
         </IconButton>
         <Box sx={{ flex: 1 }}>

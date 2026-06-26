@@ -6,7 +6,7 @@ import {
   Box, Typography, Paper, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions,
-  Tooltip, Snackbar, Alert, Stack,
+  Tooltip, Snackbar, Alert, Stack, Menu, MenuItem,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
@@ -159,6 +159,9 @@ export default function SaleTransactionScreen({
 
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const showSnackbar = (message, severity = 'success') => setSnackbar({ open: true, message, severity });
+  const [convertAnchor, setConvertAnchor] = useState(null);
+  const [convertRow,    setConvertRow]    = useState(null);
+  const [transactionTypes, setTransactionTypes] = useState([]);
 
   // Sync counter with DB on first open (skip for restored workspace tickets
   // which already have a committed ID).
@@ -169,6 +172,12 @@ export default function SaleTransactionScreen({
       if (bumped) setTicketId(generateSaleTicketId());
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    axios.get(`${config.apiUrl}/transaction-types`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      .then(res => setTransactionTypes(res.data))
+      .catch(() => {});
   }, []);
 
   // Fetch configured required customer fields for the 'sale' transaction type
@@ -512,7 +521,7 @@ export default function SaleTransactionScreen({
               {/* Header row */}
               <Box sx={{
                 display: 'grid',
-                gridTemplateColumns: '52px 1fr 120px 90px 90px 90px 100px 110px',
+                gridTemplateColumns: '52px 1fr 120px 90px 90px 90px 100px 140px',
                 bgcolor: '#fafafa', borderBottom: '1px solid #e0e0e0',
                 px: 1.5, py: 1,
               }}>
@@ -552,9 +561,35 @@ export default function SaleTransactionScreen({
                         style={{ width: 70, border: '1px solid #e0e0e0', borderRadius: 4, padding: '3px 6px', fontSize: 13, color: item.discount > 0 ? '#c62828' : 'inherit' }}
                       />
                       <Typography fontSize={13} fontWeight={600}>{lineTotal.toFixed(2)}</Typography>
-                      <Box sx={{ display: 'flex', gap: 0.25 }}>
-                        <Tooltip title="Edit price">
-                          <IconButton size="small" sx={{ color: '#1565c0' }}><MuiIcons.Edit sx={{ fontSize: 17 }} /></IconButton>
+                      <Box sx={{ display: 'flex', gap: 0.25, alignItems: 'center' }}>
+                        <Tooltip title="View item">
+                          <IconButton size="small" sx={{ color: '#1565c0' }}
+                            onClick={() => {
+                              sessionStorage.setItem('pendingSaleReturn', JSON.stringify({
+                                customerId: customer?.id || null,
+                                customer,
+                                ticketId,
+                                saleItems,
+                                ticketNote,
+                                showOnReceipt,
+                                globalDiscount,
+                              }));
+                              if (item.inventory_type === 'HG') {
+                                navigate(`/hardgoods-edit/${item.item_id}`, { state: { returnTo: 'sale-ticket' } });
+                              } else {
+                                navigate('/jewelry-edit', { state: { itemId: item.item_id, returnTo: 'sale-ticket' } });
+                              }
+                            }}
+                          >
+                            <MuiIcons.Visibility sx={{ fontSize: 17 }} />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Convert">
+                          <IconButton size="small" sx={{ color: '#555' }}
+                            onClick={e => { setConvertAnchor(e.currentTarget); setConvertRow(item); }}
+                          >
+                            <MuiIcons.SwapHoriz sx={{ fontSize: 17 }} />
+                          </IconButton>
                         </Tooltip>
                         <Tooltip title="Delete">
                           <IconButton size="small" color="error" onClick={() => handleRemoveItem(item._lineId)}>
@@ -669,7 +704,7 @@ export default function SaleTransactionScreen({
                   key={`empty-${i}`}
                   sx={{
                     display: 'grid',
-                    gridTemplateColumns: '52px 1fr 120px 90px 90px 90px 100px 110px',
+                    gridTemplateColumns: '52px 1fr 120px 90px 90px 90px 100px 140px',
                     px: 1.5, py: 1.25, borderBottom: '1px solid #f0f0f0',
                     alignItems: 'center', opacity: 0.45,
                   }}
@@ -868,6 +903,31 @@ export default function SaleTransactionScreen({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Convert menu */}
+      <Menu anchorEl={convertAnchor} open={Boolean(convertAnchor)} onClose={() => { setConvertAnchor(null); setConvertRow(null); }}>
+        <Typography variant="caption" color="text.secondary" sx={{ px: 2, pt: 1, pb: 0.5, display: 'block', fontWeight: 600, letterSpacing: 0.5 }}>
+          CONVERT TO
+        </Typography>
+        {(() => {
+          const layaway = transactionTypes.find(t => t.type === 'layaway') ?? {};
+          const trade   = transactionTypes.find(t => t.type === 'trade')   ?? {};
+          const LayawayIcon = MuiIcons[layaway.icon] ?? MuiIcons.Layers;
+          const TradeIcon   = MuiIcons[trade.icon]   ?? MuiIcons.CompareArrows;
+          return (
+            <>
+              <MenuItem onClick={() => { showSnackbar('Layaway coming soon', 'info'); setConvertAnchor(null); setConvertRow(null); }}>
+                <LayawayIcon sx={{ fontSize: 16, mr: 1.5, color: layaway.color ?? '#e65100' }} />
+                <Typography variant="body2">Layaway</Typography>
+              </MenuItem>
+              <MenuItem onClick={() => { showSnackbar('Trade ticket coming soon', 'info'); setConvertAnchor(null); setConvertRow(null); }}>
+                <TradeIcon sx={{ fontSize: 16, mr: 1.5, color: trade.color ?? '#388e3c' }} />
+                <Typography variant="body2">Trade Ticket</Typography>
+              </MenuItem>
+            </>
+          );
+        })()}
+      </Menu>
 
       <Snackbar open={snackbar.open} autoHideDuration={3000}
         onClose={() => setSnackbar(s => ({ ...s, open: false }))}
