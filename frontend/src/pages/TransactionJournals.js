@@ -283,10 +283,15 @@ function TransactionJournals() {
       const price = parseFloat(item.item_price || 0);
       const stRec = isSaleTicket ? saleTickets.find(st => st.sale_ticket_id === ticketId && st.item_id === item.item_id) : null;
       const pp = parseFloat(item.protection_plan || stRec?.protection_plan || 0);
-      return sum + price + (pp > 0 ? price * pp / 100 : 0);
+      const itemDisc = parseFloat(item.item_discount || stRec?.item_discount || 0);
+      return sum + price + (pp > 0 ? price * pp / 100 : 0) - itemDisc;
     }, 0);
-    const taxAmount = isSaleTransaction ? subtotalAmount * taxRate : 0;
-    const totalAmount = subtotalAmount + taxAmount;
+    const globalDiscountAmount = isSaleTicket
+      ? parseFloat(ticketItems[0]?.global_discount || saleTickets.find(st => st.sale_ticket_id === ticketId)?.global_discount || 0)
+      : 0;
+    const taxableAmount = Math.max(0, subtotalAmount - globalDiscountAmount);
+    const taxAmount = isSaleTransaction ? taxableAmount * taxRate : 0;
+    const totalAmount = taxableAmount + taxAmount;
     const ticketNoteItem = ticketItems.find(i => i.ticket_note);
     const ticketNote = ticketNoteItem?.ticket_note
       || (isSaleTicket ? saleTickets.find(st => st.sale_ticket_id === ticketId && st.ticket_note)?.ticket_note : null)
@@ -443,6 +448,7 @@ function TransactionJournals() {
                 const stRecord = isSaleTicket ? saleTickets.find(st => st.sale_ticket_id === ticketId && st.item_id === item.item_id) : null;
                 const ppPct = parseFloat(item.protection_plan || stRecord?.protection_plan || 0);
                 const ppAmount = ppPct > 0 ? fullPrice * ppPct / 100 : 0;
+                const itemDisc = parseFloat(item.item_discount || stRecord?.item_discount || 0);
                 const desc = item.long_desc || item.short_desc || item.item_details?.description || item.description || `Item ${index + 1}`;
                 return `
                   <tr>
@@ -455,6 +461,12 @@ function TransactionJournals() {
                     <td style="text-align: right; font-size: 10px; color: #1565c0;">$${ppAmount.toFixed(2)}</td>
                   </tr>
                   ` : ''}
+                  ${itemDisc > 0 ? `
+                  <tr>
+                    <td style="padding-left: 16px; font-size: 10px; color: #c62828; font-style: italic;">Item Discount</td>
+                    <td style="text-align: right; font-size: 10px; color: #c62828;">-$${itemDisc.toFixed(2)}</td>
+                  </tr>
+                  ` : ''}
                 `;
               }).join('')}
             </tbody>
@@ -465,6 +477,12 @@ function TransactionJournals() {
               <span>Subtotal:</span>
               <span>$${subtotalAmount.toFixed(2)}</span>
             </div>
+            ${globalDiscountAmount > 0 ? `
+            <div class="info-row" style="font-size: 11px; color: #c62828;">
+              <span>Ticket Discount:</span>
+              <span>-$${globalDiscountAmount.toFixed(2)}</span>
+            </div>
+            ` : ''}
             ${isSaleTransaction ? `
             <div class="info-row" style="font-size: 11px; color: #444;">
               <span>Tax (${(taxRate * 100).toFixed(0)}%):</span>
@@ -1290,6 +1308,7 @@ function TransactionJournals() {
                               const ppPct = parseFloat(item.protection_plan || stRecord?.protection_plan || 0);
                               const fullPrice = parseFloat(item.item_price || 0);
                               const ppAmount = ppPct > 0 ? fullPrice * ppPct / 100 : 0;
+                              const itemDisc = parseFloat(item.item_discount || stRecord?.item_discount || 0);
                               return (
                               <React.Fragment key={`${ticketId}-${index}`}>
                               <TableRow>
@@ -1354,6 +1373,20 @@ function TransactionJournals() {
                                   </TableCell>
                                 </TableRow>
                               )}
+                              {itemDisc > 0 && (
+                                <TableRow sx={{ bgcolor: '#fff8f8' }}>
+                                  <TableCell />
+                                  <TableCell>
+                                    <Typography variant="caption" sx={{ color: '#c62828', fontStyle: 'italic' }}>
+                                      Item Discount
+                                    </Typography>
+                                  </TableCell>
+                                  <TableCell />
+                                  <TableCell align="right" sx={{ color: '#c62828', fontSize: '0.8em' }}>
+                                    -${itemDisc.toFixed(2)}
+                                  </TableCell>
+                                </TableRow>
+                              )}
                               </React.Fragment>
                               );
                             })}
@@ -1366,16 +1399,31 @@ function TransactionJournals() {
                             const price = parseFloat(item.item_price || 0) * (item.quantity || 1);
                             const stRec = saleTickets.find(st => st.item_id === item.item_id);
                             const pp = parseFloat(item.protection_plan || stRec?.protection_plan || 0);
-                            return sum + price + (pp > 0 ? price * pp / 100 : 0);
+                            const disc = parseFloat(item.item_discount || stRec?.item_discount || 0);
+                            return sum + price + (pp > 0 ? price * pp / 100 : 0) - disc;
                           }, 0);
-                          const txnTax = isSaleTxn ? subtotal * taxRate : 0;
-                          const txnTotal = subtotal + txnTax;
+                          const globalDisc = isSaleTxn
+                            ? parseFloat(transactionItems[0]?.global_discount || saleTickets[0]?.global_discount || 0)
+                            : 0;
+                          const taxable = Math.max(0, subtotal - globalDisc);
+                          const txnTax = isSaleTxn ? taxable * taxRate : 0;
+                          const txnTotal = taxable + txnTax;
                           return (
                             <>
                               <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f9f9f9' }}>
                                 <TableCell colSpan={3} align="right"><strong>Subtotal:</strong></TableCell>
                                 <TableCell align="right"><strong>${subtotal.toFixed(2)}</strong></TableCell>
                               </TableRow>
+                              {globalDisc > 0 && (
+                                <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#fff8f8' }}>
+                                  <TableCell colSpan={3} align="right" sx={{ color: '#c62828', fontSize: '0.9em' }}>
+                                    Ticket Discount:
+                                  </TableCell>
+                                  <TableCell align="right" sx={{ color: '#c62828', fontSize: '0.9em' }}>
+                                    -${globalDisc.toFixed(2)}
+                                  </TableCell>
+                                </TableRow>
+                              )}
                               {isSaleTxn && (
                                 <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f9f9f9' }}>
                                   <TableCell colSpan={3} align="right" sx={{ color: '#555', fontSize: '0.9em' }}>

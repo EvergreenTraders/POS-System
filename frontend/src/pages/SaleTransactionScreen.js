@@ -280,6 +280,7 @@ export default function SaleTransactionScreen({
       price,
       quantity: 1,
       discount: 0,
+      discountType: 'amount',
       images: invItem.images || [],
       protectionPlan: false,
       accessories: [],
@@ -293,7 +294,8 @@ export default function SaleTransactionScreen({
 
   const handleRemoveItem   = (lineId) => setSaleItems(prev => prev.filter(i => i._lineId !== lineId));
   const handleQtyChange    = (lineId, qty) => setSaleItems(prev => prev.map(i => i._lineId === lineId ? { ...i, quantity: qty } : i));
-  const handleDiscountChange = (lineId, disc) => setSaleItems(prev => prev.map(i => i._lineId === lineId ? { ...i, discount: parseFloat(disc) || 0 } : i));
+  const handleDiscountChange     = (lineId, disc) => setSaleItems(prev => prev.map(i => i._lineId === lineId ? { ...i, discount: parseFloat(disc) || 0 } : i));
+  const handleDiscountTypeChange = (lineId) => setSaleItems(prev => prev.map(i => i._lineId === lineId ? { ...i, discountType: i.discountType === 'percent' ? 'amount' : 'percent', discount: 0 } : i));
 
   const [accessoryInputs, setAccessoryInputs] = useState({});
 
@@ -320,13 +322,15 @@ export default function SaleTransactionScreen({
   const handleRemoveAccessory = (lineId, accId) =>
     setSaleItems(prev => prev.map(i => i._lineId === lineId ? { ...i, accessories: (i.accessories || []).filter(a => a.id !== accId) } : i));
 
+  const resolveDiscAmt = (i) => i.discountType === 'percent' ? i.price * (i.discount || 0) / 100 : (i.discount || 0);
+
   // Order totals
   const subtotal = saleItems.reduce((s, i) => {
     const ppAmt  = i.protectionPlan ? i.price * 0.15 : 0;
     const accAmt = (i.accessories || []).reduce((as, a) => as + a.price, 0);
     return s + i.price * i.quantity + ppAmt + accAmt;
   }, 0);
-  const itemDiscounts = saleItems.reduce((s, i) => s + i.discount * i.quantity, 0);
+  const itemDiscounts = saleItems.reduce((s, i) => s + resolveDiscAmt(i) * i.quantity, 0);
   const totalDiscount = itemDiscounts + globalDiscount;
   const taxableAmount = Math.max(0, subtotal - totalDiscount);
   const taxAmt        = taxableAmount * taxRate;
@@ -393,7 +397,7 @@ export default function SaleTransactionScreen({
         images: item.images,
         transaction_type: 'sale',
         fromInventory: true,
-        discount: item.discount,
+        discount: resolveDiscAmt(item),
         protectionPlan: item.protectionPlan || false,
         ticket_note: ticketNote || null,
         show_on_receipt: showOnReceipt,
@@ -416,7 +420,7 @@ export default function SaleTransactionScreen({
     }));
     if (customer) sessionStorage.setItem('selectedCustomer', JSON.stringify(cartCustomer));
     commitSaleTicketId();
-    navigate('/checkout', { state: { items: cartItems, allCartItems: cartItems, customer: cartCustomer, from: 'sale-ticket' } });
+    navigate('/checkout', { state: { items: cartItems, allCartItems: cartItems, customer: cartCustomer, from: 'sale-ticket', globalDiscount } });
   };
 
   return (
@@ -526,14 +530,15 @@ export default function SaleTransactionScreen({
                 px: 1.5, py: 1,
               }}>
                 {['Thumbnail', 'Item', 'SKU', 'Qty', 'List', 'Disc.', 'Total', 'Actions'].map(h => (
-                  <Typography key={h} fontSize={11} fontWeight={700} color="text.secondary" letterSpacing={0.5}>{h}</Typography>
+                  <Typography key={h} fontSize={11} fontWeight={700} color="text.secondary" letterSpacing={0.5} textAlign="center">{h}</Typography>
                 ))}
               </Box>
 
               {/* Item rows */}
               {saleItems.map(item => {
                 const thumb     = getItemImage(item);
-                const lineTotal = (item.price - item.discount) * item.quantity;
+                const discAmt   = resolveDiscAmt(item);
+                const lineTotal = (item.price - discAmt) * item.quantity;
                 const ppAmt     = item.price * 0.15;
                 const accInp    = accessoryInputs[item._lineId];
                 const ROW_SX    = { display: 'grid', gridTemplateColumns: '52px 1fr 120px 90px 90px 90px 100px 110px', px: 1.5, alignItems: 'center' };
@@ -554,12 +559,26 @@ export default function SaleTransactionScreen({
                       <Typography fontSize={12} color="text.secondary">{item.sku}</Typography>
                       <QtyCell value={item.quantity} onChange={qty => handleQtyChange(item._lineId, qty)} disabled={item.inventory_type === 'jewelry'} />
                       <Typography fontSize={13} fontWeight={500}>{item.price.toFixed(2)}</Typography>
-                      <Box
-                        component="input" type="number" min={0}
-                        value={item.discount || ''} placeholder="0.00"
-                        onChange={e => handleDiscountChange(item._lineId, e.target.value)}
-                        style={{ width: 70, border: '1px solid #e0e0e0', borderRadius: 4, padding: '3px 6px', fontSize: 13, color: item.discount > 0 ? '#c62828' : 'inherit' }}
-                      />
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                        <Box component="span"
+                          onClick={() => handleDiscountTypeChange(item._lineId)}
+                          sx={{
+                            cursor: 'pointer', fontSize: 11, fontWeight: 700, userSelect: 'none',
+                            color: item.discount > 0 ? '#c62828' : '#888',
+                            bgcolor: '#f0f0f0', border: '1px solid #ddd',
+                            borderRadius: '3px', px: 0.5, py: '2px', minWidth: 18, textAlign: 'center',
+                            '&:hover': { bgcolor: '#e0e0e0' },
+                          }}
+                        >
+                          {item.discountType === 'percent' ? '%' : '$'}
+                        </Box>
+                        <Box component="input" type="number" min={0}
+                          max={item.discountType === 'percent' ? 100 : undefined}
+                          value={item.discount || ''} placeholder="0"
+                          onChange={e => handleDiscountChange(item._lineId, e.target.value)}
+                          style={{ width: 54, border: '1px solid #e0e0e0', borderRadius: 4, padding: '3px 5px', fontSize: 12, color: item.discount > 0 ? '#c62828' : 'inherit' }}
+                        />
+                      </Box>
                       <Typography fontSize={13} fontWeight={600}>{lineTotal.toFixed(2)}</Typography>
                       <Box sx={{ display: 'flex', gap: 0.25, alignItems: 'center' }}>
                         <Tooltip title="View item">

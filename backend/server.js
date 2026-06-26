@@ -369,6 +369,11 @@ pool.query(`
   ALTER TABLE transactions ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(store_id)
 `).catch(err => console.error('transactions store_id migration:', err.message));
 
+pool.query(`
+  ALTER TABLE sale_ticket ADD COLUMN IF NOT EXISTS item_discount NUMERIC(10,2) NOT NULL DEFAULT 0;
+  ALTER TABLE sale_ticket ADD COLUMN IF NOT EXISTS global_discount NUMERIC(10,2) NOT NULL DEFAULT 0;
+`).catch(err => console.error('sale_ticket discount migration:', err.message));
+
 
 
 app.post('/api/auth/login', async (req, res) => {
@@ -7887,7 +7892,7 @@ app.get('/api/sale-ticket', async (req, res) => {
 app.post('/api/sale-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { sale_ticket_id, transaction_id, item_id, quantity, inventory_type, ticket_note, show_on_receipt, protection_plan } = req.body;
+    const { sale_ticket_id, transaction_id, item_id, quantity, inventory_type, ticket_note, show_on_receipt, protection_plan, item_discount, global_discount } = req.body;
 
     // Validate required fields
     if (!sale_ticket_id) {
@@ -7910,8 +7915,8 @@ app.post('/api/sale-ticket', async (req, res) => {
 
     // Insert new sale_ticket record
     const insertQuery = `
-      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity, inventory_type, ticket_note, show_on_receipt, protection_plan)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity, inventory_type, ticket_note, show_on_receipt, protection_plan, item_discount, global_discount)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *
     `;
 
@@ -7924,6 +7929,8 @@ app.post('/api/sale-ticket', async (req, res) => {
       ticket_note ?? null,
       show_on_receipt ?? false,
       protection_plan ?? 0,
+      item_discount ?? 0,
+      global_discount ?? 0,
     ]);
 
     await client.query('COMMIT');
@@ -10109,7 +10116,9 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             ) as has_secondary_gems,
             NULL::TEXT as ticket_note,
             FALSE as show_on_receipt,
-            0::NUMERIC as protection_plan
+            0::NUMERIC as protection_plan,
+            0::NUMERIC as item_discount,
+            0::NUMERIC as global_discount
           FROM buy_ticket bt
           LEFT JOIN jewelry j ON bt.item_id = j.item_id
             AND COALESCE(bt.inventory_type, 'JW') = 'JW'
@@ -10166,7 +10175,9 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             ) as has_secondary_gems,
             st.ticket_note,
             st.show_on_receipt,
-            st.protection_plan
+            st.protection_plan,
+            st.item_discount,
+            st.global_discount
           FROM sale_ticket st
           LEFT JOIN jewelry j ON st.item_id = j.item_id
             AND COALESCE(st.inventory_type, 'JW') = 'JW'
@@ -10220,7 +10231,9 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             ) as has_secondary_gems,
             pt.ticket_note,
             pt.show_on_receipt,
-            0::NUMERIC as protection_plan
+            0::NUMERIC as protection_plan,
+            0::NUMERIC as item_discount,
+            0::NUMERIC as global_discount
           FROM pawn_ticket pt
           LEFT JOIN jewelry j ON pt.item_id = j.item_id
           WHERE pt.transaction_id = $1

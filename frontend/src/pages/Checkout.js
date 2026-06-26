@@ -159,6 +159,7 @@ function Checkout() {
     let customerData = null;
     let fromSource = null;
     let allCartItemsData = null;
+    let globalDiscount = location.state?.globalDiscount ?? 0;
 
     if (location.state?.items) {
       // Data from navigation state (preferred method)
@@ -259,8 +260,12 @@ function Checkout() {
           return normalizedItem;
         });
 
-        // Set the checkout items, ensuring jewelry items retain all fields
-        setCheckoutItems(normalizedItems);
+        // Stamp globalDiscount onto each item so the POST handler can read it
+        const itemsWithDiscount = fromSource === 'sale-ticket'
+          ? normalizedItems.map(i => ({ ...i, globalDiscount }))
+          : normalizedItems;
+
+        setCheckoutItems(itemsWithDiscount);
         setAllCartItems(allCartItemsData || items);
         setCheckoutSource(fromSource);
 
@@ -452,7 +457,7 @@ function Checkout() {
     const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
     const isTaxExempt = selectedCustomer?.tax_exempt || false;
 
-    return itemsToCalculate.reduce((total, item, index) => {
+    const subtotal = itemsToCalculate.reduce((acc, item, index) => {
       let itemValue = 0;
       const transactionType = item.transaction_type?.toLowerCase() || '';
 
@@ -481,14 +486,17 @@ function Checkout() {
         else if (item.totalAmount !== undefined) itemValue = parseFloat(item.totalAmount) || 0;
       }
 
-      // For sale items, apply quantity multiplication
+      // For sale items, apply quantity multiplication and per-item discount
       if (transactionType === 'sale') {
         const quantity = parseInt(item.quantity) || 1;
         itemValue = itemValue * quantity;
+        const discountAmt = parseFloat(item.discount) || 0;
+        itemValue = Math.max(0, itemValue - discountAmt);
       }
 
-      // Add protection plan (15% of item price) if enabled
-      const protectionPlanAmount = item.protectionPlan ? itemValue * 0.15 : 0;
+      // Add protection plan (15% of original price, before discount)
+      const basePrice = parseFloat(item.price) || 0;
+      const protectionPlanAmount = item.protectionPlan ? basePrice * 0.15 : 0;
       itemValue = itemValue + protectionPlanAmount;
 
       // For sale items, add tax (unless customer is tax-exempt)
@@ -505,8 +513,19 @@ function Checkout() {
         itemValue = Math.abs(itemValue);
       }
 
-      return total + Math.round(itemValue * 100) / 100;
+      return acc + Math.round(itemValue * 100) / 100;
     }, 0);
+
+    // Apply global discount (pre-tax) for sale tickets
+    const saleItem = itemsToCalculate.find(i => (i.transaction_type || '').toLowerCase() === 'sale');
+    if (saleItem) {
+      const gd = parseFloat(saleItem.globalDiscount || 0);
+      if (gd > 0) {
+        const gdWithTax = isTaxExempt ? gd : Math.round(gd * (1 + taxRate) * 100) / 100;
+        return subtotal - gdWithTax;
+      }
+    }
+    return subtotal;
   }, [checkoutItems, cartItems, selectedCustomer, taxRate]);
 
   const calculateTax = useCallback(() => {
@@ -1283,6 +1302,8 @@ function Checkout() {
                     ticket_note: item.ticket_note || null,
                     show_on_receipt: item.show_on_receipt || false,
                     protection_plan: item.protectionPlan ? 15 : 0,
+                    item_discount: parseFloat(item.discount) || 0,
+                    global_discount: parseFloat(item.globalDiscount) || 0,
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }
@@ -2213,6 +2234,7 @@ const handleBackToEstimation = () => {
 
                       // Determine price to display
                       let price = 0;
+                      let originalPrice = 0;
 
                       // Special handling for redeem transactions
                       if (itemTransactionType === 'redeem') {
@@ -2230,22 +2252,26 @@ const handleBackToEstimation = () => {
                           // For other items in the same redeem ticket, price is 0
                           price = 0;
                         }
+                        originalPrice = price;
                       } else {
                         // For non-redeem items, use standard price logic
                         if (item.price !== undefined) price = parseFloat(item.price) || 0;
                         else if (item.value !== undefined) price = parseFloat(item.value) || 0;
                         else if (item.fee !== undefined) price = parseFloat(item.fee) || 0;
                         else if (item.amount !== undefined) price = parseFloat(item.amount) || 0;
+                        originalPrice = price;
                       }
 
-                      // For sale items, multiply by quantity
+                      // For sale items, multiply by quantity and deduct per-item discount
                       if (itemTransactionType === 'sale') {
                         const quantity = parseInt(item.quantity) || 1;
                         price = price * quantity;
+                        const discountAmt = parseFloat(item.discount) || 0;
+                        price = Math.max(0, price - discountAmt);
                       }
 
-                      // Add protection plan (15% of item price) if enabled
-                      const protectionPlanAmount = item.protectionPlan ? price * 0.15 : 0;
+                      // Add protection plan (15% of original price, before discount)
+                      const protectionPlanAmount = item.protectionPlan ? originalPrice * 0.15 : 0;
                       let totalPrice = price + protectionPlanAmount;
 
                       // For sale items, add tax (unless customer is tax-exempt)
@@ -2299,6 +2325,11 @@ const handleBackToEstimation = () => {
                                   + Protection Plan (15%): ${protectionPlanAmount.toFixed(2)}
                                 </span>
                               )}
+                              {itemTransactionType === 'sale' && parseFloat(item.discount) > 0 && (
+                                <span style={{ fontSize: '0.85em', color: '#c62828', fontStyle: 'italic' }}>
+                                  - Discount: ${parseFloat(item.discount).toFixed(2)}
+                                </span>
+                              )}
                               {itemTransactionType === 'sale' && !selectedCustomer?.tax_exempt && (
                                 <span style={{ fontSize: '0.85em', color: '#666', fontStyle: 'italic' }}>
                                   + Tax ({(taxRate * 100).toFixed(0)}%): ${((price + protectionPlanAmount) * taxRate).toFixed(2)}
@@ -2329,6 +2360,17 @@ const handleBackToEstimation = () => {
 
               {/* Price Breakdown */}
               <Box sx={{ mt: 2 }}>
+                {(() => {
+                  const saleItem = checkoutItems.find(i => (i.transaction_type || '').toLowerCase() === 'sale');
+                  const gd = parseFloat(saleItem?.globalDiscount || 0);
+                  if (!saleItem || gd <= 0) return null;
+                  return (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                      <Typography variant="body2" color="error.main">Ticket Discount:</Typography>
+                      <Typography variant="body2" color="error.main">-${gd.toFixed(2)}</Typography>
+                    </Box>
+                  );
+                })()}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                   <Typography variant="h6" fontWeight="bold">Total:</Typography>
                   <Typography variant="h6" fontWeight="bold" color="primary">
