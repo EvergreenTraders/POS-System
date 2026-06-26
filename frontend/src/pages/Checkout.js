@@ -109,7 +109,7 @@ function Checkout() {
   });
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [checkoutItems, setCheckoutItems] = useState([]);
+  const [checkoutItems, setCheckoutItems] = useState(() => location.state?.items || []);
   const [allCartItems, setAllCartItems] = useState([]);
   const [jewelryItems, setJewelryItems] = useState([]);
 
@@ -136,6 +136,7 @@ function Checkout() {
     phone: '',
     email: ''
   });
+  const [checkoutSource, setCheckoutSource] = useState(location.state?.from || null);
   const [taxRate, setTaxRate] = useState(0.13); // Default 13% tax rate
   const [selectedProvince, setSelectedProvince] = useState('ON');
   const [provinceName, setProvinceName] = useState('Ontario');
@@ -202,6 +203,7 @@ function Checkout() {
         // Don't add items to cart - they should only be displayed in checkout, not in cart icon
         // Just set checkoutItems for display
         setCheckoutItems(itemsToCheckout);
+        setCheckoutSource(fromSource);
 
         // Set the customer if it exists
         if (customerData) {
@@ -236,7 +238,7 @@ function Checkout() {
 
         setIsInitialized(true);
       }
-      else if (fromSource === 'cart') {
+      else if (fromSource === 'cart' || fromSource === 'sale-ticket') {
         // Store the items to checkout and all cart items separately
         const items = itemsToCheckout;
 
@@ -260,6 +262,7 @@ function Checkout() {
         // Set the checkout items, ensuring jewelry items retain all fields
         setCheckoutItems(normalizedItems);
         setAllCartItems(allCartItemsData || items);
+        setCheckoutSource(fromSource);
 
         // Set the customer if provided
         if (customerData) {
@@ -447,7 +450,6 @@ function Checkout() {
     // Always use checkoutItems if available, as it contains the items selected for checkout
     // Only fall back to cartItems if checkoutItems is empty (e.g., coming from estimator)
     const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
-    const taxRate = 0.13;
     const isTaxExempt = selectedCustomer?.tax_exempt || false;
 
     return itemsToCalculate.reduce((total, item, index) => {
@@ -503,9 +505,9 @@ function Checkout() {
         itemValue = Math.abs(itemValue);
       }
 
-      return total + itemValue;
+      return total + Math.round(itemValue * 100) / 100;
     }, 0);
-  }, [checkoutItems, cartItems, selectedCustomer]);
+  }, [checkoutItems, cartItems, selectedCustomer, taxRate]);
 
   const calculateTax = useCallback(() => {
     // Tax is not calculated - all prices already include tax
@@ -1511,16 +1513,13 @@ function Checkout() {
             if (transactionType === 'sale' && item.item_id && item.fromInventory) {
               try {
                 const basePrice = parseFloat(item.price) || 0;
-                const protectionPlanAmount = item.protectionPlan ? basePrice * 0.15 : 0;
-                const totalItemPrice = basePrice + protectionPlanAmount;
-
                 const endpoint = (item.fromHardgoodsInventory || item._type === 'hardgoods')
                   ? `${config.apiUrl}/hardgoods/${item.item_id}/status`
                   : `${config.apiUrl}/jewelry/${item.item_id}/status`;
 
                 await axios.put(
                   endpoint,
-                  { status: 'SOLD', item_price: totalItemPrice },
+                  { status: 'SOLD', item_price: basePrice },
                   { headers: { Authorization: `Bearer ${token}` } }
                 );
               } catch (updateError) {
@@ -1781,7 +1780,7 @@ const handleBackToEstimation = () => {
       clearCart();
       setCustomer(null);
       navigate('/quote-manager');
-    } else if (location.state?.from === 'coinsbullions') {
+    } else if (checkoutSource === 'coinsbullions') {
       // Save the cart items to session storage before navigating back to CoinsBullions
       sessionStorage.setItem('coinsbullionsState', JSON.stringify({
         items: cartItems
@@ -1790,7 +1789,9 @@ const handleBackToEstimation = () => {
       setCustomer(null);
       // Go back to coins bullions estimator
       navigate('/bullion-estimator');
-    } else if (location.state?.from === 'cart') {
+    } else if (checkoutSource === 'sale-ticket') {
+      navigate('/modern-transactions', { state: { returnToSale: true } });
+    } else if (checkoutSource === 'cart') {
       // Check if this is a pawn-only checkout — navigate back to pawn screen
       const isPawnCheckout = checkoutItems.length > 0 &&
         checkoutItems.every(item => (item.transaction_type || '').toLowerCase() === 'pawn');
@@ -1919,11 +1920,18 @@ const handleBackToEstimation = () => {
   const isPawnCheckout = checkoutItems.length > 0 &&
     checkoutItems.every(item => (item.transaction_type || '').toLowerCase() === 'pawn');
 
+  const isSaleCheckout = checkoutSource === 'sale-ticket';
+  const themeColor = isSaleCheckout ? '#2e7d32' : PURPLE;
+  const themeDark  = isSaleCheckout ? '#1b5e20' : PURPLE_DARK;
+  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : '#f3e5f5';
+
   const breadcrumbSource = isPawnCheckout
     ? 'Pawn Transaction'
-    : location.state?.from === 'coinsbullions'
+    : checkoutSource === 'sale-ticket'
+    ? 'Sale Transaction'
+    : checkoutSource === 'coinsbullions'
     ? 'Coins & Bullions'
-    : location.state?.from === 'cart'
+    : checkoutSource === 'cart'
     ? 'Cart'
     : 'Estimator';
 
@@ -1931,7 +1939,7 @@ const handleBackToEstimation = () => {
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
 
       {/* Breadcrumb — matches PawnTransactionScreen style */}
-      <Box sx={{ bgcolor: PURPLE, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      <Box sx={{ bgcolor: themeColor, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
         <Typography
           variant="body2"
           fontWeight={400}
@@ -2242,7 +2250,7 @@ const handleBackToEstimation = () => {
 
                       // For sale items, add tax (unless customer is tax-exempt)
                       if (itemTransactionType === 'sale' && !selectedCustomer?.tax_exempt) {
-                        totalPrice = totalPrice * 1.13;
+                        totalPrice = totalPrice * (1 + taxRate);
                       }
 
                       // Apply sign based on transaction type
@@ -2293,7 +2301,7 @@ const handleBackToEstimation = () => {
                               )}
                               {itemTransactionType === 'sale' && !selectedCustomer?.tax_exempt && (
                                 <span style={{ fontSize: '0.85em', color: '#666', fontStyle: 'italic' }}>
-                                  + Tax (13%): ${((price + protectionPlanAmount) * 0.13).toFixed(2)}
+                                  + Tax ({(taxRate * 100).toFixed(0)}%): ${((price + protectionPlanAmount) * taxRate).toFixed(2)}
                                 </span>
                               )}
                               {itemTransactionType === 'sale' && selectedCustomer?.tax_exempt && (
@@ -2381,7 +2389,7 @@ const handleBackToEstimation = () => {
                   variant="outlined"
                   startIcon={<ArrowBackIcon />}
                   onClick={handleBackToEstimation}
-                  sx={{ borderColor: PURPLE, color: PURPLE, '&:hover': { borderColor: PURPLE_DARK, bgcolor: '#f3e5f5' } }}
+                  sx={{ borderColor: themeColor, color: themeColor, '&:hover': { borderColor: themeDark, bgcolor: themeHoverBg } }}
                 >
                   Cancel
                 </Button>

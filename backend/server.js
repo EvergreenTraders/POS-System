@@ -10144,7 +10144,7 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             j.jewelry_color,
             j.metal_spot_price,
             j.est_metal_value,
-            COALESCE(j.item_price, hg.cost_price) as item_price,
+            COALESCE(j.item_price, hg.item_price, hg.retail_price) as item_price,
             COALESCE(j.images, hg.images) as images,
             COALESCE(j.status, hg.status) as item_status,
             j.primary_gem_type,

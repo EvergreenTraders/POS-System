@@ -24,7 +24,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon, Warning as WarningIcon, Print as PrintIcon } from '@mui/icons-material';
+import { Visibility as ViewIcon, AttachMoney as AttachMoneyIcon, Warning as WarningIcon, Print as PrintIcon, Security } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -56,6 +56,7 @@ function TransactionJournals() {
   const [buyTickets, setBuyTickets] = useState([]);
   const [saleTickets, setSaleTickets] = useState([]);
   const [pawnTickets, setPawnTickets] = useState([]);
+  const [taxRate, setTaxRate] = useState(0.13);
   const API_BASE_URL = config.apiUrl;
 
   const [transactions, setTransactions] = useState([]);
@@ -76,7 +77,7 @@ function TransactionJournals() {
     pawn_receipt: ''
   });
 
-  // Fetch receipt config from API
+  // Fetch receipt config and province tax rate from API
   useEffect(() => {
     const fetchReceiptConfig = async () => {
       try {
@@ -94,7 +95,21 @@ function TransactionJournals() {
       }
     };
 
+    const fetchTaxRate = async () => {
+      try {
+        const province = localStorage.getItem('selectedProvince') || 'ON';
+        const response = await axios.get(`${API_BASE_URL}/tax-config/${province}`);
+        if (response.data) {
+          const total = response.data.hst_rate || (response.data.gst_rate + response.data.pst_rate) || 13;
+          setTaxRate(total / 100);
+        }
+      } catch (error) {
+        console.error('Error fetching tax rate:', error);
+      }
+    };
+
     fetchReceiptConfig();
+    fetchTaxRate();
   }, [API_BASE_URL]);
 
   // Fetch transaction types from API
@@ -222,24 +237,8 @@ function TransactionJournals() {
     const isBuyTicket = buyTickets.some(bt => bt.buy_ticket_id === ticketId);
     const isPawnTicket = pawnTickets.some(pt => pt.pawn_ticket_id === ticketId);
 
-    // Get items for this ticket
-    let ticketItems = [];
-    if (isSaleTicket) {
-      ticketItems = transactionItems.filter(item => {
-        const saleTicket = saleTickets.find(st => st.item_id === item.item_id);
-        return saleTicket?.sale_ticket_id === ticketId;
-      });
-    } else if (isBuyTicket) {
-      ticketItems = transactionItems.filter(item => {
-        const buyTicket = buyTickets.find(bt => bt.item_id === item.item_id);
-        return buyTicket?.buy_ticket_id === ticketId;
-      });
-    } else if (isPawnTicket) {
-      ticketItems = transactionItems.filter(item => {
-        const pawnTicket = pawnTickets.find(pt => pt.item_id === item.item_id);
-        return pawnTicket?.pawn_ticket_id === ticketId;
-      });
-    }
+    // Get items for this ticket — use ticket_id directly (already set by the union query)
+    let ticketItems = transactionItems.filter(item => item.ticket_id === ticketId);
 
     if (ticketItems.length === 0) {
       alert('No items found for this ticket');
@@ -280,9 +279,18 @@ function TransactionJournals() {
       console.error('Error fetching business info:', error);
     }
 
-    const totalAmount = ticketItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0)), 0);
-    const ticketNoteItem = ticketItems.find(i => i.show_on_receipt && i.ticket_note);
-    const ticketNote = ticketNoteItem?.ticket_note || null;
+    const subtotalAmount = ticketItems.reduce((sum, item) => {
+      const price = parseFloat(item.item_price || 0);
+      const stRec = isSaleTicket ? saleTickets.find(st => st.sale_ticket_id === ticketId && st.item_id === item.item_id) : null;
+      const pp = parseFloat(item.protection_plan || stRec?.protection_plan || 0);
+      return sum + price + (pp > 0 ? price * pp / 100 : 0);
+    }, 0);
+    const taxAmount = isSaleTransaction ? subtotalAmount * taxRate : 0;
+    const totalAmount = subtotalAmount + taxAmount;
+    const ticketNoteItem = ticketItems.find(i => i.ticket_note);
+    const ticketNote = ticketNoteItem?.ticket_note
+      || (isSaleTicket ? saleTickets.find(st => st.sale_ticket_id === ticketId && st.ticket_note)?.ticket_note : null)
+      || null;
     const transactionDate = selectedTransaction ? new Date(selectedTransaction.created_at) : new Date();
     const formattedDate = transactionDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
     const formattedTime = transactionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -431,16 +439,22 @@ function TransactionJournals() {
             </thead>
             <tbody>
               ${ticketItems.map((item, index) => {
-                const price = parseFloat(item.item_price || 0);
+                const fullPrice = parseFloat(item.item_price || 0);
+                const stRecord = isSaleTicket ? saleTickets.find(st => st.sale_ticket_id === ticketId && st.item_id === item.item_id) : null;
+                const ppPct = parseFloat(item.protection_plan || stRecord?.protection_plan || 0);
+                const ppAmount = ppPct > 0 ? fullPrice * ppPct / 100 : 0;
+                const desc = item.long_desc || item.short_desc || item.item_details?.description || item.description || `Item ${index + 1}`;
                 return `
                   <tr>
-                    <td>
-                      ${item.item_details?.description || item.description || `Item ${index + 1}`}
-                    </td>
-                    <td style="text-align: right;">
-                      $${price.toFixed(2)}
-                    </td>
+                    <td>${desc}</td>
+                    <td style="text-align: right;">$${fullPrice.toFixed(2)}</td>
                   </tr>
+                  ${ppPct > 0 ? `
+                  <tr>
+                    <td style="padding-left: 16px; font-size: 10px; color: #1565c0; font-style: italic;">&#128737; Protection Plan (${ppPct}%)</td>
+                    <td style="text-align: right; font-size: 10px; color: #1565c0;">$${ppAmount.toFixed(2)}</td>
+                  </tr>
+                  ` : ''}
                 `;
               }).join('')}
             </tbody>
@@ -448,13 +462,23 @@ function TransactionJournals() {
 
           <div class="total-row">
             <div class="info-row">
+              <span>Subtotal:</span>
+              <span>$${subtotalAmount.toFixed(2)}</span>
+            </div>
+            ${isSaleTransaction ? `
+            <div class="info-row" style="font-size: 11px; color: #444;">
+              <span>Tax (${(taxRate * 100).toFixed(0)}%):</span>
+              <span>$${taxAmount.toFixed(2)}</span>
+            </div>
+            ` : ''}
+            <div class="info-row" style="font-weight: bold; border-top: 1px solid #333; margin-top: 4px; padding-top: 4px;">
               <span>Total Amount:</span>
               <span>$${totalAmount.toFixed(2)}</span>
             </div>
           </div>
 
           ${ticketNote ? `
-          <div style="margin-top: 15px; border-top: 1px dashed #333; padding-top: 10px; font-size: 11px;">
+          <div style="margin-top: 12px; border-top: 1px dashed #333; padding-top: 10px; font-size: 11px;">
             <strong>Note:</strong> <span style="white-space: pre-wrap;">${ticketNote}</span>
           </div>
           ` : ''}
@@ -1261,8 +1285,14 @@ function TransactionJournals() {
                                 </TableCell>
                               </TableRow>
                             )}
-                            {ticketItems.map((item, index) => (
-                              <TableRow key={`${ticketId}-${index}`}>
+                            {ticketItems.map((item, index) => {
+                              const stRecord = saleTickets.find(st => st.sale_ticket_id === ticketId && st.item_id === item.item_id);
+                              const ppPct = parseFloat(item.protection_plan || stRecord?.protection_plan || 0);
+                              const fullPrice = parseFloat(item.item_price || 0);
+                              const ppAmount = ppPct > 0 ? fullPrice * ppPct / 100 : 0;
+                              return (
+                              <React.Fragment key={`${ticketId}-${index}`}>
+                              <TableRow>
                             <TableCell>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                                 {(item.images && Array.isArray(item.images) && item.images.length > 0) || item.item_details?.images?.[0] ? (
@@ -1293,31 +1323,76 @@ function TransactionJournals() {
                             </TableCell>
                             <TableCell>
                                 <Box>
-                                  <div>{item.item_details?.description || `Item ${index + 1}`}</div>
+                                  <div>{item.long_desc || item.short_desc || item.item_details?.description || `Item ${index + 1}`}</div>
                                   {item.description && <div style={{ fontSize: '0.8em', color: '#666' }}>{item.description}</div>}
                                 </Box>
                             </TableCell>
                             <TableCell>{item.transaction_type}</TableCell>
                             <TableCell align="right">
-                                  ${parseFloat(item.item_price || 0).toFixed(2)}
+                                  ${fullPrice.toFixed(2)}
                                   {item.quantity > 1 && (
                                     <div style={{ fontSize: '0.8em', color: '#666' }}>
-                                      {item.quantity} @ ${(parseFloat(item.item_price || 0) / item.quantity).toFixed(2)} each
+                                      {item.quantity} @ ${(fullPrice / item.quantity).toFixed(2)} each
                                     </div>
                                   )}
                             </TableCell>
                           </TableRow>
-                            ))}
+                              {ppPct > 0 && (
+                                <TableRow sx={{ bgcolor: '#f0f7ff' }}>
+                                  <TableCell />
+                                  <TableCell>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                      <Security sx={{ fontSize: 14, color: '#1565c0' }} />
+                                      <Typography variant="caption" sx={{ color: '#1565c0', fontStyle: 'italic' }}>
+                                        Protection Plan ({ppPct}%)
+                                      </Typography>
+                                    </Box>
+                                  </TableCell>
+                                  <TableCell />
+                                  <TableCell align="right" sx={{ color: '#1565c0', fontSize: '0.8em' }}>
+                                    +${ppAmount.toFixed(2)}
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                              </React.Fragment>
+                              );
+                            })}
                           </React.Fragment>
                         ))}
-                        <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f9f9f9' }}>
-                          <TableCell colSpan={3} align="right"><strong>Subtotal:</strong></TableCell>
-                          <TableCell align="right">
-                            <strong>
-                              ${transactionItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0) * (item.quantity || 1)), 0).toFixed(2)}
-                            </strong>
-                          </TableCell>
-                        </TableRow>
+                        {(() => {
+                          const isSaleTxn = selectedTransaction?.transaction_type_name?.toLowerCase() === 'sale'
+                            || saleTickets.length > 0;
+                          const subtotal = transactionItems.reduce((sum, item) => {
+                            const price = parseFloat(item.item_price || 0) * (item.quantity || 1);
+                            const stRec = saleTickets.find(st => st.item_id === item.item_id);
+                            const pp = parseFloat(item.protection_plan || stRec?.protection_plan || 0);
+                            return sum + price + (pp > 0 ? price * pp / 100 : 0);
+                          }, 0);
+                          const txnTax = isSaleTxn ? subtotal * taxRate : 0;
+                          const txnTotal = subtotal + txnTax;
+                          return (
+                            <>
+                              <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f9f9f9' }}>
+                                <TableCell colSpan={3} align="right"><strong>Subtotal:</strong></TableCell>
+                                <TableCell align="right"><strong>${subtotal.toFixed(2)}</strong></TableCell>
+                              </TableRow>
+                              {isSaleTxn && (
+                                <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f9f9f9' }}>
+                                  <TableCell colSpan={3} align="right" sx={{ color: '#555', fontSize: '0.9em' }}>
+                                    Tax ({(taxRate * 100).toFixed(0)}%):
+                                  </TableCell>
+                                  <TableCell align="right" sx={{ color: '#555', fontSize: '0.9em' }}>
+                                    ${txnTax.toFixed(2)}
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                              <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f0f0f0' }}>
+                                <TableCell colSpan={3} align="right"><strong>Total:</strong></TableCell>
+                                <TableCell align="right"><strong>${txnTotal.toFixed(2)}</strong></TableCell>
+                              </TableRow>
+                            </>
+                          );
+                        })()}
 
                         {/* Payment Methods Section */}
                         <TableRow sx={{ '&:last-child td': { border: 0 }, backgroundColor: '#f5f9ff' }}>

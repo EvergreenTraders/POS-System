@@ -329,10 +329,26 @@ export default function ModernTransactions() {
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
-  const [saleOpen, setSaleOpen]           = useState(false);
+  const [saleOpen, setSaleOpen]           = useState(() => {
+    if (location.state?.returnToSale) {
+      const raw = sessionStorage.getItem('pendingSaleReturn');
+      return !!raw;
+    }
+    return false;
+  });
   const [openingTxId, setOpeningTxId]     = useState(null);
   const [restoredPawnData, setRestoredPawnData] = useState(null);
-  const [existingSaleData, setExistingSaleData] = useState(null);
+  const [existingSaleData, setExistingSaleData] = useState(() => {
+    if (location.state?.returnToSale) {
+      const raw = sessionStorage.getItem('pendingSaleReturn');
+      if (!raw) return null;
+      try {
+        const { ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount } = JSON.parse(raw);
+        return { ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount };
+      } catch { return null; }
+    }
+    return null;
+  });
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
   const [noCustomerWarning, setNoCustomerWarning] = useState(false);
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
@@ -426,6 +442,25 @@ export default function ModernTransactions() {
         console.error('Failed to restore pawn session after checkout cancel:', err);
       }
     })();
+  }, [location.state]);
+
+  // Refresh customer data after returning from Checkout; saleOpen/existingSaleData seeded in useState.
+  useEffect(() => {
+    if (!location.state?.returnToSale) return;
+    const raw = sessionStorage.getItem('pendingSaleReturn');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingSaleReturn');
+    const { customerId, customer: savedCustomer } = pending;
+    if (savedCustomer) setCustomer(savedCustomer);
+    if (customerId) {
+      axios.get(`${config.apiUrl}/customers/${customerId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      })
+        .then(res => setCustomer(res.data))
+        .catch(err => console.error('Failed to refresh customer after sale checkout cancel:', err));
+    }
   }, [location.state]);
 
   // Restore pawn screen after returning from CustomerEditor

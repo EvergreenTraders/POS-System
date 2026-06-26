@@ -392,14 +392,22 @@ export default function SaleTransactionScreen({
         employee: currentUser
           ? { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(), role: currentUser.role }
           : null,
-        saleTicketId: ticketId,
+        buyTicketId: ticketId,
       }))
     );
-    const existing = JSON.parse(sessionStorage.getItem('cartItems') || '[]');
-    sessionStorage.setItem('cartItems', JSON.stringify([...existing, ...cartItems]));
+    sessionStorage.setItem('checkoutItems', JSON.stringify(cartItems));
+    sessionStorage.setItem('pendingSaleReturn', JSON.stringify({
+      customerId: customer?.id || null,
+      customer,
+      ticketId,
+      saleItems,
+      ticketNote,
+      showOnReceipt,
+      globalDiscount,
+    }));
     if (customer) sessionStorage.setItem('selectedCustomer', JSON.stringify(cartCustomer));
     commitSaleTicketId();
-    navigate('/checkout', { state: { from: 'sale-ticket' } });
+    navigate('/checkout', { state: { items: cartItems, allCartItems: cartItems, customer: cartCustomer, from: 'sale-ticket' } });
   };
 
   return (
