@@ -96,6 +96,17 @@ CREATE INDEX IF NOT EXISTS idx_hardgoods_sellable_status  ON hardgoods(sellable_
 CREATE INDEX IF NOT EXISTS idx_hardgoods_vendor           ON hardgoods(vendor_id);
 CREATE INDEX IF NOT EXISTS idx_hardgoods_images           ON hardgoods USING GIN (images);
 
+-- Add item_price column for existing deployments where it was not in the original CREATE TABLE
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'hardgoods' AND column_name = 'item_price'
+  ) THEN
+    ALTER TABLE hardgoods ADD COLUMN item_price NUMERIC(10,2);
+  END IF;
+END $$;
+
 
 -- ============================================================
 -- 2. HARDGOODS ATTRIBUTES

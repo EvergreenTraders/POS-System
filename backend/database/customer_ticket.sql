@@ -132,10 +132,14 @@ CREATE TABLE IF NOT EXISTS sale_ticket (
   transaction_id VARCHAR(50),
   item_id VARCHAR(50),
   quantity INTEGER DEFAULT 1,
+  inventory_type VARCHAR(50),
+  ticket_note TEXT,
+  show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE,
+  protection_plan NUMERIC(5,2) NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Add quantity column to existing sale_ticket table if it doesn't exist
+-- Add columns to existing sale_ticket table if they don't exist
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -143,6 +147,34 @@ BEGIN
     WHERE table_name = 'sale_ticket' AND column_name = 'quantity'
   ) THEN
     ALTER TABLE sale_ticket ADD COLUMN quantity INTEGER DEFAULT 1;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'sale_ticket' AND column_name = 'inventory_type'
+  ) THEN
+    ALTER TABLE sale_ticket ADD COLUMN inventory_type VARCHAR(50);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'sale_ticket' AND column_name = 'ticket_note'
+  ) THEN
+    ALTER TABLE sale_ticket ADD COLUMN ticket_note TEXT;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'sale_ticket' AND column_name = 'show_on_receipt'
+  ) THEN
+    ALTER TABLE sale_ticket ADD COLUMN show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'sale_ticket' AND column_name = 'protection_plan'
+  ) THEN
+    ALTER TABLE sale_ticket ADD COLUMN protection_plan NUMERIC(5,2) NOT NULL DEFAULT 0;
   END IF;
 END $$;
 

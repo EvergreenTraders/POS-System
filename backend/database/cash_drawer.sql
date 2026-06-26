@@ -577,6 +577,8 @@ CREATE INDEX IF NOT EXISTS idx_drawer_connections_active ON drawer_session_conne
 
 -- Partial unique index: only one active connection allowed per employee per session
 -- Allows multiple historical (is_active = FALSE) rows for the same employee/session
+-- Drop old table constraint if it exists (replaced by partial index)
+ALTER TABLE drawer_session_connections DROP CONSTRAINT IF EXISTS unique_active_connection;
 DO $$
 BEGIN
   IF NOT EXISTS (

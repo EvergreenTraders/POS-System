@@ -94,8 +94,31 @@ UPDATE jewelry SET processing_status = 'ON_RETAIL_FLOOR', sellable_status = 'SEL
   WHERE status IN ('REDEEMED', 'RESERVED');
 
 -- Create jewelry table for inventory
+-- Widen item_id to VARCHAR(30) for existing deployments
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'jewelry' AND column_name = 'item_id'
+      AND character_maximum_length < 30
+  ) THEN
+    ALTER TABLE jewelry ALTER COLUMN item_id TYPE VARCHAR(30);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'jewelry_secondary_gems' AND column_name = 'item_id'
+      AND character_maximum_length < 30
+  ) THEN
+    ALTER TABLE jewelry_secondary_gems ALTER COLUMN item_id TYPE VARCHAR(30);
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS jewelry (
-    item_id VARCHAR(10) PRIMARY KEY,
+    item_id VARCHAR(30) PRIMARY KEY,
     -- Basic item info
     long_desc TEXT,
     short_desc TEXT,
@@ -198,7 +221,7 @@ CREATE TRIGGER update_jewelry_timestamp
     
 -- Create secondary_gems table to store multiple secondary gems per jewelry item
 CREATE TABLE IF NOT EXISTS jewelry_secondary_gems (
-    item_id VARCHAR(10) NOT NULL,
+    item_id VARCHAR(30) NOT NULL,
      -- Secondary gem
     secondary_gem_type VARCHAR(50),
     secondary_gem_category VARCHAR(20) CHECK (secondary_gem_category IS NULL OR secondary_gem_category IN ('diamond', 'stone')),

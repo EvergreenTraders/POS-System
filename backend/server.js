@@ -370,40 +370,6 @@ pool.query(`
 `).catch(err => console.error('transactions store_id migration:', err.message));
 
 
-pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'`)
-  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_hardgoods_images ON hardgoods USING GIN (images)`))
-  .catch(err => console.error('hardgoods images migration:', err.message));
-
-pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'HOLD'`)
-  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_hardgoods_status ON hardgoods(status)`))
-  .catch(err => console.error('hardgoods status migration:', err.message));
-
-pool.query(`ALTER TABLE hardgoods ADD COLUMN IF NOT EXISTS item_price NUMERIC(10,2)`)
-  .catch(err => console.error('hardgoods item_price migration:', err.message));
-
-pool.query(`ALTER TABLE jewelry ALTER COLUMN item_id TYPE VARCHAR(30)`)
-  .catch(err => console.error('jewelry item_id length migration:', err.message));
-pool.query(`ALTER TABLE jewelry_secondary_gems ALTER COLUMN item_id TYPE VARCHAR(30)`)
-  .catch(err => console.error('jewelry_secondary_gems item_id length migration:', err.message));
-
-pool.query(`ALTER TABLE pawn_ticket ADD COLUMN IF NOT EXISTS ticket_note TEXT`)
-  .catch(err => console.error('pawn_ticket ticket_note migration:', err.message));
-pool.query(`ALTER TABLE pawn_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE`)
-  .catch(err => console.error('pawn_ticket show_on_receipt migration:', err.message));
-
-pool.query(`ALTER TABLE sale_ticket ADD COLUMN IF NOT EXISTS ticket_note TEXT`)
-  .catch(err => console.error('sale_ticket ticket_note migration:', err.message));
-pool.query(`ALTER TABLE sale_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE`)
-  .catch(err => console.error('sale_ticket show_on_receipt migration:', err.message));
-pool.query(`ALTER TABLE sale_ticket ADD COLUMN IF NOT EXISTS protection_plan NUMERIC(5,2) NOT NULL DEFAULT 0`)
-  .catch(err => console.error('sale_ticket protection_plan migration:', err.message));
-
-// Fix unique_active_connection: replace table constraint with partial index
-// Allows multiple historical (is_active = FALSE) rows per employee/session
-pool.query(`ALTER TABLE drawer_session_connections DROP CONSTRAINT IF EXISTS unique_active_connection`)
-  .then(() => pool.query(`DROP INDEX IF EXISTS unique_active_connection`))
-  .then(() => pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS unique_active_connection ON drawer_session_connections (session_id, employee_id) WHERE is_active = TRUE`))
-  .catch(err => console.error('unique_active_connection migration:', err.message));
 
 app.post('/api/auth/login', async (req, res) => {
   try {
