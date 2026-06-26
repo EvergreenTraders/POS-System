@@ -7864,6 +7864,28 @@ app.post('/api/buy-ticket', async (req, res) => {
 });
 
 // Sale Ticket API Endpoints
+
+// Returns the highest numeric sequence found in sale_ticket_id so the client
+// can keep its localStorage counter ahead of the DB and never reuse an ID.
+app.get('/api/sale-ticket/last-id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT sale_ticket_id
+      FROM sale_ticket
+      WHERE sale_ticket_id ~ '^ST-[0-9]+$'
+      ORDER BY CAST(SUBSTRING(sale_ticket_id FROM 4) AS INTEGER) DESC
+      LIMIT 1
+    `);
+    if (result.rows.length === 0) return res.json({ last_number: 0, last_id: null });
+    const lastId = result.rows[0].sale_ticket_id;
+    const num    = parseInt(lastId.replace('ST-', ''), 10);
+    res.json({ last_number: num, last_id: lastId });
+  } catch (err) {
+    console.error('Error fetching last sale ticket id:', err);
+    res.status(500).json({ error: 'Failed to fetch last sale ticket id' });
+  }
+});
+
 app.get('/api/sale-ticket', async (req, res) => {
   try {
     const { sale_ticket_id, transaction_id } = req.query;
@@ -9233,6 +9255,37 @@ app.get('/api/customers/:id/pawn/stats', async (req, res) => {
   } catch (err) {
     console.error('Error fetching customer stats:', err);
     res.status(500).json({ error: 'Failed to fetch customer stats' });
+  }
+});
+
+app.get('/api/customers/:id/sales/stats', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(DISTINCT st.sale_ticket_id) AS total_sales_count,
+        COALESCE(SUM(t.total_amount), 0)  AS total_sales_amount,
+        COALESCE((
+          SELECT SUM(p.amount * CASE WHEN t2.total_amount < 0 THEN 1 ELSE -1 END)
+          FROM payments p
+          JOIN transactions t2 ON p.transaction_id = t2.transaction_id
+          WHERE t2.customer_id = $1 AND p.payment_method = 'store_credit'
+        ), 0) AS store_credit
+      FROM sale_ticket st
+      JOIN transactions t ON st.transaction_id = t.transaction_id
+      WHERE t.customer_id = $1
+        AND t.total_amount > 0
+    `, [id]);
+
+    const row = result.rows[0];
+    res.json({
+      total_sales_count:  parseInt(row.total_sales_count)    || 0,
+      total_sales_amount: parseFloat(row.total_sales_amount) || 0,
+      store_credit:       parseFloat(row.store_credit)       || 0,
+    });
+  } catch (err) {
+    console.error('Error fetching customer sales stats:', err);
+    res.status(500).json({ error: 'Failed to fetch customer sales stats' });
   }
 });
 

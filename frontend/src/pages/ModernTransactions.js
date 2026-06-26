@@ -9,6 +9,7 @@ import {
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
+import SaleTransactionScreen from './SaleTransactionScreen';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
@@ -112,6 +113,49 @@ function PawnTransactionCard({ tx, pawnIcon, pawnColor, onOpen, onVoid }) {
   );
 }
 
+function SaleTransactionCard({ tx, onOpen, onVoid }) {
+  const fmt = (n) => `$${Number(n).toFixed(2)}`;
+  const itemCount = tx.saleItems?.length || 0;
+  return (
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: '4px solid #1a472a' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <MuiIcons.ShoppingCart sx={{ fontSize: 20, color: '#1a472a' }} />
+          <Typography fontWeight={700} fontSize={13} color="#1a472a">SALE</Typography>
+          <Chip label="Pending" size="small" sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: '#e8f5e9', color: '#1a472a' }} />
+        </Box>
+        <IconButton size="small"><MuiIcons.MoreVert fontSize="small" /></IconButton>
+      </Box>
+      <Box sx={{ px: 1.5, pb: 1.25 }}>
+        <Typography variant="caption" color="text.secondary" display="block" mb={0.75}>
+          {tx.ticketId} · {itemCount} {itemCount === 1 ? 'item' : 'items'}
+        </Typography>
+        {(tx.saleItems || []).slice(0, 3).map((item, i) => (
+          <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, borderBottom: '1px solid #f0f0f0' }}>
+            <Typography variant="caption" fontWeight={600} noWrap flex={1}>{item.name}</Typography>
+            <Typography variant="caption" color="text.secondary">{fmt(item.price * item.quantity)}</Typography>
+          </Box>
+        ))}
+        <Divider sx={{ my: 1 }} />
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+          <Typography variant="caption" fontWeight={600} color="#1a472a">Total</Typography>
+          <Typography variant="caption" fontWeight={700} color="#1a472a">{fmt(tx.total || 0)}</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
+            onClick={onOpen} sx={{ flex: 1, fontSize: 11 }}>
+            Open
+          </Button>
+          <IconButton size="small" color="error" onClick={onVoid}
+            sx={{ border: '1px solid', borderColor: 'error.main', borderRadius: 1 }}>
+            <MuiIcons.Block fontSize="small" />
+          </IconButton>
+        </Box>
+      </Box>
+    </Paper>
+  );
+}
+
 function TransactionTypeButton({ label, icon, color, onClick, count }) {
   return (
     <Badge badgeContent={count || 0} color="primary" overlap="rectangular"
@@ -192,8 +236,10 @@ export default function ModernTransactions() {
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
+  const [saleOpen, setSaleOpen]           = useState(false);
   const [openingTxId, setOpeningTxId]     = useState(null);
   const [restoredPawnData, setRestoredPawnData] = useState(null);
+  const [existingSaleData, setExistingSaleData] = useState(null);
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
   const [noCustomerWarning, setNoCustomerWarning] = useState(false);
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
@@ -398,11 +444,20 @@ export default function ModernTransactions() {
         color: '#c62828',
       };
     }
+    if (tx.type === 'SALE') {
+      const count = tx.saleItems?.length || 0;
+      return {
+        label: `Sale (${count} item${count !== 1 ? 's' : ''})`,
+        value: `+$${Number(tx.total || 0).toFixed(2)}`,
+        color: '#1a472a',
+      };
+    }
     return null;
   }).filter(Boolean);
 
   const netDue = workspaceTransactions.reduce((sum, tx) => {
     if (tx.type === 'PAWN') return sum - Number(tx.totalPawnAmount);
+    if (tx.type === 'SALE') return sum + Number(tx.total || 0);
     return sum;
   }, 0);
 
@@ -411,7 +466,23 @@ export default function ModernTransactions() {
       if (!customer) { setNoCustomerWarning(true); return; }
       if (customerLoading) return;
       setPawnOpen(true);
+    } else if (type === 'sale') {
+      setSaleOpen(true);
     }
+  };
+
+  const handleAddSaleToWorkspace = (saleData) => {
+    setWorkspaceTransactions(prev => {
+      const existingIdx = prev.findIndex(t => t.type === 'SALE' && t.ticketId === saleData.ticketId);
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx] = { ...updated[existingIdx], ...saleData };
+        return updated;
+      }
+      return [...prev, { id: Date.now(), type: 'SALE', ...saleData }];
+    });
+    setSaleOpen(false);
+    setExistingSaleData(null);
   };
 
   if (pawnOpen) {
@@ -425,6 +496,18 @@ export default function ModernTransactions() {
         onClose={() => { setPawnOpen(false); setOpeningTxId(null); setRestoredPawnData(null); }}
         onAddToWorkspace={(data) => { handleAddPawnToWorkspace(data); setRestoredPawnData(null); }}
         existingPawnData={existingPawnData}
+      />
+    );
+  }
+
+  if (saleOpen) {
+    return (
+      <SaleTransactionScreen
+        customer={customer}
+        customerStats={customerStats}
+        onClose={() => { setSaleOpen(false); setExistingSaleData(null); }}
+        onAddToWorkspace={handleAddSaleToWorkspace}
+        existingSaleData={existingSaleData}
       />
     );
   }
@@ -665,6 +748,12 @@ export default function ModernTransactions() {
                         pawnIcon={transactionTypes.find(t => t.type === 'pawn')?.icon}
                         pawnColor={transactionTypes.find(t => t.type === 'pawn')?.color}
                         onOpen={() => { setOpeningTxId(tx.id); setPawnOpen(true); }}
+                        onVoid={() => setVoidConfirm(tx)}
+                      />
+                    ) : tx.type === 'SALE' ? (
+                      <SaleTransactionCard
+                        tx={tx}
+                        onOpen={() => { setExistingSaleData(tx); setSaleOpen(true); }}
                         onVoid={() => setVoidConfirm(tx)}
                       />
                     ) : null}
