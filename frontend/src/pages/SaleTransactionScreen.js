@@ -385,6 +385,7 @@ export default function SaleTransactionScreen({
         transaction_type: 'sale',
         fromInventory: true,
         discount: item.discount,
+        protectionPlan: item.protectionPlan || false,
         ticket_note: ticketNote || null,
         show_on_receipt: showOnReceipt,
         customer: cartCustomer,

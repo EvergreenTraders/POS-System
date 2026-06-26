@@ -391,6 +391,13 @@ pool.query(`ALTER TABLE pawn_ticket ADD COLUMN IF NOT EXISTS ticket_note TEXT`)
 pool.query(`ALTER TABLE pawn_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE`)
   .catch(err => console.error('pawn_ticket show_on_receipt migration:', err.message));
 
+pool.query(`ALTER TABLE sale_ticket ADD COLUMN IF NOT EXISTS ticket_note TEXT`)
+  .catch(err => console.error('sale_ticket ticket_note migration:', err.message));
+pool.query(`ALTER TABLE sale_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE`)
+  .catch(err => console.error('sale_ticket show_on_receipt migration:', err.message));
+pool.query(`ALTER TABLE sale_ticket ADD COLUMN IF NOT EXISTS protection_plan NUMERIC(5,2) NOT NULL DEFAULT 0`)
+  .catch(err => console.error('sale_ticket protection_plan migration:', err.message));
+
 // Fix unique_active_connection: replace table constraint with partial index
 // Allows multiple historical (is_active = FALSE) rows per employee/session
 pool.query(`ALTER TABLE drawer_session_connections DROP CONSTRAINT IF EXISTS unique_active_connection`)
@@ -7914,7 +7921,7 @@ app.get('/api/sale-ticket', async (req, res) => {
 app.post('/api/sale-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { sale_ticket_id, transaction_id, item_id, quantity, inventory_type } = req.body;
+    const { sale_ticket_id, transaction_id, item_id, quantity, inventory_type, ticket_note, show_on_receipt, protection_plan } = req.body;
 
     // Validate required fields
     if (!sale_ticket_id) {
@@ -7937,8 +7944,8 @@ app.post('/api/sale-ticket', async (req, res) => {
 
     // Insert new sale_ticket record
     const insertQuery = `
-      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity, inventory_type)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO sale_ticket (sale_ticket_id, transaction_id, item_id, quantity, inventory_type, ticket_note, show_on_receipt, protection_plan)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
     `;
 
@@ -7947,7 +7954,10 @@ app.post('/api/sale-ticket', async (req, res) => {
       transaction_id || null,
       item_id || null,
       quantity || 1,
-      resolvedInventoryType
+      resolvedInventoryType,
+      ticket_note ?? null,
+      show_on_receipt ?? false,
+      protection_plan ?? 0,
     ]);
 
     await client.query('COMMIT');
@@ -10130,7 +10140,10 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             EXISTS (
               SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = bt.item_id
-            ) as has_secondary_gems
+            ) as has_secondary_gems,
+            NULL::TEXT as ticket_note,
+            FALSE as show_on_receipt,
+            0::NUMERIC as protection_plan
           FROM buy_ticket bt
           LEFT JOIN jewelry j ON bt.item_id = j.item_id
             AND COALESCE(bt.inventory_type, 'JW') = 'JW'
@@ -10184,7 +10197,10 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             EXISTS (
               SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = st.item_id
-            ) as has_secondary_gems
+            ) as has_secondary_gems,
+            st.ticket_note,
+            st.show_on_receipt,
+            st.protection_plan
           FROM sale_ticket st
           LEFT JOIN jewelry j ON st.item_id = j.item_id
             AND COALESCE(st.inventory_type, 'JW') = 'JW'
@@ -10235,7 +10251,10 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
             EXISTS (
               SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = pt.item_id
-            ) as has_secondary_gems
+            ) as has_secondary_gems,
+            pt.ticket_note,
+            pt.show_on_receipt,
+            0::NUMERIC as protection_plan
           FROM pawn_ticket pt
           LEFT JOIN jewelry j ON pt.item_id = j.item_id
           WHERE pt.transaction_id = $1

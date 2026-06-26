@@ -281,6 +281,8 @@ function TransactionJournals() {
     }
 
     const totalAmount = ticketItems.reduce((sum, item) => sum + (parseFloat(item.item_price || 0)), 0);
+    const ticketNoteItem = ticketItems.find(i => i.show_on_receipt && i.ticket_note);
+    const ticketNote = ticketNoteItem?.ticket_note || null;
     const transactionDate = selectedTransaction ? new Date(selectedTransaction.created_at) : new Date();
     const formattedDate = transactionDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
     const formattedTime = transactionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -450,6 +452,12 @@ function TransactionJournals() {
               <span>$${totalAmount.toFixed(2)}</span>
             </div>
           </div>
+
+          ${ticketNote ? `
+          <div style="margin-top: 15px; border-top: 1px dashed #333; padding-top: 10px; font-size: 11px;">
+            <strong>Note:</strong> <span style="white-space: pre-wrap;">${ticketNote}</span>
+          </div>
+          ` : ''}
 
           <div class="footer">
             <p style="white-space: pre-wrap;">${isSaleTransaction ? receiptConfig.sales_receipt : receiptConfig.buy_receipt}</p>

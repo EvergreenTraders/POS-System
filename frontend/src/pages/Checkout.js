@@ -1277,7 +1277,10 @@ function Checkout() {
                     sale_ticket_id: saleTicketId,
                     transaction_id: realTransactionId,
                     item_id: itemId,
-                    inventory_type: invType
+                    inventory_type: invType,
+                    ticket_note: item.ticket_note || null,
+                    show_on_receipt: item.show_on_receipt || false,
+                    protection_plan: item.protectionPlan ? 15 : 0,
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }
