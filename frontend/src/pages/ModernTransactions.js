@@ -403,8 +403,24 @@ export default function ModernTransactions() {
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
-  const [buyOpen,  setBuyOpen]            = useState(false);
-  const [existingBuyData, setExistingBuyData] = useState(null);
+  const [buyOpen, setBuyOpen] = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingBuyState');
+      return !!raw;
+    }
+    return false;
+  });
+  const [existingBuyData, setExistingBuyData] = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingBuyState');
+      if (!raw) return null;
+      try {
+        const { ticketId, buyItems, buyPawnNotes, ticketNote, showOnReceipt } = JSON.parse(raw);
+        return { ticketId, buyItems, buyPawnNotes, ticketNote, showOnReceipt };
+      } catch { return null; }
+    }
+    return null;
+  });
   const [saleOpen, setSaleOpen]           = useState(() => {
     if (location.state?.returnToSale) {
       const raw = sessionStorage.getItem('pendingSaleReturn');
@@ -589,6 +605,26 @@ export default function ModernTransactions() {
     })
       .then(res => setCustomer(res.data))
       .catch(err => console.error('Failed to refresh customer after sale edit:', err));
+  }, [location.state]);
+
+  // Restore buy screen after returning from CustomerEditor
+  useEffect(() => {
+    if (!location.state?.customerUpdated) return;
+    const raw = sessionStorage.getItem('pendingBuyState');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingBuyState');
+    const { customerId, customer: savedCustomer, ticketId, buyItems, buyPawnNotes, ticketNote, showOnReceipt } = pending;
+    if (!customerId) return;
+    if (savedCustomer) setCustomer(savedCustomer);
+    setExistingBuyData({ ticketId, buyItems, buyPawnNotes, ticketNote, showOnReceipt });
+    setBuyOpen(true);
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after buy edit:', err));
   }, [location.state]);
 
   const handleCustomerSearch = async (query) => {

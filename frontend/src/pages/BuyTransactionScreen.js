@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
 import {
-  Box, Typography, Paper, Button, IconButton, Chip,
+  Box, Typography, Paper, Button, IconButton, Chip, Avatar,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   Dialog, DialogTitle, DialogContent, DialogActions,
   Tooltip, Snackbar, Alert, Select, MenuItem,
@@ -132,7 +132,7 @@ export default function BuyTransactionScreen({
 
   const handleQuickAdd = () => {
     const raw = quickInput.trim();
-    if (!raw) { addItem(); setQuickInput(''); return; }
+    if (!raw) { addItem(); setQuickInput(''); setQuickAddMode(false); return; }
     const amtMatch = raw.match(/\$?([\d,]+\.?\d*)\s*$/);
     let description = raw;
     let paid = 0;
@@ -143,6 +143,7 @@ export default function BuyTransactionScreen({
     }
     addItem({ description, paid });
     setQuickInput('');
+    setQuickAddMode(false);
     showSnackbar(`${description || 'Item'} added`);
   };
 
@@ -229,224 +230,91 @@ export default function BuyTransactionScreen({
       </Box>
 
       {/* Body */}
-      <Box sx={{ display: 'flex', flex: 1 }}>
+      <Box sx={{ p: 2.5 }}>
 
-        {/* LEFT / CENTER */}
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-          <Box sx={{ p: 2.5, overflow: 'auto' }}>
+        {/* ── Top section: two equal halves ── */}
+        <Box sx={{ display: 'flex', gap: 2, mb: 2.5 }}>
 
-            {/* Header */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1.5, flexWrap: 'wrap' }}>
-              <Box>
-                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5 }}>
-                  <Typography variant="h5" fontWeight={800} letterSpacing={0.5}>Buy Ticket</Typography>
-                  <Typography variant="h5" fontWeight={800} color={BUY_BLUE}>{ticketId}</Typography>
-                  <Chip label="Ready" size="small"
-                    sx={{ bgcolor: '#e0f2fe', color: BUY_BLUE, fontWeight: 700, fontSize: 12, border: `1px solid ${BUY_BLUE}` }} />
-                </Box>
-                {customer && (
-                  <Typography variant="body2" color="text.secondary" mt={0.25}>
-                    Customer: <strong>{customer.first_name} {customer.last_name}</strong>
-                  </Typography>
-                )}
-              </Box>
+          {/* Left half — customer details + buy stats */}
+          <Paper variant="outlined" sx={{ flex: 1, p: 2, borderRadius: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+
+            {/* Ticket ID + chip */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography fontSize={12} color="text.secondary" fontWeight={600} letterSpacing={0.5}>BUY TICKET</Typography>
+              <Typography fontSize={13} fontWeight={800} color={BUY_BLUE}>{ticketId}</Typography>
+              <Chip label="Ready" size="small"
+                sx={{ bgcolor: '#e0f2fe', color: BUY_BLUE, fontWeight: 700, fontSize: 11, border: `1px solid ${BUY_BLUE}`, ml: 0.5 }} />
             </Box>
 
-            {/* Stats bar */}
+            {/* Customer card */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Avatar sx={{ width: 56, height: 56, bgcolor: '#e0f2fe', color: BUY_BLUE, fontSize: 20, fontWeight: 700, flexShrink: 0 }}>
+                {customer ? `${(customer.first_name || '')[0] || ''}${(customer.last_name || '')[0] || ''}`.toUpperCase() : '?'}
+              </Avatar>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography fontWeight={800} fontSize={18} lineHeight={1.2} noWrap>
+                  {customer ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() : 'No customer selected'}
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.25 }}>
+                  <MuiIcons.Phone sx={{ fontSize: 13, color: 'text.secondary' }} />
+                  <Typography fontSize={13} color="text.secondary">{customer?.phone || '—'}</Typography>
+                </Box>
+              </Box>
+              {customer && (
+                <Tooltip title="Edit customer">
+                  <IconButton size="small" onClick={() => {
+                    sessionStorage.setItem('pendingBuyState', JSON.stringify({
+                      customerId: customer.id,
+                      customer,
+                      ticketId,
+                      buyItems,
+                      buyPawnNotes,
+                      ticketNote,
+                      showOnReceipt,
+                    }));
+                    navigate('/customer-editor', {
+                      state: {
+                        customer: {
+                          ...customer,
+                          id_expiry_date: customer.id_expiry_date ? new Date(customer.id_expiry_date).toISOString().substring(0, 10) : '',
+                          date_of_birth:  customer.date_of_birth  ? new Date(customer.date_of_birth).toISOString().substring(0, 10)  : '',
+                        },
+                        mode: 'edit',
+                        returnTo: location.pathname,
+                      },
+                    });
+                  }}>
+                    <MuiIcons.Edit fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
+
+            {/* Buy stats */}
             {buyStats && (
-              <Paper variant="outlined" sx={{ display: 'flex', mb: 2, borderRadius: 2, overflow: 'hidden' }}>
+              <Paper variant="outlined" sx={{ display: 'flex', borderRadius: 2, overflow: 'hidden' }}>
                 {[
                   { icon: 'CalendarToday', label: 'Last Buy Date', value: buyStats.last_buy_date ? new Date(buyStats.last_buy_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
                   { icon: 'LocalOffer',    label: 'Total Buys',    value: buyStats.total_buys ?? 0 },
-                  { icon: 'AttachMoney',  label: 'Total Buys Amount', value: fmt(buyStats.total_buy_amount || 0) },
+                  { icon: 'AttachMoney',  label: 'Total Amount',   value: fmt(buyStats.total_buy_amount || 0) },
                 ].map((s, i) => {
                   const StatIcon = MuiIcons[s.icon];
                   return (
-                  <Box key={i} sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 1.5, px: 2, py: 1.25, borderRight: i < 2 ? '1px solid #e0e0e0' : 'none' }}>
-                    <StatIcon sx={{ color: BUY_BLUE, fontSize: 20 }} />
-                    <Box>
-                      <Typography fontSize={11} color="text.secondary">{s.label}</Typography>
-                      <Typography fontSize={14} fontWeight={700}>{s.value}</Typography>
+                    <Box key={i} sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 1, px: 1.5, py: 1, borderRight: i < 2 ? '1px solid #e0e0e0' : 'none' }}>
+                      <StatIcon sx={{ color: BUY_BLUE, fontSize: 18 }} />
+                      <Box>
+                        <Typography fontSize={10} color="text.secondary">{s.label}</Typography>
+                        <Typography fontSize={13} fontWeight={700}>{s.value}</Typography>
+                      </Box>
                     </Box>
-                  </Box>
                   );
                 })}
               </Paper>
             )}
+          </Paper>
 
-            {/* Buy/Pawn Notes */}
-            <Paper variant="outlined" sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 2, py: 1, mb: 2, borderRadius: 2 }}>
-              <Typography fontSize={13} color="text.secondary" fontWeight={600} sx={{ whiteSpace: 'nowrap' }}>Buy/Pawn Notes:</Typography>
-              <TextField
-                value={buyPawnNotes}
-                onChange={e => setBuyPawnNotes(e.target.value)}
-                placeholder="Add customer notes..."
-                variant="standard"
-                size="small"
-                fullWidth
-                InputProps={{ disableUnderline: true }}
-              />
-              {buyPawnNotes && (
-                <Button size="small" variant="outlined" onClick={() => setBuyPawnNotes('')} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>Clear</Button>
-              )}
-            </Paper>
-
-            {/* Search + Free-type toggle */}
-            <Typography variant="body2" fontWeight={600} color="text.secondary" mb={0.75}>
-              Scan / Search / Describe Item
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 1, mb: quickAddMode ? 1 : 2.5 }}>
-              <TextField
-                fullWidth size="small"
-                placeholder="Scan barcode, search inventory, or describe item..."
-                InputProps={{ startAdornment: <InputAdornment position="start"><MuiIcons.Search sx={{ color: 'text.secondary' }} /></InputAdornment> }}
-                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2, bgcolor: '#fff' } }}
-              />
-              <Button
-                variant={quickAddMode ? 'contained' : 'outlined'}
-                startIcon={<MuiIcons.Edit sx={{ fontSize: 16 }} />}
-                onClick={() => setQuickAddMode(q => !q)}
-                sx={{
-                  borderRadius: 2, textTransform: 'none', fontSize: 13, flexShrink: 0,
-                  borderColor: BUY_BLUE, color: quickAddMode ? '#fff' : BUY_BLUE,
-                  bgcolor: quickAddMode ? BUY_BLUE : 'transparent',
-                  '&:hover': { bgcolor: quickAddMode ? BUY_DARK : '#e0f2fe', borderColor: BUY_BLUE },
-                }}
-              >
-                Free-type Quick Add
-              </Button>
-            </Box>
-
-            {/* Quick Add input */}
-            {quickAddMode && (
-              <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-                <TextField
-                  inputRef={quickInputRef}
-                  fullWidth size="small"
-                  placeholder='e.g. "DeWalt Drill $75" — press Enter to add'
-                  value={quickInput}
-                  onChange={e => setQuickInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleQuickAdd(); }}
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start"><MuiIcons.FlashOn sx={{ color: BUY_BLUE, fontSize: 18 }} /></InputAdornment>,
-                    endAdornment: <InputAdornment position="end"><Typography fontSize={11} color="text.secondary">↵ Enter</Typography></InputAdornment>,
-                  }}
-                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2, bgcolor: '#fff' } }}
-                />
-                <Button variant="contained" onClick={handleQuickAdd}
-                  sx={{ bgcolor: BUY_BLUE, '&:hover': { bgcolor: BUY_DARK }, borderRadius: 2, whiteSpace: 'nowrap' }}>
-                  Add
-                </Button>
-              </Box>
-            )}
-
-            {/* Items Being Bought */}
-            <Typography variant="body2" fontWeight={700} mb={1}>Items Being Bought</Typography>
-            <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'auto', mb: 2.5 }}>
-              {/* Table header */}
-              <Box sx={{ display: 'grid', gridTemplateColumns: HEADER_COLS, bgcolor: '#fafafa', borderBottom: '1px solid #e0e0e0', px: 1.5, py: 1 }}>
-                {['Part #', 'Thumbnail', 'Category', 'Item', 'Serial Number', 'Qty', 'Paid', 'Actions'].map(h => (
-                  <Typography key={h} fontSize={11} fontWeight={700} color={BUY_BLUE} letterSpacing={0.5} textAlign="center">{h}</Typography>
-                ))}
-              </Box>
-
-              {/* Empty state */}
-              {buyItems.length === 0 && (
-                <Box sx={{ py: 4, textAlign: 'center' }}>
-                  <MuiIcons.Inbox sx={{ fontSize: 36, color: '#bdbdbd', mb: 0.5 }} />
-                  <Typography fontSize={13} color="text.secondary">No items yet. Use the search or Quick Add above.</Typography>
-                </Box>
-              )}
-
-              {/* Item rows */}
-              {buyItems.map(item => {
-                const isEditing = editingItemId === item._lineId;
-                const catName   = categories.find(c => c.id === item.category_id)?.name || item.category_name || '';
-                return (
-                  <Box key={item._lineId} sx={{ borderBottom: '1px solid #f0f0f0' }}>
-                    {isEditing ? (
-                      <Box sx={{ display: 'grid', gridTemplateColumns: HEADER_COLS, px: 1.5, py: 1, alignItems: 'center', gap: 0.5, bgcolor: '#fffbf0' }}>
-                        <Typography fontSize={11} color="text.secondary">{item.part_no}</Typography>
-                        <Box sx={{ width: 40, height: 40, bgcolor: '#f5f5f5', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <MuiIcons.Image sx={{ fontSize: 20, color: '#bdbdbd' }} />
-                        </Box>
-                        <Select size="small" value={editFields.category_id || ''} displayEmpty
-                          onChange={e => setEditFields(f => ({ ...f, category_id: e.target.value }))}
-                          sx={{ fontSize: 12 }}>
-                          <MenuItem value=""><em>None</em></MenuItem>
-                          {categories.map(c => <MenuItem key={c.id} value={c.id} sx={{ fontSize: 12 }}>{c.name}</MenuItem>)}
-                        </Select>
-                        <TextField size="small" value={editFields.description}
-                          onChange={e => setEditFields(f => ({ ...f, description: e.target.value }))}
-                          placeholder="Description"
-                          inputProps={{ style: { fontSize: 12 } }} />
-                        <TextField size="small" value={editFields.serial_number}
-                          onChange={e => setEditFields(f => ({ ...f, serial_number: e.target.value }))}
-                          placeholder="—"
-                          inputProps={{ style: { fontSize: 12 } }} />
-                        <TextField size="small" type="number" value={editFields.qty}
-                          onChange={e => setEditFields(f => ({ ...f, qty: e.target.value }))}
-                          inputProps={{ min: 1, style: { fontSize: 12, width: 40 } }} />
-                        <TextField size="small" type="number" value={editFields.paid}
-                          onChange={e => setEditFields(f => ({ ...f, paid: e.target.value }))}
-                          inputProps={{ min: 0, step: 0.01, style: { fontSize: 12 } }}
-                          InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }} />
-                        <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
-                          <Tooltip title="Save"><IconButton size="small" color="success" onClick={() => saveEdit(item._lineId)}><MuiIcons.Check sx={{ fontSize: 16 }} /></IconButton></Tooltip>
-                          <Tooltip title="Cancel"><IconButton size="small" onClick={() => setEditingItemId(null)}><MuiIcons.Close sx={{ fontSize: 16 }} /></IconButton></Tooltip>
-                        </Box>
-                      </Box>
-                    ) : (
-                      <Box sx={{ display: 'grid', gridTemplateColumns: HEADER_COLS, px: 1.5, py: 1, alignItems: 'center', '&:hover': { bgcolor: '#fffbf0' } }}>
-                        <Typography fontSize={11} color="text.secondary" fontWeight={500}>{item.part_no}</Typography>
-                        <Box sx={{ width: 40, height: 40, bgcolor: '#f5f5f5', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {item.images?.[0]?.url
-                            ? <Box component="img" src={item.images[0].url} alt="" sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }} />
-                            : <MuiIcons.Image sx={{ fontSize: 20, color: '#bdbdbd' }} />}
-                        </Box>
-                        <Typography fontSize={12} color="text.secondary" textAlign="center">{catName || '—'}</Typography>
-                        <Typography fontSize={13} fontWeight={600}>{item.description || <em style={{ color: '#bbb' }}>No description</em>}</Typography>
-                        <Typography fontSize={12} color="text.secondary" textAlign="center">{item.serial_number || '—'}</Typography>
-                        <Typography fontSize={13} textAlign="center" fontWeight={500}>{item.qty}</Typography>
-                        <Typography fontSize={13} fontWeight={700} color={BUY_BLUE} textAlign="center">{fmt(item.paid * (parseInt(item.qty) || 1))}</Typography>
-                        <Box sx={{ display: 'flex', gap: 0.25, justifyContent: 'center' }}>
-                          <Tooltip title="Edit">
-                            <IconButton size="small" onClick={() => startEdit(item)} sx={{ color: '#1565c0' }}>
-                              <MuiIcons.Edit sx={{ fontSize: 16 }} />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Duplicate">
-                            <IconButton size="small" onClick={() => handleDuplicateItem(item)} sx={{ color: '#555' }}>
-                              <MuiIcons.ContentCopy sx={{ fontSize: 16 }} />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Delete">
-                            <IconButton size="small" color="error" onClick={() => handleRemoveItem(item._lineId)}>
-                              <MuiIcons.Delete sx={{ fontSize: 16 }} />
-                            </IconButton>
-                          </Tooltip>
-                        </Box>
-                      </Box>
-                    )}
-                  </Box>
-                );
-              })}
-
-              {/* Add item footer */}
-              <Box sx={{ px: 1.5, py: 0.75 }}>
-                <Button size="small" startIcon={<MuiIcons.Add />} onClick={() => addItem()}
-                  sx={{ color: BUY_BLUE, textTransform: 'none', fontSize: 12 }}>
-                  Add Item
-                </Button>
-              </Box>
-            </Paper>
-
-          </Box>
-        </Box>
-
-        {/* RIGHT PANEL */}
-        <Box sx={{ width: 300, flexShrink: 0, borderLeft: '1px solid #e0e0e0', bgcolor: '#fff', display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
-          <Box sx={{ p: 2 }}>
+          {/* Right half — last 5 items sold */}
+          <Paper variant="outlined" sx={{ flex: 1, p: 2, borderRadius: 2, display: 'flex', flexDirection: 'column' }}>
             <Typography fontWeight={700} fontSize={13} mb={1.5}>Last 5 Items Sold</Typography>
             <Table size="small">
               <TableHead>
@@ -467,7 +335,7 @@ export default function BuyTransactionScreen({
                   <TableRow key={i}>
                     <TableCell sx={{ fontSize: 12, py: 0.5, px: 0.75 }}>{r.item_desc || '—'}</TableCell>
                     <TableCell sx={{ fontSize: 12, py: 0.5, px: 0.75, whiteSpace: 'nowrap' }}>
-                      {r.transaction_date ? new Date(r.transaction_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+                      {r.transaction_date ? new Date(r.transaction_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
                     </TableCell>
                     <TableCell sx={{ fontSize: 12, py: 0.5, px: 0.75, color: BUY_BLUE, fontWeight: 600 }}>
                       {r.amount ? fmt(r.amount) : '—'}
@@ -476,23 +344,203 @@ export default function BuyTransactionScreen({
                 ))}
               </TableBody>
             </Table>
+          </Paper>
 
-            <Divider sx={{ my: 2 }} />
+        </Box>
 
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-              <MuiIcons.LocalOffer sx={{ color: BUY_BLUE, fontSize: 20, mr: 1 }} />
-              <Typography fontSize={14} fontWeight={600}>Total Paid:</Typography>
-              <Typography fontSize={18} fontWeight={800} color={BUY_BLUE} ml="auto">{fmt(totalPaid)}</Typography>
+        {/* ── Items Being Bought (75%) + Financial Summary (25%) ── */}
+        <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+
+          {/* Items — 75% */}
+          <Paper variant="outlined" sx={{ flex: 3, borderRadius: 2, overflow: 'hidden', minWidth: 0 }}>
+
+            {/* Section header + Buy/Pawn Notes */}
+            <Box sx={{ px: 2, py: 1.25, borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Typography fontWeight={700} fontSize={13} sx={{ whiteSpace: 'nowrap' }}>Items Being Bought</Typography>
+              <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+              <Typography fontSize={12} color="text.secondary" fontWeight={600} sx={{ whiteSpace: 'nowrap' }}>Buy/Pawn Notes:</Typography>
+              <TextField
+                value={buyPawnNotes}
+                onChange={e => setBuyPawnNotes(e.target.value)}
+                placeholder="Add transaction notes..."
+                variant="standard"
+                size="small"
+                fullWidth
+                InputProps={{ disableUnderline: true }}
+              />
+              {buyPawnNotes && (
+                <Button size="small" onClick={() => setBuyPawnNotes('')} sx={{ whiteSpace: 'nowrap', flexShrink: 0, color: 'text.secondary' }}>Clear</Button>
+              )}
             </Box>
 
-            <Paper variant="outlined" sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 1, borderRadius: 2, bgcolor: '#e0f2fe', borderColor: BUY_BLUE }}>
-              <MuiIcons.AccountBalance sx={{ color: BUY_BLUE, fontSize: 18, mr: 1 }} />
+            {/* Scan + Free-type row */}
+            <Box sx={{ px: 2, py: 1.25, borderBottom: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <TextField
+                  fullWidth size="small"
+                  placeholder="Scan barcode, search inventory, or describe item..."
+                  InputProps={{ startAdornment: <InputAdornment position="start"><MuiIcons.Search sx={{ color: 'text.secondary' }} /></InputAdornment> }}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2, bgcolor: '#fff' } }}
+                />
+                <Button
+                  variant={quickAddMode ? 'contained' : 'outlined'}
+                  startIcon={<MuiIcons.Edit sx={{ fontSize: 16 }} />}
+                  onClick={() => setQuickAddMode(q => !q)}
+                  sx={{
+                    borderRadius: 2, textTransform: 'none', fontSize: 13, flexShrink: 0,
+                    borderColor: BUY_BLUE, color: quickAddMode ? '#fff' : BUY_BLUE,
+                    bgcolor: quickAddMode ? BUY_BLUE : 'transparent',
+                    '&:hover': { bgcolor: quickAddMode ? BUY_DARK : '#e0f2fe', borderColor: BUY_BLUE },
+                  }}
+                >
+                  Free-type Quick Add
+                </Button>
+              </Box>
+              {quickAddMode && (
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <TextField
+                    inputRef={quickInputRef}
+                    fullWidth size="small"
+                    placeholder='e.g. "DeWalt Drill $75" — press Enter to add'
+                    value={quickInput}
+                    onChange={e => setQuickInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleQuickAdd(); }}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start"><MuiIcons.FlashOn sx={{ color: BUY_BLUE, fontSize: 18 }} /></InputAdornment>,
+                      endAdornment: <InputAdornment position="end"><Typography fontSize={11} color="text.secondary">↵ Enter</Typography></InputAdornment>,
+                    }}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2, bgcolor: '#fff' } }}
+                  />
+                  <Button variant="contained" onClick={handleQuickAdd}
+                    sx={{ bgcolor: BUY_BLUE, '&:hover': { bgcolor: BUY_DARK }, borderRadius: 2, whiteSpace: 'nowrap' }}>
+                    Add
+                  </Button>
+                </Box>
+              )}
+            </Box>
+
+            {/* Items table */}
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ bgcolor: '#fafafa' }}>
+                  {[
+                    { label: 'Part #',       width: 100 },
+                    { label: 'Thumbnail',    width: 56 },
+                    { label: 'Category',     width: 120 },
+                    { label: 'Item Description' },
+                    { label: 'Serial #',     width: 110 },
+                    { label: 'Qty',          width: 52, align: 'center' },
+                    { label: 'Paid',         width: 90, align: 'right' },
+                    { label: 'Actions',      width: 96, align: 'center' },
+                  ].map(col => (
+                    <TableCell key={col.label}
+                      align={col.align || 'left'}
+                      sx={{ width: col.width, fontSize: 11, fontWeight: 700, color: BUY_BLUE, py: 0.75, letterSpacing: 0.5 }}>
+                      {col.label}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {buyItems.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                      <MuiIcons.Inbox sx={{ fontSize: 36, color: '#bdbdbd', display: 'block', mx: 'auto', mb: 0.5 }} />
+                      <Typography fontSize={13} color="text.secondary">No items yet. Use the scan or Free-type above.</Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {buyItems.map(item => {
+                  const isEditing = editingItemId === item._lineId;
+                  const catName   = categories.find(c => c.id === item.category_id)?.name || item.category_name || '';
+                  return isEditing ? (
+                    <TableRow key={item._lineId} sx={{ bgcolor: '#f0f9ff' }}>
+                      <TableCell sx={{ py: 0.5 }}><Typography fontSize={11} color="text.secondary">{item.part_no}</Typography></TableCell>
+                      <TableCell sx={{ py: 0.5 }}>
+                        <Box sx={{ width: 40, height: 40, bgcolor: '#f5f5f5', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <MuiIcons.Image sx={{ fontSize: 20, color: '#bdbdbd' }} />
+                        </Box>
+                      </TableCell>
+                      <TableCell sx={{ py: 0.5 }}>
+                        <Select size="small" value={editFields.category_id || ''} displayEmpty fullWidth
+                          onChange={e => setEditFields(f => ({ ...f, category_id: e.target.value }))}
+                          sx={{ fontSize: 12 }}>
+                          <MenuItem value=""><em>None</em></MenuItem>
+                          {categories.map(c => <MenuItem key={c.id} value={c.id} sx={{ fontSize: 12 }}>{c.name}</MenuItem>)}
+                        </Select>
+                      </TableCell>
+                      <TableCell sx={{ py: 0.5 }}>
+                        <TextField size="small" fullWidth value={editFields.description}
+                          onChange={e => setEditFields(f => ({ ...f, description: e.target.value }))}
+                          placeholder="Description" inputProps={{ style: { fontSize: 12 } }} />
+                      </TableCell>
+                      <TableCell sx={{ py: 0.5 }}>
+                        <TextField size="small" fullWidth value={editFields.serial_number}
+                          onChange={e => setEditFields(f => ({ ...f, serial_number: e.target.value }))}
+                          placeholder="—" inputProps={{ style: { fontSize: 12 } }} />
+                      </TableCell>
+                      <TableCell sx={{ py: 0.5 }}>
+                        <TextField size="small" type="number" value={editFields.qty}
+                          onChange={e => setEditFields(f => ({ ...f, qty: e.target.value }))}
+                          inputProps={{ min: 1, style: { fontSize: 12, width: 40 } }} />
+                      </TableCell>
+                      <TableCell sx={{ py: 0.5 }}>
+                        <TextField size="small" type="number" value={editFields.paid}
+                          onChange={e => setEditFields(f => ({ ...f, paid: e.target.value }))}
+                          inputProps={{ min: 0, step: 0.01, style: { fontSize: 12 } }}
+                          InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }} />
+                      </TableCell>
+                      <TableCell align="center" sx={{ py: 0.5 }}>
+                        <Tooltip title="Save"><IconButton size="small" color="success" onClick={() => saveEdit(item._lineId)}><MuiIcons.Check sx={{ fontSize: 16 }} /></IconButton></Tooltip>
+                        <Tooltip title="Cancel"><IconButton size="small" onClick={() => setEditingItemId(null)}><MuiIcons.Close sx={{ fontSize: 16 }} /></IconButton></Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    <TableRow key={item._lineId} sx={{ '&:hover': { bgcolor: '#f0f9ff' } }}>
+                      <TableCell sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 500, py: 0.75 }}>{item.part_no}</TableCell>
+                      <TableCell sx={{ py: 0.75 }}>
+                        <Box sx={{ width: 40, height: 40, bgcolor: '#f5f5f5', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {item.images?.[0]?.url
+                            ? <Box component="img" src={item.images[0].url} alt="" sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }} />
+                            : <MuiIcons.Image sx={{ fontSize: 20, color: '#bdbdbd' }} />}
+                        </Box>
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 12, color: 'text.secondary', py: 0.75 }}>{catName || '—'}</TableCell>
+                      <TableCell sx={{ fontSize: 13, fontWeight: 600, py: 0.75 }}>{item.description || <em style={{ color: '#bbb' }}>No description</em>}</TableCell>
+                      <TableCell sx={{ fontSize: 12, color: 'text.secondary', py: 0.75 }}>{item.serial_number || '—'}</TableCell>
+                      <TableCell align="center" sx={{ fontSize: 13, fontWeight: 500, py: 0.75 }}>{item.qty}</TableCell>
+                      <TableCell align="right" sx={{ fontSize: 13, fontWeight: 700, color: BUY_BLUE, py: 0.75 }}>{fmt(item.paid * (parseInt(item.qty) || 1))}</TableCell>
+                      <TableCell align="center" sx={{ py: 0.75 }}>
+                        <Tooltip title="Edit"><IconButton size="small" onClick={() => startEdit(item)} sx={{ color: '#1565c0' }}><MuiIcons.Edit sx={{ fontSize: 16 }} /></IconButton></Tooltip>
+                        <Tooltip title="Duplicate"><IconButton size="small" onClick={() => handleDuplicateItem(item)} sx={{ color: '#555' }}><MuiIcons.ContentCopy sx={{ fontSize: 16 }} /></IconButton></Tooltip>
+                        <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => handleRemoveItem(item._lineId)}><MuiIcons.Delete sx={{ fontSize: 16 }} /></IconButton></Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Paper>
+
+          {/* Financial summary — 25% */}
+          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0 }}>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <MuiIcons.LocalOffer sx={{ color: BUY_BLUE, fontSize: 24 }} />
               <Box>
-                <Typography fontSize={12} fontWeight={600} color={BUY_BLUE}>Net Effect:</Typography>
-                <Typography fontSize={13} fontWeight={800} color="#c62828">-{fmt(totalPaid)} due to customer</Typography>
+                <Typography fontSize={11} color="text.secondary">Total Paid</Typography>
+                <Typography fontSize={22} fontWeight={800} color={BUY_BLUE} lineHeight={1}>{fmt(totalPaid)}</Typography>
               </Box>
             </Paper>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#e0f2fe', borderColor: BUY_BLUE }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                <MuiIcons.AccountBalance sx={{ color: BUY_BLUE, fontSize: 18 }} />
+                <Typography fontSize={12} fontWeight={700} color={BUY_BLUE}>Net Effect</Typography>
+              </Box>
+              <Typography fontSize={15} fontWeight={800} color="#c62828">-{fmt(totalPaid)}</Typography>
+              <Typography fontSize={11} color="text.secondary">due to customer</Typography>
+            </Paper>
           </Box>
+
         </Box>
 
       </Box>
