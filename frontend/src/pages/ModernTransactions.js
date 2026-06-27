@@ -10,9 +10,11 @@ import {
 import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
 import SaleTransactionScreen from './SaleTransactionScreen';
+import BuyTransactionScreen from './BuyTransactionScreen';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
+const BUY_BLUE = '#0284c7';
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -322,6 +324,77 @@ function cleanupExpiredWorkspaces() {
   }
 }
 
+function BuyTransactionCard({ tx, buyIcon, buyColor, onOpen, onVoid }) {
+  const fmt    = (n) => `$${Number(n).toFixed(2)}`;
+  const accent = buyColor || BUY_BLUE;
+  const BuyIconComponent = buyIcon ? (MuiIcons[buyIcon] ?? MuiIcons.ShoppingBag) : MuiIcons.ShoppingBag;
+  const items     = tx.buyItems || [];
+  const totalPaid = tx.totalPaid || items.reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
+
+  return (
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <BuyIconComponent sx={{ fontSize: 20, color: accent }} />
+          <Typography fontWeight={700} fontSize={13} color={accent}>BUY</Typography>
+        </Box>
+        <Chip label={tx.ticketId} size="small"
+          sx={{ fontWeight: 700, fontSize: 11, height: 20, bgcolor: '#f5f5f5', border: '1px solid #e0e0e0' }} />
+      </Box>
+
+      <Box sx={{ px: 1.5, pb: 1.25 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75 }}>
+          <Chip icon={<MuiIcons.ShoppingBag sx={{ fontSize: 14 }} />}
+            label={`${items.length} ${items.length === 1 ? 'item' : 'items'}`}
+            size="small"
+            sx={{ fontSize: 12, height: 24, bgcolor: '#fef3c7', color: accent, '& .MuiChip-icon': { color: accent } }} />
+          <Chip label="Active" size="small"
+            sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: accent, color: '#fff' }} />
+        </Box>
+
+        {items.slice(0, 2).map((item, i) => (
+          <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.75, borderBottom: '1px solid #f0f0f0' }}>
+            <Box sx={{ width: 36, height: 36, borderRadius: 1, bgcolor: '#f5f5f5', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <MuiIcons.Inventory2 sx={{ fontSize: 18, color: '#bdbdbd' }} />
+            </Box>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="caption" fontWeight={600} display="block" noWrap>{item.description || item.part_no}</Typography>
+              <Typography variant="caption" color="text.secondary">{item.category_name || '—'}</Typography>
+            </Box>
+            <Typography variant="caption" fontWeight={700} color={accent}>{fmt(item.paid)}</Typography>
+          </Box>
+        ))}
+        {items.length > 2 && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', py: 0.5 }}>
+            +{items.length - 2} more item(s)
+          </Typography>
+        )}
+
+        <Divider sx={{ my: 1 }} />
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+          <Typography variant="caption" fontWeight={600} color={accent}>Total Paid to Customer</Typography>
+          <Typography variant="caption" fontWeight={700} color={accent}>{fmt(totalPaid)}</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+          <Typography variant="caption" fontWeight={600} color="#c62828">Net Effect</Typography>
+          <Typography variant="caption" fontWeight={700} color="#c62828">-{fmt(totalPaid)}</Typography>
+        </Box>
+
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
+            onClick={onOpen} sx={{ flex: 1, fontSize: 11, borderColor: accent, color: accent, '&:hover': { borderColor: accent } }}>
+            Open
+          </Button>
+          <IconButton size="small" color="error" onClick={onVoid}
+            sx={{ border: '1px solid', borderColor: 'error.main', borderRadius: 1 }}>
+            <MuiIcons.Block fontSize="small" />
+          </IconButton>
+        </Box>
+      </Box>
+    </Paper>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ModernTransactions() {
@@ -330,6 +403,8 @@ export default function ModernTransactions() {
   const [search, setSearch] = useState('');
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [pawnOpen, setPawnOpen]           = useState(false);
+  const [buyOpen,  setBuyOpen]            = useState(false);
+  const [existingBuyData, setExistingBuyData] = useState(null);
   const [saleOpen, setSaleOpen]           = useState(() => {
     if (location.state?.returnToSale) {
       const raw = sessionStorage.getItem('pendingSaleReturn');
@@ -609,6 +684,7 @@ export default function ModernTransactions() {
   const netDue = workspaceTransactions.reduce((sum, tx) => {
     if (tx.type === 'PAWN') return sum - Number(tx.totalPawnAmount);
     if (tx.type === 'SALE') return sum + Number(tx.total || 0);
+    if (tx.type === 'BUY')  return sum - Number(tx.totalPaid || 0);
     return sum;
   }, 0);
 
@@ -619,7 +695,24 @@ export default function ModernTransactions() {
       setPawnOpen(true);
     } else if (type === 'sale') {
       setSaleOpen(true);
+    } else if (type === 'buy') {
+      if (!customer) { setNoCustomerWarning(true); return; }
+      setBuyOpen(true);
     }
+  };
+
+  const handleAddBuyToWorkspace = (buyData) => {
+    setWorkspaceTransactions(prev => {
+      const existingIdx = prev.findIndex(t => t.type === 'BUY' && t.ticketId === buyData.ticketId);
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx] = { ...updated[existingIdx], ...buyData };
+        return updated;
+      }
+      return [...prev, { id: Date.now(), type: 'BUY', ...buyData }];
+    });
+    setBuyOpen(false);
+    setExistingBuyData(null);
   };
 
   const handleAddSaleToWorkspace = (saleData) => {
@@ -664,6 +757,23 @@ export default function ModernTransactions() {
           setExistingSaleData(null);
         }}
         existingSaleData={existingSaleData}
+      />
+    );
+  }
+
+  if (buyOpen) {
+    return (
+      <BuyTransactionScreen
+        customer={customer}
+        customerStats={customerStats}
+        onClose={() => { setBuyOpen(false); setExistingBuyData(null); }}
+        onAddToWorkspace={handleAddBuyToWorkspace}
+        onRemoveFromWorkspace={(ticketId) => {
+          setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'BUY' && t.ticketId === ticketId)));
+          setBuyOpen(false);
+          setExistingBuyData(null);
+        }}
+        existingBuyData={existingBuyData}
       />
     );
   }
@@ -920,6 +1030,14 @@ export default function ModernTransactions() {
                         saleIcon={transactionTypes.find(t => t.type === 'sale')?.icon}
                         saleColor={transactionTypes.find(t => t.type === 'sale')?.color}
                         onOpen={() => { setExistingSaleData(tx); setSaleOpen(true); }}
+                        onVoid={() => setVoidConfirm(tx)}
+                      />
+                    ) : tx.type === 'BUY' ? (
+                      <BuyTransactionCard
+                        tx={tx}
+                        buyIcon={transactionTypes.find(t => t.type === 'buy')?.icon}
+                        buyColor={transactionTypes.find(t => t.type === 'buy')?.color}
+                        onOpen={() => { setExistingBuyData(tx); setBuyOpen(true); }}
                         onVoid={() => setVoidConfirm(tx)}
                       />
                     ) : null}

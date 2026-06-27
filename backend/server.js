@@ -7886,6 +7886,78 @@ app.delete('/api/inventory-status/:id', async (req, res) => {
 });
 
 // Buy Ticket API Endpoints
+// GET /api/buy-ticket/last-id — for syncing the local counter with DB
+app.get('/api/buy-ticket/last-id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT buy_ticket_id FROM buy_ticket
+      WHERE buy_ticket_id ~ '^BT-[0-9]+$'
+      ORDER BY CAST(SUBSTRING(buy_ticket_id FROM 4) AS INTEGER) DESC
+      LIMIT 1
+    `);
+    if (result.rows.length === 0) return res.json({ last_number: 0, last_id: null });
+    const lastId = result.rows[0].buy_ticket_id;
+    const num    = parseInt(lastId.replace('BT-', ''), 10);
+    res.json({ last_number: num, last_id: lastId });
+  } catch (err) {
+    console.error('Error fetching last buy ticket id:', err);
+    res.status(500).json({ error: 'Failed to fetch last buy ticket id' });
+  }
+});
+
+// GET /api/customers/:id/buy/stats
+app.get('/api/customers/:id/buy/stats', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        MAX(t.transaction_date)                             AS last_buy_date,
+        COUNT(DISTINCT st.buy_ticket_id)                   AS total_buys,
+        COALESCE(SUM(ABS(t.total_amount)), 0)              AS total_buy_amount
+      FROM (SELECT DISTINCT buy_ticket_id, transaction_id FROM buy_ticket) st
+      JOIN transactions t ON st.transaction_id = t.transaction_id
+      WHERE t.customer_id = $1 AND t.total_amount < 0
+    `, [id]);
+    const row = result.rows[0];
+    res.json({
+      last_buy_date:    row.last_buy_date || null,
+      total_buys:       parseInt(row.total_buys)      || 0,
+      total_buy_amount: parseFloat(row.total_buy_amount) || 0,
+    });
+  } catch (err) {
+    console.error('Error fetching customer buy stats:', err);
+    res.status(500).json({ error: 'Failed to fetch customer buy stats' });
+  }
+});
+
+// GET /api/customers/:id/buy-history — last N items bought from this customer
+app.get('/api/customers/:id/buy-history', async (req, res) => {
+  const { id } = req.params;
+  const limit = Math.min(parseInt(req.query.limit) || 5, 20);
+  try {
+    const result = await pool.query(`
+      SELECT
+        COALESCE(j.short_desc, j.long_desc, h.short_desc, h.long_desc, bt.item_id, 'Unknown Item') AS item_desc,
+        t.transaction_date,
+        ROUND(ABS(t.total_amount)::NUMERIC / NULLIF(cnt.item_count, 0), 2) AS amount
+      FROM buy_ticket bt
+      JOIN transactions t ON bt.transaction_id = t.transaction_id
+      JOIN (
+        SELECT transaction_id, COUNT(*) AS item_count FROM buy_ticket GROUP BY transaction_id
+      ) cnt ON cnt.transaction_id = bt.transaction_id
+      LEFT JOIN jewelry   j ON bt.item_id = j.item_id
+      LEFT JOIN hardgoods h ON bt.item_id = h.item_id
+      WHERE t.customer_id = $1 AND t.total_amount < 0
+      ORDER BY t.transaction_date DESC, bt.id DESC
+      LIMIT $2
+    `, [id, limit]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching customer buy history:', err);
+    res.status(500).json({ error: 'Failed to fetch customer buy history' });
+  }
+});
+
 app.get('/api/buy-ticket', async (req, res) => {
   try {
     const { buy_ticket_id, transaction_id } = req.query;
