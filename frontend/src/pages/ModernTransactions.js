@@ -11,6 +11,7 @@ import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
 import SaleTransactionScreen from './SaleTransactionScreen';
 import BuyTransactionScreen from './BuyTransactionScreen';
+import TradeTransactionScreen from './TradeTransactionScreen';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
@@ -400,6 +401,76 @@ function BuyTransactionCard({ tx, buyIcon, buyColor, onOpen, onVoid }) {
   );
 }
 
+function TradeTransactionCard({ tx, tradeIcon, tradeColor, onOpen, onVoid }) {
+  const fmt    = (n) => `$${Number(n || 0).toFixed(2)}`;
+  const accent = tradeColor || '#0891b2';
+  const TradeIconComponent = tradeIcon ? (MuiIcons[tradeIcon] ?? MuiIcons.Balance) : MuiIcons.Balance;
+  const tradeItems = tx.tradeItems || [];
+  const saleItems  = tx.saleItems  || [];
+  const net        = Number(tx.netDueToCustomer || 0);
+
+  return (
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <TradeIconComponent sx={{ fontSize: 20, color: accent }} />
+          <Typography fontWeight={700} fontSize={13} color={accent}>TRADE</Typography>
+        </Box>
+        <Chip label={tx.ticketId} size="small"
+          sx={{ fontWeight: 700, fontSize: 11, height: 20, bgcolor: '#f5f5f5', border: '1px solid #e0e0e0' }} />
+      </Box>
+
+      <Box sx={{ px: 1.5, pb: 1.25 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75 }}>
+          <Chip icon={<MuiIcons.SwapHoriz sx={{ fontSize: 14 }} />}
+            label={`${tradeItems.length} trade-in`}
+            size="small"
+            sx={{ fontSize: 12, height: 24, bgcolor: '#e0f9ff', color: accent, '& .MuiChip-icon': { color: accent } }} />
+          <Chip icon={<MuiIcons.ShoppingCart sx={{ fontSize: 14 }} />}
+            label={`${saleItems.length} sale`}
+            size="small"
+            sx={{ fontSize: 12, height: 24, bgcolor: '#e0f9ff', color: accent, '& .MuiChip-icon': { color: accent } }} />
+          <Chip label="Active" size="small"
+            sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: accent, color: '#fff' }} />
+        </Box>
+
+        <Divider sx={{ my: 1 }} />
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.4 }}>
+          <Typography variant="caption" color="text.secondary">Trade Allowance</Typography>
+          <Typography variant="caption" fontWeight={600}>{fmt(tx.totalTradeAllowance)}</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.4 }}>
+          <Typography variant="caption" color="text.secondary">Sale Total</Typography>
+          <Typography variant="caption" fontWeight={600}>{fmt(tx.totalSaleAfterTax)}</Typography>
+        </Box>
+
+        <Divider sx={{ my: 1 }} />
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+          <Typography variant="caption" fontWeight={600} color={net >= 0 ? accent : '#c62828'}>
+            {net >= 0 ? 'Net Due to Customer' : 'Net Due from Customer'}
+          </Typography>
+          <Typography variant="caption" fontWeight={700} color={net >= 0 ? accent : '#c62828'}>
+            {net >= 0 ? '' : '-'}{fmt(Math.abs(net))}
+          </Typography>
+        </Box>
+
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
+            onClick={onOpen} sx={{ flex: 1, fontSize: 11, borderColor: accent, color: accent, '&:hover': { borderColor: accent } }}>
+            Open
+          </Button>
+          <IconButton size="small" color="error" onClick={onVoid}
+            sx={{ border: '1px solid', borderColor: 'error.main', borderRadius: 1 }}>
+            <MuiIcons.Block fontSize="small" />
+          </IconButton>
+        </Box>
+      </Box>
+    </Paper>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ModernTransactions() {
@@ -458,6 +529,8 @@ export default function ModernTransactions() {
     }
     return null;
   });
+  const [tradeOpen, setTradeOpen]         = useState(false);
+  const [existingTradeData, setExistingTradeData] = useState(null);
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
   const [noCustomerWarning, setNoCustomerWarning] = useState(false);
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
@@ -750,13 +823,22 @@ export default function ModernTransactions() {
         color: '#1a472a',
       };
     }
+    if (tx.type === 'TRADE') {
+      const net = Number(tx.netDueToCustomer || 0);
+      return {
+        label: `Trade (${(tx.tradeItems?.length || 0)} in / ${(tx.saleItems?.length || 0)} out)`,
+        value: net >= 0 ? `-$${net.toFixed(2)}` : `+$${Math.abs(net).toFixed(2)}`,
+        color: net >= 0 ? '#c62828' : '#0891b2',
+      };
+    }
     return null;
   }).filter(Boolean);
 
   const netDue = workspaceTransactions.reduce((sum, tx) => {
     if (tx.type === 'PAWN') return sum - Number(tx.totalPawnAmount);
     if (tx.type === 'SALE') return sum + Number(tx.total || 0);
-    if (tx.type === 'BUY')  return sum - Number(tx.totalPaid || 0);
+    if (tx.type === 'BUY')   return sum - Number(tx.totalPaid || 0);
+    if (tx.type === 'TRADE') return sum - Number(tx.netDueToCustomer || 0);
     return sum;
   }, 0);
 
@@ -770,6 +852,9 @@ export default function ModernTransactions() {
     } else if (type === 'buy') {
       if (!customer) { setNoCustomerWarning(true); return; }
       setBuyOpen(true);
+    } else if (type === 'trade') {
+      if (!customer) { setNoCustomerWarning(true); return; }
+      setTradeOpen(true);
     }
   };
 
@@ -785,6 +870,20 @@ export default function ModernTransactions() {
     });
     setBuyOpen(false);
     setExistingBuyData(null);
+  };
+
+  const handleAddTradeToWorkspace = (tradeData) => {
+    setWorkspaceTransactions(prev => {
+      const existingIdx = prev.findIndex(t => t.type === 'TRADE' && t.ticketId === tradeData.ticketId);
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx] = { ...updated[existingIdx], ...tradeData };
+        return updated;
+      }
+      return [...prev, { id: Date.now(), type: 'TRADE', ...tradeData }];
+    });
+    setTradeOpen(false);
+    setExistingTradeData(null);
   };
 
   const handleAddSaleToWorkspace = (saleData) => {
@@ -869,6 +968,23 @@ export default function ModernTransactions() {
         }}
         onConvertTo={handleBuyConvertTo}
         existingBuyData={existingBuyData}
+      />
+    );
+  }
+
+  if (tradeOpen) {
+    return (
+      <TradeTransactionScreen
+        customer={customer}
+        customerStats={customerStats}
+        onClose={() => { setTradeOpen(false); setExistingTradeData(null); }}
+        onAddToWorkspace={handleAddTradeToWorkspace}
+        onRemoveFromWorkspace={(ticketId) => {
+          setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'TRADE' && t.ticketId === ticketId)));
+          setTradeOpen(false);
+          setExistingTradeData(null);
+        }}
+        existingTradeData={existingTradeData}
       />
     );
   }
@@ -1133,6 +1249,14 @@ export default function ModernTransactions() {
                         buyIcon={transactionTypes.find(t => t.type === 'buy')?.icon}
                         buyColor={transactionTypes.find(t => t.type === 'buy')?.color}
                         onOpen={() => { setExistingBuyData(tx); setBuyOpen(true); }}
+                        onVoid={() => setVoidConfirm(tx)}
+                      />
+                    ) : tx.type === 'TRADE' ? (
+                      <TradeTransactionCard
+                        tx={tx}
+                        tradeIcon={transactionTypes.find(t => t.type === 'trade')?.icon}
+                        tradeColor={transactionTypes.find(t => t.type === 'trade')?.color}
+                        onOpen={() => { setExistingTradeData(tx); setTradeOpen(true); }}
                         onVoid={() => setVoidConfirm(tx)}
                       />
                     ) : null}
