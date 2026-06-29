@@ -408,11 +408,23 @@ export default function ModernTransactions() {
       const raw = sessionStorage.getItem('pendingBuyState');
       return !!raw;
     }
+    if (location.state?.returnToBuy) {
+      const raw = sessionStorage.getItem('pendingBuyReturn');
+      return !!raw;
+    }
     return false;
   });
   const [existingBuyData, setExistingBuyData] = useState(() => {
     if (location.state?.customerUpdated) {
       const raw = sessionStorage.getItem('pendingBuyState');
+      if (!raw) return null;
+      try {
+        const { ticketId, buyItems, buyPawnNotes, ticketNote, showOnReceipt } = JSON.parse(raw);
+        return { ticketId, buyItems, buyPawnNotes, ticketNote, showOnReceipt };
+      } catch { return null; }
+    }
+    if (location.state?.returnToBuy) {
+      const raw = sessionStorage.getItem('pendingBuyReturn');
       if (!raw) return null;
       try {
         const { ticketId, buyItems, buyPawnNotes, ticketNote, showOnReceipt } = JSON.parse(raw);
@@ -552,6 +564,25 @@ export default function ModernTransactions() {
       })
         .then(res => setCustomer(res.data))
         .catch(err => console.error('Failed to refresh customer after sale checkout cancel:', err));
+    }
+  }, [location.state]);
+
+  // Refresh customer data after returning from Checkout via Buy Ticket breadcrumb; buyOpen/existingBuyData seeded in useState.
+  useEffect(() => {
+    if (!location.state?.returnToBuy) return;
+    const raw = sessionStorage.getItem('pendingBuyReturn');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingBuyReturn');
+    const { customerId, customer: savedCustomer } = pending;
+    if (savedCustomer) setCustomer(savedCustomer);
+    if (customerId) {
+      axios.get(`${config.apiUrl}/customers/${customerId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      })
+        .then(res => setCustomer(res.data))
+        .catch(err => console.error('Failed to refresh customer after buy checkout cancel:', err));
     }
   }, [location.state]);
 

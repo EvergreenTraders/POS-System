@@ -239,7 +239,7 @@ function Checkout() {
 
         setIsInitialized(true);
       }
-      else if (fromSource === 'cart' || fromSource === 'sale-ticket') {
+      else if (fromSource === 'cart' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket') {
         // Store the items to checkout and all cart items separately
         const items = itemsToCheckout;
 
@@ -1837,6 +1837,8 @@ const handleBackToEstimation = () => {
       navigate('/bullion-estimator');
     } else if (checkoutSource === 'sale-ticket') {
       navigate('/modern-transactions', { state: { returnToSale: true } });
+    } else if (checkoutSource === 'buy-ticket') {
+      navigate('/modern-transactions', { state: { returnToBuy: true } });
     } else if (checkoutSource === 'cart') {
       // Check if this is a pawn-only checkout — navigate back to pawn screen
       const isPawnCheckout = checkoutItems.length > 0 &&
@@ -1967,14 +1969,17 @@ const handleBackToEstimation = () => {
     checkoutItems.every(item => (item.transaction_type || '').toLowerCase() === 'pawn');
 
   const isSaleCheckout = checkoutSource === 'sale-ticket';
-  const themeColor = isSaleCheckout ? '#2e7d32' : PURPLE;
-  const themeDark  = isSaleCheckout ? '#1b5e20' : PURPLE_DARK;
-  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : '#f3e5f5';
+  const isBuyCheckout  = checkoutSource === 'buy-ticket';
+  const themeColor   = isSaleCheckout ? '#2e7d32' : isBuyCheckout ? '#0284c7' : PURPLE;
+  const themeDark    = isSaleCheckout ? '#1b5e20' : isBuyCheckout ? '#0369a1' : PURPLE_DARK;
+  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : isBuyCheckout ? '#e0f2fe' : '#f3e5f5';
 
   const breadcrumbSource = isPawnCheckout
     ? 'Pawn Transaction'
     : checkoutSource === 'sale-ticket'
     ? 'Sale Transaction'
+    : checkoutSource === 'buy-ticket'
+    ? 'Buy Transaction'
     : checkoutSource === 'coinsbullions'
     ? 'Coins & Bullions'
     : checkoutSource === 'cart'
@@ -1984,16 +1989,29 @@ const handleBackToEstimation = () => {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
 
-      {/* Breadcrumb — matches PawnTransactionScreen style */}
+      {/* Breadcrumb */}
       <Box sx={{ bgcolor: themeColor, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        <Typography
-          variant="body2"
-          fontWeight={400}
-          sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
-          onClick={handleBackToEstimation}
-        >
-          {breadcrumbSource}
-        </Typography>
+        {isBuyCheckout ? (
+          <>
+            <Typography variant="body2" fontWeight={400}
+              sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
+              onClick={() => navigate('/modern-transactions')}>
+              Transactions
+            </Typography>
+            <ChevronRightIcon sx={{ fontSize: 16, opacity: 0.6 }} />
+            <Typography variant="body2" fontWeight={400}
+              sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
+              onClick={handleBackToEstimation}>
+              Buy Ticket
+            </Typography>
+          </>
+        ) : (
+          <Typography variant="body2" fontWeight={400}
+            sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
+            onClick={handleBackToEstimation}>
+            {breadcrumbSource}
+          </Typography>
+        )}
         <ChevronRightIcon sx={{ fontSize: 16, opacity: 0.6 }} />
         <Typography variant="body2" fontWeight={700}>Checkout</Typography>
       </Box>

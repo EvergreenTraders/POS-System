@@ -209,6 +209,15 @@ export default function BuyTransactionScreen({
 
     sessionStorage.setItem('checkoutItems', JSON.stringify(cartItems));
     if (customer) sessionStorage.setItem('selectedCustomer', JSON.stringify(cartCustomer));
+    sessionStorage.setItem('pendingBuyReturn', JSON.stringify({
+      customerId: customer?.id || null,
+      customer,
+      ticketId,
+      buyItems,
+      buyPawnNotes,
+      ticketNote,
+      showOnReceipt,
+    }));
     commitBuyTicketId();
     navigate('/checkout', { state: { items: cartItems, allCartItems: cartItems, customer: cartCustomer, from: 'buy-ticket' } });
   };
