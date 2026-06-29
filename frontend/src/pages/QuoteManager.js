@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { useCart } from '../context/CartContext';
 import { useStoreStatus } from '../context/StoreStatusContext';
 import {
   Container,
@@ -42,9 +41,34 @@ import EditIcon from '@mui/icons-material/Edit';
 
 const API_BASE_URL = config.apiUrl;
 
+function generateBuyTicketId() {
+  const voided = JSON.parse(localStorage.getItem('voidedBuyTickets') || '[]');
+  const pending = localStorage.getItem('pendingBTTicketId');
+  if (pending && !voided.includes(pending)) return pending;
+  if (pending) localStorage.removeItem('pendingBTTicketId');
+  let last = parseInt(localStorage.getItem('lastBTTicketNumber') || '0');
+  let id;
+  do { last += 1; id = `BT-${last.toString().padStart(8, '0')}`; } while (voided.includes(id));
+  localStorage.setItem('lastBTTicketNumber', last.toString());
+  localStorage.setItem('pendingBTTicketId', id);
+  return id;
+}
+
+function generatePawnTicketId() {
+  const voided = JSON.parse(localStorage.getItem('voidedPawnTickets') || '[]');
+  const pending = localStorage.getItem('pendingPTTicketId');
+  if (pending && !voided.includes(pending)) return pending;
+  if (pending) localStorage.removeItem('pendingPTTicketId');
+  let last = parseInt(localStorage.getItem('lastPTTicketNumber') || '0');
+  let id;
+  do { last += 1; id = `PT-${last.toString().padStart(8, '0')}`; } while (voided.includes(id));
+  localStorage.setItem('lastPTTicketNumber', last.toString());
+  localStorage.setItem('pendingPTTicketId', id);
+  return id;
+}
+
 function QuoteManager() {
   const navigate = useNavigate();
-  const { addToCart, setCustomer } = useCart();
   const { isStoreClosed } = useStoreStatus();
   const [quotes, setQuotes] = useState([]);
   const [selectedQuote, setSelectedQuote] = useState(null);
@@ -423,44 +447,99 @@ function QuoteManager() {
 
   const handleProceedToCheckout = async (quoteToUse) => {
     try {
-      // Use the passed quote or selectedQuote (for dialog)
       const quote = quoteToUse || selectedQuote;
-      
-      // Get all items for this quote
+      const quoteType = quote.quote_type || 'pawn';
       const items = await api.quotes.getItems(quote.quote_id);
-      
-      // Add each quote item to cart
-      items.forEach(item => {
-        addToCart({
-          id: item.item_id,
-          short_desc: item.description,
-          itemPriceEstimates: {
-            [item.transaction_type]: parseFloat(item.item_price) || 0
-          },
-          transaction_type: item.transaction_type,
-          images: item.images || [],
-          price: item.item_price
-        });
-      });
 
-      // Set the customer information
-      setCustomer({
+      const nameParts = (quote.customer_name || '').split(' ');
+      const customerObj = {
         id: quote.customer_id,
-        name: quote.customer_name,
-        email: quote.customer_email,
-        phone: quote.customer_phone
-      });
+        first_name: nameParts[0] || '',
+        last_name: nameParts.slice(1).join(' ') || '',
+        name: quote.customer_name || '',
+        email: quote.customer_email || '',
+        phone: quote.customer_phone || '',
+      };
 
       setDetailsDialogOpen(false);
+
+      const parseImages = (raw) => {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw;
+        try { return JSON.parse(raw); } catch { return []; }
+      };
+
+      let checkoutItems = [];
+      let checkoutFrom = 'cart';
+
+      if (quoteType === 'buy') {
+        const ticketId = generateBuyTicketId();
+        checkoutFrom = 'buy-ticket';
+        checkoutItems = items.map(item => ({
+          id: item.item_id,
+          item_id: item.item_id,
+          description: item.short_desc || item.description || '',
+          short_desc: item.short_desc || item.description || '',
+          long_desc: item.long_desc || '',
+          price: parseFloat(item.item_price) || 0,
+          images: parseImages(item.images),
+          transaction_type: 'buy',
+          buyTicketId: ticketId,
+          fromInventory: true,
+          sourceEstimator: 'jewelry',
+          category: item.category || '',
+          precious_metal_type: item.precious_metal_type || '',
+          metal_weight: item.metal_weight || '',
+          metal_purity: item.metal_purity || '',
+          serial_number: item.serial_number || '',
+          notes: item.notes || '',
+        }));
+
+      } else if (quoteType === 'pawn') {
+        const ticketId = generatePawnTicketId();
+        checkoutItems = items.map(item => ({
+          id: item.item_id,
+          item_id: item.item_id,
+          description: item.short_desc || item.description || '',
+          short_desc: item.short_desc || item.description || '',
+          long_desc: item.long_desc || '',
+          price: parseFloat(item.item_price) || 0,
+          images: parseImages(item.images),
+          transaction_type: 'pawn',
+          pawnTicketId: ticketId,
+          buyTicketId: ticketId,
+          fromInventory: true,
+          category: item.category || '',
+          precious_metal_type: item.precious_metal_type || '',
+          metal_weight: item.metal_weight || '',
+          metal_purity: item.metal_purity || '',
+          serial_number: item.serial_number || '',
+          notes: item.notes || '',
+        }));
+
+      } else {
+        // Sale quote
+        checkoutItems = items.map(item => ({
+          id: item.item_id,
+          item_id: item.item_id,
+          description: item.short_desc || item.description || '',
+          short_desc: item.short_desc || item.description || '',
+          price: parseFloat(item.item_price) || 0,
+          images: parseImages(item.images),
+          transaction_type: 'sale',
+          fromInventory: true,
+        }));
+      }
+
       navigate('/checkout', {
         state: {
+          items: checkoutItems,
+          allCartItems: checkoutItems,
+          customer: customerObj,
           customerId: quote.customer_id,
-          customerName: quote.customer_name,
-          customerEmail: quote.customer_email,
-          customerPhone: quote.customer_phone,
-          returnPath: '/quotes',
-          quoteId: quote.quote_id
-        }
+          from: checkoutFrom,
+          quoteId: quote.quote_id,
+        },
       });
     } catch (error) {
       console.error('Error proceeding to checkout:', error);

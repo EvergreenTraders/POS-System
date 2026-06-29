@@ -6084,6 +6084,7 @@ app.post('/api/quotes', uploadJewelryImages, async (req, res) => {
     const customer_id  = req.body.customer_id;
     const employee_id  = req.body.employee_id;
     const total_amount = req.body.total_amount;
+    const quote_type   = req.body.quote_type || 'pawn';
     const uploadedFiles = req.files || [];
     
     // Get the latest quote ID to generate the next sequential number
@@ -6114,18 +6115,21 @@ app.post('/api/quotes', uploadJewelryImages, async (req, res) => {
     const configResult = await client.query('SELECT days FROM quote_expiration LIMIT 1');
     const expiresIn = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
     
+    // Ensure quote_type column exists
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_type VARCHAR(10) DEFAULT 'pawn'`);
+
     // Insert the quote
     const quoteResult = await client.query(
       `INSERT INTO quotes (
         quote_id, customer_id, employee_id, total_amount,
-        expires_in, days_remaining, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $5, CURRENT_TIMESTAMP)
+        expires_in, days_remaining, quote_type, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $5, $6, CURRENT_TIMESTAMP)
       RETURNING *`,
-      [quoteId, customer_id, employee_id, total_amount, expiresIn]
+      [quoteId, customer_id, employee_id, total_amount, expiresIn, quote_type]
     );
 
-    // Look up transaction_type_id for 'pawn'
-    const typeResult = await client.query(`SELECT id FROM transaction_type WHERE type = 'pawn' LIMIT 1`);
+    // Look up transaction_type_id based on quote_type
+    const typeResult = await client.query(`SELECT id FROM transaction_type WHERE type = $1 LIMIT 1`, [quote_type]);
     const pawnTypeId = typeResult.rows[0]?.id ?? 1;
 
     // Build a global image index map: imageMetadata[n].itemIndex tells us which item each file belongs to
@@ -6419,23 +6423,49 @@ app.get('/api/quotes/:quote_id/items', async (req, res) => {
       return res.json(result.rows);
     }
 
-    // Default pawn quote: existing behaviour
+    // pawn/buy quote: return full jewelry data needed to restore the ticket
     const query = `
       SELECT
         qi.item_id,
         qi.item_price,
-        tt.type as transaction_type,
-        j.short_desc as description,
-        j.item_price as jewelry_item_price,
-        j.precious_metal_type,
-        j.metal_spot_price,
+        tt.type                          AS transaction_type,
+        j.short_desc,
+        j.long_desc,
+        COALESCE(j.short_desc, j.long_desc) AS description,
+        j.category,
+        j.brand,
+        j.vintage,
+        j.stamps,
+        j.images,
+        j.serial_number,
         j.metal_weight,
+        j.precious_metal_type,
+        j.non_precious_metal_type,
         j.metal_purity,
-        j.purity_value
+        j.jewelry_color,
+        j.purity_value,
+        j.est_metal_value,
+        j.melt_value,
+        j.metal_spot_price,
+        j.primary_gem_type,
+        j.primary_gem_category,
+        j.primary_gem_size,
+        j.primary_gem_quantity,
+        j.primary_gem_shape,
+        j.primary_gem_weight,
+        j.primary_gem_color,
+        j.primary_gem_exact_color,
+        j.primary_gem_clarity,
+        j.primary_gem_cut,
+        j.primary_gem_lab_grown,
+        j.primary_gem_authentic,
+        j.primary_gem_value,
+        j.notes
       FROM quote_items qi
       LEFT JOIN transaction_type tt ON qi.transaction_type_id = tt.id
       LEFT JOIN jewelry j ON qi.item_id = j.item_id
       WHERE qi.quote_id = $1
+      ORDER BY qi.id
     `;
 
     const result = await pool.query(query, [quote_id]);
@@ -8030,43 +8060,98 @@ app.post('/api/buy-ticket', async (req, res) => {
   try {
     const { buy_ticket_id, transaction_id, item_id, inventory_type, ticket_note, show_on_receipt } = req.body;
 
-    // Validate required fields
     if (!buy_ticket_id) {
       return res.status(400).json({ error: 'buy_ticket_id is required' });
     }
 
     await client.query('BEGIN');
 
-    // Auto-detect inventory_type by looking up item_id in both tables if not provided
+    let actualItemId = item_id || null;
     let resolvedInventoryType = inventory_type || null;
-    if (!resolvedInventoryType && item_id) {
-      const jwCheck = await client.query('SELECT 1 FROM jewelry WHERE item_id = $1 LIMIT 1', [item_id]);
-      if (jwCheck.rows.length > 0) {
-        resolvedInventoryType = 'JW';
-      } else {
-        const hgCheck = await client.query('SELECT 1 FROM hardgoods WHERE item_id = $1 LIMIT 1', [item_id]);
-        if (hgCheck.rows.length > 0) resolvedInventoryType = 'HG';
+
+    if (item_id && item_id.startsWith('QT')) {
+      // Item came from a quote — assign a sequential buy-ticket item ID and promote the jewelry record
+      const countResult = await client.query(
+        `SELECT COUNT(*) AS cnt FROM buy_ticket WHERE buy_ticket_id = $1`,
+        [buy_ticket_id]
+      );
+      const seq = parseInt(countResult.rows[0].cnt) + 1;
+      const newItemId = `${buy_ticket_id}-${String(seq).padStart(2, '0')}`;
+
+      await client.query(`
+        INSERT INTO jewelry (
+          item_id, part_number, long_desc, short_desc, category, brand, vintage, stamps, images,
+          metal_weight, precious_metal_type, non_precious_metal_type, metal_purity, jewelry_color,
+          purity_value, est_metal_value, primary_gem_type, primary_gem_category, primary_gem_size,
+          primary_gem_quantity, primary_gem_shape, primary_gem_weight, primary_gem_color,
+          primary_gem_exact_color, primary_gem_clarity, primary_gem_cut, primary_gem_lab_grown,
+          primary_gem_authentic, primary_gem_value, status, location, condition, metal_spot_price,
+          notes, item_price, melt_value, total_weight, inventory_type
+        )
+        SELECT
+          $1, $1, long_desc, short_desc, category, brand, vintage, stamps, images,
+          metal_weight, precious_metal_type, non_precious_metal_type, metal_purity, jewelry_color,
+          purity_value, est_metal_value, primary_gem_type, primary_gem_category, primary_gem_size,
+          primary_gem_quantity, primary_gem_shape, primary_gem_weight, primary_gem_color,
+          primary_gem_exact_color, primary_gem_clarity, primary_gem_cut, primary_gem_lab_grown,
+          primary_gem_authentic, primary_gem_value, 'HOLD', location, condition, metal_spot_price,
+          notes, item_price, melt_value, total_weight, 'jewelry'
+        FROM jewelry WHERE item_id = $2
+      `, [newItemId, item_id]);
+
+      await client.query(`
+        INSERT INTO jewelry_secondary_gems (
+          item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+          secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+          secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+        )
+        SELECT
+          $1, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+          secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+          secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+        FROM jewelry_secondary_gems WHERE item_id = $2
+      `, [newItemId, item_id]);
+
+      const delResult = await client.query(
+        `DELETE FROM quote_items WHERE item_id = $1 RETURNING quote_id`,
+        [item_id]
+      );
+      const quoteId = delResult.rows[0]?.quote_id;
+
+      await client.query(`DELETE FROM jewelry WHERE item_id = $1`, [item_id]);
+
+      if (quoteId) {
+        const rem = await client.query(
+          `SELECT COUNT(*) AS cnt FROM quote_items WHERE quote_id = $1`,
+          [quoteId]
+        );
+        if (parseInt(rem.rows[0].cnt) === 0) {
+          await client.query(`DELETE FROM quotes WHERE quote_id = $1`, [quoteId]);
+        }
+      }
+
+      actualItemId = newItemId;
+      resolvedInventoryType = 'JW';
+    } else {
+      // Auto-detect inventory_type by looking up item_id in both tables if not provided
+      if (!resolvedInventoryType && item_id) {
+        const jwCheck = await client.query('SELECT 1 FROM jewelry WHERE item_id = $1 LIMIT 1', [item_id]);
+        if (jwCheck.rows.length > 0) {
+          resolvedInventoryType = 'JW';
+        } else {
+          const hgCheck = await client.query('SELECT 1 FROM hardgoods WHERE item_id = $1 LIMIT 1', [item_id]);
+          if (hgCheck.rows.length > 0) resolvedInventoryType = 'HG';
+        }
       }
     }
 
-    // Insert new buy_ticket record
-    const insertQuery = `
-      INSERT INTO buy_ticket (buy_ticket_id, transaction_id, item_id, inventory_type, ticket_note, show_on_receipt)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING *
-    `;
-
-    const result = await client.query(insertQuery, [
-      buy_ticket_id,
-      transaction_id || null,
-      item_id || null,
-      resolvedInventoryType,
-      ticket_note || null,
-      show_on_receipt ?? false,
-    ]);
+    const result = await client.query(
+      `INSERT INTO buy_ticket (buy_ticket_id, transaction_id, item_id, inventory_type, ticket_note, show_on_receipt)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [buy_ticket_id, transaction_id || null, actualItemId, resolvedInventoryType, ticket_note || null, show_on_receipt ?? false]
+    );
 
     await client.query('COMMIT');
-
     res.status(201).json(result.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK');
@@ -8241,29 +8326,78 @@ app.post('/api/pawn-ticket', async (req, res) => {
       });
     }
 
-    // Insert new pawn_ticket record with pawn config values frozen at time of creation
-    const insertQuery = `
-      INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date, ticket_note, show_on_receipt, storage_fee)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      RETURNING *
-    `;
+    let actualItemId = item_id ?? null;
 
-    const result = await client.query(insertQuery, [
-      pawn_ticket_id,
-      transaction_id ?? null,
-      item_id ?? null,
-      term_days ?? 90,
-      interest_rate ?? 2.9,
-      insurance_rate ?? 0,
-      frequency_days ?? 30,
-      due_date ?? null,
-      ticket_note ?? null,
-      show_on_receipt ?? false,
-      storage_fee ?? 0
-    ]);
+    if (item_id && item_id.startsWith('QT')) {
+      // Item came from a quote — assign a sequential pawn-ticket item ID and promote the jewelry record
+      const seq = currentItemCount + 1;
+      const newItemId = `${pawn_ticket_id}-${String(seq).padStart(2, '0')}`;
+
+      await client.query(`
+        INSERT INTO jewelry (
+          item_id, part_number, long_desc, short_desc, category, brand, vintage, stamps, images,
+          metal_weight, precious_metal_type, non_precious_metal_type, metal_purity, jewelry_color,
+          purity_value, est_metal_value, primary_gem_type, primary_gem_category, primary_gem_size,
+          primary_gem_quantity, primary_gem_shape, primary_gem_weight, primary_gem_color,
+          primary_gem_exact_color, primary_gem_clarity, primary_gem_cut, primary_gem_lab_grown,
+          primary_gem_authentic, primary_gem_value, status, location, condition, metal_spot_price,
+          notes, item_price, melt_value, total_weight, inventory_type
+        )
+        SELECT
+          $1, $1, long_desc, short_desc, category, brand, vintage, stamps, images,
+          metal_weight, precious_metal_type, non_precious_metal_type, metal_purity, jewelry_color,
+          purity_value, est_metal_value, primary_gem_type, primary_gem_category, primary_gem_size,
+          primary_gem_quantity, primary_gem_shape, primary_gem_weight, primary_gem_color,
+          primary_gem_exact_color, primary_gem_clarity, primary_gem_cut, primary_gem_lab_grown,
+          primary_gem_authentic, primary_gem_value, 'PAWN', location, condition, metal_spot_price,
+          notes, item_price, melt_value, total_weight, 'jewelry'
+        FROM jewelry WHERE item_id = $2
+      `, [newItemId, item_id]);
+
+      await client.query(`
+        INSERT INTO jewelry_secondary_gems (
+          item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+          secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+          secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+        )
+        SELECT
+          $1, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+          secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+          secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+        FROM jewelry_secondary_gems WHERE item_id = $2
+      `, [newItemId, item_id]);
+
+      const delResult = await client.query(
+        `DELETE FROM quote_items WHERE item_id = $1 RETURNING quote_id`,
+        [item_id]
+      );
+      const quoteId = delResult.rows[0]?.quote_id;
+
+      await client.query(`DELETE FROM jewelry WHERE item_id = $1`, [item_id]);
+
+      if (quoteId) {
+        const rem = await client.query(
+          `SELECT COUNT(*) AS cnt FROM quote_items WHERE quote_id = $1`,
+          [quoteId]
+        );
+        if (parseInt(rem.rows[0].cnt) === 0) {
+          await client.query(`DELETE FROM quotes WHERE quote_id = $1`, [quoteId]);
+        }
+      }
+
+      actualItemId = newItemId;
+    }
+
+    // Insert new pawn_ticket record with pawn config values frozen at time of creation
+    const result = await client.query(
+      `INSERT INTO pawn_ticket (pawn_ticket_id, transaction_id, item_id, term_days, interest_rate, insurance_rate, frequency_days, due_date, ticket_note, show_on_receipt, storage_fee)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [pawn_ticket_id, transaction_id ?? null, actualItemId, term_days ?? 90, interest_rate ?? 2.9,
+       insurance_rate ?? 0, frequency_days ?? 30, due_date ?? null, ticket_note ?? null, show_on_receipt ?? false, storage_fee ?? 0]
+    );
 
     await client.query('COMMIT');
-    console.log(`✓ Pawn ticket: ticket_id=${pawn_ticket_id}, transaction_id=${transaction_id}, item_id=${item_id}`);
+    console.log(`✓ Pawn ticket: ticket_id=${pawn_ticket_id}, transaction_id=${transaction_id}, item_id=${actualItemId}`);
 
     res.status(201).json(result.rows[0]);
   } catch (error) {

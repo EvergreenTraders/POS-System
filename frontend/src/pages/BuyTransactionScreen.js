@@ -58,6 +58,13 @@ function generateBuyTicketId() {
 
 function commitBuyTicketId() { localStorage.removeItem(BT_PENDING_KEY); }
 
+function resolveImageUrl(url) {
+  if (!url) return null;
+  if (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+  if (url.startsWith('/uploads')) return `${config.apiUrl.replace('/api', '')}${url}`;
+  return url;
+}
+
 async function syncBuyTicketCounter() {
   try {
     const res = await axios.get(`${config.apiUrl}/buy-ticket/last-id`, {
@@ -234,7 +241,16 @@ export default function BuyTransactionScreen({
 
   const startEdit = (item) => {
     if (item.sourceEstimator === 'jewelry' && item.jewelryData) {
-      setEditingIntakeItem({ ...item.jewelryData, _lineId: item._lineId, images: item.images?.length ? item.images : (item.jewelryData.images || []) });
+      const jd = item.jewelryData;
+      const images = item.images?.length ? item.images : (jd.images || []);
+      setEditingIntakeItem({
+        ...jd,
+        _lineId: item._lineId,
+        images,
+        // JewelryIntakeScreen reads 'item' for name and 'metal_category' for category
+        item: jd.item || jd.short_desc || item.description || '',
+        metal_category: jd.metal_category || jd.category || '',
+      });
       setParsedValues(null);
       setIntakeEntry('');
       setIntakeOpen(true);
@@ -302,7 +318,15 @@ export default function BuyTransactionScreen({
   const handleIntakeUpdate = (item) => {
     setBuyItems(prev => prev.map(i =>
       i._lineId === editingIntakeItem?._lineId
-        ? { ...jewelryItemToBuyItem(item, 0), _lineId: i._lineId, part_no: i.part_no }
+        ? {
+            ...jewelryItemToBuyItem(item, 0),
+            _lineId: i._lineId,
+            part_no: i.part_no,
+            // Preserve the original paid amount; user adjusts it in the table
+            paid: i.paid,
+            // Preserve inventory-tracking fields for quote items
+            ...(i.fromInventory && { fromInventory: true, item_id: i.item_id }),
+          }
         : i
     ));
     setEditingIntakeItem(null);
@@ -372,6 +396,57 @@ export default function BuyTransactionScreen({
   const handleAddToWorkspace = () => {
     if (buyItems.length === 0) { showSnackbar('Add at least one item before adding to workspace', 'warning'); return; }
     onAddToWorkspace?.({ ticketId, buyItems, buyPawnNotes, ticketNote, showOnReceipt, totalPaid, totalPaidOverride: totalPaidOverride ?? null, customer });
+  };
+
+  const handleSaveAsQuote = async () => {
+    if (!customer?.id) { showSnackbar('Please select a customer before saving as quote', 'error'); return; }
+    if (buyItems.length === 0) { showSnackbar('No items to save as quote', 'warning'); return; }
+    const token = localStorage.getItem('token');
+    const employeeId = JSON.parse(atob(token.split('.')[1])).id;
+    const scale = totalPaid > 0 ? effectiveTotalPaid / totalPaid : 1;
+    try {
+      const formData = new FormData();
+      const imageMetadata = [];
+
+      const itemsForSubmit = buyItems.map((item, itemIndex) => {
+        const jd = item.jewelryData || {};
+        const { images } = item;
+        if (images && Array.isArray(images)) {
+          images.forEach((img, imgIndex) => {
+            if (img.file instanceof File) {
+              formData.append('images', img.file);
+              imageMetadata.push({ itemIndex, isPrimary: img.isPrimary || imgIndex === 0 });
+            }
+          });
+        }
+        const itemPaid = (parseFloat(item.paid) || 0) * scale;
+        return {
+          ...jd,
+          short_desc: item.description || jd.short_desc || '',
+          long_desc: jd.long_desc || item.description || '',
+          amount: itemPaid,
+          price: itemPaid,
+          transaction_type: 'buy',
+        };
+      });
+
+      formData.append('items', JSON.stringify(itemsForSubmit));
+      formData.append('imageMetadata', JSON.stringify(imageMetadata));
+      formData.append('customer_id', customer.id);
+      formData.append('employee_id', employeeId);
+      formData.append('total_amount', effectiveTotalPaid);
+      formData.append('quote_type', 'buy');
+
+      const res = await axios.post(`${config.apiUrl}/quotes`, formData, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
+      });
+      showSnackbar(`Quote ${res.data.quote_id} saved successfully. Valid for ${res.data.expires_in} days.`, 'success');
+      setBuyItems([]);
+      setTotalPaidOverride(null);
+    } catch (err) {
+      console.error('Error saving quote:', err);
+      showSnackbar('Error saving quote. Please try again.', 'error');
+    }
   };
 
   const handleCheckoutNow = () => {
@@ -703,7 +778,7 @@ export default function BuyTransactionScreen({
                       <TableCell sx={{ py: 0.5 }}><Typography fontSize={11} color="text.secondary">{item.part_no}</Typography></TableCell>
                       <TableCell sx={{ py: 0.5 }}>
                         {(() => {
-                          const thumb = item.images?.find(i => i.isPrimary)?.url || item.images?.[0]?.url;
+                          const thumb = resolveImageUrl(item.images?.find(i => i.isPrimary)?.url || item.images?.[0]?.url);
                           return thumb ? (
                             <Box component="img" src={thumb} alt="Item"
                               sx={{ width: 40, height: 40, borderRadius: 1, objectFit: 'cover', cursor: 'pointer' }}
@@ -760,7 +835,7 @@ export default function BuyTransactionScreen({
                       <TableCell sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 500, py: 0.75 }}>{item.part_no}</TableCell>
                       <TableCell sx={{ py: 0.75 }}>
                         {(() => {
-                          const thumb = item.images?.find(i => i.isPrimary)?.url || item.images?.[0]?.url;
+                          const thumb = resolveImageUrl(item.images?.find(i => i.isPrimary)?.url || item.images?.[0]?.url);
                           return thumb ? (
                             <Box component="img" src={thumb} alt="Item"
                               sx={{ width: 40, height: 40, borderRadius: 1, objectFit: 'cover', cursor: 'pointer' }}
@@ -848,6 +923,12 @@ export default function BuyTransactionScreen({
           sx={{ whiteSpace: 'nowrap', mr: 0 }}
         />
         <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+        <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
+          disabled={buyItems.length === 0 || !customer?.id}
+          onClick={handleSaveAsQuote}
+          sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+          Save as Quote
+        </Button>
         <Button size="small" variant="outlined" color="error" onClick={onClose}
           sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
           Cancel

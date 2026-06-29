@@ -818,8 +818,8 @@ function Checkout() {
           );
 
           // Step 1: Create jewelry items FIRST (only if we have jewelry items)
-          if (isFromQuotes) {
-            // If coming from quotes, update each quote item to a regular item
+          if (isFromQuotes && checkoutItems.some(item => item.item_id?.startsWith('QT') && !item.fromInventory)) {
+            // Legacy path: quoted items have Q- prefix IDs — convert them via the jewelry endpoint
             const convertResponse = await axios.put(
               `${config.apiUrl}/jewelry/${quoteId}`,
               {},
@@ -828,19 +828,19 @@ function Checkout() {
               }
             );
             createdJewelryItems = convertResponse.data;
-            
+
             // Push data to jewelry_secondary_gems for items converted from quotes
             for (const item of createdJewelryItems) {
               // Find matching cart item to get secondary gem data
               const originalItem = checkoutItems.find(cartItem =>
                 cartItem.item_id && cartItem.item_id.startsWith(quoteId));
-              
+
                 try {
                   if (originalItem.secondary_gems && originalItem.secondary_gems.length > 0) {
                     // Send each secondary gem individually
                     try {
                       for (const gemData of originalItem.secondary_gems) {
-                        
+
                         // Send the gem data
                         await axios.post(
                           `${config.apiUrl}/jewelry_secondary_gems`,
@@ -871,7 +871,7 @@ function Checkout() {
                       secondary_gem_authentic: originalItem.secondary_gem_authentic,
                       secondary_gem_value: originalItem.secondary_gem_value
                     };
-                    
+
                     // Push to jewelry_secondary_gems with the same item_id
                     await axios.put(
                       `${config.apiUrl}/jewelry_secondary_gems/${item.item_id}`,
@@ -883,7 +883,7 @@ function Checkout() {
                   console.error(`Error adding secondary gems for converted item ${item.item_id}:`, error);
                   // Continue with transaction even if secondary gems fail
                 }
-    
+
             }
           } else if (hasJewelryItems) {
             // If coming from estimator, create new jewelry items (only if we have jewelry items)
@@ -1655,6 +1655,22 @@ function Checkout() {
                   console.error(`Error recording pawn history for ${pawnTicketId}:`, historyError);
                 }
               }
+            }
+          }
+
+          // Step 3.8: Clean up sale quote after successful checkout
+          // Buy/pawn quotes are cleaned up by the ticket creation endpoints (backend).
+          const isSaleOnlyQuote = checkoutItems.every(
+            item => (item.transaction_type || '').toLowerCase() === 'sale'
+          );
+          if (isFromQuotes && quoteId && isSaleOnlyQuote) {
+            try {
+              await axios.delete(
+                `${config.apiUrl}/quotes/${quoteId}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+            } catch (err) {
+              console.error('Failed to clean up sale quote after checkout:', err);
             }
           }
 
