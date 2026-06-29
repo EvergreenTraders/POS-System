@@ -435,6 +435,7 @@ function GemEntryDialog({ open, onClose, onSave, title = 'Gem', initial = null }
 export default function JewelryIntakeScreen({
   customer,
   ticketId,
+  ticketLabel = 'Pawn Ticket',
   initialEntry = '',
   parsedValues = null,
   editItem = null,
@@ -503,8 +504,8 @@ export default function JewelryIntakeScreen({
   const parsedParts = [category, colour, metal, purity.purity || String(purity.value || '')].filter(Boolean);
 
   const breadcrumbs = [
-    { label: 'Transactions',                    onClick: () => onBack('transactions') },
-    { label: `Pawn Ticket (${ticketId ?? '—'})`, onClick: () => onBack('pawn') },
+    { label: 'Transactions',                          onClick: () => onBack('transactions') },
+    { label: `${ticketLabel} (${ticketId ?? '—'})`,   onClick: () => onBack() },
     { label: 'Intake' },
     { label: 'Jewellery Item Intake' },
     { label: 'Unique Jewellery Item', current: true },

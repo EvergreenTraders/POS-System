@@ -6,15 +6,39 @@ import {
   Box, Typography, Paper, Button, IconButton, Chip, Avatar,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Tooltip, Snackbar, Alert, Select, MenuItem,
+  Tooltip, Snackbar, Alert, Select, MenuItem, Menu,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import JewelryIntakeScreen from './JewelryIntakeScreen';
 
 const BUY_BLUE  = '#0284c7';
 const BUY_DARK  = '#0369a1';
+
+function parseItemDescription(parts, categoryCodeMap, colorCodeMap, metalTypeCodeMap) {
+  const result = { category: null, purity: null, weight: null, color: null, metal: null };
+  let i = 0;
+  if (parts[i] && categoryCodeMap[parts[i]]) { result.category = categoryCodeMap[parts[i]]; i++; }
+  if (i < parts.length) {
+    const p = parts[i];
+    if (p.match(/^\d+K?$/i))                          { result.purity = p.replace(/K$/i, '') + 'K'; i++; }
+    else if (p.match(/^0?\.\d+$/) || p.match(/^1\.0+$/)) { result.purity = parseFloat(p); i++; }
+    else if (p.match(/^[A-Z]+$/) && !p.match(/^\d/)) { result.purity = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase(); i++; }
+  }
+  if (i < parts.length) {
+    const w = parts[i];
+    if (w.match(/^[\d.]+G?$/i)) { result.weight = parseFloat(w.replace(/G$/i, '')); i++; }
+  }
+  if (i < parts.length) {
+    const cm = parts[i];
+    if (cm.length === 1)         { result.metal = metalTypeCodeMap[cm] || null; }
+    else if (metalTypeCodeMap[cm]) { result.metal = metalTypeCodeMap[cm]; }
+    else { result.color = colorCodeMap[cm[0]] || null; result.metal = metalTypeCodeMap[cm.slice(1)] || null; }
+  }
+  return result;
+}
 
 const BT_PENDING_KEY = 'pendingBTTicketId';
 const BT_COUNTER_KEY = 'lastBTTicketNumber';
@@ -56,6 +80,7 @@ export default function BuyTransactionScreen({
   onClose,
   onAddToWorkspace,
   onRemoveFromWorkspace,
+  onConvertTo,
   existingBuyData,
 }) {
   const navigate = useNavigate();
@@ -66,17 +91,29 @@ export default function BuyTransactionScreen({
   const [ticketId, setTicketId]         = useState(() => existingBuyData?.ticketId || generateBuyTicketId());
   const [buyItems, setBuyItems]         = useState(existingBuyData?.buyItems || []);
   const [buyPawnNotes, setBuyPawnNotes] = useState(existingBuyData?.buyPawnNotes || '');
+  const [savedNotes, setSavedNotes]     = useState(existingBuyData?.buyPawnNotes || '');
   const [ticketNote, setTicketNote]     = useState(existingBuyData?.ticketNote || '');
-  const [showOnReceipt, setShowOnReceipt] = useState(existingBuyData?.showOnReceipt ?? true);
+  const [showOnReceipt, setShowOnReceipt] = useState(existingBuyData?.showOnReceipt ?? false);
   const [categories, setCategories]     = useState([]);
   const [buyStats, setBuyStats]         = useState(null);
   const [lastSoldItems, setLastSoldItems] = useState([]);
+  const [scanInput, setScanInput]       = useState('');
+  const [intakeOpen, setIntakeOpen]     = useState(false);
+  const [intakeEntry, setIntakeEntry]   = useState('');
+  const [parsedValues, setParsedValues] = useState(null);
+  const [editingIntakeItem, setEditingIntakeItem] = useState(null);
+  const [categoryCodeMap, setCategoryCodeMap] = useState({});
+  const [colorCodeMap,    setColorCodeMap]    = useState({});
+  const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
   const [quickAddMode, setQuickAddMode] = useState(false);
   const [quickInput, setQuickInput]     = useState('');
   const [editingItemId, setEditingItemId] = useState(null);
   const [editFields, setEditFields]     = useState({});
   const [adjustDialog, setAdjustDialog] = useState(false);
   const [adjustTotal, setAdjustTotal]   = useState('');
+  const [transactionTypes, setTransactionTypes] = useState([]);
+  const [convertAnchor, setConvertAnchor] = useState(null);
+  const [convertRow,    setConvertRow]    = useState(null);
   const [snackbar, setSnackbar]         = useState({ open: false, message: '', severity: 'success' });
   const quickInputRef = useRef(null);
 
@@ -94,6 +131,32 @@ export default function BuyTransactionScreen({
     axios.get(`${config.apiUrl}/categories`, { headers })
       .then(res => setCategories(res.data))
       .catch(() => {});
+    axios.get(`${config.apiUrl}/transaction-types`, { headers })
+      .then(res => setTransactionTypes(res.data))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [catRes, colorRes, typeRes] = await Promise.all([
+          axios.get(`${config.apiUrl}/metal_category`),
+          axios.get(`${config.apiUrl}/metal_color`),
+          axios.get(`${config.apiUrl}/precious_metal_type`),
+        ]);
+        const catMap = {};
+        (catRes.data || []).forEach(c => { if (c.category_code) catMap[c.category_code.toUpperCase()] = c.category; });
+        setCategoryCodeMap(catMap);
+        const colorMap = {};
+        (colorRes.data || []).forEach(c => { if (c.color_code) colorMap[c.color_code.toUpperCase()] = c.color; });
+        setColorCodeMap(colorMap);
+        const typeMap = {};
+        (typeRes.data || []).forEach(t => { if (t.type_code) typeMap[t.type_code.toUpperCase()] = t.type; });
+        setMetalTypeCodeMap(typeMap);
+      } catch (err) {
+        console.error('Error fetching metal code maps:', err);
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -105,6 +168,14 @@ export default function BuyTransactionScreen({
     axios.get(`${config.apiUrl}/customers/${customer.id}/buy-history?limit=5`, { headers })
       .then(res => setLastSoldItems(res.data))
       .catch(() => {});
+    axios.get(`${config.apiUrl}/customers/${customer.id}`, { headers })
+      .then(res => {
+        const dbNotes = res.data.buy_pawn_notes || '';
+        setSavedNotes(dbNotes);
+        if (!existingBuyData) setBuyPawnNotes(dbNotes);
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customer?.id]);
 
   useEffect(() => {
@@ -152,11 +223,18 @@ export default function BuyTransactionScreen({
   const handleDuplicateItem = (item) => {
     setBuyItems(prev => {
       const count = prev.length + 1;
-      return [...prev, { ...item, _lineId: Date.now() + Math.random(), part_no: `${ticketId}-${String(count).padStart(2, '0')}` }];
+      return [...prev, { ...item, serial_number: '', _lineId: Date.now() + Math.random(), part_no: `${ticketId}-${String(count).padStart(2, '0')}` }];
     });
   };
 
   const startEdit = (item) => {
+    if (item.sourceEstimator === 'jewelry' && item.jewelryData) {
+      setEditingIntakeItem({ ...item.jewelryData, _lineId: item._lineId });
+      setParsedValues(null);
+      setIntakeEntry('');
+      setIntakeOpen(true);
+      return;
+    }
     setEditingItemId(item._lineId);
     setEditFields({ category_id: item.category_id || '', description: item.description, serial_number: item.serial_number || '', qty: item.qty, paid: item.paid });
   };
@@ -167,6 +245,80 @@ export default function BuyTransactionScreen({
           category_name: categories.find(c => c.id === editFields.category_id)?.name || i.category_name }
       : i));
     setEditingItemId(null);
+  };
+
+  const openIntake = () => {
+    const text  = scanInput.trim();
+    const parts = text.toUpperCase().split(/\s+/);
+    if (parts[0] === 'J' && parts.length >= 2) {
+      setParsedValues(parseItemDescription(parts.slice(1), categoryCodeMap, colorCodeMap, metalTypeCodeMap));
+    } else {
+      setParsedValues(null);
+    }
+    setIntakeEntry(text);
+    setEditingIntakeItem(null);
+    setIntakeOpen(true);
+  };
+
+  const jewelryItemToBuyItem = (item, seq) => ({
+    _lineId: Date.now() + Math.random(),
+    part_no: `${ticketId}-${String(seq).padStart(2, '0')}`,
+    category_id: categories.find(c => c.name === item.category)?.id || '',
+    category_name: item.category || '',
+    description: item.item || item.short_desc || '',
+    serial_number: item.serial_number || item.serial || '',
+    qty: 1,
+    paid: parseFloat(item.buy_price) || parseFloat(item.paid_amount) || 0,
+    images: item.images || [],
+    sourceEstimator: 'jewelry',
+    jewelryData: item,
+  });
+
+  const handleIntakeBack = () => {
+    setIntakeOpen(false);
+    setEditingIntakeItem(null);
+  };
+
+  const handleIntakeSave = (item) => {
+    setBuyItems(prev => [...prev, jewelryItemToBuyItem(item, prev.length + 1)]);
+    setScanInput('');
+    setIntakeOpen(false);
+  };
+
+  const handleIntakeSaveAndAdd = (item) => {
+    setBuyItems(prev => [...prev, jewelryItemToBuyItem(item, prev.length + 1)]);
+    setScanInput('');
+    setIntakeEntry('');
+    setParsedValues(null);
+    setEditingIntakeItem(null);
+    setIntakeOpen(true);
+  };
+
+  const handleIntakeUpdate = (item) => {
+    setBuyItems(prev => prev.map(i =>
+      i._lineId === editingIntakeItem?._lineId
+        ? { ...jewelryItemToBuyItem(item, 0), _lineId: i._lineId, part_no: i.part_no }
+        : i
+    ));
+    setEditingIntakeItem(null);
+    setIntakeOpen(false);
+  };
+
+  const saveBuyPawnNotes = async (notes) => {
+    if (!customer?.id) return;
+    try {
+      await axios.put(`${config.apiUrl}/customers/${customer.id}/buy-pawn-notes`,
+        { buy_pawn_notes: notes },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      setSavedNotes(notes);
+      showSnackbar('Notes saved');
+    } catch { showSnackbar('Failed to save notes', 'error'); }
+  };
+
+  const handleClearNotes = async () => {
+    setBuyPawnNotes('');
+    await saveBuyPawnNotes('');
   };
 
   const handleAddToWorkspace = () => {
@@ -223,6 +375,23 @@ export default function BuyTransactionScreen({
   };
 
   const HEADER_COLS = '110px 52px 120px 1fr 110px 50px 95px 100px';
+
+  if (intakeOpen) {
+    return (
+      <JewelryIntakeScreen
+        customer={customer}
+        ticketId={ticketId}
+        ticketLabel="Buy Ticket"
+        initialEntry={intakeEntry}
+        parsedValues={editingIntakeItem ? null : parsedValues}
+        editItem={editingIntakeItem}
+        onBack={handleIntakeBack}
+        onSaveItem={handleIntakeSave}
+        onSaveAndAddAnother={handleIntakeSaveAndAdd}
+        onUpdateItem={handleIntakeUpdate}
+      />
+    );
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
@@ -371,15 +540,22 @@ export default function BuyTransactionScreen({
               <TextField
                 value={buyPawnNotes}
                 onChange={e => setBuyPawnNotes(e.target.value)}
-                placeholder="Add transaction notes..."
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveBuyPawnNotes(buyPawnNotes); } }}
+                placeholder={customer?.id ? 'Add notes for this customer...' : 'Select a customer first'}
+                disabled={!customer?.id}
                 variant="standard"
                 size="small"
                 fullWidth
                 InputProps={{ disableUnderline: true }}
               />
-              {buyPawnNotes && (
-                <Button size="small" onClick={() => setBuyPawnNotes('')} sx={{ whiteSpace: 'nowrap', flexShrink: 0, color: 'text.secondary' }}>Clear</Button>
+              {buyPawnNotes !== savedNotes && (
+                <Tooltip title="Save notes">
+                  <IconButton size="small" onClick={() => saveBuyPawnNotes(buyPawnNotes)} sx={{ color: BUY_BLUE, flexShrink: 0 }}>
+                    <MuiIcons.Save fontSize="small" />
+                  </IconButton>
+                </Tooltip>
               )}
+              <Button size="small" onClick={handleClearNotes} disabled={!buyPawnNotes} sx={{ whiteSpace: 'nowrap', flexShrink: 0, color: 'text.secondary' }}>Clear</Button>
             </Box>
 
             {/* Scan + Free-type row */}
@@ -387,7 +563,10 @@ export default function BuyTransactionScreen({
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <TextField
                   fullWidth size="small"
-                  placeholder="Scan barcode, search inventory, or describe item..."
+                  value={scanInput}
+                  onChange={e => setScanInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && scanInput.trim()) openIntake(); }}
+                  placeholder="Scan barcode, search inventory, or describe item — press Enter to add"
                   InputProps={{ startAdornment: <InputAdornment position="start"><MuiIcons.Search sx={{ color: 'text.secondary' }} /></InputAdornment> }}
                   sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2, bgcolor: '#fff' } }}
                 />
@@ -494,10 +673,14 @@ export default function BuyTransactionScreen({
                           inputProps={{ min: 1, style: { fontSize: 12, width: 40 } }} />
                       </TableCell>
                       <TableCell sx={{ py: 0.5 }}>
-                        <TextField size="small" type="number" value={editFields.paid}
-                          onChange={e => setEditFields(f => ({ ...f, paid: e.target.value }))}
-                          inputProps={{ min: 0, step: 0.01, style: { fontSize: 12 } }}
-                          InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }} />
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                          <Typography fontSize={12} color="text.secondary">$</Typography>
+                          <TextField size="small" type="number" value={editFields.paid}
+                            onChange={e => setEditFields(f => ({ ...f, paid: e.target.value }))}
+                            variant="standard"
+                            inputProps={{ min: 0, step: 0.01, style: { fontSize: 12, width: 64 } }}
+                            InputProps={{ disableUnderline: false }} />
+                        </Box>
                       </TableCell>
                       <TableCell align="center" sx={{ py: 0.5 }}>
                         <Tooltip title="Save"><IconButton size="small" color="success" onClick={() => saveEdit(item._lineId)}><MuiIcons.Check sx={{ fontSize: 16 }} /></IconButton></Tooltip>
@@ -521,6 +704,7 @@ export default function BuyTransactionScreen({
                       <TableCell align="right" sx={{ fontSize: 13, fontWeight: 700, color: BUY_BLUE, py: 0.75 }}>{fmt(item.paid * (parseInt(item.qty) || 1))}</TableCell>
                       <TableCell align="center" sx={{ py: 0.75 }}>
                         <Tooltip title="Edit"><IconButton size="small" onClick={() => startEdit(item)} sx={{ color: '#1565c0' }}><MuiIcons.Edit sx={{ fontSize: 16 }} /></IconButton></Tooltip>
+                        <Tooltip title="Convert"><IconButton size="small" sx={{ color: '#555' }} onClick={(e) => { setConvertAnchor(e.currentTarget); setConvertRow(item); }}><MuiIcons.SwapHoriz sx={{ fontSize: 16 }} /></IconButton></Tooltip>
                         <Tooltip title="Duplicate"><IconButton size="small" onClick={() => handleDuplicateItem(item)} sx={{ color: '#555' }}><MuiIcons.ContentCopy sx={{ fontSize: 16 }} /></IconButton></Tooltip>
                         <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => handleRemoveItem(item._lineId)}><MuiIcons.Delete sx={{ fontSize: 16 }} /></IconButton></Tooltip>
                       </TableCell>
@@ -622,6 +806,31 @@ export default function BuyTransactionScreen({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Convert menu */}
+      <Menu anchorEl={convertAnchor} open={Boolean(convertAnchor)} onClose={() => { setConvertAnchor(null); setConvertRow(null); }}>
+        <Typography variant="caption" color="text.secondary" sx={{ px: 2, pt: 1, pb: 0.5, display: 'block', fontWeight: 600, letterSpacing: 0.5 }}>
+          CONVERT TO
+        </Typography>
+        {(() => {
+          const pawn  = transactionTypes.find(t => t.type === 'pawn')  ?? {};
+          const trade = transactionTypes.find(t => t.type === 'trade') ?? {};
+          const PawnIcon  = MuiIcons[pawn.icon]  ?? MuiIcons.Handshake;
+          const TradeIcon = MuiIcons[trade.icon] ?? MuiIcons.CompareArrows;
+          return (
+            <>
+              <MenuItem onClick={() => { onConvertTo?.({ type: 'pawn', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
+                <PawnIcon sx={{ fontSize: 16, mr: 1.5, color: pawn.color ?? '#7b1fa2' }} />
+                <Typography variant="body2">Pawn Ticket</Typography>
+              </MenuItem>
+              <MenuItem onClick={() => { onConvertTo?.({ type: 'trade', item: convertRow }); setConvertAnchor(null); setConvertRow(null); }}>
+                <TradeIcon sx={{ fontSize: 16, mr: 1.5, color: trade.color ?? '#388e3c' }} />
+                <Typography variant="body2">Trade Ticket</Typography>
+              </MenuItem>
+            </>
+          );
+        })()}
+      </Menu>
 
       <Snackbar open={snackbar.open} autoHideDuration={3000}
         onClose={() => setSnackbar(s => ({ ...s, open: false }))}

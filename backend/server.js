@@ -290,6 +290,11 @@ const storeClosedMiddleware = async (req, res, next) => {
 
 app.use(storeClosedMiddleware);
 
+// Ensure buy_pawn_notes column exists on customers table
+pool.query(`
+  ALTER TABLE customers ADD COLUMN IF NOT EXISTS buy_pawn_notes TEXT
+`).catch(err => console.error('buy_pawn_notes migration:', err.message));
+
 // Authentication route
 // Ensure track_hours column exists on employees table
 pool.query(`
@@ -7955,6 +7960,22 @@ app.get('/api/customers/:id/buy-history', async (req, res) => {
   } catch (err) {
     console.error('Error fetching customer buy history:', err);
     res.status(500).json({ error: 'Failed to fetch customer buy history' });
+  }
+});
+
+// PUT /api/customers/:id/buy-pawn-notes — save customer-level buy/pawn notes
+app.put('/api/customers/:id/buy-pawn-notes', async (req, res) => {
+  const { id } = req.params;
+  const { buy_pawn_notes } = req.body;
+  try {
+    await pool.query(
+      'UPDATE customers SET buy_pawn_notes = $1, updated_at = NOW() WHERE id = $2',
+      [buy_pawn_notes ?? null, id]
+    );
+    res.json({ success: true, buy_pawn_notes: buy_pawn_notes ?? null });
+  } catch (err) {
+    console.error('Error saving customer buy_pawn_notes:', err);
+    res.status(500).json({ error: 'Failed to save notes' });
   }
 });
 

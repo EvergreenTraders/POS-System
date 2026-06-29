@@ -796,6 +796,28 @@ export default function ModernTransactions() {
     setExistingSaleData(null);
   };
 
+  const handleBuyConvertTo = ({ type, item }) => {
+    if (type === 'pawn') {
+      const pawnItem = item.jewelryData
+        ? item.jewelryData
+        : {
+            id: Date.now(),
+            item: item.description || '',
+            category: item.category_name || '',
+            serial_number: item.serial_number || '',
+            serial: item.serial_number || '',
+            qty: 1,
+            amount: 0,
+            images: item.images || [],
+            sourceEstimator: 'jewelry',
+          };
+      setBuyOpen(false);
+      setExistingBuyData(null);
+      setRestoredPawnData({ pawnItems: [pawnItem], ticketNote: '', showOnReceipt: false });
+      setPawnOpen(true);
+    }
+  };
+
   if (pawnOpen) {
     const existingPawnData = openingTxId
       ? workspaceTransactions.find(t => t.id === openingTxId)
@@ -840,6 +862,7 @@ export default function ModernTransactions() {
           setBuyOpen(false);
           setExistingBuyData(null);
         }}
+        onConvertTo={handleBuyConvertTo}
         existingBuyData={existingBuyData}
       />
     );
