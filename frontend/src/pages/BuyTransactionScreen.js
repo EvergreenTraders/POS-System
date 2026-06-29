@@ -114,8 +114,13 @@ export default function BuyTransactionScreen({
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [convertAnchor, setConvertAnchor] = useState(null);
   const [convertRow,    setConvertRow]    = useState(null);
+  const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
+  const [cameraStream,     setCameraStream]     = useState(null);
+  const [photoTargetId,    setPhotoTargetId]    = useState(null);
+  const [isCamReady,       setIsCamReady]       = useState(false);
   const [snackbar, setSnackbar]         = useState({ open: false, message: '', severity: 'success' });
-  const quickInputRef = useRef(null);
+  const quickInputRef  = useRef(null);
+  const cameraVideoRef = useRef(null);
 
   const showSnackbar = (msg, sev = 'success') => setSnackbar({ open: true, message: msg, severity: sev });
   const fmt = (n) => `$${Number(n).toFixed(2)}`;
@@ -229,7 +234,7 @@ export default function BuyTransactionScreen({
 
   const startEdit = (item) => {
     if (item.sourceEstimator === 'jewelry' && item.jewelryData) {
-      setEditingIntakeItem({ ...item.jewelryData, _lineId: item._lineId });
+      setEditingIntakeItem({ ...item.jewelryData, _lineId: item._lineId, images: item.images?.length ? item.images : (item.jewelryData.images || []) });
       setParsedValues(null);
       setIntakeEntry('');
       setIntakeOpen(true);
@@ -304,6 +309,49 @@ export default function BuyTransactionScreen({
     setIntakeOpen(false);
   };
 
+  const openItemCamera = (_lineId) => {
+    setPhotoTargetId(_lineId);
+    setIsCamReady(false);
+    setCameraDialogOpen(true);
+  };
+
+  const handleCameraDialogEntered = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      setCameraStream(stream);
+      if (cameraVideoRef.current) cameraVideoRef.current.srcObject = stream;
+    } catch (err) {
+      console.error('Camera error:', err);
+      closeItemCamera();
+    }
+  };
+
+  const captureItemPhoto = () => {
+    const video = cameraVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    canvas.toBlob(blob => {
+      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const url  = URL.createObjectURL(file);
+      setBuyItems(prev => prev.map(item =>
+        item._lineId === photoTargetId
+          ? { ...item, images: [...(item.images || []), { url, file, isPrimary: !(item.images?.length), type: 'capture' }] }
+          : item
+      ));
+      closeItemCamera();
+    }, 'image/jpeg', 0.9);
+  };
+
+  const closeItemCamera = () => {
+    if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); setCameraStream(null); }
+    setIsCamReady(false);
+    setCameraDialogOpen(false);
+    setPhotoTargetId(null);
+  };
+
   const saveBuyPawnNotes = async (notes) => {
     if (!customer?.id) return;
     try {
@@ -339,16 +387,22 @@ export default function BuyTransactionScreen({
     };
     setCartCustomer(cartCustomer);
 
-    const cartItems = buyItems.flatMap(item =>
-      Array.from({ length: parseInt(item.qty) || 1 }, () => ({
+    const cartItems = buyItems.flatMap(item => {
+      const jewelryBase = item.jewelryData ? { ...item.jewelryData } : {};
+      return Array.from({ length: parseInt(item.qty) || 1 }, () => ({
+        ...jewelryBase,
+        ...item,
         id: `${ticketId}_${item._lineId}_${Date.now()}`,
-        description: item.description || item.part_no,
+        description: item.description || item.jewelryData?.short_desc || item.part_no,
+        short_desc: item.description || item.jewelryData?.short_desc || '',
+        long_desc: item.jewelryData?.long_desc || item.description || '',
         price: parseFloat(item.paid) || 0,
         value: parseFloat(item.paid) || 0,
         transaction_type: 'buy',
-        sourceEstimator: 'jewelry',
-        category_id: item.category_id || null,
-        serial_number: item.serial_number || null,
+        sourceEstimator: item.sourceEstimator || 'jewelry',
+        category_id: item.category_id || item.jewelryData?.category_id || null,
+        serial_number: item.serial_number || item.jewelryData?.serial_number || null,
+        images: item.images || item.jewelryData?.images || [],
         ticket_note: ticketNote || null,
         show_on_receipt: showOnReceipt,
         customer: cartCustomer,
@@ -356,8 +410,8 @@ export default function BuyTransactionScreen({
           ? { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(), role: currentUser.role }
           : null,
         buyTicketId: ticketId,
-      }))
-    );
+      }));
+    });
 
     sessionStorage.setItem('checkoutItems', JSON.stringify(cartItems));
     if (customer) sessionStorage.setItem('selectedCustomer', JSON.stringify(cartCustomer));
@@ -613,7 +667,7 @@ export default function BuyTransactionScreen({
                 <TableRow sx={{ bgcolor: '#fafafa' }}>
                   {[
                     { label: 'Part #',       width: 100 },
-                    { label: 'Thumbnail',    width: 56 },
+                    { label: 'Image',    width: 56 },
                     { label: 'Category',     width: 120 },
                     { label: 'Item Description' },
                     { label: 'Serial #',     width: 110 },
@@ -645,9 +699,20 @@ export default function BuyTransactionScreen({
                     <TableRow key={item._lineId} sx={{ bgcolor: '#f0f9ff' }}>
                       <TableCell sx={{ py: 0.5 }}><Typography fontSize={11} color="text.secondary">{item.part_no}</Typography></TableCell>
                       <TableCell sx={{ py: 0.5 }}>
-                        <Box sx={{ width: 40, height: 40, bgcolor: '#f5f5f5', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <MuiIcons.Image sx={{ fontSize: 20, color: '#bdbdbd' }} />
-                        </Box>
+                        {(() => {
+                          const thumb = item.images?.find(i => i.isPrimary)?.url || item.images?.[0]?.url;
+                          return thumb ? (
+                            <Box component="img" src={thumb} alt="Item"
+                              sx={{ width: 40, height: 40, borderRadius: 1, objectFit: 'cover', cursor: 'pointer' }}
+                              onClick={() => openItemCamera(item._lineId)} />
+                          ) : (
+                            <IconButton size="small"
+                              sx={{ width: 40, height: 40, borderRadius: 1, bgcolor: '#f0f0f0', color: '#9e9e9e', '&:hover': { bgcolor: '#e0f2fe', color: BUY_BLUE } }}
+                              onClick={() => openItemCamera(item._lineId)}>
+                              <MuiIcons.PhotoCamera sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell sx={{ py: 0.5 }}>
                         <Select size="small" value={editFields.category_id || ''} displayEmpty fullWidth
@@ -691,11 +756,20 @@ export default function BuyTransactionScreen({
                     <TableRow key={item._lineId} sx={{ '&:hover': { bgcolor: '#f0f9ff' } }}>
                       <TableCell sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 500, py: 0.75 }}>{item.part_no}</TableCell>
                       <TableCell sx={{ py: 0.75 }}>
-                        <Box sx={{ width: 40, height: 40, bgcolor: '#f5f5f5', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {item.images?.[0]?.url
-                            ? <Box component="img" src={item.images[0].url} alt="" sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }} />
-                            : <MuiIcons.Image sx={{ fontSize: 20, color: '#bdbdbd' }} />}
-                        </Box>
+                        {(() => {
+                          const thumb = item.images?.find(i => i.isPrimary)?.url || item.images?.[0]?.url;
+                          return thumb ? (
+                            <Box component="img" src={thumb} alt="Item"
+                              sx={{ width: 40, height: 40, borderRadius: 1, objectFit: 'cover', cursor: 'pointer' }}
+                              onClick={() => openItemCamera(item._lineId)} />
+                          ) : (
+                            <IconButton size="small"
+                              sx={{ width: 40, height: 40, borderRadius: 1, bgcolor: '#f0f0f0', color: '#9e9e9e', '&:hover': { bgcolor: '#e0f2fe', color: BUY_BLUE } }}
+                              onClick={() => openItemCamera(item._lineId)}>
+                              <MuiIcons.PhotoCamera sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell sx={{ fontSize: 12, color: 'text.secondary', py: 0.75 }}>{catName || '—'}</TableCell>
                       <TableCell sx={{ fontSize: 13, fontWeight: 600, py: 0.75 }}>{item.description || <em style={{ color: '#bbb' }}>No description</em>}</TableCell>
@@ -803,6 +877,23 @@ export default function BuyTransactionScreen({
               setAdjustDialog(false);
             }}>
             Apply
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Camera dialog */}
+      <Dialog open={cameraDialogOpen} onClose={closeItemCamera} maxWidth="sm" fullWidth
+        TransitionProps={{ onEntered: handleCameraDialogEntered }}>
+        <DialogContent sx={{ p: 1.5, bgcolor: '#000' }}>
+          <video ref={cameraVideoRef} autoPlay playsInline onCanPlay={() => setIsCamReady(true)}
+            style={{ width: '100%', borderRadius: 8, display: 'block' }} />
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'space-between', px: 2 }}>
+          <Button onClick={closeItemCamera} color="inherit">Cancel</Button>
+          <Button variant="contained" onClick={captureItemPhoto} disabled={!isCamReady}
+            startIcon={<MuiIcons.PhotoCamera />}
+            sx={{ bgcolor: BUY_BLUE, '&:hover': { bgcolor: BUY_DARK }, textTransform: 'none' }}>
+            Capture
           </Button>
         </DialogActions>
       </Dialog>

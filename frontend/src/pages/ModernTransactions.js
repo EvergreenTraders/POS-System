@@ -352,10 +352,14 @@ function BuyTransactionCard({ tx, buyIcon, buyColor, onOpen, onVoid }) {
             sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: accent, color: '#fff' }} />
         </Box>
 
-        {items.slice(0, 2).map((item, i) => (
+        {items.slice(0, 2).map((item, i) => {
+          const thumb = item.images?.find(img => img.isPrimary)?.url || item.images?.[0]?.url;
+          return (
           <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.75, borderBottom: '1px solid #f0f0f0' }}>
-            <Box sx={{ width: 36, height: 36, borderRadius: 1, bgcolor: '#f5f5f5', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <MuiIcons.Inventory2 sx={{ fontSize: 18, color: '#bdbdbd' }} />
+            <Box sx={{ width: 36, height: 36, borderRadius: 1, bgcolor: '#f5f5f5', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+              {thumb
+                ? <Box component="img" src={thumb} alt="" sx={{ width: 36, height: 36, objectFit: 'cover' }} />
+                : <MuiIcons.Inventory2 sx={{ fontSize: 18, color: '#bdbdbd' }} />}
             </Box>
             <Box sx={{ minWidth: 0, flex: 1 }}>
               <Typography variant="caption" fontWeight={600} display="block" noWrap>{item.description || item.part_no}</Typography>
@@ -363,7 +367,8 @@ function BuyTransactionCard({ tx, buyIcon, buyColor, onOpen, onVoid }) {
             </Box>
             <Typography variant="caption" fontWeight={700} color={accent}>{fmt(item.paid)}</Typography>
           </Box>
-        ))}
+          );
+        })}
         {items.length > 2 && (
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', py: 0.5 }}>
             +{items.length - 2} more item(s)

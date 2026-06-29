@@ -7944,7 +7944,11 @@ app.get('/api/customers/:id/buy-history', async (req, res) => {
       SELECT
         COALESCE(j.short_desc, j.long_desc, h.short_desc, h.long_desc, bt.item_id, 'Unknown Item') AS item_desc,
         t.transaction_date,
-        ROUND(ABS(t.total_amount)::NUMERIC / NULLIF(cnt.item_count, 0), 2) AS amount
+        COALESCE(
+          j.item_price,
+          h.cost_price,
+          ROUND(ABS(t.total_amount)::NUMERIC / NULLIF(cnt.item_count, 0), 2)
+        ) AS amount
       FROM buy_ticket bt
       JOIN transactions t ON bt.transaction_id = t.transaction_id
       JOIN (

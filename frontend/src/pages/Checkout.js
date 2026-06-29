@@ -890,7 +890,13 @@ function Checkout() {
             const newJewelryItems = checkoutItems.filter(item => !item.fromInventory).map(item => {
               if (!item.buyTicketId) return item;
               ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
-              return { ...item, item_id: `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}` };
+              const desc = item.short_desc || item.description || '';
+              return {
+                ...item,
+                item_id: `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`,
+                short_desc: desc,
+                long_desc: item.long_desc || desc,
+              };
             });
 
 
