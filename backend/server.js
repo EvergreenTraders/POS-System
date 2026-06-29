@@ -7916,11 +7916,22 @@ app.get('/api/customers/:id/buy/stats', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
-        MAX(t.transaction_date)                             AS last_buy_date,
-        COUNT(DISTINCT st.buy_ticket_id)                   AS total_buys,
-        COALESCE(SUM(ABS(t.total_amount)), 0)              AS total_buy_amount
-      FROM (SELECT DISTINCT buy_ticket_id, transaction_id FROM buy_ticket) st
-      JOIN transactions t ON st.transaction_id = t.transaction_id
+        MAX(t.transaction_date)  AS last_buy_date,
+        COUNT(DISTINCT bt.buy_ticket_id) AS total_buys,
+        COALESCE(SUM(
+          COALESCE(
+            j.item_price,
+            h.cost_price,
+            ROUND(ABS(t.total_amount)::NUMERIC / NULLIF(cnt.item_count, 0), 2)
+          )
+        ), 0) AS total_buy_amount
+      FROM buy_ticket bt
+      JOIN transactions t ON bt.transaction_id = t.transaction_id
+      JOIN (
+        SELECT transaction_id, COUNT(*) AS item_count FROM buy_ticket GROUP BY transaction_id
+      ) cnt ON cnt.transaction_id = bt.transaction_id
+      LEFT JOIN jewelry   j ON bt.item_id = j.item_id
+      LEFT JOIN hardgoods h ON bt.item_id = h.item_id
       WHERE t.customer_id = $1 AND t.total_amount < 0
     `, [id]);
     const row = result.rows[0];
