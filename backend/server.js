@@ -295,6 +295,12 @@ pool.query(`
   ALTER TABLE customers ADD COLUMN IF NOT EXISTS buy_pawn_notes TEXT
 `).catch(err => console.error('buy_pawn_notes migration:', err.message));
 
+// Ensure ticket_note and show_on_receipt exist on buy_ticket table
+pool.query(`
+  ALTER TABLE buy_ticket ADD COLUMN IF NOT EXISTS ticket_note TEXT;
+  ALTER TABLE buy_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE
+`).catch(err => console.error('buy_ticket note/receipt migration:', err.message));
+
 // Authentication route
 // Ensure track_hours column exists on employees table
 pool.query(`
@@ -8022,7 +8028,7 @@ app.get('/api/buy-ticket', async (req, res) => {
 app.post('/api/buy-ticket', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { buy_ticket_id, transaction_id, item_id, inventory_type } = req.body;
+    const { buy_ticket_id, transaction_id, item_id, inventory_type, ticket_note, show_on_receipt } = req.body;
 
     // Validate required fields
     if (!buy_ticket_id) {
@@ -8045,8 +8051,8 @@ app.post('/api/buy-ticket', async (req, res) => {
 
     // Insert new buy_ticket record
     const insertQuery = `
-      INSERT INTO buy_ticket (buy_ticket_id, transaction_id, item_id, inventory_type)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO buy_ticket (buy_ticket_id, transaction_id, item_id, inventory_type, ticket_note, show_on_receipt)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *
     `;
 
@@ -8054,7 +8060,9 @@ app.post('/api/buy-ticket', async (req, res) => {
       buy_ticket_id,
       transaction_id || null,
       item_id || null,
-      resolvedInventoryType
+      resolvedInventoryType,
+      ticket_note || null,
+      show_on_receipt ?? false,
     ]);
 
     await client.query('COMMIT');
@@ -10343,8 +10351,8 @@ app.get('/api/transactions/:transaction_id/items', async (req, res) => {
               SELECT 1 FROM jewelry_secondary_gems jsg
               WHERE jsg.item_id = bt.item_id
             ) as has_secondary_gems,
-            NULL::TEXT as ticket_note,
-            FALSE as show_on_receipt,
+            bt.ticket_note,
+            COALESCE(bt.show_on_receipt, FALSE) as show_on_receipt,
             0::NUMERIC as protection_plan,
             0::NUMERIC as item_discount,
             0::NUMERIC as global_discount

@@ -304,6 +304,9 @@ function Checkout() {
     const checkCashDrawerSession = async () => {
       if (!user?.id) return;
 
+      // Salary employees are not tied to a physical drawer — skip the check
+      if (user.employment_type === 'salary') return;
+
       try {
         const response = await axios.get(`${API_BASE_URL}/cash-drawer/employee/${user.id}/active`);
 
@@ -1252,13 +1255,18 @@ function Checkout() {
                   : item.fromEstimator === 'jewelry' || item.sourceEstimator === 'jewelry' ? 'JW'
                   : null;
 
+                const ticketNote    = itemsForTicket[0]?.ticket_note    || null;
+                const showOnReceipt = itemsForTicket[0]?.show_on_receipt || false;
+
                 await axios.post(
                   `${config.apiUrl}/buy-ticket`,
                   {
-                    buy_ticket_id: buyTicketId,
-                    transaction_id: realTransactionId,
-                    item_id: itemId,
-                    inventory_type: invType
+                    buy_ticket_id:   buyTicketId,
+                    transaction_id:  realTransactionId,
+                    item_id:         itemId,
+                    inventory_type:  invType,
+                    ticket_note:     ticketNote,
+                    show_on_receipt: showOnReceipt,
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }

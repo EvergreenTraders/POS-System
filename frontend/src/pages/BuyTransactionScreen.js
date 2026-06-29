@@ -109,8 +109,7 @@ export default function BuyTransactionScreen({
   const [quickInput, setQuickInput]     = useState('');
   const [editingItemId, setEditingItemId] = useState(null);
   const [editFields, setEditFields]     = useState({});
-  const [adjustDialog, setAdjustDialog] = useState(false);
-  const [adjustTotal, setAdjustTotal]   = useState('');
+  const [totalPaidOverride, setTotalPaidOverride] = useState(existingBuyData?.totalPaidOverride ?? null);
   const [transactionTypes, setTransactionTypes] = useState([]);
   const [convertAnchor, setConvertAnchor] = useState(null);
   const [convertRow,    setConvertRow]    = useState(null);
@@ -188,6 +187,7 @@ export default function BuyTransactionScreen({
   }, [quickAddMode]);
 
   const totalPaid = buyItems.reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
+  const effectiveTotalPaid = totalPaidOverride ?? totalPaid;
 
   const addItem = (overrides = {}) => {
     setBuyItems(prev => {
@@ -371,7 +371,7 @@ export default function BuyTransactionScreen({
 
   const handleAddToWorkspace = () => {
     if (buyItems.length === 0) { showSnackbar('Add at least one item before adding to workspace', 'warning'); return; }
-    onAddToWorkspace?.({ ticketId, buyItems, buyPawnNotes, ticketNote, showOnReceipt, totalPaid, customer });
+    onAddToWorkspace?.({ ticketId, buyItems, buyPawnNotes, ticketNote, showOnReceipt, totalPaid, totalPaidOverride: totalPaidOverride ?? null, customer });
   };
 
   const handleCheckoutNow = () => {
@@ -387,8 +387,10 @@ export default function BuyTransactionScreen({
     };
     setCartCustomer(cartCustomer);
 
+    const scale = totalPaid > 0 ? effectiveTotalPaid / totalPaid : 1;
     const cartItems = buyItems.flatMap(item => {
       const jewelryBase = item.jewelryData ? { ...item.jewelryData } : {};
+      const itemPaid = (parseFloat(item.paid) || 0) * scale;
       return Array.from({ length: parseInt(item.qty) || 1 }, () => ({
         ...jewelryBase,
         ...item,
@@ -396,8 +398,8 @@ export default function BuyTransactionScreen({
         description: item.description || item.jewelryData?.short_desc || item.part_no,
         short_desc: item.description || item.jewelryData?.short_desc || '',
         long_desc: item.jewelryData?.long_desc || item.description || '',
-        price: parseFloat(item.paid) || 0,
-        value: parseFloat(item.paid) || 0,
+        price: itemPaid,
+        value: itemPaid,
         transaction_type: 'buy',
         sourceEstimator: item.sourceEstimator || 'jewelry',
         category_id: item.category_id || item.jewelryData?.category_id || null,
@@ -423,6 +425,7 @@ export default function BuyTransactionScreen({
       buyPawnNotes,
       ticketNote,
       showOnReceipt,
+      totalPaidOverride: totalPaidOverride ?? null,
     }));
     commitBuyTicketId();
     navigate('/checkout', { state: { items: cartItems, allCartItems: cartItems, customer: cartCustomer, from: 'buy-ticket' } });
@@ -791,19 +794,32 @@ export default function BuyTransactionScreen({
 
           {/* Financial summary — 25% */}
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5, minWidth: 0 }}>
-            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <MuiIcons.LocalOffer sx={{ color: BUY_BLUE, fontSize: 24 }} />
-              <Box>
-                <Typography fontSize={11} color="text.secondary">Total Paid</Typography>
-                <Typography fontSize={22} fontWeight={800} color={BUY_BLUE} lineHeight={1}>{fmt(totalPaid)}</Typography>
-              </Box>
+            <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 2 }}>
+              <Typography fontSize={11} color="text.secondary" mb={0.5}>Total Paid</Typography>
+              <TextField
+                type="number"
+                size="small"
+                fullWidth
+                value={totalPaidOverride ?? totalPaid}
+                onChange={e => setTotalPaidOverride(e.target.value === '' ? null : parseFloat(e.target.value) || 0)}
+                inputProps={{ min: 0, step: 0.01, style: { fontWeight: 800, fontSize: 22, color: BUY_BLUE } }}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
+                InputProps={{
+                  startAdornment: <InputAdornment position="start"><Typography fontWeight={700} color="text.secondary">$</Typography></InputAdornment>,
+                }}
+              />
+              {totalPaidOverride !== null && Math.abs(totalPaidOverride - totalPaid) > 0.001 && (
+                <Typography fontSize={10} color="text.secondary" mt={0.5}>
+                  Auto: {fmt(totalPaid)} — distributed proportionally at checkout
+                </Typography>
+              )}
             </Paper>
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#e0f2fe', borderColor: BUY_BLUE }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                 <MuiIcons.AccountBalance sx={{ color: BUY_BLUE, fontSize: 18 }} />
                 <Typography fontSize={12} fontWeight={700} color={BUY_BLUE}>Net Effect</Typography>
               </Box>
-              <Typography fontSize={15} fontWeight={800} color="#c62828">-{fmt(totalPaid)}</Typography>
+              <Typography fontSize={15} fontWeight={800} color="#c62828">-{fmt(effectiveTotalPaid)}</Typography>
               <Typography fontSize={11} color="text.secondary">due to customer</Typography>
             </Paper>
           </Box>
@@ -849,37 +865,6 @@ export default function BuyTransactionScreen({
           Checkout Now
         </Button>
       </Paper>
-
-      {/* Adjust Total Dialog */}
-      <Dialog open={adjustDialog} onClose={() => setAdjustDialog(false)} maxWidth="xs" fullWidth>
-        <DialogTitle fontWeight={700}>Adjust Total Paid Amount</DialogTitle>
-        <DialogContent>
-          <TextField fullWidth label="New Total" type="number" autoFocus
-            value={adjustTotal}
-            onChange={e => setAdjustTotal(e.target.value)}
-            InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
-            sx={{ mt: 1 }}
-          />
-          <Typography variant="caption" color="text.secondary" mt={1} display="block">
-            The difference will be distributed proportionally across items.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAdjustDialog(false)}>Cancel</Button>
-          <Button variant="contained"
-            sx={{ bgcolor: BUY_BLUE, '&:hover': { bgcolor: BUY_DARK } }}
-            onClick={() => {
-              const newTotal = parseFloat(adjustTotal) || 0;
-              if (newTotal > 0 && totalPaid > 0 && buyItems.length > 0) {
-                const ratio = newTotal / totalPaid;
-                setBuyItems(prev => prev.map(item => ({ ...item, paid: Math.round(item.paid * ratio * 100) / 100 })));
-              }
-              setAdjustDialog(false);
-            }}>
-            Apply
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       {/* Camera dialog */}
       <Dialog open={cameraDialogOpen} onClose={closeItemCamera} maxWidth="sm" fullWidth
