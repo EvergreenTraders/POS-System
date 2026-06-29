@@ -912,7 +912,36 @@ export default function ModernTransactions() {
     setExistingSaleData(null);
   };
 
-  const handleBuyConvertTo = ({ type, item }) => {
+  const handleConvertTradeItemToBuy = (tradeItem, targetTicketId) => {
+    const buyItem = {
+      _lineId: tradeItem._lineId,
+      part_no: tradeItem.part_no,
+      category_id: tradeItem.category_id || '',
+      category_name: tradeItem.category_name || '',
+      description: tradeItem.description || '',
+      serial_number: tradeItem.serial_number || '',
+      qty: tradeItem.qty || 1,
+      paid: parseFloat(tradeItem.tradeAllowance) || 0,
+      images: tradeItem.images || [],
+    };
+    if (targetTicketId) {
+      setWorkspaceTransactions(prev => prev.map(t =>
+        t.type === 'BUY' && t.ticketId === targetTicketId
+          ? { ...t, buyItems: [...(t.buyItems || []), buyItem] }
+          : t
+      ));
+    } else {
+      const last = parseInt(localStorage.getItem('lastBTTicketNumber') || '0') + 1;
+      localStorage.setItem('lastBTTicketNumber', last.toString());
+      const newTicketId = `BT-${last.toString().padStart(8, '0')}`;
+      setWorkspaceTransactions(prev => [
+        ...prev,
+        { id: Date.now(), type: 'BUY', ticketId: newTicketId, buyItems: [buyItem], customer },
+      ]);
+    }
+  };
+
+  const handleBuyConvertTo = ({ type, item, targetTicketId }) => {
     if (type === 'pawn') {
       const pawnItem = item.jewelryData
         ? item.jewelryData
@@ -931,6 +960,53 @@ export default function ModernTransactions() {
       setExistingBuyData(null);
       setRestoredPawnData({ pawnItems: [pawnItem], ticketNote: '', showOnReceipt: false });
       setPawnOpen(true);
+    }
+    if (type === 'trade') {
+      const tradeAllowance = parseFloat(item.paid) || 0;
+      const qty = parseInt(item.qty) || 1;
+      const tradeItem = {
+        _lineId: item._lineId,
+        part_no: item.part_no || '',
+        category_id: item.category_id || '',
+        category_name: item.category_name || '',
+        description: item.description || '',
+        serial_number: item.serial_number || '',
+        qty,
+        tradeAllowance,
+        images: item.images || [],
+      };
+      const buyTicketId = existingBuyData?.ticketId;
+      setWorkspaceTransactions(prev => {
+        // Remove converted item from the buy ticket in workspace
+        const withBuyUpdated = prev.map(t => {
+          if (!(t.type === 'BUY' && t.ticketId === buyTicketId)) return t;
+          return { ...t, buyItems: (t.buyItems || []).filter(i => i._lineId !== item._lineId) };
+        });
+        if (targetTicketId) {
+          return withBuyUpdated.map(t => {
+            if (!(t.type === 'TRADE' && t.ticketId === targetTicketId)) return t;
+            const newTradeItems = [...(t.tradeItems || []), tradeItem];
+            const newTotal = newTradeItems.reduce((s, i) => s + (parseFloat(i.tradeAllowance) || 0) * (parseInt(i.qty) || 1), 0);
+            return { ...t, tradeItems: newTradeItems, totalTradeAllowance: newTotal, netDueToCustomer: newTotal - (t.totalSaleAfterTax || 0) };
+          });
+        } else {
+          const last = parseInt(localStorage.getItem('lastTTTicketNumber') || '100000') + 1;
+          localStorage.setItem('lastTTTicketNumber', last.toString());
+          const newTicketId = `TT-${last}`;
+          return [
+            ...withBuyUpdated,
+            {
+              id: Date.now(), type: 'TRADE', ticketId: newTicketId,
+              tradeItems: [tradeItem], saleItems: [],
+              totalTradeAllowance: tradeAllowance * qty,
+              totalSaleAfterTax: 0,
+              netDueToCustomer: tradeAllowance * qty,
+              taxAmount: 0, taxRate: 0.07,
+              customer,
+            },
+          ];
+        }
+      });
     }
   };
 
@@ -967,6 +1043,7 @@ export default function ModernTransactions() {
   }
 
   if (buyOpen) {
+    const workspaceTradeTickets = workspaceTransactions.filter(t => t.type === 'TRADE');
     return (
       <BuyTransactionScreen
         customer={customer}
@@ -980,6 +1057,7 @@ export default function ModernTransactions() {
         }}
         onConvertTo={handleBuyConvertTo}
         existingBuyData={existingBuyData}
+        workspaceTradeTickets={workspaceTradeTickets}
       />
     );
   }
@@ -993,6 +1071,7 @@ export default function ModernTransactions() {
         customerStats={customerStats}
         onClose={() => { setTradeOpen(false); setExistingTradeData(null); }}
         onAddToWorkspace={handleAddTradeToWorkspace}
+        onConvertToBuy={handleConvertTradeItemToBuy}
         onRemoveFromWorkspace={(ticketId) => {
           setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'TRADE' && t.ticketId === ticketId)));
           setTradeOpen(false);

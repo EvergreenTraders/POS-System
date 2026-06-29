@@ -57,6 +57,7 @@ export default function TradeTransactionScreen({
   customerStats,
   onClose,
   onAddToWorkspace,
+  onConvertToBuy,
   existingTradeData,
   workspaceBuyTickets = [],
   onConsumeWorkspaceBuy,
@@ -78,9 +79,14 @@ export default function TradeTransactionScreen({
   const [categories, setCategories] = useState([]);
   const [taxRate, setTaxRate]       = useState(0.07);
 
-  // Buy ticket picker
+  // Buy ticket picker (Add Existing Buy Ticket)
   const [buyPickerOpen, setBuyPickerOpen]   = useState(false);
   const [selectedBuyId, setSelectedBuyId]   = useState(null);
+
+  // Convert to Buy picker
+  const [convertBuyPickerOpen, setConvertBuyPickerOpen] = useState(false);
+  const [convertBuySelectedId, setConvertBuySelectedId] = useState(null);
+  const [convertBuyItem,       setConvertBuyItem]       = useState(null);
 
   // Sale ticket picker
   const [salePickerOpen, setSalePickerOpen] = useState(false);
@@ -690,7 +696,7 @@ export default function TradeTransactionScreen({
                       { label: 'Serial #',         width: 100 },
                       { label: 'Qty',              width: 48, align: 'center' },
                       { label: 'Trade Allowance',  width: 110, align: 'right' },
-                      { label: 'Actions',          width: 96, align: 'center' },
+                      { label: 'Actions',          width: 80, align: 'center' },
                     ].map(col => (
                       <TableCell key={col.label} align={col.align || 'left'}
                         sx={{ width: col.width, fontSize: 11, fontWeight: 700, color: TRADE_TEAL, py: 0.75, letterSpacing: 0.5, bgcolor: '#fafafa' }}>
@@ -775,8 +781,17 @@ export default function TradeTransactionScreen({
                         </TableCell>
                         <TableCell align="center" sx={{ py: 0.75 }}>
                           <Tooltip title="Edit"><IconButton size="small" onClick={() => startEditTrade(item)} sx={{ color: '#1565c0' }}><MuiIcons.Edit sx={{ fontSize: 16 }} /></IconButton></Tooltip>
-                          <Tooltip title="Photo"><IconButton size="small" onClick={() => openCamera('trade', item._lineId)} sx={{ color: '#555' }}><MuiIcons.PhotoCamera sx={{ fontSize: 16 }} /></IconButton></Tooltip>
-                          <Tooltip title="Swap"><IconButton size="small" sx={{ color: '#555' }}><MuiIcons.SwapHoriz sx={{ fontSize: 16 }} /></IconButton></Tooltip>
+                          <Tooltip title="Convert to Buy"><IconButton size="small" sx={{ color: '#0284c7' }} onClick={() => {
+                            if (workspaceBuyTickets.length > 0) {
+                              setConvertBuyItem(item);
+                              setConvertBuySelectedId(null);
+                              setConvertBuyPickerOpen(true);
+                            } else {
+                              setTradeItems(prev => prev.filter(i => i._lineId !== item._lineId));
+                              onConvertToBuy?.(item, null);
+                              showSnackbar('Item moved to a new Buy Ticket in the workspace.', 'info');
+                            }
+                          }}><MuiIcons.CallMade sx={{ fontSize: 16 }} /></IconButton></Tooltip>
                           <Tooltip title="Delete"><IconButton size="small" color="error" onClick={() => setTradeItems(prev => prev.filter(i => i._lineId !== item._lineId))}><MuiIcons.Delete sx={{ fontSize: 16 }} /></IconButton></Tooltip>
                         </TableCell>
                       </TableRow>
@@ -1179,6 +1194,52 @@ export default function TradeTransactionScreen({
             sx={{ bgcolor: TRADE_TEAL, '&:hover': { bgcolor: TRADE_DARK }, textTransform: 'none' }}
           >
             Import into Trade
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Convert to Buy picker dialog */}
+      <Dialog open={convertBuyPickerOpen} onClose={() => { setConvertBuyPickerOpen(false); setConvertBuyItem(null); }} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ pb: 1 }}>Move to Buy Ticket</DialogTitle>
+        <DialogContent sx={{ pt: 0 }}>
+          <Typography variant="body2" color="text.secondary" mb={1}>
+            Choose a buy ticket to move this item into, or create a new one.
+          </Typography>
+          <List dense disablePadding>
+            {workspaceBuyTickets.map(t => {
+              const total = t.totalPaid || (t.buyItems || []).reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
+              return (
+                <ListItemButton key={t.ticketId} selected={convertBuySelectedId === t.ticketId}
+                  onClick={() => setConvertBuySelectedId(t.ticketId)}
+                  sx={{ borderRadius: 1, mb: 0.5, border: '1px solid', borderColor: convertBuySelectedId === t.ticketId ? '#0284c7' : 'transparent' }}>
+                  <ListItemText
+                    primary={<Typography fontWeight={700} fontSize={13}>{t.ticketId}</Typography>}
+                    secondary={`${(t.buyItems || []).length} item${(t.buyItems || []).length !== 1 ? 's' : ''} · $${Number(total).toFixed(2)}`}
+                  />
+                </ListItemButton>
+              );
+            })}
+            <ListItemButton selected={convertBuySelectedId === '__new__'} onClick={() => setConvertBuySelectedId('__new__')}
+              sx={{ borderRadius: 1, border: '1px solid', borderColor: convertBuySelectedId === '__new__' ? '#0284c7' : 'transparent' }}>
+              <MuiIcons.AddCircleOutline sx={{ mr: 1.5, fontSize: 18, color: '#0284c7' }} />
+              <ListItemText primary={<Typography fontSize={13}>Create new Buy Ticket</Typography>} />
+            </ListItemButton>
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setConvertBuyPickerOpen(false); setConvertBuyItem(null); }}>Cancel</Button>
+          <Button variant="contained" disabled={!convertBuySelectedId}
+            sx={{ bgcolor: '#0284c7', '&:hover': { bgcolor: '#0369a1' } }}
+            onClick={() => {
+              const targetId = convertBuySelectedId === '__new__' ? null : convertBuySelectedId;
+              setTradeItems(prev => prev.filter(i => i._lineId !== convertBuyItem._lineId));
+              onConvertToBuy?.(convertBuyItem, targetId);
+              showSnackbar(`Item moved to ${targetId || 'a new Buy Ticket'}.`, 'info');
+              setConvertBuyPickerOpen(false);
+              setConvertBuyItem(null);
+              setConvertBuySelectedId(null);
+            }}>
+            Move Item
           </Button>
         </DialogActions>
       </Dialog>
