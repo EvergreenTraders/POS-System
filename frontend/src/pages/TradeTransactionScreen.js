@@ -5,7 +5,7 @@ import config from '../config';
 import {
   Box, Typography, Paper, Button, IconButton, Chip, Avatar,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
-  Dialog, DialogContent, DialogActions,
+  Dialog, DialogTitle, DialogContent, DialogActions, List, ListItemButton, ListItemText,
   Tooltip, Snackbar, Alert, Select, MenuItem,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from '@mui/material';
@@ -58,6 +58,10 @@ export default function TradeTransactionScreen({
   onClose,
   onAddToWorkspace,
   existingTradeData,
+  workspaceBuyTickets = [],
+  onConsumeWorkspaceBuy,
+  workspaceSaleTickets = [],
+  onConsumeWorkspaceSale,
 }) {
   const navigate   = useNavigate();
   const location   = useLocation();
@@ -73,6 +77,14 @@ export default function TradeTransactionScreen({
 
   const [categories, setCategories] = useState([]);
   const [taxRate, setTaxRate]       = useState(0.07);
+
+  // Buy ticket picker
+  const [buyPickerOpen, setBuyPickerOpen]   = useState(false);
+  const [selectedBuyId, setSelectedBuyId]   = useState(null);
+
+  // Sale ticket picker
+  const [salePickerOpen, setSalePickerOpen] = useState(false);
+  const [selectedSaleId, setSelectedSaleId] = useState(null);
 
   // Trade-in item editing
   const [editingTradeId, setEditingTradeId] = useState(null);
@@ -302,6 +314,43 @@ export default function TradeTransactionScreen({
     return base - disc;
   };
 
+  // ── Buy ticket import ────────────────────────────────────────────────────────
+
+  const handleImportBuyTicket = () => {
+    const ticket = workspaceBuyTickets.find(t => t.ticketId === selectedBuyId);
+    if (!ticket) return;
+    const imported = (ticket.buyItems || []).map((item, idx) => ({
+      _lineId: Date.now() + Math.random() + idx,
+      part_no: item.part_no || `${ticketId}-T${String(tradeItems.length + idx + 1).padStart(2, '0')}`,
+      category_id:   item.category_id   || '',
+      category_name: item.category_name || '',
+      description:   item.description   || '',
+      serial_number: item.serial_number || '',
+      qty:           parseInt(item.qty) || 1,
+      tradeAllowance: parseFloat(item.paid) || 0,
+      images:        item.images || [],
+    }));
+    setTradeItems(prev => [...prev, ...imported]);
+    onConsumeWorkspaceBuy?.(selectedBuyId);
+    setBuyPickerOpen(false);
+    setSelectedBuyId(null);
+    showSnackbar(`${imported.length} item${imported.length !== 1 ? 's' : ''} imported from ${selectedBuyId}`);
+  };
+
+  const handleImportSaleTicket = () => {
+    const ticket = workspaceSaleTickets.find(t => t.ticketId === selectedSaleId);
+    if (!ticket) return;
+    const imported = (ticket.saleItems || []).map((item, idx) => ({
+      ...item,
+      _lineId: Date.now() + Math.random() + idx,
+    }));
+    setSaleItems(prev => [...prev, ...imported]);
+    onConsumeWorkspaceSale?.(selectedSaleId);
+    setSalePickerOpen(false);
+    setSelectedSaleId(null);
+    showSnackbar(`${imported.length} item${imported.length !== 1 ? 's' : ''} imported from ${selectedSaleId}`);
+  };
+
   // ── Camera ───────────────────────────────────────────────────────────────────
 
   const openCamera = (type, _lineId) => {
@@ -367,7 +416,8 @@ export default function TradeTransactionScreen({
     }
     onAddToWorkspace?.({
       ticketId, tradeItems, saleItems, ticketNote, showOnReceipt,
-      isStoreCreditNet, totalTradeAllowance, totalSaleAfterTax, netDueToCustomer, customer,
+      isStoreCreditNet, totalTradeAllowance, totalSaleAfterTax, netDueToCustomer,
+      taxAmount, taxRate, customer,
     });
   };
 
@@ -547,13 +597,13 @@ export default function TradeTransactionScreen({
       </Paper>
 
       {/* ── Main body ── */}
-      <Box sx={{ flex: 1, p: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Box sx={{ flex: 1, p: 2, display: 'flex', flexDirection: 'row', gap: 2, minHeight: 0 }}>
 
-        {/* Two-panel row */}
-        <Box sx={{ display: 'flex', gap: 2, flex: 1, minHeight: 0 }}>
+        {/* Left column: Customer Gives Us stacked above Customer Receives */}
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0 }}>
 
           {/* ── LEFT: Customer gives us (trade-in items) ── */}
-          <Paper variant="outlined" sx={{ flex: '0 0 55%', borderRadius: 2, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             {/* Section header */}
             <Box sx={{ px: 2, py: 1, bgcolor: '#f0f9ff', borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box sx={{ width: 24, height: 24, borderRadius: '50%', bgcolor: TRADE_TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -592,7 +642,14 @@ export default function TradeTransactionScreen({
                   Free-type Quick Add
                 </Button>
                 <Button variant="outlined" startIcon={<MuiIcons.AddCircleOutline sx={{ fontSize: 15 }} />}
-                  onClick={() => showSnackbar('Add Existing Buy Ticket — coming soon', 'info')}
+                  onClick={() => {
+                    if (workspaceBuyTickets.length === 0) {
+                      showSnackbar('No Buy Tickets in workspace. Add a Buy Ticket to the workspace first.', 'warning');
+                      return;
+                    }
+                    setSelectedBuyId(null);
+                    setBuyPickerOpen(true);
+                  }}
                   sx={{ borderRadius: 2, textTransform: 'none', fontSize: 12, flexShrink: 0, borderColor: TRADE_TEAL, color: TRADE_TEAL, '&:hover': { bgcolor: '#e0f9ff' } }}>
                   Add Existing Buy Ticket
                 </Button>
@@ -621,7 +678,7 @@ export default function TradeTransactionScreen({
             </Box>
 
             {/* Trade-in items table */}
-            <Box sx={{ flex: 1, overflowY: 'auto' }}>
+            <Box sx={{ overflowY: 'auto' }}>
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow sx={{ bgcolor: '#fafafa' }}>
@@ -739,8 +796,8 @@ export default function TradeTransactionScreen({
             </Box>
           </Paper>
 
-          {/* ── RIGHT: Customer receives (sale items) ── */}
-          <Paper variant="outlined" sx={{ flex: 1, borderRadius: 2, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          {/* ── Customer receives (sale items) ── */}
+          <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             {/* Section header */}
             <Box sx={{ px: 2, py: 1, bgcolor: '#f0f9ff', borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box sx={{ width: 24, height: 24, borderRadius: '50%', bgcolor: TRADE_TEAL, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -801,14 +858,21 @@ export default function TradeTransactionScreen({
                 )}
               </Box>
               <Button variant="outlined" startIcon={<MuiIcons.AddCircleOutline sx={{ fontSize: 15 }} />}
-                onClick={() => showSnackbar('Add Existing Sale Ticket — coming soon', 'info')}
+                onClick={() => {
+                  if (workspaceSaleTickets.length === 0) {
+                    showSnackbar('No Sale Tickets in workspace. Add a Sale Ticket to the workspace first.', 'warning');
+                    return;
+                  }
+                  setSelectedSaleId(null);
+                  setSalePickerOpen(true);
+                }}
                 sx={{ borderRadius: 2, textTransform: 'none', fontSize: 12, flexShrink: 0, borderColor: TRADE_TEAL, color: TRADE_TEAL, '&:hover': { bgcolor: '#e0f9ff' } }}>
                 Add Existing Sale Ticket
               </Button>
             </Box>
 
             {/* Sale items table */}
-            <Box sx={{ flex: 1, overflowY: 'auto' }}>
+            <Box sx={{ overflowY: 'auto' }}>
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
@@ -915,8 +979,8 @@ export default function TradeTransactionScreen({
           </Paper>
         </Box>
 
-        {/* ── Three-column summary ── */}
-        <Box sx={{ display: 'flex', gap: 2 }}>
+        {/* Right column: Financial summary */}
+        <Box sx={{ width: 320, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2, alignSelf: 'flex-start' }}>
 
           {/* Trade-in Summary */}
           <Paper variant="outlined" sx={{ flex: 1, borderRadius: 2, p: 2, borderColor: TRADE_TEAL }}>
@@ -946,7 +1010,6 @@ export default function TradeTransactionScreen({
             {[
               { label: 'Sale Subtotal',       value: fmt(saleSubtotal),      bold: false },
               { label: 'Discount',            value: fmt(saleDiscount),      bold: false },
-              { label: 'Tax Rule',            value: 'Tax on Difference',    bold: false, italic: true },
               { label: 'Taxable Difference',  value: fmt(taxableDifference), bold: false },
               { label: `Tax (${(taxRate * 100).toFixed(3)}%)`, value: fmt(taxAmount), bold: false },
             ].map(row => (
@@ -1035,6 +1098,172 @@ export default function TradeTransactionScreen({
           Checkout Now
         </Button>
       </Paper>
+
+      {/* Buy ticket picker dialog */}
+      <Dialog open={buyPickerOpen} onClose={() => setBuyPickerOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700, fontSize: 16 }}>
+          Select Buy Ticket to Absorb into Trade
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {workspaceBuyTickets.length === 0 ? (
+            <Box sx={{ p: 3, textAlign: 'center' }}>
+              <Typography color="text.secondary" fontSize={14}>No eligible Buy Tickets in workspace.</Typography>
+            </Box>
+          ) : (
+            <List disablePadding>
+              {workspaceBuyTickets.map(ticket => {
+                const items    = ticket.buyItems || [];
+                const total    = ticket.totalPaid || items.reduce((s, i) => s + (parseFloat(i.paid) || 0) * (parseInt(i.qty) || 1), 0);
+                const selected = selectedBuyId === ticket.ticketId;
+                return (
+                  <ListItemButton
+                    key={ticket.ticketId}
+                    selected={selected}
+                    onClick={() => setSelectedBuyId(ticket.ticketId)}
+                    sx={{
+                      borderBottom: '1px solid #f0f0f0',
+                      bgcolor: selected ? '#e0f9ff !important' : undefined,
+                      '&:hover': { bgcolor: '#f0f9ff' },
+                    }}
+                  >
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      {/* Ticket header row */}
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.75 }}>
+                        <MuiIcons.ShoppingBag sx={{ fontSize: 18, color: selected ? TRADE_TEAL : '#0284c7' }} />
+                        <Typography fontWeight={700} fontSize={14} color={selected ? TRADE_TEAL : '#0284c7'}>
+                          {ticket.ticketId}
+                        </Typography>
+                        <Chip
+                          label={`${items.length} item${items.length !== 1 ? 's' : ''}`}
+                          size="small"
+                          sx={{ height: 20, fontSize: 11, bgcolor: '#e0f2fe', color: '#0284c7' }}
+                        />
+                        <Typography fontSize={13} fontWeight={700} color={selected ? TRADE_TEAL : 'text.primary'} sx={{ ml: 'auto' }}>
+                          ${Number(total).toFixed(2)}
+                        </Typography>
+                      </Box>
+                      {/* Item list preview */}
+                      {items.slice(0, 3).map((item, i) => (
+                        <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, pl: 3.5, py: 0.25 }}>
+                          <Typography fontSize={12} color="text.secondary" sx={{ minWidth: 60 }}>{item.part_no}</Typography>
+                          <Typography fontSize={12} noWrap sx={{ flex: 1 }}>{item.description || <em style={{ color: '#bbb' }}>No description</em>}</Typography>
+                          <Typography fontSize={12} fontWeight={600} color={selected ? TRADE_TEAL : '#0284c7'}>
+                            ${Number((parseFloat(item.paid) || 0) * (parseInt(item.qty) || 1)).toFixed(2)}
+                          </Typography>
+                        </Box>
+                      ))}
+                      {items.length > 3 && (
+                        <Typography fontSize={11} color="text.secondary" sx={{ pl: 3.5, mt: 0.25 }}>
+                          +{items.length - 3} more item{items.length - 3 !== 1 ? 's' : ''}
+                        </Typography>
+                      )}
+                    </Box>
+                    {selected && <MuiIcons.CheckCircle sx={{ color: TRADE_TEAL, ml: 1.5, flexShrink: 0 }} />}
+                  </ListItemButton>
+                );
+              })}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 2.5, py: 1.5, gap: 1 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+            {selectedBuyId
+              ? `The selected Buy Ticket will be removed from the workspace and its items moved here.`
+              : `Select a Buy Ticket above to import.`}
+          </Typography>
+          <Button onClick={() => setBuyPickerOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={!selectedBuyId}
+            onClick={handleImportBuyTicket}
+            sx={{ bgcolor: TRADE_TEAL, '&:hover': { bgcolor: TRADE_DARK }, textTransform: 'none' }}
+          >
+            Import into Trade
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Sale ticket picker dialog */}
+      <Dialog open={salePickerOpen} onClose={() => setSalePickerOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700, fontSize: 16 }}>
+          Select Sale Ticket to Absorb into Trade
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {workspaceSaleTickets.length === 0 ? (
+            <Box sx={{ p: 3, textAlign: 'center' }}>
+              <Typography color="text.secondary" fontSize={14}>No eligible Sale Tickets in workspace.</Typography>
+            </Box>
+          ) : (
+            <List disablePadding>
+              {workspaceSaleTickets.map(ticket => {
+                const items    = ticket.saleItems || [];
+                const total    = ticket.total || items.reduce((s, i) => s + (parseFloat(i.price) || 0) * (parseInt(i.quantity) || 1), 0);
+                const selected = selectedSaleId === ticket.ticketId;
+                return (
+                  <ListItemButton
+                    key={ticket.ticketId}
+                    selected={selected}
+                    onClick={() => setSelectedSaleId(ticket.ticketId)}
+                    sx={{
+                      borderBottom: '1px solid #f0f0f0',
+                      bgcolor: selected ? '#e0f9ff !important' : undefined,
+                      '&:hover': { bgcolor: '#f0f9ff' },
+                    }}
+                  >
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.75 }}>
+                        <MuiIcons.ShoppingCart sx={{ fontSize: 18, color: selected ? TRADE_TEAL : '#1a472a' }} />
+                        <Typography fontWeight={700} fontSize={14} color={selected ? TRADE_TEAL : '#1a472a'}>
+                          {ticket.ticketId}
+                        </Typography>
+                        <Chip
+                          label={`${items.length} item${items.length !== 1 ? 's' : ''}`}
+                          size="small"
+                          sx={{ height: 20, fontSize: 11, bgcolor: '#e8f5e9', color: '#1a472a' }}
+                        />
+                        <Typography fontSize={13} fontWeight={700} color={selected ? TRADE_TEAL : 'text.primary'} sx={{ ml: 'auto' }}>
+                          ${Number(total).toFixed(2)}
+                        </Typography>
+                      </Box>
+                      {items.slice(0, 3).map((item, i) => (
+                        <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, pl: 3.5, py: 0.25 }}>
+                          <Typography fontSize={12} color="text.secondary" sx={{ minWidth: 60 }}>{item.sku}</Typography>
+                          <Typography fontSize={12} noWrap sx={{ flex: 1 }}>{item.name || <em style={{ color: '#bbb' }}>No description</em>}</Typography>
+                          <Typography fontSize={12} fontWeight={600} color={selected ? TRADE_TEAL : '#1a472a'}>
+                            ${Number((parseFloat(item.price) || 0) * (parseInt(item.quantity) || 1)).toFixed(2)}
+                          </Typography>
+                        </Box>
+                      ))}
+                      {items.length > 3 && (
+                        <Typography fontSize={11} color="text.secondary" sx={{ pl: 3.5, mt: 0.25 }}>
+                          +{items.length - 3} more item{items.length - 3 !== 1 ? 's' : ''}
+                        </Typography>
+                      )}
+                    </Box>
+                    {selected && <MuiIcons.CheckCircle sx={{ color: TRADE_TEAL, ml: 1.5, flexShrink: 0 }} />}
+                  </ListItemButton>
+                );
+              })}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 2.5, py: 1.5, gap: 1 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+            {selectedSaleId
+              ? `The selected Sale Ticket will be removed from the workspace and its items moved here.`
+              : `Select a Sale Ticket above to import.`}
+          </Typography>
+          <Button onClick={() => setSalePickerOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={!selectedSaleId}
+            onClick={handleImportSaleTicket}
+            sx={{ bgcolor: TRADE_TEAL, '&:hover': { bgcolor: TRADE_DARK }, textTransform: 'none' }}
+          >
+            Import into Trade
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Camera dialog */}
       <Dialog open={cameraDialogOpen} onClose={closeCamera} maxWidth="sm" fullWidth

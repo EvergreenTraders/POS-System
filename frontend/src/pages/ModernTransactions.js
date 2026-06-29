@@ -408,9 +408,12 @@ function TradeTransactionCard({ tx, tradeIcon, tradeColor, onOpen, onVoid }) {
   const tradeItems = tx.tradeItems || [];
   const saleItems  = tx.saleItems  || [];
   const net        = Number(tx.netDueToCustomer || 0);
+  const taxAmt     = Number(tx.taxAmount || 0);
 
   return (
     <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+
+      {/* ── Header ── */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <TradeIconComponent sx={{ fontSize: 20, color: accent }} />
@@ -420,52 +423,61 @@ function TradeTransactionCard({ tx, tradeIcon, tradeColor, onOpen, onVoid }) {
           sx={{ fontWeight: 700, fontSize: 11, height: 20, bgcolor: '#f5f5f5', border: '1px solid #e0e0e0' }} />
       </Box>
 
-      <Box sx={{ px: 1.5, pb: 1.25 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75 }}>
-          <Chip icon={<MuiIcons.SwapHoriz sx={{ fontSize: 14 }} />}
-            label={`${tradeItems.length} trade-in`}
-            size="small"
-            sx={{ fontSize: 12, height: 24, bgcolor: '#e0f9ff', color: accent, '& .MuiChip-icon': { color: accent } }} />
-          <Chip icon={<MuiIcons.ShoppingCart sx={{ fontSize: 14 }} />}
-            label={`${saleItems.length} sale`}
-            size="small"
-            sx={{ fontSize: 12, height: 24, bgcolor: '#e0f9ff', color: accent, '& .MuiChip-icon': { color: accent } }} />
-          <Chip label="Active" size="small"
-            sx={{ height: 20, fontSize: 10, fontWeight: 600, bgcolor: accent, color: '#fff' }} />
-        </Box>
+      {/* ── Trading In + Receiving side-by-side ── */}
+      <Box sx={{ display: 'flex', gap: 1.25, px: 1.5, pt: 1.25, pb: 0 }}>
+        {[
+          { label: 'Trading In', icon: 'MoveToInbox', count: tradeItems.length, amount: tx.totalTradeAllowance },
+          { label: 'Receiving',  icon: 'Outbox',      count: saleItems.length,  amount: tx.totalSaleAfterTax  },
+        ].map(({ label, icon, count, amount }) => {
+          const Icon = MuiIcons[icon];
+          return (
+            <Paper key={label} variant="outlined" sx={{ flex: 1, minWidth: 0, px: 1.25, py: 1, borderRadius: 1.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography fontWeight={700} fontSize={12} color={accent}>{label}</Typography>
+                <Icon sx={{ fontSize: 16, color: accent, opacity: 0.7 }} />
+              </Box>
+              <Typography fontSize={11} color="text.secondary" mb={0.5}>{count} item{count !== 1 ? 's' : ''}</Typography>
+              <Typography fontWeight={800} fontSize={16}>{fmt(amount)}</Typography>
+            </Paper>
+          );
+        })}
+      </Box>
 
+      {/* ── Tax + Net ── */}
+      
         <Divider sx={{ my: 1 }} />
-
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.4 }}>
-          <Typography variant="caption" color="text.secondary">Trade Allowance</Typography>
-          <Typography variant="caption" fontWeight={600}>{fmt(tx.totalTradeAllowance)}</Typography>
+      <Box sx={{ px: 1.5, pb: 0 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+          <Typography variant="caption" color="text.secondary">Tax Rule</Typography>
+          <Typography variant="caption">Tax on Difference</Typography>
         </Box>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.4 }}>
-          <Typography variant="caption" color="text.secondary">Sale Total</Typography>
-          <Typography variant="caption" fontWeight={600}>{fmt(tx.totalSaleAfterTax)}</Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Typography variant="caption" color="text.secondary">Tax ({(tx.taxRate * 100 || 0).toFixed(1)}%)</Typography>
+          <Typography variant="caption">{fmt(taxAmt)}</Typography>
         </Box>
 
         <Divider sx={{ my: 1 }} />
 
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-          <Typography variant="caption" fontWeight={600} color={net >= 0 ? accent : '#c62828'}>
-            {net >= 0 ? 'Net Due to Customer' : 'Net Due from Customer'}
-          </Typography>
-          <Typography variant="caption" fontWeight={700} color={net >= 0 ? accent : '#c62828'}>
-            {net >= 0 ? '' : '-'}{fmt(Math.abs(net))}
+          <Typography variant="caption" fontWeight={600} color={net <= 0 ? '#1a472a' : '#c62828'}>Net Effect</Typography>
+          <Typography variant="caption" fontWeight={700} color={net <= 0 ? '#1a472a' : '#c62828'}>
+            {net <= 0 ? '+' : '-'}{fmt(Math.abs(net))}
           </Typography>
         </Box>
+      </Box>
 
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
-            onClick={onOpen} sx={{ flex: 1, fontSize: 11, borderColor: accent, color: accent, '&:hover': { borderColor: accent } }}>
-            Open
-          </Button>
-          <IconButton size="small" color="error" onClick={onVoid}
-            sx={{ border: '1px solid', borderColor: 'error.main', borderRadius: 1 }}>
-            <MuiIcons.Block fontSize="small" />
-          </IconButton>
-        </Box>
+
+      {/* ── Action buttons ── */}
+      <Box sx={{ px: 1.5, pb: 1.5, display: 'flex', gap: 1 }}>
+        <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
+          onClick={onOpen}
+          sx={{ flex: 1, fontSize: 11, borderRadius: 2, color: accent, borderColor: accent, textTransform: 'none', '&:hover': { bgcolor: '#e0f9ff' } }}>
+          Open
+        </Button>
+        <IconButton size="small" color="error" onClick={onVoid}
+          sx={{ border: '1px solid', borderColor: 'error.main', borderRadius: 1 }}>
+          <MuiIcons.Block fontSize="small" />
+        </IconButton>
       </Box>
     </Paper>
   );
@@ -973,6 +985,8 @@ export default function ModernTransactions() {
   }
 
   if (tradeOpen) {
+    const workspaceBuyTickets  = workspaceTransactions.filter(t => t.type === 'BUY');
+    const workspaceSaleTickets = workspaceTransactions.filter(t => t.type === 'SALE');
     return (
       <TradeTransactionScreen
         customer={customer}
@@ -985,6 +999,14 @@ export default function ModernTransactions() {
           setExistingTradeData(null);
         }}
         existingTradeData={existingTradeData}
+        workspaceBuyTickets={workspaceBuyTickets}
+        onConsumeWorkspaceBuy={(buyTicketId) =>
+          setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'BUY' && t.ticketId === buyTicketId)))
+        }
+        workspaceSaleTickets={workspaceSaleTickets}
+        onConsumeWorkspaceSale={(saleTicketId) =>
+          setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'SALE' && t.ticketId === saleTicketId)))
+        }
       />
     );
   }
