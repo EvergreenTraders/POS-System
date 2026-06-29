@@ -295,6 +295,7 @@ function TransactionJournals() {
     const ticketNoteItem = ticketItems.find(i => i.ticket_note);
     const ticketNote = ticketNoteItem?.ticket_note
       || (isSaleTicket ? saleTickets.find(st => st.sale_ticket_id === ticketId && st.ticket_note)?.ticket_note : null)
+      || (isBuyTicket  ? buyTickets.find(bt => bt.buy_ticket_id === ticketId && bt.ticket_note)?.ticket_note  : null)
       || null;
     const transactionDate = selectedTransaction ? new Date(selectedTransaction.created_at) : new Date();
     const formattedDate = transactionDate.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });

@@ -239,7 +239,7 @@ function Checkout() {
 
         setIsInitialized(true);
       }
-      else if (fromSource === 'cart' || fromSource === 'sale-ticket') {
+      else if (fromSource === 'cart' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket') {
         // Store the items to checkout and all cart items separately
         const items = itemsToCheckout;
 
@@ -303,6 +303,9 @@ function Checkout() {
   useEffect(() => {
     const checkCashDrawerSession = async () => {
       if (!user?.id) return;
+
+      // Salary employees are not tied to a physical drawer — skip the check
+      if (user.employment_type === 'salary') return;
 
       try {
         const response = await axios.get(`${API_BASE_URL}/cash-drawer/employee/${user.id}/active`);
@@ -815,8 +818,8 @@ function Checkout() {
           );
 
           // Step 1: Create jewelry items FIRST (only if we have jewelry items)
-          if (isFromQuotes) {
-            // If coming from quotes, update each quote item to a regular item
+          if (isFromQuotes && checkoutItems.some(item => item.item_id?.startsWith('QT') && !item.fromInventory)) {
+            // Legacy path: quoted items have Q- prefix IDs — convert them via the jewelry endpoint
             const convertResponse = await axios.put(
               `${config.apiUrl}/jewelry/${quoteId}`,
               {},
@@ -825,19 +828,19 @@ function Checkout() {
               }
             );
             createdJewelryItems = convertResponse.data;
-            
+
             // Push data to jewelry_secondary_gems for items converted from quotes
             for (const item of createdJewelryItems) {
               // Find matching cart item to get secondary gem data
               const originalItem = checkoutItems.find(cartItem =>
                 cartItem.item_id && cartItem.item_id.startsWith(quoteId));
-              
+
                 try {
                   if (originalItem.secondary_gems && originalItem.secondary_gems.length > 0) {
                     // Send each secondary gem individually
                     try {
                       for (const gemData of originalItem.secondary_gems) {
-                        
+
                         // Send the gem data
                         await axios.post(
                           `${config.apiUrl}/jewelry_secondary_gems`,
@@ -868,7 +871,7 @@ function Checkout() {
                       secondary_gem_authentic: originalItem.secondary_gem_authentic,
                       secondary_gem_value: originalItem.secondary_gem_value
                     };
-                    
+
                     // Push to jewelry_secondary_gems with the same item_id
                     await axios.put(
                       `${config.apiUrl}/jewelry_secondary_gems/${item.item_id}`,
@@ -880,7 +883,7 @@ function Checkout() {
                   console.error(`Error adding secondary gems for converted item ${item.item_id}:`, error);
                   // Continue with transaction even if secondary gems fail
                 }
-    
+
             }
           } else if (hasJewelryItems) {
             // If coming from estimator, create new jewelry items (only if we have jewelry items)
@@ -890,7 +893,13 @@ function Checkout() {
             const newJewelryItems = checkoutItems.filter(item => !item.fromInventory).map(item => {
               if (!item.buyTicketId) return item;
               ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
-              return { ...item, item_id: `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}` };
+              const desc = item.short_desc || item.description || '';
+              return {
+                ...item,
+                item_id: `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`,
+                short_desc: desc,
+                long_desc: item.long_desc || desc,
+              };
             });
 
 
@@ -1246,13 +1255,18 @@ function Checkout() {
                   : item.fromEstimator === 'jewelry' || item.sourceEstimator === 'jewelry' ? 'JW'
                   : null;
 
+                const ticketNote    = itemsForTicket[0]?.ticket_note    || null;
+                const showOnReceipt = itemsForTicket[0]?.show_on_receipt || false;
+
                 await axios.post(
                   `${config.apiUrl}/buy-ticket`,
                   {
-                    buy_ticket_id: buyTicketId,
-                    transaction_id: realTransactionId,
-                    item_id: itemId,
-                    inventory_type: invType
+                    buy_ticket_id:   buyTicketId,
+                    transaction_id:  realTransactionId,
+                    item_id:         itemId,
+                    inventory_type:  invType,
+                    ticket_note:     ticketNote,
+                    show_on_receipt: showOnReceipt,
                   },
                   {
                     headers: { Authorization: `Bearer ${token}` }
@@ -1644,6 +1658,22 @@ function Checkout() {
             }
           }
 
+          // Step 3.8: Clean up sale quote after successful checkout
+          // Buy/pawn quotes are cleaned up by the ticket creation endpoints (backend).
+          const isSaleOnlyQuote = checkoutItems.every(
+            item => (item.transaction_type || '').toLowerCase() === 'sale'
+          );
+          if (isFromQuotes && quoteId && isSaleOnlyQuote) {
+            try {
+              await axios.delete(
+                `${config.apiUrl}/quotes/${quoteId}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+            } catch (err) {
+              console.error('Failed to clean up sale quote after checkout:', err);
+            }
+          }
+
           // Step 4: Clear all storage IMMEDIATELY before any UI updates
           // Clear all ticket items from localStorage FIRST
           const ticketTypes = ['pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund', 'redeem'];
@@ -1837,6 +1867,8 @@ const handleBackToEstimation = () => {
       navigate('/bullion-estimator');
     } else if (checkoutSource === 'sale-ticket') {
       navigate('/modern-transactions', { state: { returnToSale: true } });
+    } else if (checkoutSource === 'buy-ticket') {
+      navigate('/modern-transactions', { state: { returnToBuy: true } });
     } else if (checkoutSource === 'cart') {
       // Check if this is a pawn-only checkout — navigate back to pawn screen
       const isPawnCheckout = checkoutItems.length > 0 &&
@@ -1967,14 +1999,17 @@ const handleBackToEstimation = () => {
     checkoutItems.every(item => (item.transaction_type || '').toLowerCase() === 'pawn');
 
   const isSaleCheckout = checkoutSource === 'sale-ticket';
-  const themeColor = isSaleCheckout ? '#2e7d32' : PURPLE;
-  const themeDark  = isSaleCheckout ? '#1b5e20' : PURPLE_DARK;
-  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : '#f3e5f5';
+  const isBuyCheckout  = checkoutSource === 'buy-ticket';
+  const themeColor   = isSaleCheckout ? '#2e7d32' : isBuyCheckout ? '#0284c7' : PURPLE;
+  const themeDark    = isSaleCheckout ? '#1b5e20' : isBuyCheckout ? '#0369a1' : PURPLE_DARK;
+  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : isBuyCheckout ? '#e0f2fe' : '#f3e5f5';
 
   const breadcrumbSource = isPawnCheckout
     ? 'Pawn Transaction'
     : checkoutSource === 'sale-ticket'
     ? 'Sale Transaction'
+    : checkoutSource === 'buy-ticket'
+    ? 'Buy Transaction'
     : checkoutSource === 'coinsbullions'
     ? 'Coins & Bullions'
     : checkoutSource === 'cart'
@@ -1984,16 +2019,29 @@ const handleBackToEstimation = () => {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
 
-      {/* Breadcrumb — matches PawnTransactionScreen style */}
+      {/* Breadcrumb */}
       <Box sx={{ bgcolor: themeColor, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        <Typography
-          variant="body2"
-          fontWeight={400}
-          sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
-          onClick={handleBackToEstimation}
-        >
-          {breadcrumbSource}
-        </Typography>
+        {isBuyCheckout ? (
+          <>
+            <Typography variant="body2" fontWeight={400}
+              sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
+              onClick={() => navigate('/modern-transactions')}>
+              Transactions
+            </Typography>
+            <ChevronRightIcon sx={{ fontSize: 16, opacity: 0.6 }} />
+            <Typography variant="body2" fontWeight={400}
+              sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
+              onClick={handleBackToEstimation}>
+              Buy Ticket
+            </Typography>
+          </>
+        ) : (
+          <Typography variant="body2" fontWeight={400}
+            sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
+            onClick={handleBackToEstimation}>
+            {breadcrumbSource}
+          </Typography>
+        )}
         <ChevronRightIcon sx={{ fontSize: 16, opacity: 0.6 }} />
         <Typography variant="body2" fontWeight={700}>Checkout</Typography>
       </Box>
