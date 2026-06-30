@@ -38,6 +38,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import SaveIcon from '@mui/icons-material/Save';
 import EditIcon from '@mui/icons-material/Edit';
+import { generateTradeTicketId, commitTradeTicketId } from './TradeTransactionScreen';
 
 const API_BASE_URL = config.apiUrl;
 
@@ -66,6 +67,20 @@ function generatePawnTicketId() {
   localStorage.setItem('pendingPTTicketId', id);
   return id;
 }
+
+function generateSaleTicketId() {
+  const voided = JSON.parse(localStorage.getItem('voidedSaleTickets') || '[]');
+  const pending = localStorage.getItem('pendingSTTicketId');
+  if (pending && !voided.includes(pending)) return pending;
+  if (pending) localStorage.removeItem('pendingSTTicketId');
+  let last = parseInt(localStorage.getItem('lastSTTicketNumber') || '0');
+  let id;
+  do { last += 1; id = `ST-${last.toString().padStart(8, '0')}`; } while (voided.includes(id));
+  localStorage.setItem('lastSTTicketNumber', last.toString());
+  localStorage.setItem('pendingSTTicketId', id);
+  return id;
+}
+
 
 function QuoteManager() {
   const navigate = useNavigate();
@@ -517,6 +532,146 @@ function QuoteManager() {
           notes: item.notes || '',
         }));
 
+      } else if (quoteType === 'trade') {
+        const tradeTicketId = generateTradeTicketId();
+        const buyItems  = items.filter(item => item.transaction_type === 'buy');
+        const saleItemsForTrade = items.filter(item => item.transaction_type === 'sale');
+        const buyTicketId  = buyItems.length  > 0 ? generateBuyTicketId()  : null;
+        const saleTicketId = saleItemsForTrade.length > 0 ? generateSaleTicketId() : null;
+        checkoutFrom = 'trade-ticket';
+
+        const tradeInCheckoutItems = buyItems.map(item => ({
+          id: item.item_id,
+          item_id: item.item_id,
+          description: item.short_desc || item.description || '',
+          short_desc: item.short_desc || item.description || '',
+          long_desc: item.long_desc || '',
+          price: -(parseFloat(item.item_price) || 0),
+          value: -(parseFloat(item.item_price) || 0),
+          images: parseImages(item.images),
+          transaction_type: 'trade_in',
+          tradeTicketId,
+          buyTicketId,
+          fromInventory: true,
+          sourceEstimator: 'jewelry',
+          category: item.category || '',
+          precious_metal_type: item.precious_metal_type || '',
+          metal_weight: item.metal_weight || '',
+          metal_purity: item.metal_purity || '',
+          serial_number: item.serial_number || '',
+          notes: item.notes || '',
+        }));
+
+        const tradeSaleCheckoutItems = saleItemsForTrade.map(item => ({
+          id: item.item_id,
+          item_id: item.item_id,
+          description: item.short_desc || item.description || '',
+          short_desc: item.short_desc || item.description || '',
+          price: parseFloat(item.item_price) || 0,
+          value: parseFloat(item.item_price) || 0,
+          images: parseImages(item.images),
+          inventory_type: item.inventory_type,
+          // Checkout's "mark SOLD" step checks fromHardgoodsInventory, not
+          // inventory_type's 'HG'/'JW' codes — set it explicitly so hardgoods
+          // sale items in a trade resolve to the right status endpoint.
+          fromHardgoodsInventory: item.inventory_type === 'HG',
+          transaction_type: 'trade_sale',
+          tradeTicketId,
+          saleTicketId,
+          fromInventory: true,
+        }));
+
+        checkoutItems = [...tradeSaleCheckoutItems, ...tradeInCheckoutItems];
+
+        // Also stash the trade ticket in TradeTransactionScreen's own item shape
+        // (not the Checkout cart-item shape above) so clicking "Trade Ticket" in
+        // Checkout's breadcrumb can actually restore an editable trade ticket,
+        // the same way a live trade checkout's pendingTradeReturn does — without
+        // this, there's nothing for ModernTransactions to restore and the
+        // breadcrumb lands on an empty workspace instead.
+        const nativeTradeItems = buyItems.map((item, idx) => ({
+          _lineId: Date.now() + Math.random() + idx,
+          part_no: item.item_id,
+          category_id: '',
+          category_name: item.category || '',
+          description: item.short_desc || item.description || '',
+          serial_number: item.serial_number || '',
+          qty: 1,
+          tradeAllowance: parseFloat(item.item_price) || 0,
+          images: parseImages(item.images),
+          sourceEstimator: 'jewelry',
+          jewelryData: item,
+        }));
+        const nativeSaleItems = saleItemsForTrade.map((item, idx) => ({
+          _lineId: Date.now() + Math.random() + idx,
+          item_id: item.item_id,
+          sku: item.item_id,
+          inventory_type: item.inventory_type,
+          name: item.short_desc || item.description || item.item_id,
+          category_name: item.category || '',
+          price: parseFloat(item.item_price) || 0,
+          quantity: 1,
+          discount: 0,
+          discountType: 'amount',
+          images: parseImages(item.images),
+        }));
+        sessionStorage.setItem('pendingTradeReturn', JSON.stringify({
+          customerId: quote.customer_id,
+          customer: customerObj,
+          ticketId: tradeTicketId,
+          tradeItems: nativeTradeItems,
+          saleItems: nativeSaleItems,
+          ticketNote: quote.ticket_note || '',
+          showOnReceipt: quote.show_on_receipt || false,
+          isStoreCreditNet: false,
+          buyTicketId,
+          saleTicketId,
+        }));
+
+        const buyTotal  = buyItems.reduce((s, i) => s + (parseFloat(i.item_price) || 0), 0);
+        const saleTotal = saleItemsForTrade.reduce((s, i) => s + (parseFloat(i.item_price) || 0), 0);
+
+        // Trade tax rule (same one TradeTransactionScreen applies live): tax only
+        // applies to the amount the sale exceeds the trade-in allowance, not the
+        // full sale price. Fetch the current tax rate to replicate it here.
+        let taxRate = 0.07;
+        try {
+          const province = localStorage.getItem('selectedProvince');
+          if (province) {
+            const taxRes = await axios.get(`${API_BASE_URL}/tax-config/${province}`);
+            const { gst_rate, pst_rate, hst_rate } = taxRes.data;
+            const total = (parseFloat(gst_rate) || 0) + (parseFloat(pst_rate) || 0) + (parseFloat(hst_rate) || 0);
+            if (total > 0) taxRate = total / 100;
+          }
+        } catch {
+          // fall back to default rate
+        }
+
+        const taxableDifference = Math.max(0, saleTotal - buyTotal);
+        const taxAmount         = taxableDifference * taxRate;
+        const totalSaleAfterTax = saleTotal + taxAmount;
+
+        navigate('/checkout', {
+          state: {
+            items: checkoutItems,
+            allCartItems: checkoutItems,
+            customer: customerObj,
+            customerId: quote.customer_id,
+            from: checkoutFrom,
+            quoteId: quote.quote_id,
+            tradeTotal: totalSaleAfterTax - buyTotal,
+            tradeBreakdown: {
+              buyTotal,
+              saleTotal,
+              taxableDifference,
+              taxRate,
+              taxAmount,
+              netTotal: totalSaleAfterTax - buyTotal,
+            },
+          },
+        });
+        return;
+
       } else {
         // Sale quote
         checkoutItems = items.map(item => ({
@@ -888,7 +1043,7 @@ function QuoteManager() {
     const metalType = editingItem.precious_metal_type;
     const meta = metalMap[metalType];
     if (meta) {
-      const spot = liveSpotPrices[meta.key] || liveSpotPrices[meta.key.toUpperCase()];
+      const spot = liveSpotPrices?.[meta.key] || liveSpotPrices?.[meta.key.toUpperCase()];
       const purity = editingItem.purity_value;
       const weight = editingItem.metal_weight;
       const price = spot * purity * weight * meta.factor;
@@ -962,6 +1117,7 @@ function QuoteManager() {
               display="block"
               sx={{ fontSize: '0.875rem' }}
               color={
+                !liveSpotPrices ? 'textSecondary' :
                 item.precious_metal_type === 'Silver' ?
                   (liveSpotPrices.cadxag > item.metal_spot_price ? 'success.main' :
                     liveSpotPrices.cadxag < item.metal_spot_price ? 'error.main' : 'textSecondary') :
@@ -999,6 +1155,7 @@ function QuoteManager() {
           variant="caption"
           display="block"
           color={
+            !liveSpotPrices ? 'textSecondary' :
             item.precious_metal_type === 'Silver' ?
               (liveSpotPrices.cadxag > item.metal_spot_price ? 'success.main' :
                 liveSpotPrices.cadxag < item.metal_spot_price ? 'error.main' : 'textSecondary') :
@@ -1063,17 +1220,41 @@ function QuoteManager() {
                         </TableCell>
                       </TableRow>
                     );})}
-                    <TableRow>
-                      <TableCell colSpan={5} align="right">
-                        <strong>Total Amount:</strong>
-                      </TableCell>
-                      <TableCell align="right">
-                        <strong>${selectedQuote.total_amount}</strong>
-                      </TableCell>
-                    </TableRow>
                   </TableBody>
                 </Table>
               </TableContainer>
+
+              {selectedQuote.quote_type === 'trade' && (() => {
+                const buyTotal  = quoteItems.filter(i => i.transaction_type === 'buy').reduce((s, i) => s + (parseFloat(i.item_price) || 0), 0);
+                const saleTotal = quoteItems.filter(i => i.transaction_type === 'sale').reduce((s, i) => s + (parseFloat(i.item_price) || 0), 0);
+                const taxableDifference = Math.max(0, saleTotal - buyTotal);
+                const netTotal = parseFloat(selectedQuote.total_amount) || 0;
+                // Derived from the stored net total rather than re-fetching the
+                // current tax rate — reflects what was actually applied when saved.
+                const taxAmount = netTotal - (saleTotal - buyTotal);
+                const taxRatePct = taxableDifference > 0 ? (taxAmount / taxableDifference) * 100 : 0;
+                return (
+                  <Box sx={{ mt: 2, p: 1.5, borderRadius: 1, bgcolor: '#f0f9ff', border: '1px solid #b3e5fc' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}>
+                      Trade tax rule: tax is only charged on the amount the sale exceeds the trade-in allowance.
+                    </Typography>
+                    {[
+                      { label: 'Taxable Difference (Sale − Trade-In)', value: taxableDifference },
+                      { label: `Tax (${taxRatePct.toFixed(3)}%)`, value: taxAmount },
+                    ].map(row => (
+                      <Box key={row.label} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                        <Typography variant="body2" color="text.secondary">{row.label}:</Typography>
+                        <Typography variant="body2">${(parseFloat(row.value) || 0).toFixed(2)}</Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                );
+              })()}
+
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 1, mt: 2 }}>
+                <Typography variant="subtitle1" fontWeight="bold">Total Amount:</Typography>
+                <Typography variant="subtitle1" fontWeight="bold">${selectedQuote.total_amount}</Typography>
+              </Box>
             </DialogContent>
             <DialogActions>
               <Button onClick={() => {

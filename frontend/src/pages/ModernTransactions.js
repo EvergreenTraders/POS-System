@@ -11,10 +11,34 @@ import * as MuiIcons from '@mui/icons-material';
 import PawnTransactionScreen from './PawnTransactionScreen';
 import SaleTransactionScreen from './SaleTransactionScreen';
 import BuyTransactionScreen from './BuyTransactionScreen';
+import TradeTransactionScreen from './TradeTransactionScreen';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 const BUY_BLUE = '#0284c7';
+
+// Maps workspace transaction type to the localStorage keys each ticket screen uses
+// to track voided ticket numbers (so they're never reused) and the in-flight
+// "pending" ticket id (so a voided-but-uncommitted id isn't handed out again).
+const VOID_STORAGE_KEYS = {
+  PAWN:  { voided: 'voidedPawnTickets',  pending: 'pendingPTTicketId' },
+  BUY:   { voided: 'voidedBuyTickets',   pending: 'pendingBTTicketId' },
+  TRADE: { voided: 'voidedTradeTickets', pending: 'pendingTTTicketId' },
+  SALE:  { voided: 'voidedSaleTickets',  pending: 'pendingSTTicketId' },
+};
+
+function voidTicketId(type, ticketId) {
+  const keys = VOID_STORAGE_KEYS[type];
+  if (!keys || !ticketId) return;
+  const voided = JSON.parse(localStorage.getItem(keys.voided) || '[]');
+  if (!voided.includes(ticketId)) {
+    voided.push(ticketId);
+    localStorage.setItem(keys.voided, JSON.stringify(voided));
+  }
+  if (localStorage.getItem(keys.pending) === ticketId) {
+    localStorage.removeItem(keys.pending);
+  }
+}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -400,6 +424,88 @@ function BuyTransactionCard({ tx, buyIcon, buyColor, onOpen, onVoid }) {
   );
 }
 
+function TradeTransactionCard({ tx, tradeIcon, tradeColor, onOpen, onVoid }) {
+  const fmt    = (n) => `$${Number(n || 0).toFixed(2)}`;
+  const accent = tradeColor || '#0891b2';
+  const TradeIconComponent = tradeIcon ? (MuiIcons[tradeIcon] ?? MuiIcons.Balance) : MuiIcons.Balance;
+  const tradeItems = tx.tradeItems || [];
+  const saleItems  = tx.saleItems  || [];
+  const net        = Number(tx.netDueToCustomer || 0);
+  const taxAmt     = Number(tx.taxAmount || 0);
+
+  return (
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: '#e0e0e0' }}>
+
+      {/* ── Header ── */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 1, borderLeft: `4px solid ${accent}` }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <TradeIconComponent sx={{ fontSize: 20, color: accent }} />
+          <Typography fontWeight={700} fontSize={13} color={accent}>TRADE</Typography>
+        </Box>
+        <Chip label={tx.ticketId} size="small"
+          sx={{ fontWeight: 700, fontSize: 11, height: 20, bgcolor: '#f5f5f5', border: '1px solid #e0e0e0' }} />
+      </Box>
+
+      {/* ── Trading In + Receiving side-by-side ── */}
+      <Box sx={{ display: 'flex', gap: 1.25, px: 1.5, pt: 1.25, pb: 0 }}>
+        {[
+          { label: 'Trading In', icon: 'MoveToInbox', count: tradeItems.length, amount: tx.totalTradeAllowance },
+          { label: 'Receiving',  icon: 'Outbox',      count: saleItems.length,  amount: tx.totalSaleAfterTax  },
+        ].map(({ label, icon, count, amount }) => {
+          const Icon = MuiIcons[icon];
+          return (
+            <Paper key={label} variant="outlined" sx={{ flex: 1, minWidth: 0, px: 1.25, py: 1, borderRadius: 1.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography fontWeight={700} fontSize={12} color={accent}>{label}</Typography>
+                <Icon sx={{ fontSize: 16, color: accent, opacity: 0.7 }} />
+              </Box>
+              <Typography fontSize={11} color="text.secondary" mb={0.5}>{count} item{count !== 1 ? 's' : ''}</Typography>
+              <Typography fontWeight={800} fontSize={16}>{fmt(amount)}</Typography>
+            </Paper>
+          );
+        })}
+      </Box>
+
+      {/* ── Tax + Net ── */}
+      
+        <Divider sx={{ my: 1 }} />
+      <Box sx={{ px: 1.5, pb: 0 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+          <Typography variant="caption" color="text.secondary">Tax Rule</Typography>
+          <Typography variant="caption">Tax on Difference</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Typography variant="caption" color="text.secondary">Tax ({(tx.taxRate * 100 || 0).toFixed(1)}%)</Typography>
+          <Typography variant="caption">{fmt(taxAmt)}</Typography>
+        </Box>
+
+        <Divider sx={{ my: 1 }} />
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+          <Typography variant="caption" fontWeight={600} color={net <= 0 ? '#1a472a' : '#c62828'}>Net Effect</Typography>
+          <Typography variant="caption" fontWeight={700} color={net <= 0 ? '#1a472a' : '#c62828'}>
+            {net <= 0 ? '+' : '-'}{fmt(Math.abs(net))}
+          </Typography>
+        </Box>
+      </Box>
+
+
+      {/* ── Action buttons ── */}
+      <Box sx={{ px: 1.5, pb: 1.5, display: 'flex', gap: 1 }}>
+        <Button size="small" variant="outlined" startIcon={<MuiIcons.OpenInNew sx={{ fontSize: 13 }} />}
+          onClick={onOpen}
+          sx={{ flex: 1, fontSize: 11, borderRadius: 2, color: accent, borderColor: accent, textTransform: 'none', '&:hover': { bgcolor: '#e0f9ff' } }}>
+          Open
+        </Button>
+        <IconButton size="small" color="error" onClick={onVoid}
+          sx={{ border: '1px solid', borderColor: 'error.main', borderRadius: 1 }}>
+          <MuiIcons.Block fontSize="small" />
+        </IconButton>
+      </Box>
+    </Paper>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ModernTransactions() {
@@ -454,6 +560,36 @@ export default function ModernTransactions() {
       try {
         const { ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount } = JSON.parse(raw);
         return { ticketId, saleItems, ticketNote, showOnReceipt, globalDiscount };
+      } catch { return null; }
+    }
+    return null;
+  });
+  const [tradeOpen, setTradeOpen]         = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingTradeState');
+      return !!raw;
+    }
+    if (location.state?.returnToTrade) {
+      const raw = sessionStorage.getItem('pendingTradeReturn');
+      return !!raw;
+    }
+    return false;
+  });
+  const [existingTradeData, setExistingTradeData] = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingTradeState');
+      if (!raw) return null;
+      try {
+        const { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId } = JSON.parse(raw);
+        return { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId };
+      } catch { return null; }
+    }
+    if (location.state?.returnToTrade) {
+      const raw = sessionStorage.getItem('pendingTradeReturn');
+      if (!raw) return null;
+      try {
+        const { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId } = JSON.parse(raw);
+        return { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId };
       } catch { return null; }
     }
     return null;
@@ -591,6 +727,25 @@ export default function ModernTransactions() {
     }
   }, [location.state]);
 
+  // Refresh customer data after returning from Checkout via Trade Ticket breadcrumb; tradeOpen/existingTradeData seeded in useState.
+  useEffect(() => {
+    if (!location.state?.returnToTrade) return;
+    const raw = sessionStorage.getItem('pendingTradeReturn');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingTradeReturn');
+    const { customerId, customer: savedCustomer } = pending;
+    if (savedCustomer) setCustomer(savedCustomer);
+    if (customerId) {
+      axios.get(`${config.apiUrl}/customers/${customerId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      })
+        .then(res => setCustomer(res.data))
+        .catch(err => console.error('Failed to refresh customer after trade checkout cancel:', err));
+    }
+  }, [location.state]);
+
   // Restore pawn screen after returning from CustomerEditor
   useEffect(() => {
     if (!location.state?.customerUpdated) return;
@@ -663,6 +818,26 @@ export default function ModernTransactions() {
       .catch(err => console.error('Failed to refresh customer after buy edit:', err));
   }, [location.state]);
 
+  // Restore trade screen after returning from CustomerEditor
+  useEffect(() => {
+    if (!location.state?.customerUpdated) return;
+    const raw = sessionStorage.getItem('pendingTradeState');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingTradeState');
+    const { customerId, customer: savedCustomer, ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId } = pending;
+    if (!customerId) return;
+    if (savedCustomer) setCustomer(savedCustomer);
+    setExistingTradeData({ ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId });
+    setTradeOpen(true);
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after trade edit:', err));
+  }, [location.state]);
+
   const handleCustomerSearch = async (query) => {
     setCustomerSearch(query);
     if (!query.trim()) { setCustomerResults([]); setShowResults(false); return; }
@@ -723,11 +898,7 @@ export default function ModernTransactions() {
   const handleConfirmVoid = () => {
     if (!voidConfirm) return;
     if (voidConfirm.ticketId) {
-      const voided = JSON.parse(localStorage.getItem('voidedPawnTickets') || '[]');
-      if (!voided.includes(voidConfirm.ticketId)) {
-        voided.push(voidConfirm.ticketId);
-        localStorage.setItem('voidedPawnTickets', JSON.stringify(voided));
-      }
+      voidTicketId(voidConfirm.type, voidConfirm.ticketId);
     }
     setWorkspaceTransactions(prev => prev.filter(t => t.id !== voidConfirm.id));
     setVoidConfirm(null);
@@ -750,13 +921,22 @@ export default function ModernTransactions() {
         color: '#1a472a',
       };
     }
+    if (tx.type === 'TRADE') {
+      const net = Number(tx.netDueToCustomer || 0);
+      return {
+        label: `Trade (${(tx.tradeItems?.length || 0)} in / ${(tx.saleItems?.length || 0)} out)`,
+        value: net >= 0 ? `-$${net.toFixed(2)}` : `+$${Math.abs(net).toFixed(2)}`,
+        color: net >= 0 ? '#c62828' : '#0891b2',
+      };
+    }
     return null;
   }).filter(Boolean);
 
   const netDue = workspaceTransactions.reduce((sum, tx) => {
     if (tx.type === 'PAWN') return sum - Number(tx.totalPawnAmount);
     if (tx.type === 'SALE') return sum + Number(tx.total || 0);
-    if (tx.type === 'BUY')  return sum - Number(tx.totalPaid || 0);
+    if (tx.type === 'BUY')   return sum - Number(tx.totalPaid || 0);
+    if (tx.type === 'TRADE') return sum - Number(tx.netDueToCustomer || 0);
     return sum;
   }, 0);
 
@@ -770,6 +950,9 @@ export default function ModernTransactions() {
     } else if (type === 'buy') {
       if (!customer) { setNoCustomerWarning(true); return; }
       setBuyOpen(true);
+    } else if (type === 'trade') {
+      if (!customer) { setNoCustomerWarning(true); return; }
+      setTradeOpen(true);
     }
   };
 
@@ -787,6 +970,20 @@ export default function ModernTransactions() {
     setExistingBuyData(null);
   };
 
+  const handleAddTradeToWorkspace = (tradeData) => {
+    setWorkspaceTransactions(prev => {
+      const existingIdx = prev.findIndex(t => t.type === 'TRADE' && t.ticketId === tradeData.ticketId);
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx] = { ...updated[existingIdx], ...tradeData };
+        return updated;
+      }
+      return [...prev, { id: Date.now(), type: 'TRADE', ...tradeData }];
+    });
+    setTradeOpen(false);
+    setExistingTradeData(null);
+  };
+
   const handleAddSaleToWorkspace = (saleData) => {
     setWorkspaceTransactions(prev => {
       const existingIdx = prev.findIndex(t => t.type === 'SALE' && t.ticketId === saleData.ticketId);
@@ -801,7 +998,71 @@ export default function ModernTransactions() {
     setExistingSaleData(null);
   };
 
-  const handleBuyConvertTo = ({ type, item }) => {
+  // Called when TradeTransactionScreen detects only trade-in items exist.
+  // Converts all trade-in items to a new Buy ticket and opens it.
+  const handleSwitchToBuy = ({ tradeItems, ticketNote, showOnReceipt }) => {
+    const buyItems = tradeItems.map(item => ({
+      _lineId: item._lineId,
+      part_no: item.part_no,
+      category_id: item.category_id || '',
+      category_name: item.category_name || '',
+      description: item.description || '',
+      serial_number: item.serial_number || '',
+      qty: item.qty || 1,
+      paid: parseFloat(item.tradeAllowance) || 0,
+      images: item.images || [],
+      sourceEstimator: item.sourceEstimator || 'jewelry',
+      jewelryData: item.jewelryData,
+      ...(item.fromInventory && { fromInventory: true, item_id: item.item_id }),
+    }));
+    setTradeOpen(false);
+    setExistingTradeData(null);
+    setExistingBuyData({ buyItems, ticketNote, showOnReceipt });
+    setBuyOpen(true);
+  };
+
+  // Called when TradeTransactionScreen detects only sale items exist.
+  // Moves all sale items to a new Sale ticket and opens it.
+  const handleSwitchToSale = ({ saleItems, ticketNote, showOnReceipt }) => {
+    setTradeOpen(false);
+    setExistingTradeData(null);
+    setExistingSaleData({ saleItems, ticketNote, showOnReceipt, globalDiscount: 0 });
+    setSaleOpen(true);
+  };
+
+  const handleConvertTradeItemToBuy = (tradeItem, targetTicketId) => {
+    const buyItem = {
+      _lineId: tradeItem._lineId,
+      part_no: tradeItem.part_no,
+      category_id: tradeItem.category_id || '',
+      category_name: tradeItem.category_name || '',
+      description: tradeItem.description || '',
+      serial_number: tradeItem.serial_number || '',
+      qty: tradeItem.qty || 1,
+      paid: parseFloat(tradeItem.tradeAllowance) || 0,
+      images: tradeItem.images || [],
+      sourceEstimator: tradeItem.sourceEstimator,
+      jewelryData: tradeItem.jewelryData,
+      ...(tradeItem.fromInventory && { fromInventory: true, item_id: tradeItem.item_id }),
+    };
+    if (targetTicketId) {
+      setWorkspaceTransactions(prev => prev.map(t =>
+        t.type === 'BUY' && t.ticketId === targetTicketId
+          ? { ...t, buyItems: [...(t.buyItems || []), buyItem] }
+          : t
+      ));
+    } else {
+      const last = parseInt(localStorage.getItem('lastBTTicketNumber') || '0') + 1;
+      localStorage.setItem('lastBTTicketNumber', last.toString());
+      const newTicketId = `BT-${last.toString().padStart(8, '0')}`;
+      setWorkspaceTransactions(prev => [
+        ...prev,
+        { id: Date.now(), type: 'BUY', ticketId: newTicketId, buyItems: [buyItem], customer },
+      ]);
+    }
+  };
+
+  const handleBuyConvertTo = ({ type, item, targetTicketId }) => {
     if (type === 'pawn') {
       const pawnItem = item.jewelryData
         ? item.jewelryData
@@ -820,6 +1081,56 @@ export default function ModernTransactions() {
       setExistingBuyData(null);
       setRestoredPawnData({ pawnItems: [pawnItem], ticketNote: '', showOnReceipt: false });
       setPawnOpen(true);
+    }
+    if (type === 'trade') {
+      const tradeAllowance = parseFloat(item.paid) || 0;
+      const qty = parseInt(item.qty) || 1;
+      const tradeItem = {
+        _lineId: item._lineId,
+        part_no: item.part_no || '',
+        category_id: item.category_id || '',
+        category_name: item.category_name || '',
+        description: item.description || '',
+        serial_number: item.serial_number || '',
+        qty,
+        tradeAllowance,
+        images: item.images || [],
+        sourceEstimator: item.sourceEstimator,
+        jewelryData: item.jewelryData,
+        ...(item.fromInventory && { fromInventory: true, item_id: item.item_id }),
+      };
+      const buyTicketId = existingBuyData?.ticketId;
+      setWorkspaceTransactions(prev => {
+        // Remove converted item from the buy ticket in workspace
+        const withBuyUpdated = prev.map(t => {
+          if (!(t.type === 'BUY' && t.ticketId === buyTicketId)) return t;
+          return { ...t, buyItems: (t.buyItems || []).filter(i => i._lineId !== item._lineId) };
+        });
+        if (targetTicketId) {
+          return withBuyUpdated.map(t => {
+            if (!(t.type === 'TRADE' && t.ticketId === targetTicketId)) return t;
+            const newTradeItems = [...(t.tradeItems || []), tradeItem];
+            const newTotal = newTradeItems.reduce((s, i) => s + (parseFloat(i.tradeAllowance) || 0) * (parseInt(i.qty) || 1), 0);
+            return { ...t, tradeItems: newTradeItems, totalTradeAllowance: newTotal, netDueToCustomer: newTotal - (t.totalSaleAfterTax || 0) };
+          });
+        } else {
+          const last = parseInt(localStorage.getItem('lastTTTicketNumber') || '100000') + 1;
+          localStorage.setItem('lastTTTicketNumber', last.toString());
+          const newTicketId = `TT-${last}`;
+          return [
+            ...withBuyUpdated,
+            {
+              id: Date.now(), type: 'TRADE', ticketId: newTicketId,
+              tradeItems: [tradeItem], saleItems: [],
+              totalTradeAllowance: tradeAllowance * qty,
+              totalSaleAfterTax: 0,
+              netDueToCustomer: tradeAllowance * qty,
+              taxAmount: 0, taxRate: 0.07,
+              customer,
+            },
+          ];
+        }
+      });
     }
   };
 
@@ -856,6 +1167,7 @@ export default function ModernTransactions() {
   }
 
   if (buyOpen) {
+    const workspaceTradeTickets = workspaceTransactions.filter(t => t.type === 'TRADE');
     return (
       <BuyTransactionScreen
         customer={customer}
@@ -869,6 +1181,37 @@ export default function ModernTransactions() {
         }}
         onConvertTo={handleBuyConvertTo}
         existingBuyData={existingBuyData}
+        workspaceTradeTickets={workspaceTradeTickets}
+      />
+    );
+  }
+
+  if (tradeOpen) {
+    const workspaceBuyTickets  = workspaceTransactions.filter(t => t.type === 'BUY');
+    const workspaceSaleTickets = workspaceTransactions.filter(t => t.type === 'SALE');
+    return (
+      <TradeTransactionScreen
+        customer={customer}
+        customerStats={customerStats}
+        onClose={() => { setTradeOpen(false); setExistingTradeData(null); }}
+        onAddToWorkspace={handleAddTradeToWorkspace}
+        onConvertToBuy={handleConvertTradeItemToBuy}
+        onRemoveFromWorkspace={(ticketId) => {
+          setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'TRADE' && t.ticketId === ticketId)));
+          setTradeOpen(false);
+          setExistingTradeData(null);
+        }}
+        existingTradeData={existingTradeData}
+        workspaceBuyTickets={workspaceBuyTickets}
+        onConsumeWorkspaceBuy={(buyTicketId) =>
+          setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'BUY' && t.ticketId === buyTicketId)))
+        }
+        workspaceSaleTickets={workspaceSaleTickets}
+        onConsumeWorkspaceSale={(saleTicketId) =>
+          setWorkspaceTransactions(prev => prev.filter(t => !(t.type === 'SALE' && t.ticketId === saleTicketId)))
+        }
+        onSwitchToBuy={handleSwitchToBuy}
+        onSwitchToSale={handleSwitchToSale}
       />
     );
   }
@@ -1133,6 +1476,14 @@ export default function ModernTransactions() {
                         buyIcon={transactionTypes.find(t => t.type === 'buy')?.icon}
                         buyColor={transactionTypes.find(t => t.type === 'buy')?.color}
                         onOpen={() => { setExistingBuyData(tx); setBuyOpen(true); }}
+                        onVoid={() => setVoidConfirm(tx)}
+                      />
+                    ) : tx.type === 'TRADE' ? (
+                      <TradeTransactionCard
+                        tx={tx}
+                        tradeIcon={transactionTypes.find(t => t.type === 'trade')?.icon}
+                        tradeColor={transactionTypes.find(t => t.type === 'trade')?.color}
+                        onOpen={() => { setExistingTradeData(tx); setTradeOpen(true); }}
                         onVoid={() => setVoidConfirm(tx)}
                       />
                     ) : null}

@@ -449,7 +449,9 @@ function SystemConfig() {
     pawn_receipt: 'Thank you for shopping with us',
     layaway_receipt: 'Thank you for shopping with us',
     return_receipt: 'Thank you for shopping with us',
-    refund_receipt: 'Thank you for shopping with us'
+    trade_receipt: 'Thank you for shopping with us',
+    payment_receipt: 'Thank you for shopping with us',
+    repair_receipt: 'Thank you for shopping with us',
   });
 
   const fetchCustomerHeaderPreferences = async () => {
@@ -743,7 +745,9 @@ function SystemConfig() {
             pawn_receipt: response.data.pawn_receipt || 'Thank you for shopping with us',
             layaway_receipt: response.data.layaway_receipt || 'Thank you for shopping with us',
             return_receipt: response.data.return_receipt || 'Thank you for shopping with us',
-            refund_receipt: response.data.refund_receipt || 'Thank you for shopping with us'
+            trade_receipt: response.data.trade_receipt || 'Thank you for shopping with us',
+            payment_receipt: response.data.payment_receipt || 'Thank you for shopping with us',
+            repair_receipt: response.data.repair_receipt || 'Thank you for shopping with us',
           });
         }
       } catch (error) {
@@ -4326,13 +4330,37 @@ const handleTabChange = (event, newValue) => {
               <Grid item xs={12} md={6}>
                 <TextField
                   fullWidth
-                  label="Refund Receipt"
-                  name="refund_receipt"
-                  value={receiptConfig.refund_receipt}
+                  label="Trade Receipt"
+                  name="trade_receipt"
+                  value={receiptConfig.trade_receipt}
                   onChange={handleReceiptConfigChange}
                   multiline
                   rows={2}
-                  helperText="Footer text for refund transaction receipts"
+                  helperText="Footer text for trade transaction receipts"
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Payment Receipt"
+                  name="payment_receipt"
+                  value={receiptConfig.payment_receipt}
+                  onChange={handleReceiptConfigChange}
+                  multiline
+                  rows={2}
+                  helperText="Footer text for payment receipts"
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Repair Receipt"
+                  name="repair_receipt"
+                  value={receiptConfig.repair_receipt}
+                  onChange={handleReceiptConfigChange}
+                  multiline
+                  rows={2}
+                  helperText="Footer text for repair receipts"
                 />
               </Grid>
             </Grid>

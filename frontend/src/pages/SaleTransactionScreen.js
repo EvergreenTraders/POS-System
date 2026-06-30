@@ -64,6 +64,11 @@ async function syncSaleTicketCounter() {
   }
 }
 
+// Exported so TradeTransactionScreen can mint a real sale_ticket_id for the
+// sale-out portion of a trade, sharing the same counter/pending-id semantics
+// as a standalone sale ticket.
+export { generateSaleTicketId, commitSaleTicketId };
+
 function getCustomerImageUrl(customer) {
   if (!customer?.image) return null;
   const img = customer.image;
