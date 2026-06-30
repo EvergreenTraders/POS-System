@@ -8266,6 +8266,119 @@ app.post('/api/sale-ticket', async (req, res) => {
   }
 });
 
+// Trade Ticket API Endpoints
+// A trade ticket doesn't store items directly — the trade-in items live in
+// buy_ticket (under buy_ticket_id) and the items the customer takes home live
+// in sale_ticket (under sale_ticket_id). This table just links the two so a
+// trade's items can be fetched by joining through those tables.
+
+app.get('/api/trade-ticket/last-id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT trade_ticket_id FROM trade_ticket
+      WHERE trade_ticket_id ~ '^TT-[0-9]+$'
+      ORDER BY CAST(SUBSTRING(trade_ticket_id FROM 4) AS INTEGER) DESC
+      LIMIT 1
+    `);
+    if (result.rows.length === 0) return res.json({ last_number: 0, last_id: null });
+    const lastId = result.rows[0].trade_ticket_id;
+    const num    = parseInt(lastId.replace('TT-', ''), 10);
+    res.json({ last_number: num, last_id: lastId });
+  } catch (err) {
+    console.error('Error fetching last trade ticket id:', err);
+    res.status(500).json({ error: 'Failed to fetch last trade ticket id' });
+  }
+});
+
+app.get('/api/trade-ticket', async (req, res) => {
+  try {
+    const { trade_ticket_id, transaction_id } = req.query;
+
+    let query = 'SELECT * FROM trade_ticket';
+    const params = [];
+
+    if (trade_ticket_id) {
+      query += ' WHERE trade_ticket_id = $1';
+      params.push(trade_ticket_id);
+    } else if (transaction_id) {
+      query += ' WHERE transaction_id = $1';
+      params.push(transaction_id);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching trade tickets:', error);
+    res.status(500).json({ error: 'Failed to fetch trade tickets' });
+  }
+});
+
+// GET /api/trade-ticket/:trade_ticket_id/items — fetches the trade-in and
+// sale-out jewelry/hardgoods items by joining through buy_ticket/sale_ticket.
+app.get('/api/trade-ticket/:trade_ticket_id/items', async (req, res) => {
+  try {
+    const { trade_ticket_id } = req.params;
+
+    const ticketResult = await pool.query(
+      'SELECT * FROM trade_ticket WHERE trade_ticket_id = $1',
+      [trade_ticket_id]
+    );
+    if (ticketResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Trade ticket not found' });
+    }
+    const { buy_ticket_id, sale_ticket_id } = ticketResult.rows[0];
+
+    const itemQuery = (idColumn, idValue) => pool.query(`
+      SELECT bt.*,
+        COALESCE(j.short_desc, h.short_desc) AS short_desc,
+        COALESCE(j.long_desc, h.long_desc)   AS long_desc,
+        COALESCE(j.item_price, h.cost_price) AS item_price,
+        COALESCE(j.images, h.images)         AS images
+      FROM ${idColumn === 'buy_ticket_id' ? 'buy_ticket' : 'sale_ticket'} bt
+      LEFT JOIN jewelry   j ON bt.item_id = j.item_id
+      LEFT JOIN hardgoods h ON bt.item_id = h.item_id
+      WHERE bt.${idColumn} = $1
+    `, [idValue]);
+
+    const [tradeInItems, saleOutItems] = await Promise.all([
+      buy_ticket_id  ? itemQuery('buy_ticket_id', buy_ticket_id)   : Promise.resolve({ rows: [] }),
+      sale_ticket_id ? itemQuery('sale_ticket_id', sale_ticket_id) : Promise.resolve({ rows: [] }),
+    ]);
+
+    res.json({
+      trade_ticket: ticketResult.rows[0],
+      trade_in_items: tradeInItems.rows,
+      sale_out_items: saleOutItems.rows,
+    });
+  } catch (error) {
+    console.error('Error fetching trade ticket items:', error);
+    res.status(500).json({ error: 'Failed to fetch trade ticket items' });
+  }
+});
+
+app.post('/api/trade-ticket', async (req, res) => {
+  try {
+    const { trade_ticket_id, buy_ticket_id, sale_ticket_id, transaction_id, ticket_note, show_on_receipt } = req.body;
+
+    if (!trade_ticket_id) {
+      return res.status(400).json({ error: 'trade_ticket_id is required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO trade_ticket (trade_ticket_id, buy_ticket_id, sale_ticket_id, transaction_id, ticket_note, show_on_receipt)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [trade_ticket_id, buy_ticket_id || null, sale_ticket_id || null, transaction_id || null, ticket_note || null, show_on_receipt ?? false]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating trade ticket:', error);
+    res.status(500).json({ error: 'Failed to create trade ticket' });
+  }
+});
+
 // Pawn Ticket API Endpoints
 app.get('/api/pawn-ticket', async (req, res) => {
   try {

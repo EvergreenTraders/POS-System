@@ -13,6 +13,8 @@ import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
+import { generateBuyTicketId, commitBuyTicketId } from './BuyTransactionScreen';
+import { generateSaleTicketId, commitSaleTicketId } from './SaleTransactionScreen';
 
 const TRADE_TEAL = '#0891b2';
 const TRADE_DARK = '#0e7490';
@@ -466,6 +468,14 @@ export default function TradeTransactionScreen({
     };
     setCartCustomer(cartCustomer);
 
+    // A trade bundles two real tickets under the hood: the trade-in items become
+    // a buy ticket (store acquires them) and the sale items become a sale ticket
+    // (store sells them to the customer). Mint real BT-/ST- ids using the same
+    // counters the standalone Buy/Sale screens use, so the resulting buy_ticket /
+    // sale_ticket rows are indistinguishable from a standalone transaction.
+    const tradeBuyTicketId  = tradeItems.length > 0 ? generateBuyTicketId()  : null;
+    const tradeSaleTicketId = saleItems.length  > 0 ? generateSaleTicketId() : null;
+
     // Build cart items: sale items go as positive-price items, trade items as negative (buy-back)
     const cartItems = [
       ...saleItems.flatMap(item =>
@@ -482,6 +492,7 @@ export default function TradeTransactionScreen({
             ? { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(), role: currentUser.role }
             : null,
           tradeTicketId: ticketId,
+          saleTicketId: tradeSaleTicketId,
           ticket_note: ticketNote || null,
           show_on_receipt: showOnReceipt,
         }))
@@ -499,6 +510,7 @@ export default function TradeTransactionScreen({
           ? { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(), role: currentUser.role }
           : null,
         tradeTicketId: ticketId,
+        buyTicketId: tradeBuyTicketId,
         ticket_note: ticketNote || null,
         show_on_receipt: showOnReceipt,
       })),
@@ -507,6 +519,8 @@ export default function TradeTransactionScreen({
     sessionStorage.setItem('checkoutItems', JSON.stringify(cartItems));
     sessionStorage.setItem('selectedCustomer', JSON.stringify(cartCustomer));
     commitTradeTicketId();
+    if (tradeBuyTicketId)  commitBuyTicketId();
+    if (tradeSaleTicketId) commitSaleTicketId();
     navigate('/checkout', { state: { items: cartItems, allCartItems: cartItems, customer: cartCustomer, from: 'trade-ticket' } });
   };
 

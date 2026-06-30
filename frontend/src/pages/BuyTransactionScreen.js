@@ -68,6 +68,11 @@ function voidBuyTicketId(id) {
   if (localStorage.getItem(BT_PENDING_KEY) === id) localStorage.removeItem(BT_PENDING_KEY);
 }
 
+// Exported so TradeTransactionScreen can mint a real buy_ticket_id for the
+// trade-in portion of a trade, sharing the same counter/pending-id semantics
+// as a standalone buy ticket.
+export { generateBuyTicketId, commitBuyTicketId };
+
 function resolveImageUrl(url) {
   if (!url) return null;
   if (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:')) return url;

@@ -178,6 +178,42 @@ BEGIN
   END IF;
 END $$;
 
+-- Create trade_ticket table. A trade bundles items the customer brings in
+-- (trade-in, recorded as a buy_ticket) with items the customer takes home
+-- (recorded as a sale_ticket). Rather than duplicating item rows here, this
+-- table just links the trade_ticket_id to the underlying buy_ticket_id and
+-- sale_ticket_id so the jewelry items can be fetched from buy_ticket /
+-- sale_ticket (and from there, jewelry/hardgoods) the same way buy and sale
+-- transactions already are.
+CREATE TABLE IF NOT EXISTS trade_ticket (
+  id SERIAL PRIMARY KEY,
+  trade_ticket_id VARCHAR(50) NOT NULL,
+  buy_ticket_id VARCHAR(50),
+  sale_ticket_id VARCHAR(50),
+  transaction_id VARCHAR(50),
+  ticket_note TEXT,
+  show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Add missing columns to existing trade_ticket table if they don't exist
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'trade_ticket' AND column_name = 'ticket_note'
+  ) THEN
+    ALTER TABLE trade_ticket ADD COLUMN ticket_note TEXT;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'trade_ticket' AND column_name = 'show_on_receipt'
+  ) THEN
+    ALTER TABLE trade_ticket ADD COLUMN show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE;
+  END IF;
+END $$;
+
 -- Create indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_pawn_ticket_pawn_ticket_id ON pawn_ticket(pawn_ticket_id);
 CREATE INDEX IF NOT EXISTS idx_pawn_ticket_transaction_id ON pawn_ticket(transaction_id);
@@ -190,3 +226,8 @@ CREATE INDEX IF NOT EXISTS idx_buy_ticket_item_id ON buy_ticket(item_id);
 CREATE INDEX IF NOT EXISTS idx_sale_ticket_sale_ticket_id ON sale_ticket(sale_ticket_id);
 CREATE INDEX IF NOT EXISTS idx_sale_ticket_transaction_id ON sale_ticket(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_sale_ticket_item_id ON sale_ticket(item_id);
+
+CREATE INDEX IF NOT EXISTS idx_trade_ticket_trade_ticket_id ON trade_ticket(trade_ticket_id);
+CREATE INDEX IF NOT EXISTS idx_trade_ticket_buy_ticket_id ON trade_ticket(buy_ticket_id);
+CREATE INDEX IF NOT EXISTS idx_trade_ticket_sale_ticket_id ON trade_ticket(sale_ticket_id);
+CREATE INDEX IF NOT EXISTS idx_trade_ticket_transaction_id ON trade_ticket(transaction_id);

@@ -1422,12 +1422,14 @@ function Checkout() {
             }
           }
 
-          // Step 2.7: Post trade_ticket records for each unique trade_ticket_id
+          // Step 2.7: Post trade_ticket records. A trade doesn't store items
+          // directly — its trade-in items go into buy_ticket (under the
+          // buyTicketId minted by TradeTransactionScreen) and its sale-out
+          // items go into sale_ticket (under saleTicketId), exactly like a
+          // standalone buy/sale ticket. trade_ticket just links those two ids.
           const tradeTicketIds = new Set();
           checkoutItems.forEach(item => {
-            if (item.tradeTicketId) {
-              tradeTicketIds.add(item.tradeTicketId);
-            }
+            if (item.tradeTicketId) tradeTicketIds.add(item.tradeTicketId);
           });
 
           for (const tradeTicketId of tradeTicketIds) {
@@ -1435,29 +1437,75 @@ function Checkout() {
               .map((item, index) => ({ ...item, index }))
               .filter(item => item.tradeTicketId === tradeTicketId);
 
-            for (const item of itemsForTicket) {
-              try {
-                let itemId = null;
-                if (createdJewelryItems && createdJewelryItems.length > 0 && createdJewelryItems[item.index]) {
-                  itemId = createdJewelryItems[item.index].item_id;
-                } else if (item.item_id) {
-                  itemId = item.item_id;
-                }
+            const tradeInItems  = itemsForTicket.filter(item => item.transaction_type === 'trade_in');
+            const tradeSaleItems = itemsForTicket.filter(item => item.transaction_type === 'trade_sale');
+            const buyTicketId  = tradeInItems[0]?.buyTicketId  || null;
+            const saleTicketId = tradeSaleItems[0]?.saleTicketId || null;
 
-                await axios.post(
-                  `${config.apiUrl}/trade-ticket`,
-                  {
-                    trade_ticket_id: tradeTicketId,
-                    transaction_id: realTransactionId,
-                    item_id: itemId
-                  },
-                  {
-                    headers: { Authorization: `Bearer ${token}` }
-                  }
-                );
-              } catch (tradeTicketError) {
-                console.error('Error posting trade_ticket:', tradeTicketError);
+            const resolveItemId = (item) => {
+              if (createdJewelryItems && createdJewelryItems.length > 0 && createdJewelryItems[item.index]) {
+                return createdJewelryItems[item.index].item_id;
               }
+              return item.item_id || null;
+            };
+            const resolveInvType = (item) =>
+              item.fromEstimator === 'hardgoods' ? 'HG'
+              : item.fromEstimator === 'jewelry' || item.sourceEstimator === 'jewelry' ? 'JW'
+              : null;
+
+            for (const item of tradeInItems) {
+              try {
+                await axios.post(
+                  `${config.apiUrl}/buy-ticket`,
+                  {
+                    buy_ticket_id:   buyTicketId,
+                    transaction_id:  realTransactionId,
+                    item_id:         resolveItemId(item),
+                    inventory_type:  resolveInvType(item),
+                    ticket_note:     item.ticket_note || null,
+                    show_on_receipt: item.show_on_receipt || false,
+                  },
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+              } catch (buyTicketError) {
+                console.error('Error posting buy_ticket for trade-in item:', buyTicketError);
+              }
+            }
+
+            for (const item of tradeSaleItems) {
+              try {
+                await axios.post(
+                  `${config.apiUrl}/sale-ticket`,
+                  {
+                    sale_ticket_id:  saleTicketId,
+                    transaction_id:  realTransactionId,
+                    item_id:         resolveItemId(item),
+                    inventory_type:  resolveInvType(item),
+                    ticket_note:     item.ticket_note || null,
+                    show_on_receipt: item.show_on_receipt || false,
+                  },
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+              } catch (saleTicketError) {
+                console.error('Error posting sale_ticket for trade sale-out item:', saleTicketError);
+              }
+            }
+
+            try {
+              await axios.post(
+                `${config.apiUrl}/trade-ticket`,
+                {
+                  trade_ticket_id: tradeTicketId,
+                  buy_ticket_id:   buyTicketId,
+                  sale_ticket_id:  saleTicketId,
+                  transaction_id:  realTransactionId,
+                  ticket_note:     itemsForTicket[0]?.ticket_note    || null,
+                  show_on_receipt: itemsForTicket[0]?.show_on_receipt || false,
+                },
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+            } catch (tradeTicketError) {
+              console.error('Error posting trade_ticket:', tradeTicketError);
             }
           }
 
