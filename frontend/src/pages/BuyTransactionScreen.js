@@ -73,6 +73,10 @@ function voidBuyTicketId(id) {
 // as a standalone buy ticket.
 export { generateBuyTicketId, commitBuyTicketId };
 
+// Exported so TradeTransactionScreen can parse a scanned "J <code>" entry the
+// same way the standalone Buy ticket does.
+export { parseItemDescription };
+
 function resolveImageUrl(url) {
   if (!url) return null;
   if (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:')) return url;

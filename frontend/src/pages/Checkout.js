@@ -1443,6 +1443,18 @@ function Checkout() {
             if (item.tradeTicketId) tradeTicketIds.add(item.tradeTicketId);
           });
 
+          // createdJewelryItems only has entries for checkoutItems that were NOT
+          // fromInventory (sale items skip jewelry creation entirely — they already
+          // exist), so its array position doesn't match checkoutItems' position.
+          // Build the real mapping once up front instead of assuming they line up.
+          const tradeJewelryCreationPos = new Map();
+          {
+            let pos = 0;
+            checkoutItems.forEach((item, idx) => {
+              if (!item.fromInventory) tradeJewelryCreationPos.set(idx, pos++);
+            });
+          }
+
           for (const tradeTicketId of tradeTicketIds) {
             const itemsForTicket = checkoutItems
               .map((item, index) => ({ ...item, index }))
@@ -1454,8 +1466,13 @@ function Checkout() {
             const saleTicketId = tradeSaleItems[0]?.saleTicketId || null;
 
             const resolveItemId = (item) => {
-              if (createdJewelryItems && createdJewelryItems.length > 0 && createdJewelryItems[item.index]) {
-                return createdJewelryItems[item.index].item_id;
+              // Already in inventory (e.g. a trade_sale item, or a trade-in item
+              // converted from an existing inventory record) — use its real id,
+              // never re-create a jewelry row for it.
+              if (item.fromInventory) return item.item_id || null;
+              const pos = tradeJewelryCreationPos.get(item.index);
+              if (pos !== undefined && createdJewelryItems && createdJewelryItems[pos]) {
+                return createdJewelryItems[pos].item_id;
               }
               return item.item_id || null;
             };
@@ -1604,7 +1621,9 @@ function Checkout() {
 
 
             // Only update status for sale transactions with inventory items
-            if (transactionType === 'sale' && item.item_id && item.fromInventory) {
+            // (includes trade_sale — the item the customer takes home in a trade,
+            // which is also pulled from existing inventory)
+            if ((transactionType === 'sale' || transactionType === 'trade_sale') && item.item_id && item.fromInventory) {
               try {
                 const basePrice = parseFloat(item.price) || 0;
                 const isHardgoods = item.fromHardgoodsInventory || item._type === 'hardgoods'

@@ -13,7 +13,7 @@ import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import JewelryIntakeScreen from './JewelryIntakeScreen';
-import { generateBuyTicketId, commitBuyTicketId } from './BuyTransactionScreen';
+import { generateBuyTicketId, commitBuyTicketId, parseItemDescription } from './BuyTransactionScreen';
 import { generateSaleTicketId, commitSaleTicketId } from './SaleTransactionScreen';
 
 const TRADE_TEAL = '#0891b2';
@@ -79,6 +79,13 @@ export default function TradeTransactionScreen({
   const [showOnReceipt, setShowOnReceipt] = useState(existingTradeData?.showOnReceipt ?? false);
   const [isStoreCreditNet, setIsStoreCreditNet] = useState(existingTradeData?.isStoreCreditNet ?? false);
 
+  // Real BT-XXXXXXXX / ST-XXXXXXXX ids minted the moment the first trade-in /
+  // sale item is added (not just at checkout) — see ensureTradeBuyTicketId /
+  // ensureTradeSaleTicketId below — so every item's part_no carries the real
+  // ticket id from the start, the same way a standalone Buy/Sale ticket's does.
+  const [tradeBuyTicketId,  setTradeBuyTicketId]  = useState(existingTradeData?.buyTicketId  || null);
+  const [tradeSaleTicketId, setTradeSaleTicketId] = useState(existingTradeData?.saleTicketId || null);
+
   const [categories, setCategories] = useState([]);
   const [taxRate, setTaxRate]       = useState(0.07);
 
@@ -98,10 +105,17 @@ export default function TradeTransactionScreen({
   // Trade-in item editing
   const [tradeIntakeOpen, setTradeIntakeOpen] = useState(false);
   const [editingTradeIntakeItem, setEditingTradeIntakeItem] = useState(null);
+  const [tradeIntakeEntry, setTradeIntakeEntry] = useState('');
+  const [tradeParsedValues, setTradeParsedValues] = useState(null);
   const [tradeQuickAddMode, setTradeQuickAddMode] = useState(false);
   const [tradeQuickInput, setTradeQuickInput]     = useState('');
   const [tradeScanInput,  setTradeScanInput]      = useState('');
   const tradeQuickInputRef = useRef(null);
+
+  // Metal/category code maps for parsing scanned "J <code>" entries
+  const [categoryCodeMap, setCategoryCodeMap] = useState({});
+  const [colorCodeMap,    setColorCodeMap]    = useState({});
+  const [metalTypeCodeMap,setMetalTypeCodeMap]= useState({});
 
   // Sale item search
   const [saleSearch,         setSaleSearch]         = useState('');
@@ -152,6 +166,29 @@ export default function TradeTransactionScreen({
     if (tradeQuickAddMode) tradeQuickInputRef.current?.focus();
   }, [tradeQuickAddMode]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const [catRes, colorRes, typeRes] = await Promise.all([
+          axios.get(`${config.apiUrl}/metal_category`),
+          axios.get(`${config.apiUrl}/metal_color`),
+          axios.get(`${config.apiUrl}/precious_metal_type`),
+        ]);
+        const catMap = {};
+        (catRes.data || []).forEach(c => { if (c.category_code) catMap[c.category_code.toUpperCase()] = c.category; });
+        setCategoryCodeMap(catMap);
+        const colorMap = {};
+        (colorRes.data || []).forEach(c => { if (c.color_code) colorMap[c.color_code.toUpperCase()] = c.color; });
+        setColorCodeMap(colorMap);
+        const typeMap = {};
+        (typeRes.data || []).forEach(t => { if (t.type_code) typeMap[t.type_code.toUpperCase()] = t.type; });
+        setMetalTypeCodeMap(typeMap);
+      } catch (err) {
+        console.error('Error fetching metal code maps:', err);
+      }
+    })();
+  }, []);
+
   // ── Financials ───────────────────────────────────────────────────────────────
 
   const totalTradeAllowance = tradeItems.reduce(
@@ -179,12 +216,31 @@ export default function TradeTransactionScreen({
 
   // ── Trade-in items ────────────────────────────────────────────────────────────
 
+  // Mints a real buy_ticket_id (sharing the same counter/pending-id as a
+  // standalone Buy ticket) the first time it's needed, then reuses it for every
+  // trade-in item added afterward in this ticket.
+  const ensureTradeBuyTicketId = () => {
+    if (tradeBuyTicketId) return tradeBuyTicketId;
+    const id = generateBuyTicketId();
+    setTradeBuyTicketId(id);
+    return id;
+  };
+
+  // Same idea for the sale-out side of the trade.
+  const ensureTradeSaleTicketId = () => {
+    if (tradeSaleTicketId) return tradeSaleTicketId;
+    const id = generateSaleTicketId();
+    setTradeSaleTicketId(id);
+    return id;
+  };
+
   const addTradeItem = (overrides = {}) => {
+    const buyId = ensureTradeBuyTicketId();
     setTradeItems(prev => {
       const count = prev.length + 1;
       return [...prev, {
         _lineId: Date.now() + Math.random(),
-        part_no: `${ticketId}-T${String(count).padStart(2, '0')}`,
+        part_no: `${buyId}-${String(count).padStart(2, '0')}`,
         category_id: '',
         category_name: '',
         description: '',
@@ -212,6 +268,42 @@ export default function TradeTransactionScreen({
     setTradeQuickInput('');
     setTradeQuickAddMode(false);
     showSnackbar(`${description || 'Item'} added to trade-in`);
+  };
+
+  // Scan/search box: parse a "J <code>" entry the same way the standalone Buy
+  // ticket does, then open the full Jewelry Intake screen pre-filled with it.
+  const openTradeIntake = () => {
+    const text  = tradeScanInput.trim();
+    const parts = text.toUpperCase().split(/\s+/);
+    if (parts[0] === 'J' && parts.length >= 2) {
+      setTradeParsedValues(parseItemDescription(parts.slice(1), categoryCodeMap, colorCodeMap, metalTypeCodeMap));
+    } else {
+      setTradeParsedValues(null);
+    }
+    setTradeIntakeEntry(text);
+    setEditingTradeIntakeItem(null);
+    setTradeIntakeOpen(true);
+  };
+
+  const jewelryItemToTradeItem = (item, seq, buyId) => ({
+    _lineId: Date.now() + Math.random(),
+    part_no: `${buyId}-${String(seq).padStart(2, '0')}`,
+    category_id: categories.find(c => c.name === item.category)?.id || '',
+    category_name: item.category || '',
+    description: item.item || item.short_desc || '',
+    serial_number: item.serial_number || item.serial || '',
+    qty: 1,
+    tradeAllowance: parseFloat(item.buy_price) || parseFloat(item.paid_amount) || 0,
+    images: item.images || [],
+    sourceEstimator: 'jewelry',
+    jewelryData: item,
+  });
+
+  const handleTradeIntakeSave = (item) => {
+    const buyId = ensureTradeBuyTicketId();
+    setTradeItems(prev => [...prev, jewelryItemToTradeItem(item, prev.length + 1, buyId)]);
+    setTradeScanInput('');
+    setTradeIntakeOpen(false);
   };
 
   const startEditTrade = (item) => {
@@ -299,8 +391,12 @@ export default function TradeTransactionScreen({
     const imgs  = Array.isArray(invItem.images)
       ? invItem.images
       : (typeof invItem.images === 'string' ? (() => { try { return JSON.parse(invItem.images); } catch { return []; } })() : []);
+    const saleId = ensureTradeSaleTicketId();
     setSaleItems(prev => [...prev, {
       _lineId: Date.now() + Math.random(),
+      // Sale items become a sale_ticket item at checkout, so they're labeled
+      // with the real sale_ticket_id here, the same as a standalone Sale ticket.
+      part_no: `${saleId}-${String(prev.length + 1).padStart(2, '0')}`,
       item_id: invItem.item_id,
       sku: invItem.item_id,
       inventory_type: invItem._type,
@@ -344,9 +440,10 @@ export default function TradeTransactionScreen({
   const handleImportBuyTicket = () => {
     const ticket = workspaceBuyTickets.find(t => t.ticketId === selectedBuyId);
     if (!ticket) return;
+    const buyId = ensureTradeBuyTicketId();
     const imported = (ticket.buyItems || []).map((item, idx) => ({
       _lineId: Date.now() + Math.random() + idx,
-      part_no: item.part_no || `${ticketId}-T${String(tradeItems.length + idx + 1).padStart(2, '0')}`,
+      part_no: item.part_no || `${buyId}-${String(tradeItems.length + idx + 1).padStart(2, '0')}`,
       category_id:   item.category_id   || '',
       category_name: item.category_name || '',
       description:   item.description   || '',
@@ -446,6 +543,7 @@ export default function TradeTransactionScreen({
       ticketId, tradeItems, saleItems, ticketNote, showOnReceipt,
       isStoreCreditNet, totalTradeAllowance, totalSaleAfterTax, netDueToCustomer,
       taxAmount, taxRate, customer,
+      buyTicketId: tradeBuyTicketId, saleTicketId: tradeSaleTicketId,
     });
   };
 
@@ -470,11 +568,11 @@ export default function TradeTransactionScreen({
 
     // A trade bundles two real tickets under the hood: the trade-in items become
     // a buy ticket (store acquires them) and the sale items become a sale ticket
-    // (store sells them to the customer). Mint real BT-/ST- ids using the same
-    // counters the standalone Buy/Sale screens use, so the resulting buy_ticket /
-    // sale_ticket rows are indistinguishable from a standalone transaction.
-    const tradeBuyTicketId  = tradeItems.length > 0 ? generateBuyTicketId()  : null;
-    const tradeSaleTicketId = saleItems.length  > 0 ? generateSaleTicketId() : null;
+    // (store sells them to the customer). These were already minted (and used
+    // for each item's part_no) as soon as the first item of each kind was added —
+    // ensure* here is just a safety net for items added some other way.
+    const buyId  = tradeItems.length > 0 ? ensureTradeBuyTicketId()  : null;
+    const saleId = saleItems.length  > 0 ? ensureTradeSaleTicketId() : null;
 
     // Build cart items: sale items go as positive-price items, trade items as negative (buy-back)
     const cartItems = [
@@ -487,12 +585,16 @@ export default function TradeTransactionScreen({
           price: parseFloat(item.price) || 0,
           value: parseFloat(item.price) || 0,
           transaction_type: 'trade_sale',
+          // Sale items are pulled from existing inventory (already in jewelry/
+          // hardgoods, recorded when they were bought) — flag so Checkout.js
+          // doesn't try to create a second jewelry record for them.
+          fromInventory: true,
           customer: cartCustomer,
           employee: currentUser
             ? { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(), role: currentUser.role }
             : null,
           tradeTicketId: ticketId,
-          saleTicketId: tradeSaleTicketId,
+          saleTicketId: saleId,
           ticket_note: ticketNote || null,
           show_on_receipt: showOnReceipt,
         }))
@@ -518,7 +620,7 @@ export default function TradeTransactionScreen({
             ? { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(), role: currentUser.role }
             : null,
           tradeTicketId: ticketId,
-          buyTicketId: tradeBuyTicketId,
+          buyTicketId: buyId,
           ticket_note: ticketNote || null,
           show_on_receipt: showOnReceipt,
         };
@@ -529,6 +631,8 @@ export default function TradeTransactionScreen({
     sessionStorage.setItem('selectedCustomer', JSON.stringify(cartCustomer));
     sessionStorage.setItem('pendingTradeReturn', JSON.stringify({
       customerId: customer.id,
+      buyTicketId: buyId,
+      saleTicketId: saleId,
       customer,
       ticketId,
       tradeItems,
@@ -538,8 +642,8 @@ export default function TradeTransactionScreen({
       isStoreCreditNet,
     }));
     commitTradeTicketId();
-    if (tradeBuyTicketId)  commitBuyTicketId();
-    if (tradeSaleTicketId) commitSaleTicketId();
+    if (buyId)  commitBuyTicketId();
+    if (saleId) commitSaleTicketId();
     // Tax on a trade only applies to the amount the sale exceeds the trade-in
     // allowance (taxableDifference above), so the net total can't be rebuilt by
     // summing individual line items in Checkout — pass the ticket's own total.
@@ -591,11 +695,11 @@ export default function TradeTransactionScreen({
         customer={customer}
         ticketId={ticketId}
         ticketLabel="Trade Ticket"
-        initialEntry=""
-        parsedValues={null}
+        initialEntry={tradeIntakeEntry}
+        parsedValues={editingTradeIntakeItem ? null : tradeParsedValues}
         editItem={editingTradeIntakeItem}
         onBack={handleTradeIntakeBack}
-        onSaveItem={handleTradeIntakeBack}
+        onSaveItem={handleTradeIntakeSave}
         onUpdateItem={handleTradeIntakeUpdate}
       />
     );
@@ -709,7 +813,7 @@ export default function TradeTransactionScreen({
                   fullWidth size="small"
                   value={tradeScanInput}
                   onChange={e => setTradeScanInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && tradeScanInput.trim()) { addTradeItem({ description: tradeScanInput }); setTradeScanInput(''); } }}
+                  onKeyDown={e => { if (e.key === 'Enter' && tradeScanInput.trim()) openTradeIntake(); }}
                   placeholder="Scan barcode or search items to trade in..."
                   InputProps={{
                     startAdornment: <InputAdornment position="start"><MuiIcons.Search sx={{ color: 'text.secondary' }} /></InputAdornment>,

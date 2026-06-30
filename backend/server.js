@@ -7414,38 +7414,59 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         'jewelry'
       ];
 
-      const jewelryResult = await client.query(jewelryQuery, jewelryValues);
+      // A savepoint around just this item's insert so a duplicate item_id/part_number
+      // (e.g. the item was already created by an earlier request) doesn't abort the
+      // whole batch — skip it and reuse the existing record instead of erroring.
+      await client.query('SAVEPOINT jewelry_item_insert');
+      try {
+        const jewelryResult = await client.query(jewelryQuery, jewelryValues);
 
-      // Insert secondary gems if any
-      if (item.secondary_gems && Array.isArray(item.secondary_gems)) {
-        for (const gem of item.secondary_gems) {
-          const secondaryGemQuery = `
-            INSERT INTO jewelry_secondary_gems (
-              item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
-              secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
-              secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`;
+        // Insert secondary gems if any
+        if (item.secondary_gems && Array.isArray(item.secondary_gems)) {
+          for (const gem of item.secondary_gems) {
+            const secondaryGemQuery = `
+              INSERT INTO jewelry_secondary_gems (
+                item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+                secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+                secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`;
 
-          await client.query(secondaryGemQuery, [
-            item_id,
-            gem.secondary_gem_type || null,
-            gem.secondary_gem_category || null,
-            parseFloat(gem.secondary_gem_size) || null,
-            parseInt(gem.secondary_gem_quantity) || 0,
-            gem.secondary_gem_shape || null,
-            parseFloat(gem.secondary_gem_weight) || 0,
-            gem.secondary_gem_color || null,
-            gem.secondary_gem_exact_color || null,
-            gem.secondary_gem_clarity || null,
-            gem.secondary_gem_cut || null,
-            gem.secondary_gem_lab_grown || false,
-            gem.secondary_gem_authentic || false,
-            parseFloat(gem.secondary_gem_value) || 0
-          ]);
+            await client.query(secondaryGemQuery, [
+              item_id,
+              gem.secondary_gem_type || null,
+              gem.secondary_gem_category || null,
+              parseFloat(gem.secondary_gem_size) || null,
+              parseInt(gem.secondary_gem_quantity) || 0,
+              gem.secondary_gem_shape || null,
+              parseFloat(gem.secondary_gem_weight) || 0,
+              gem.secondary_gem_color || null,
+              gem.secondary_gem_exact_color || null,
+              gem.secondary_gem_clarity || null,
+              gem.secondary_gem_cut || null,
+              gem.secondary_gem_lab_grown || false,
+              gem.secondary_gem_authentic || false,
+              parseFloat(gem.secondary_gem_value) || 0
+            ]);
+          }
+        }
+
+        results.push(jewelryResult.rows[0]);
+      } catch (itemError) {
+        if (itemError.code === '23505') {
+          // Unique violation (item_id or part_number already exists) — roll back
+          // just this insert, reuse the existing jewelry record, and continue.
+          await client.query('ROLLBACK TO SAVEPOINT jewelry_item_insert');
+          console.warn(`Jewelry item ${item_id} already exists, skipping insert and reusing existing record`);
+          const existing = await client.query(
+            'SELECT * FROM jewelry WHERE item_id = $1 OR part_number = $1 LIMIT 1',
+            [item_id]
+          );
+          if (existing.rows.length > 0) results.push(existing.rows[0]);
+        } else {
+          throw itemError;
         }
       }
-
-      results.push(jewelryResult.rows[0]);
+      await client.query('RELEASE SAVEPOINT jewelry_item_insert');
     }
 
     await client.query('COMMIT');
@@ -7626,55 +7647,75 @@ app.post('/api/jewelry', async (req, res) => {
         'jewelry'                                             // 39
       ];
 
-      const result = await client.query(jewelryQuery, jewelryValues);
-      results.push(result.rows[0]);
-      // Insert secondary gems if any
-      if (item.secondary_gems && Array.isArray(item.secondary_gems)) {
-        for (const gem of item.secondary_gems) {
-          const secondaryGemQuery = `
-            INSERT INTO jewelry_secondary_gems (
-              item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
-              secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
-              secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`;
+      // A savepoint around just this item's insert so a duplicate item_id/part_number
+      // (e.g. the item was already created by an earlier request) doesn't abort the
+      // whole batch — skip it and reuse the existing record instead of erroring.
+      await client.query('SAVEPOINT jewelry_item_insert');
+      try {
+        const result = await client.query(jewelryQuery, jewelryValues);
+        results.push(result.rows[0]);
+        // Insert secondary gems if any
+        if (item.secondary_gems && Array.isArray(item.secondary_gems)) {
+          for (const gem of item.secondary_gems) {
+            const secondaryGemQuery = `
+              INSERT INTO jewelry_secondary_gems (
+                item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+                secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+                secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`;
 
-          await client.query(secondaryGemQuery, [
+            await client.query(secondaryGemQuery, [
+              item_id,
+              gem.secondary_gem_type || null,
+              gem.secondary_gem_category || null,
+              parseFloat(gem.secondary_gem_size) || null,
+              parseInt(gem.secondary_gem_quantity) || 0,
+              gem.secondary_gem_shape || null,
+              parseFloat(gem.secondary_gem_weight) || 0,
+              gem.secondary_gem_color || null,
+              gem.secondary_gem_exact_color || null,
+              gem.secondary_gem_clarity || null,
+              gem.secondary_gem_cut || null,
+              gem.secondary_gem_lab_grown || false,
+              gem.secondary_gem_authentic || false,
+              parseFloat(gem.secondary_gem_value) || 0
+            ]);
+          }
+        }
+
+        if (quote_id) {
+          const itemQuery = `
+            INSERT INTO quote_items (
+              quote_id, item_id, transaction_type_id,
+              item_price
+            )
+            VALUES ($1, $2, $3, $4)
+            RETURNING *
+          `;
+
+          await client.query(itemQuery, [
+            quote_id,
             item_id,
-            gem.secondary_gem_type || null,
-            gem.secondary_gem_category || null,
-            parseFloat(gem.secondary_gem_size) || null,
-            parseInt(gem.secondary_gem_quantity) || 0,
-            gem.secondary_gem_shape || null,
-            parseFloat(gem.secondary_gem_weight) || 0,
-            gem.secondary_gem_color || null,
-            gem.secondary_gem_exact_color || null,
-            gem.secondary_gem_clarity || null,
-            gem.secondary_gem_cut || null,
-            gem.secondary_gem_lab_grown || false,
-            gem.secondary_gem_authentic || false,
-            parseFloat(gem.secondary_gem_value) || 0
+            item.transaction_type_id,
+            item.price
           ]);
         }
+      } catch (itemError) {
+        if (itemError.code === '23505') {
+          // Unique violation (item_id or part_number already exists) — roll back
+          // just this insert, reuse the existing jewelry record, and continue.
+          await client.query('ROLLBACK TO SAVEPOINT jewelry_item_insert');
+          console.warn(`Jewelry item ${item_id} already exists, skipping insert and reusing existing record`);
+          const existing = await client.query(
+            'SELECT * FROM jewelry WHERE item_id = $1 OR part_number = $1 LIMIT 1',
+            [item_id]
+          );
+          if (existing.rows.length > 0) results.push(existing.rows[0]);
+        } else {
+          throw itemError;
+        }
       }
-
-      if(quote_id) {
-        const itemQuery = `
-          INSERT INTO quote_items (
-            quote_id, item_id, transaction_type_id,
-            item_price
-          )
-          VALUES ($1, $2, $3, $4)
-          RETURNING *
-        `;
-
-        await client.query(itemQuery, [
-          quote_id,
-          item_id,
-          item.transaction_type_id,
-          item.price
-        ]);
-      }
-
+      await client.query('RELEASE SAVEPOINT jewelry_item_insert');
     }
 
     await client.query('COMMIT');

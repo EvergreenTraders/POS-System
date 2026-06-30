@@ -576,8 +576,8 @@ export default function ModernTransactions() {
       const raw = sessionStorage.getItem('pendingTradeReturn');
       if (!raw) return null;
       try {
-        const { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet } = JSON.parse(raw);
-        return { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet };
+        const { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId } = JSON.parse(raw);
+        return { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId };
       } catch { return null; }
     }
     return null;
