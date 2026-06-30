@@ -565,6 +565,10 @@ export default function ModernTransactions() {
     return null;
   });
   const [tradeOpen, setTradeOpen]         = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingTradeState');
+      return !!raw;
+    }
     if (location.state?.returnToTrade) {
       const raw = sessionStorage.getItem('pendingTradeReturn');
       return !!raw;
@@ -572,6 +576,14 @@ export default function ModernTransactions() {
     return false;
   });
   const [existingTradeData, setExistingTradeData] = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingTradeState');
+      if (!raw) return null;
+      try {
+        const { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId } = JSON.parse(raw);
+        return { ticketId, tradeItems, saleItems, ticketNote, showOnReceipt, isStoreCreditNet, buyTicketId, saleTicketId };
+      } catch { return null; }
+    }
     if (location.state?.returnToTrade) {
       const raw = sessionStorage.getItem('pendingTradeReturn');
       if (!raw) return null;

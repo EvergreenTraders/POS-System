@@ -141,6 +141,10 @@ function Checkout() {
   // a ticket-level computation TradeTransactionScreen already did — captured
   // here once so it survives re-renders rather than re-reading location.state.
   const [tradeTotal] = useState(location.state?.tradeTotal);
+  // Breakdown behind tradeTotal (trade-in/sale subtotals, taxable difference,
+  // tax rate/amount) — surfaced in the UI so the tax-on-difference rule isn't
+  // a black box to whoever's checking the customer out.
+  const [tradeBreakdown] = useState(location.state?.tradeBreakdown);
   const [taxRate, setTaxRate] = useState(0.13); // Default 13% tax rate
   const [selectedProvince, setSelectedProvince] = useState('ON');
   const [provinceName, setProvinceName] = useState('Ontario');
@@ -243,7 +247,7 @@ function Checkout() {
 
         setIsInitialized(true);
       }
-      else if (fromSource === 'cart' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket') {
+      else if (fromSource === 'cart' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket' || fromSource === 'trade-ticket') {
         // Store the items to checkout and all cart items separately
         const items = itemsToCheckout;
 
@@ -1752,6 +1756,23 @@ function Checkout() {
             }
           }
 
+          // Trade quotes mix trade-in items (cleaned up automatically when
+          // /api/buy-ticket promotes their QT-prefixed placeholder) with sale
+          // items (linked to real inventory, never auto-removed) — the quote
+          // can be left behind with just the sale item's row still attached,
+          // so it needs this same explicit cleanup. The backend only restores
+          // sellable status on the real inventory item; it never deletes it.
+          if (isFromQuotes && quoteId && checkoutSource === 'trade-ticket') {
+            try {
+              await axios.delete(
+                `${config.apiUrl}/quotes/${quoteId}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+            } catch (err) {
+              console.error('Failed to clean up trade quote after checkout:', err);
+            }
+          }
+
           // Step 4: Clear all storage IMMEDIATELY before any UI updates
           // Clear all ticket items from localStorage FIRST
           const ticketTypes = ['pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund', 'redeem'];
@@ -1975,8 +1996,10 @@ function Checkout() {
   };
 
 const handleBackToEstimation = () => {
-    // If we came from a quote, go back to quote manager
-    if (location.state?.quoteId) {
+    // If we came from a quote, go back to quote manager — except for a trade
+    // quote, where the breadcrumb is labeled "Trade Ticket" and should behave
+    // like one (back to the transactions workspace), not jump to the quote list.
+    if (location.state?.quoteId && checkoutSource !== 'trade-ticket') {
       clearCart();
       setCustomer(null);
       navigate('/quote-manager');
@@ -2127,9 +2150,13 @@ const handleBackToEstimation = () => {
   const isSaleCheckout  = checkoutSource === 'sale-ticket';
   const isBuyCheckout   = checkoutSource === 'buy-ticket';
   const isTradeCheckout = checkoutSource === 'trade-ticket';
-  const themeColor   = isSaleCheckout ? '#2e7d32' : isBuyCheckout ? '#0284c7' : isTradeCheckout ? '#0891b2' : PURPLE;
-  const themeDark    = isSaleCheckout ? '#1b5e20' : isBuyCheckout ? '#0369a1' : isTradeCheckout ? '#0e7490' : PURPLE_DARK;
-  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : isBuyCheckout ? '#e0f2fe' : isTradeCheckout ? '#e0f9ff' : '#f3e5f5';
+  // Trade's color matches the registered transaction_type.color ('#00695c'),
+  // not TradeTransactionScreen's internal accent teal — keeps Checkout visually
+  // consistent with how trade is colored everywhere else in the app (e.g. the
+  // Transactions hub's type buttons).
+  const themeColor   = isSaleCheckout ? '#2e7d32' : isBuyCheckout ? '#0284c7' : isTradeCheckout ? '#00695c' : PURPLE;
+  const themeDark    = isSaleCheckout ? '#1b5e20' : isBuyCheckout ? '#0369a1' : isTradeCheckout ? '#004d40' : PURPLE_DARK;
+  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : isBuyCheckout ? '#e0f2fe' : isTradeCheckout ? '#e0f2f1' : '#f3e5f5';
 
   const breadcrumbSource = isPawnCheckout
     ? 'Pawn Transaction'
@@ -2485,7 +2512,7 @@ const handleBackToEstimation = () => {
                       // Money going OUT (buy/pawn) = negative values
                       // Money coming IN (sale/repair/other) = positive values
                       let displayPrice = totalPrice;
-                      if (itemTransactionType === 'buy' || itemTransactionType === 'pawn') {
+                      if (itemTransactionType === 'buy' || itemTransactionType === 'pawn' || itemTransactionType === 'trade_in') {
                         displayPrice = -Math.abs(totalPrice);
                       } else {
                         displayPrice = Math.abs(totalPrice);
@@ -2573,10 +2600,26 @@ const handleBackToEstimation = () => {
                     </Box>
                   );
                 })()}
+                {checkoutSource === 'trade-ticket' && tradeBreakdown && (
+                  <Box sx={{ mb: 2, p: 1.5, borderRadius: 1, bgcolor: '#f0f9ff', border: '1px solid #b3e5fc' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}>
+                      Trade tax rule: tax is only charged on the amount the sale exceeds the trade-in allowance.
+                    </Typography>
+                    {[
+                      { label: 'Taxable Difference (Sale − Trade-In)', value: tradeBreakdown.taxableDifference },
+                      { label: `Tax (${(tradeBreakdown.taxRate * 100).toFixed(3)}%)`, value: tradeBreakdown.taxAmount },
+                    ].map(row => (
+                      <Box key={row.label} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                        <Typography variant="body2" color="text.secondary">{row.label}:</Typography>
+                        <Typography variant="body2">${(parseFloat(row.value) || 0).toFixed(2)}</Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="h6" fontWeight="bold">Total:</Typography>
-                  <Typography variant="h6" fontWeight="bold" color="primary">
-                    ${calculateTotal().toFixed(2)}
+                  <Typography variant="h6" fontWeight="bold">Net Effect:</Typography>
+                  <Typography variant="h6" fontWeight="bold" color={calculateTotal() < 0 ? 'error.main' : 'success.main'}>
+                    {calculateTotal() >= 0 ? '+' : '-'}${Math.abs(calculateTotal()).toFixed(2)}
                   </Typography>
                 </Box>
               </Box>
@@ -2641,8 +2684,8 @@ const handleBackToEstimation = () => {
                   variant="contained"
                   startIcon={<PaymentIcon />}
                   onClick={() => handleSubmit()}
-                  color="primary"
                   disabled={isStoreClosed}
+                  sx={{ bgcolor: themeColor, '&:hover': { bgcolor: themeDark } }}
                 >
                   {parseFloat(paymentDetails.cashAmount || 0) >= Math.abs(remainingAmount)
                     ? 'Process Payment'

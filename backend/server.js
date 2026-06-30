@@ -6339,6 +6339,209 @@ app.post('/api/quotes/sale', async (req, res) => {
   }
 });
 
+// POST /api/quotes/trade — save a trade ticket (both sides) as a single quote.
+// trade_in_items are new jewelry to estimate (like /api/quotes), sale_items
+// already exist in inventory (like /api/quotes/sale) — each quote_item is
+// tagged with its own 'buy' or 'sale' transaction_type_id so the two sides
+// aren't conflated when the quote is later resumed.
+app.post('/api/quotes/trade', uploadJewelryImages, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const tradeInItems  = JSON.parse(req.body.trade_in_items || '[]');
+    const saleItems     = JSON.parse(req.body.sale_items     || '[]');
+    const imageMetadata = JSON.parse(req.body.imageMetadata  || '[]');
+    const customer_id   = req.body.customer_id;
+    const employee_id   = req.body.employee_id;
+    const total_amount  = req.body.total_amount;
+    const uploadedFiles = req.files || [];
+
+    if (!customer_id || !employee_id) {
+      return res.status(400).json({ error: 'customer_id and employee_id are required' });
+    }
+    if (tradeInItems.length === 0 && saleItems.length === 0) {
+      return res.status(400).json({ error: 'At least one item is required' });
+    }
+
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_type VARCHAR(10) DEFAULT 'pawn'`);
+    await client.query(`ALTER TABLE quote_items DROP CONSTRAINT IF EXISTS quote_items_item_id_fkey`);
+
+    const latestResult = await client.query(
+      "SELECT quote_id FROM quotes WHERE quote_id LIKE 'QT%' ORDER BY quote_id DESC LIMIT 1"
+    );
+    let nextNumber = 1;
+    if (latestResult.rows.length > 0) nextNumber = parseInt(latestResult.rows[0].quote_id.slice(2)) + 1;
+    const quoteId = `QT${nextNumber.toString().padStart(3, '0')}`;
+
+    const configResult = await client.query('SELECT days FROM quote_expiration LIMIT 1');
+    const expiresIn = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
+
+    const [buyTypeResult, saleTypeResult] = await Promise.all([
+      client.query(`SELECT id FROM transaction_type WHERE type = 'buy' LIMIT 1`),
+      client.query(`SELECT id FROM transaction_type WHERE type = 'sale' LIMIT 1`),
+    ]);
+    const buyTypeId  = buyTypeResult.rows[0]?.id  ?? null;
+    const saleTypeId = saleTypeResult.rows[0]?.id ?? null;
+
+    const quoteResult = await client.query(
+      `INSERT INTO quotes (quote_id, customer_id, employee_id, total_amount, expires_in, days_remaining, quote_type, created_at)
+       VALUES ($1, $2, $3, $4, $5, $5, 'trade', CURRENT_TIMESTAMP) RETURNING *`,
+      [quoteId, customer_id, employee_id, parseFloat(total_amount) || 0, expiresIn]
+    );
+
+    // Trade-in items — create a new jewelry record for each, same as /api/quotes.
+    // Use the plain QTxxx-xx id format (not a custom suffix) so that when this
+    // item is later checked out, /api/buy-ticket's existing "item_id starts with
+    // QT" quote-promotion path recognizes it, deletes this placeholder record,
+    // and recreates it under the real buy_ticket_id — same as a buy/pawn quote.
+    let globalFileIndex = 0;
+    for (let i = 0; i < tradeInItems.length; i++) {
+      const item = tradeInItems[i];
+      const seq = String(i + 1).padStart(2, '0');
+      const item_id = `${quoteId}-${seq}`;
+
+      const processedImages = [];
+      const itemImagesMeta = imageMetadata.filter(m => m.itemIndex === i);
+      for (let j = 0; j < itemImagesMeta.length; j++) {
+        const fileIdx = globalFileIndex + j;
+        if (fileIdx < uploadedFiles.length) {
+          const file = uploadedFiles[fileIdx];
+          const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+          const filename = `${item_id}-${j + 1}${ext}`;
+          const filepath = path.join(jewelryUploadDir, filename);
+          await fs.promises.writeFile(filepath, file.buffer);
+          processedImages.push({ url: `/uploads/jewelry/${filename}`, isPrimary: itemImagesMeta[j].isPrimary || j === 0 });
+        }
+      }
+      globalFileIndex += itemImagesMeta.length;
+
+      // Isolate each trade-in item's insert behind a savepoint — a problem with
+      // one item (bad data, a stray constraint) used to silently roll back the
+      // *entire* quote (including the sale items already processed) with no
+      // trace in the response. Now it's caught, logged, and the item is simply
+      // skipped instead of taking the whole save down or vanishing silently.
+      await client.query('SAVEPOINT trade_in_item_insert');
+      try {
+        await client.query(`
+          INSERT INTO jewelry (
+            item_id, long_desc, short_desc, category, brand, vintage, stamps, images,
+            metal_weight, precious_metal_type, non_precious_metal_type, metal_purity, jewelry_color,
+            purity_value, est_metal_value,
+            primary_gem_type, primary_gem_category, primary_gem_size, primary_gem_quantity,
+            primary_gem_shape, primary_gem_weight, primary_gem_color, primary_gem_exact_color,
+            primary_gem_clarity, primary_gem_cut, primary_gem_lab_grown, primary_gem_authentic, primary_gem_value,
+            status, location, condition, metal_spot_price, notes, item_price, melt_value, total_weight, inventory_type
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+            $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,
+            $29,$30,$31,$32,$33,$34,$35,$36,$37
+          )`, [
+          item_id,
+          item.long_desc || '',
+          item.short_desc || '',
+          item.metal_category || '',
+          item.brand || '',
+          item.vintage || false,
+          item.stamps || '',
+          JSON.stringify(processedImages),
+          Math.max(parseFloat(item.metal_weight) || 0.001, 0.001),
+          item.precious_metal_type || null,
+          item.non_precious_metal_type || null,
+          item.metal_purity || null,
+          item.jewelry_color || null,
+          parseFloat(item.purity_value) || 0,
+          parseFloat(item.est_metal_value) || 0,
+          item.primary_gem_type || null,
+          item.primary_gem_category || null,
+          item.primary_gem_size || null,
+          parseInt(item.primary_gem_quantity) || 0,
+          item.primary_gem_shape || null,
+          parseFloat(item.primary_gem_weight) || 0,
+          item.primary_gem_color || null,
+          item.primary_gem_exact_color || null,
+          item.primary_gem_clarity || null,
+          item.primary_gem_cut || null,
+          item.primary_gem_lab_grown || false,
+          item.primary_gem_authentic || false,
+          parseFloat(item.primary_gem_value) || 0,
+          'QUOTED',
+          item.location || 'SOUTH STORE',
+          'GOOD',
+          item.metal_spot_price || null,
+          item.notes || null,
+          parseFloat(item.amount ?? item.price ?? 0),
+          parseFloat(item.melt_value) || 0,
+          Math.max(parseFloat(item.metal_weight) || 0.001, 0.001) +
+            (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
+            (item.secondary_gems || []).reduce((s, g) =>
+              s + (parseFloat(g.secondary_gem_weight) || 0) * (parseInt(g.secondary_gem_quantity) || 1), 0),
+          'jewelry'
+        ]);
+
+        if (item.secondary_gems && item.secondary_gems.length > 0) {
+          for (const gem of item.secondary_gems) {
+            await client.query(`
+              INSERT INTO jewelry_secondary_gems (
+                item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+                secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+                secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, [
+              item_id,
+              gem.secondary_gem_type || null,
+              gem.secondary_gem_category || null,
+              parseFloat(gem.secondary_gem_size) || null,
+              parseInt(gem.secondary_gem_quantity) || 0,
+              gem.secondary_gem_shape || null,
+              parseFloat(gem.secondary_gem_weight) || 0,
+              gem.secondary_gem_color || null,
+              gem.secondary_gem_exact_color || null,
+              gem.secondary_gem_clarity || null,
+              gem.secondary_gem_cut || null,
+              gem.secondary_gem_lab_grown || false,
+              gem.secondary_gem_authentic || false,
+              parseFloat(gem.secondary_gem_value) || 0
+            ]);
+          }
+        }
+
+        await client.query(
+          `INSERT INTO quote_items (quote_id, item_id, transaction_type_id, item_price) VALUES ($1, $2, $3, $4)`,
+          [quoteId, item_id, buyTypeId, parseFloat(item.amount ?? item.price ?? 0)]
+        );
+      } catch (itemError) {
+        await client.query('ROLLBACK TO SAVEPOINT trade_in_item_insert');
+        console.error(`Error saving trade-in item ${item_id} for quote ${quoteId}:`, itemError.message);
+      }
+      await client.query('RELEASE SAVEPOINT trade_in_item_insert');
+    }
+
+    // Sale items — already exist in inventory; link them and hide from search
+    // while quoted, same as /api/quotes/sale.
+    for (const item of saleItems) {
+      await client.query(
+        `INSERT INTO quote_items (quote_id, item_id, transaction_type_id, item_price) VALUES ($1, $2, $3, $4)`,
+        [quoteId, item.item_id, saleTypeId, parseFloat(item.price) || 0]
+      );
+      const invType = (item.inventory_type || '').toLowerCase();
+      const table = invType === 'jewelry' ? 'jewelry' : 'hardgoods';
+      await client.query(
+        `UPDATE ${table} SET sellable_status = 'NOT_SELLABLE' WHERE item_id = $1`,
+        [item.item_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ ...quoteResult.rows[0], quote_id: quoteId, expires_in: expiresIn });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating trade quote:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.put('/api/quotes/:id', async (req, res) => {
   const client = await pool.connect();
   try {
@@ -6423,20 +6626,23 @@ app.get('/api/quotes/:quote_id/items', async (req, res) => {
       return res.json(result.rows);
     }
 
-    // pawn/buy quote: return full jewelry data needed to restore the ticket
+    // pawn/buy/trade quote: return full jewelry data needed to restore the ticket.
+    // Also left-joins hardgoods so sale-side items (e.g. in a trade quote) that
+    // are hardgoods rather than jewelry still resolve a description/image.
     const query = `
       SELECT
         qi.item_id,
         qi.item_price,
         tt.type                          AS transaction_type,
+        CASE WHEN h.item_id IS NOT NULL THEN 'HG' ELSE 'JW' END AS inventory_type,
         j.short_desc,
         j.long_desc,
-        COALESCE(j.short_desc, j.long_desc) AS description,
+        COALESCE(j.short_desc, h.short_desc, j.long_desc, h.long_desc) AS description,
+        COALESCE(j.images, h.images) AS images,
         j.category,
         j.brand,
         j.vintage,
         j.stamps,
-        j.images,
         j.serial_number,
         j.metal_weight,
         j.precious_metal_type,
@@ -6463,7 +6669,8 @@ app.get('/api/quotes/:quote_id/items', async (req, res) => {
         j.notes
       FROM quote_items qi
       LEFT JOIN transaction_type tt ON qi.transaction_type_id = tt.id
-      LEFT JOIN jewelry j ON qi.item_id = j.item_id
+      LEFT JOIN jewelry   j ON qi.item_id = j.item_id
+      LEFT JOIN hardgoods h ON qi.item_id = h.item_id
       WHERE qi.quote_id = $1
       ORDER BY qi.id
     `;
@@ -6535,28 +6742,50 @@ app.delete('/api/quotes/:quote_id', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Get quote type and all item_ids
+    // Get quote type and all item_ids (with their per-item transaction type —
+    // a trade quote mixes placeholder trade-in items with real inventory sale
+    // items, so it can't be handled as one block like sale/pawn quotes can).
     const quoteRow = await client.query(
       `SELECT COALESCE(quote_type, 'pawn') AS quote_type FROM quotes WHERE quote_id = $1`,
       [quote_id]
     );
     const quoteType = quoteRow.rows[0]?.quote_type || 'pawn';
 
-    const itemIdsResult = await client.query('SELECT item_id FROM quote_items WHERE quote_id = $1', [quote_id]);
-    const itemIds = itemIdsResult.rows.map(row => row.item_id);
+    const itemsResult = await client.query(
+      `SELECT qi.item_id, tt.type AS transaction_type
+       FROM quote_items qi
+       LEFT JOIN transaction_type tt ON qi.transaction_type_id = tt.id
+       WHERE qi.quote_id = $1`,
+      [quote_id]
+    );
+    const items = itemsResult.rows;
+    const itemIds = items.map(row => row.item_id);
 
     // Delete all quote_items rows
     await client.query('DELETE FROM quote_items WHERE quote_id = $1', [quote_id]);
 
-    if (itemIds.length > 0) {
-      if (quoteType === 'sale') {
-        // Restore sellable status on real inventory items
+    if (quoteType === 'sale') {
+      // Restore sellable status on real inventory items
+      if (itemIds.length > 0) {
         await client.query(`UPDATE hardgoods SET sellable_status = 'SELLABLE' WHERE item_id = ANY($1)`, [itemIds]);
         await client.query(`UPDATE jewelry   SET sellable_status = 'SELLABLE' WHERE item_id = ANY($1)`, [itemIds]);
-      } else {
-        // Pawn quote — items were created solely for the quote, remove them
-        await client.query('DELETE FROM jewelry WHERE item_id = ANY($1)', [itemIds]);
       }
+    } else if (quoteType === 'trade') {
+      // Sale-side items are real existing inventory — never delete them, just
+      // restore sellable status. Buy-side (trade-in) items are placeholder
+      // jewelry records created solely for the quote — safe to delete.
+      const saleItemIds = items.filter(i => i.transaction_type === 'sale').map(i => i.item_id);
+      const buyItemIds  = items.filter(i => i.transaction_type !== 'sale').map(i => i.item_id);
+      if (saleItemIds.length > 0) {
+        await client.query(`UPDATE hardgoods SET sellable_status = 'SELLABLE' WHERE item_id = ANY($1)`, [saleItemIds]);
+        await client.query(`UPDATE jewelry   SET sellable_status = 'SELLABLE' WHERE item_id = ANY($1)`, [saleItemIds]);
+      }
+      if (buyItemIds.length > 0) {
+        await client.query('DELETE FROM jewelry WHERE item_id = ANY($1)', [buyItemIds]);
+      }
+    } else if (itemIds.length > 0) {
+      // Pawn/buy quote — items were created solely for the quote, remove them
+      await client.query('DELETE FROM jewelry WHERE item_id = ANY($1)', [itemIds]);
     }
 
     // Finally delete the quote

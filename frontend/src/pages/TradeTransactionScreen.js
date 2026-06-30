@@ -6,7 +6,7 @@ import {
   Box, Typography, Paper, Button, IconButton, Chip, Avatar,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   Dialog, DialogTitle, DialogContent, DialogActions, List, ListItemButton, ListItemText,
-  Tooltip, Snackbar, Alert,
+  Tooltip, Snackbar, Alert, Select, MenuItem,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
@@ -16,8 +16,11 @@ import JewelryIntakeScreen from './JewelryIntakeScreen';
 import { generateBuyTicketId, commitBuyTicketId, parseItemDescription } from './BuyTransactionScreen';
 import { generateSaleTicketId, commitSaleTicketId } from './SaleTransactionScreen';
 
-const TRADE_TEAL = '#0891b2';
-const TRADE_DARK = '#0e7490';
+// Matches transaction_type.color for 'trade' in the database, so the ticket
+// screen is colored consistently with the rest of the app (e.g. the
+// Transactions hub's type buttons and the Checkout breadcrumb/total).
+const TRADE_TEAL = '#00695c';
+const TRADE_DARK = '#004d40';
 
 const TT_PENDING_KEY = 'pendingTTTicketId';
 const TT_COUNTER_KEY = 'lastTTTicketNumber';
@@ -104,6 +107,8 @@ export default function TradeTransactionScreen({
   const [selectedSaleId, setSelectedSaleId] = useState(null);
 
   // Trade-in item editing
+  const [editingTradeId, setEditingTradeId] = useState(null);
+  const [editTradeFields, setEditTradeFields] = useState({});
   const [tradeIntakeOpen, setTradeIntakeOpen] = useState(false);
   const [editingTradeIntakeItem, setEditingTradeIntakeItem] = useState(null);
   const [tradeIntakeEntry, setTradeIntakeEntry] = useState('');
@@ -317,6 +322,20 @@ export default function TradeTransactionScreen({
   };
 
   const startEditTrade = (item) => {
+    // Only items actually sourced from the jewelry estimator have the detail
+    // (metal, purity, gemstones, etc.) Jewelry Intake edits — a random free-type
+    // item has nothing to show there, so it gets the plain inline edit instead.
+    if (item.sourceEstimator !== 'jewelry' || !item.jewelryData) {
+      setEditingTradeId(item._lineId);
+      setEditTradeFields({
+        category_id: item.category_id || '',
+        description: item.description || '',
+        serial_number: item.serial_number || '',
+        qty: item.qty,
+        tradeAllowance: item.tradeAllowance,
+      });
+      return;
+    }
     const jd = item.jewelryData;
     const images = item.images?.length ? item.images : (jd?.images || []);
     setEditingTradeIntakeItem({
@@ -330,6 +349,18 @@ export default function TradeTransactionScreen({
       paid_amount: jd?.paid_amount ?? item.tradeAllowance,
     });
     setTradeIntakeOpen(true);
+  };
+
+  const saveEditTrade = (_lineId) => {
+    setTradeItems(prev => prev.map(i => i._lineId === _lineId
+      ? { ...i, ...editTradeFields,
+          tradeAllowance: parseFloat(editTradeFields.tradeAllowance) || 0,
+          qty: parseInt(editTradeFields.qty) || 1,
+          category_name: categories.find(c => c.id === editTradeFields.category_id)?.name || i.category_name,
+        }
+      : i
+    ));
+    setEditingTradeId(null);
   };
 
   const handleTradeIntakeBack = () => {
@@ -544,6 +575,70 @@ export default function TradeTransactionScreen({
 
   // ── Actions ──────────────────────────────────────────────────────────────────
 
+  // Saves the whole trade ticket as a draft quote — both the trade-in items
+  // (new jewelry to estimate, like the standalone Buy ticket's "Save as Quote")
+  // and the sale items (already in inventory, like the Sale ticket's quote).
+  // Each item is tagged with its own buy/sale type so the two sides aren't
+  // conflated when the quote is resumed later.
+  const handleSaveAsQuote = async () => {
+    if (!customer?.id) { showSnackbar('Please select a customer before saving as quote', 'error'); return; }
+    if (tradeItems.length === 0 && saleItems.length === 0) { showSnackbar('No items to save as quote', 'warning'); return; }
+    const token = localStorage.getItem('token');
+    const employeeId = JSON.parse(atob(token.split('.')[1])).id;
+    try {
+      const formData = new FormData();
+      const imageMetadata = [];
+
+      const tradeInForSubmit = tradeItems.map((item, itemIndex) => {
+        const jd = item.jewelryData || {};
+        const { images } = item;
+        if (images && Array.isArray(images)) {
+          images.forEach((img, imgIndex) => {
+            if (img.file instanceof File) {
+              formData.append('images', img.file);
+              imageMetadata.push({ itemIndex, isPrimary: img.isPrimary || imgIndex === 0 });
+            }
+          });
+        }
+        const itemAllowance = (parseFloat(item.tradeAllowance) || 0) * (parseInt(item.qty) || 1);
+        return {
+          ...jd,
+          short_desc: item.description || jd.short_desc || '',
+          long_desc: jd.long_desc || item.description || '',
+          amount: itemAllowance,
+          price: itemAllowance,
+        };
+      });
+
+      const saleForSubmit = saleItems.map(item => ({
+        item_id: item.item_id,
+        inventory_type: item.inventory_type,
+        price: (parseFloat(item.price) || 0) * (parseInt(item.quantity) || 1),
+      }));
+
+      formData.append('trade_in_items', JSON.stringify(tradeInForSubmit));
+      formData.append('sale_items', JSON.stringify(saleForSubmit));
+      formData.append('imageMetadata', JSON.stringify(imageMetadata));
+      formData.append('customer_id', customer.id);
+      formData.append('employee_id', employeeId);
+      // Net transaction value, tax included — same sign convention used everywhere
+      // else in the app (positive = customer owes the store, negative = store owes
+      // the customer). Summing both sides instead (as a positive total) doesn't
+      // correspond to any real dollar amount.
+      formData.append('total_amount', totalSaleAfterTax - totalTradeAllowance);
+
+      const res = await axios.post(`${config.apiUrl}/quotes/trade`, formData, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
+      });
+      showSnackbar(`Quote ${res.data.quote_id} saved successfully. Valid for ${res.data.expires_in} days.`, 'success');
+      setTradeItems([]);
+      setSaleItems([]);
+    } catch (err) {
+      console.error('Error saving quote:', err);
+      showSnackbar('Error saving quote. Please try again.', 'error');
+    }
+  };
+
   const handleAddToWorkspace = () => {
     if (tradeItems.length === 0 && saleItems.length === 0) {
       showSnackbar('Add at least one item before adding to workspace', 'warning');
@@ -666,6 +761,16 @@ export default function TradeTransactionScreen({
         customer: cartCustomer,
         from: 'trade-ticket',
         tradeTotal: -netDueToCustomer,
+        // Surfaced in Checkout so the tax-on-difference rule isn't a black box —
+        // same numbers shown in the Sale Summary / Net Balance panels above.
+        tradeBreakdown: {
+          buyTotal: totalTradeAllowance,
+          saleTotal: saleAfterDiscount,
+          taxableDifference,
+          taxRate,
+          taxAmount,
+          netTotal: -netDueToCustomer,
+        },
       },
     });
   };
@@ -691,7 +796,7 @@ export default function TradeTransactionScreen({
     }
     return (
       <IconButton size="small" onClick={onCameraClick}
-        sx={{ width: 40, height: 40, borderRadius: 1, bgcolor: '#f0f0f0', color: '#9e9e9e', '&:hover': { bgcolor: '#e0f9ff', color: TRADE_TEAL } }}>
+        sx={{ width: 40, height: 40, borderRadius: 1, bgcolor: '#f0f0f0', color: '#9e9e9e', '&:hover': { bgcolor: '#e0f2f1', color: TRADE_TEAL } }}>
         <MuiIcons.PhotoCamera sx={{ fontSize: 18 }} />
       </IconButton>
     );
@@ -730,7 +835,7 @@ export default function TradeTransactionScreen({
             label="In Progress"
             size="small"
             icon={<MuiIcons.FiberManualRecord sx={{ fontSize: '10px !important', color: `${TRADE_TEAL} !important` }} />}
-            sx={{ bgcolor: '#e0f9ff', color: TRADE_TEAL, fontWeight: 600, fontSize: 12, border: `1px solid ${TRADE_TEAL}` }}
+            sx={{ bgcolor: '#e0f2f1', color: TRADE_TEAL, fontWeight: 600, fontSize: 12, border: `1px solid ${TRADE_TEAL}` }}
           />
         </Box>
 
@@ -745,7 +850,7 @@ export default function TradeTransactionScreen({
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
                 <Avatar
                   src={customerImg || undefined}
-                  sx={{ width: 44, height: 44, bgcolor: '#e0f9ff', color: TRADE_TEAL, fontWeight: 700, fontSize: 15 }}
+                  sx={{ width: 44, height: 44, bgcolor: '#e0f2f1', color: TRADE_TEAL, fontWeight: 700, fontSize: 15 }}
                 >
                   {!customerImg && `${(customer.first_name || '')[0] || ''}${(customer.last_name || '')[0] || ''}`.toUpperCase()}
                 </Avatar>
@@ -759,7 +864,7 @@ export default function TradeTransactionScreen({
                 </Box>
                 <Tooltip title="Edit customer">
                   <IconButton size="small"
-                    sx={{ color: TRADE_TEAL, border: `1px solid ${TRADE_TEAL}`, '&:hover': { bgcolor: '#e0f9ff' } }}
+                    sx={{ color: TRADE_TEAL, border: `1px solid ${TRADE_TEAL}`, '&:hover': { bgcolor: '#e0f2f1' } }}
                     onClick={() => {
                       sessionStorage.setItem('pendingTradeState', JSON.stringify({
                         customerId: customer.id,
@@ -869,7 +974,7 @@ export default function TradeTransactionScreen({
                     borderRadius: 2, textTransform: 'none', fontSize: 12, flexShrink: 0,
                     borderColor: TRADE_TEAL, color: tradeQuickAddMode ? '#fff' : TRADE_TEAL,
                     bgcolor: tradeQuickAddMode ? TRADE_TEAL : 'transparent',
-                    '&:hover': { bgcolor: tradeQuickAddMode ? TRADE_DARK : '#e0f9ff', borderColor: TRADE_TEAL },
+                    '&:hover': { bgcolor: tradeQuickAddMode ? TRADE_DARK : '#e0f2f1', borderColor: TRADE_TEAL },
                   }}>
                   Free-type Quick Add
                 </Button>
@@ -882,7 +987,7 @@ export default function TradeTransactionScreen({
                     setSelectedBuyId(null);
                     setBuyPickerOpen(true);
                   }}
-                  sx={{ borderRadius: 2, textTransform: 'none', fontSize: 12, flexShrink: 0, borderColor: TRADE_TEAL, color: TRADE_TEAL, '&:hover': { bgcolor: '#e0f9ff' } }}>
+                  sx={{ borderRadius: 2, textTransform: 'none', fontSize: 12, flexShrink: 0, borderColor: TRADE_TEAL, color: TRADE_TEAL, '&:hover': { bgcolor: '#e0f2f1' } }}>
                   Add Existing Buy Ticket
                 </Button>
               </Box>
@@ -941,8 +1046,53 @@ export default function TradeTransactionScreen({
                     </TableRow>
                   )}
                   {tradeItems.map(item => {
-                    const catName = categories.find(c => c.id === item.category_id)?.name || item.category_name || '';
-                    return (
+                    const isEditing = editingTradeId === item._lineId;
+                    const catName   = categories.find(c => c.id === item.category_id)?.name || item.category_name || '';
+                    return isEditing ? (
+                      <TableRow key={item._lineId} sx={{ bgcolor: '#f0f9ff' }}>
+                        <TableCell sx={{ py: 0.5 }}><Typography fontSize={11} color="text.secondary">{item.part_no}</Typography></TableCell>
+                        <TableCell sx={{ py: 0.5 }}>
+                          <ImageCell item={item} onCameraClick={() => openCamera('trade', item._lineId)} />
+                        </TableCell>
+                        <TableCell sx={{ py: 0.5 }}>
+                          <Select size="small" value={editTradeFields.category_id || ''} displayEmpty fullWidth
+                            onChange={e => setEditTradeFields(f => ({ ...f, category_id: e.target.value }))}
+                            sx={{ fontSize: 12 }}>
+                            <MenuItem value=""><em>None</em></MenuItem>
+                            {categories.map(c => <MenuItem key={c.id} value={c.id} sx={{ fontSize: 12 }}>{c.name}</MenuItem>)}
+                          </Select>
+                        </TableCell>
+                        <TableCell sx={{ py: 0.5 }}>
+                          <TextField size="small" fullWidth value={editTradeFields.description}
+                            onChange={e => setEditTradeFields(f => ({ ...f, description: e.target.value }))}
+                            placeholder="Description" inputProps={{ style: { fontSize: 12 } }} />
+                        </TableCell>
+                        <TableCell sx={{ py: 0.5 }}>
+                          <TextField size="small" fullWidth value={editTradeFields.serial_number}
+                            onChange={e => setEditTradeFields(f => ({ ...f, serial_number: e.target.value }))}
+                            placeholder="—" inputProps={{ style: { fontSize: 12 } }} />
+                        </TableCell>
+                        <TableCell sx={{ py: 0.5 }}>
+                          <TextField size="small" type="number" value={editTradeFields.qty}
+                            onChange={e => setEditTradeFields(f => ({ ...f, qty: e.target.value }))}
+                            inputProps={{ min: 1, style: { fontSize: 12, width: 36 } }} />
+                        </TableCell>
+                        <TableCell sx={{ py: 0.5 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                            <Typography fontSize={12} color="text.secondary">$</Typography>
+                            <TextField size="small" type="number" value={editTradeFields.tradeAllowance}
+                              onChange={e => setEditTradeFields(f => ({ ...f, tradeAllowance: e.target.value }))}
+                              variant="standard"
+                              inputProps={{ min: 0, step: 0.01, style: { fontSize: 12, width: 64 } }}
+                              InputProps={{ disableUnderline: false }} />
+                          </Box>
+                        </TableCell>
+                        <TableCell align="center" sx={{ py: 0.5 }}>
+                          <Tooltip title="Save"><IconButton size="small" color="success" onClick={() => saveEditTrade(item._lineId)}><MuiIcons.Check sx={{ fontSize: 16 }} /></IconButton></Tooltip>
+                          <Tooltip title="Cancel"><IconButton size="small" onClick={() => setEditingTradeId(null)}><MuiIcons.Close sx={{ fontSize: 16 }} /></IconButton></Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
                       <TableRow key={item._lineId} sx={{ '&:hover': { bgcolor: '#f0f9ff' } }}>
                         <TableCell sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 500, py: 0.75 }}>{item.part_no}</TableCell>
                         <TableCell sx={{ py: 0.75 }}>
@@ -1062,7 +1212,7 @@ export default function TradeTransactionScreen({
                   setSelectedSaleId(null);
                   setSalePickerOpen(true);
                 }}
-                sx={{ borderRadius: 2, textTransform: 'none', fontSize: 12, flexShrink: 0, borderColor: TRADE_TEAL, color: TRADE_TEAL, '&:hover': { bgcolor: '#e0f9ff' } }}>
+                sx={{ borderRadius: 2, textTransform: 'none', fontSize: 12, flexShrink: 0, borderColor: TRADE_TEAL, color: TRADE_TEAL, '&:hover': { bgcolor: '#e0f2f1' } }}>
                 Add Existing Sale Ticket
               </Button>
             </Box>
@@ -1273,7 +1423,8 @@ export default function TradeTransactionScreen({
         />
         <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
         <Button size="small" variant="outlined" startIcon={<MuiIcons.BookmarkBorder />}
-          onClick={() => showSnackbar('Save as Quote — coming soon', 'info')}
+          disabled={(tradeItems.length === 0 && saleItems.length === 0) || !customer?.id}
+          onClick={handleSaveAsQuote}
           sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
           Save as Quote
         </Button>
@@ -1318,7 +1469,7 @@ export default function TradeTransactionScreen({
                     onClick={() => setSelectedBuyId(ticket.ticketId)}
                     sx={{
                       borderBottom: '1px solid #f0f0f0',
-                      bgcolor: selected ? '#e0f9ff !important' : undefined,
+                      bgcolor: selected ? '#e0f2f1 !important' : undefined,
                       '&:hover': { bgcolor: '#f0f9ff' },
                     }}
                   >
@@ -1448,7 +1599,7 @@ export default function TradeTransactionScreen({
                     onClick={() => setSelectedSaleId(ticket.ticketId)}
                     sx={{
                       borderBottom: '1px solid #f0f0f0',
-                      bgcolor: selected ? '#e0f9ff !important' : undefined,
+                      bgcolor: selected ? '#e0f2f1 !important' : undefined,
                       '&:hover': { bgcolor: '#f0f9ff' },
                     }}
                   >
