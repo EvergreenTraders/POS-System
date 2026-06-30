@@ -301,6 +301,12 @@ pool.query(`
   ALTER TABLE buy_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE
 `).catch(err => console.error('buy_ticket note/receipt migration:', err.message));
 
+// Ensure ticket_note and show_on_receipt exist on trade_ticket table
+pool.query(`
+  ALTER TABLE trade_ticket ADD COLUMN IF NOT EXISTS ticket_note TEXT;
+  ALTER TABLE trade_ticket ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE
+`).catch(err => console.error('trade_ticket note/receipt migration:', err.message));
+
 // Authentication route
 // Ensure track_hours column exists on employees table
 pool.query(`
@@ -6339,6 +6345,213 @@ app.post('/api/quotes/sale', async (req, res) => {
   }
 });
 
+// POST /api/quotes/trade — save a trade ticket (both sides) as a single quote.
+// trade_in_items are new jewelry to estimate (like /api/quotes), sale_items
+// already exist in inventory (like /api/quotes/sale) — each quote_item is
+// tagged with its own 'buy' or 'sale' transaction_type_id so the two sides
+// aren't conflated when the quote is later resumed.
+app.post('/api/quotes/trade', uploadJewelryImages, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const tradeInItems  = JSON.parse(req.body.trade_in_items || '[]');
+    const saleItems     = JSON.parse(req.body.sale_items     || '[]');
+    const imageMetadata = JSON.parse(req.body.imageMetadata  || '[]');
+    const customer_id   = req.body.customer_id;
+    const employee_id   = req.body.employee_id;
+    const total_amount  = req.body.total_amount;
+    const ticket_note   = req.body.ticket_note   || null;
+    const show_on_receipt = req.body.show_on_receipt === 'true';
+    const uploadedFiles = req.files || [];
+
+    if (!customer_id || !employee_id) {
+      return res.status(400).json({ error: 'customer_id and employee_id are required' });
+    }
+    if (tradeInItems.length === 0 && saleItems.length === 0) {
+      return res.status(400).json({ error: 'At least one item is required' });
+    }
+
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_type VARCHAR(10) DEFAULT 'pawn'`);
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS ticket_note TEXT`);
+    await client.query(`ALTER TABLE quotes ADD COLUMN IF NOT EXISTS show_on_receipt BOOLEAN NOT NULL DEFAULT FALSE`);
+    await client.query(`ALTER TABLE quote_items DROP CONSTRAINT IF EXISTS quote_items_item_id_fkey`);
+
+    const latestResult = await client.query(
+      "SELECT quote_id FROM quotes WHERE quote_id LIKE 'QT%' ORDER BY quote_id DESC LIMIT 1"
+    );
+    let nextNumber = 1;
+    if (latestResult.rows.length > 0) nextNumber = parseInt(latestResult.rows[0].quote_id.slice(2)) + 1;
+    const quoteId = `QT${nextNumber.toString().padStart(3, '0')}`;
+
+    const configResult = await client.query('SELECT days FROM quote_expiration LIMIT 1');
+    const expiresIn = configResult.rows.length > 0 ? configResult.rows[0].days : 30;
+
+    const [buyTypeResult, saleTypeResult] = await Promise.all([
+      client.query(`SELECT id FROM transaction_type WHERE type = 'buy' LIMIT 1`),
+      client.query(`SELECT id FROM transaction_type WHERE type = 'sale' LIMIT 1`),
+    ]);
+    const buyTypeId  = buyTypeResult.rows[0]?.id  ?? null;
+    const saleTypeId = saleTypeResult.rows[0]?.id ?? null;
+
+    const quoteResult = await client.query(
+      `INSERT INTO quotes (quote_id, customer_id, employee_id, total_amount, expires_in, days_remaining, quote_type, ticket_note, show_on_receipt, created_at)
+       VALUES ($1, $2, $3, $4, $5, $5, 'trade', $6, $7, CURRENT_TIMESTAMP) RETURNING *`,
+      [quoteId, customer_id, employee_id, parseFloat(total_amount) || 0, expiresIn, ticket_note, show_on_receipt]
+    );
+
+    // Trade-in items — create a new jewelry record for each, same as /api/quotes.
+    // Use the plain QTxxx-xx id format (not a custom suffix) so that when this
+    // item is later checked out, /api/buy-ticket's existing "item_id starts with
+    // QT" quote-promotion path recognizes it, deletes this placeholder record,
+    // and recreates it under the real buy_ticket_id — same as a buy/pawn quote.
+    let globalFileIndex = 0;
+    for (let i = 0; i < tradeInItems.length; i++) {
+      const item = tradeInItems[i];
+      const seq = String(i + 1).padStart(2, '0');
+      const item_id = `${quoteId}-${seq}`;
+
+      const processedImages = [];
+      const itemImagesMeta = imageMetadata.filter(m => m.itemIndex === i);
+      for (let j = 0; j < itemImagesMeta.length; j++) {
+        const fileIdx = globalFileIndex + j;
+        if (fileIdx < uploadedFiles.length) {
+          const file = uploadedFiles[fileIdx];
+          const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+          const filename = `${item_id}-${j + 1}${ext}`;
+          const filepath = path.join(jewelryUploadDir, filename);
+          await fs.promises.writeFile(filepath, file.buffer);
+          processedImages.push({ url: `/uploads/jewelry/${filename}`, isPrimary: itemImagesMeta[j].isPrimary || j === 0 });
+        }
+      }
+      globalFileIndex += itemImagesMeta.length;
+
+      // Isolate each trade-in item's insert behind a savepoint — a problem with
+      // one item (bad data, a stray constraint) used to silently roll back the
+      // *entire* quote (including the sale items already processed) with no
+      // trace in the response. Now it's caught, logged, and the item is simply
+      // skipped instead of taking the whole save down or vanishing silently.
+      await client.query('SAVEPOINT trade_in_item_insert');
+      try {
+        await client.query(`
+          INSERT INTO jewelry (
+            item_id, long_desc, short_desc, category, brand, vintage, stamps, images,
+            metal_weight, precious_metal_type, non_precious_metal_type, metal_purity, jewelry_color,
+            purity_value, est_metal_value,
+            primary_gem_type, primary_gem_category, primary_gem_size, primary_gem_quantity,
+            primary_gem_shape, primary_gem_weight, primary_gem_color, primary_gem_exact_color,
+            primary_gem_clarity, primary_gem_cut, primary_gem_lab_grown, primary_gem_authentic, primary_gem_value,
+            status, location, condition, metal_spot_price, notes, item_price, melt_value, total_weight, inventory_type
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+            $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,
+            $29,$30,$31,$32,$33,$34,$35,$36,$37
+          )`, [
+          item_id,
+          item.long_desc || '',
+          item.short_desc || '',
+          item.metal_category || '',
+          item.brand || '',
+          item.vintage || false,
+          item.stamps || '',
+          JSON.stringify(processedImages),
+          Math.max(parseFloat(item.metal_weight) || 0.001, 0.001),
+          item.precious_metal_type || null,
+          item.non_precious_metal_type || null,
+          item.metal_purity || null,
+          item.jewelry_color || null,
+          parseFloat(item.purity_value) || 0,
+          parseFloat(item.est_metal_value) || 0,
+          item.primary_gem_type || null,
+          item.primary_gem_category || null,
+          item.primary_gem_size || null,
+          parseInt(item.primary_gem_quantity) || 0,
+          item.primary_gem_shape || null,
+          parseFloat(item.primary_gem_weight) || 0,
+          item.primary_gem_color || null,
+          item.primary_gem_exact_color || null,
+          item.primary_gem_clarity || null,
+          item.primary_gem_cut || null,
+          item.primary_gem_lab_grown || false,
+          item.primary_gem_authentic || false,
+          parseFloat(item.primary_gem_value) || 0,
+          'QUOTED',
+          item.location || 'SOUTH STORE',
+          'GOOD',
+          item.metal_spot_price || null,
+          item.notes || null,
+          parseFloat(item.amount ?? item.price ?? 0),
+          parseFloat(item.melt_value) || 0,
+          Math.max(parseFloat(item.metal_weight) || 0.001, 0.001) +
+            (parseFloat(item.primary_gem_weight) || 0) * (parseInt(item.primary_gem_quantity) || 0) +
+            (item.secondary_gems || []).reduce((s, g) =>
+              s + (parseFloat(g.secondary_gem_weight) || 0) * (parseInt(g.secondary_gem_quantity) || 1), 0),
+          'jewelry'
+        ]);
+
+        if (item.secondary_gems && item.secondary_gems.length > 0) {
+          for (const gem of item.secondary_gems) {
+            await client.query(`
+              INSERT INTO jewelry_secondary_gems (
+                item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+                secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+                secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, [
+              item_id,
+              gem.secondary_gem_type || null,
+              gem.secondary_gem_category || null,
+              parseFloat(gem.secondary_gem_size) || null,
+              parseInt(gem.secondary_gem_quantity) || 0,
+              gem.secondary_gem_shape || null,
+              parseFloat(gem.secondary_gem_weight) || 0,
+              gem.secondary_gem_color || null,
+              gem.secondary_gem_exact_color || null,
+              gem.secondary_gem_clarity || null,
+              gem.secondary_gem_cut || null,
+              gem.secondary_gem_lab_grown || false,
+              gem.secondary_gem_authentic || false,
+              parseFloat(gem.secondary_gem_value) || 0
+            ]);
+          }
+        }
+
+        await client.query(
+          `INSERT INTO quote_items (quote_id, item_id, transaction_type_id, item_price) VALUES ($1, $2, $3, $4)`,
+          [quoteId, item_id, buyTypeId, parseFloat(item.amount ?? item.price ?? 0)]
+        );
+      } catch (itemError) {
+        await client.query('ROLLBACK TO SAVEPOINT trade_in_item_insert');
+        console.error(`Error saving trade-in item ${item_id} for quote ${quoteId}:`, itemError.message);
+      }
+      await client.query('RELEASE SAVEPOINT trade_in_item_insert');
+    }
+
+    // Sale items — already exist in inventory; link them and hide from search
+    // while quoted, same as /api/quotes/sale.
+    for (const item of saleItems) {
+      await client.query(
+        `INSERT INTO quote_items (quote_id, item_id, transaction_type_id, item_price) VALUES ($1, $2, $3, $4)`,
+        [quoteId, item.item_id, saleTypeId, parseFloat(item.price) || 0]
+      );
+      const invType = (item.inventory_type || '').toLowerCase();
+      const table = invType === 'jewelry' ? 'jewelry' : 'hardgoods';
+      await client.query(
+        `UPDATE ${table} SET sellable_status = 'NOT_SELLABLE' WHERE item_id = $1`,
+        [item.item_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ ...quoteResult.rows[0], quote_id: quoteId, expires_in: expiresIn });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating trade quote:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.put('/api/quotes/:id', async (req, res) => {
   const client = await pool.connect();
   try {
@@ -6423,20 +6636,23 @@ app.get('/api/quotes/:quote_id/items', async (req, res) => {
       return res.json(result.rows);
     }
 
-    // pawn/buy quote: return full jewelry data needed to restore the ticket
+    // pawn/buy/trade quote: return full jewelry data needed to restore the ticket.
+    // Also left-joins hardgoods so sale-side items (e.g. in a trade quote) that
+    // are hardgoods rather than jewelry still resolve a description/image.
     const query = `
       SELECT
         qi.item_id,
         qi.item_price,
         tt.type                          AS transaction_type,
+        CASE WHEN h.item_id IS NOT NULL THEN 'HG' ELSE 'JW' END AS inventory_type,
         j.short_desc,
         j.long_desc,
-        COALESCE(j.short_desc, j.long_desc) AS description,
+        COALESCE(j.short_desc, h.short_desc, j.long_desc, h.long_desc) AS description,
+        COALESCE(j.images, h.images) AS images,
         j.category,
         j.brand,
         j.vintage,
         j.stamps,
-        j.images,
         j.serial_number,
         j.metal_weight,
         j.precious_metal_type,
@@ -6463,7 +6679,8 @@ app.get('/api/quotes/:quote_id/items', async (req, res) => {
         j.notes
       FROM quote_items qi
       LEFT JOIN transaction_type tt ON qi.transaction_type_id = tt.id
-      LEFT JOIN jewelry j ON qi.item_id = j.item_id
+      LEFT JOIN jewelry   j ON qi.item_id = j.item_id
+      LEFT JOIN hardgoods h ON qi.item_id = h.item_id
       WHERE qi.quote_id = $1
       ORDER BY qi.id
     `;
@@ -6535,28 +6752,50 @@ app.delete('/api/quotes/:quote_id', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Get quote type and all item_ids
+    // Get quote type and all item_ids (with their per-item transaction type —
+    // a trade quote mixes placeholder trade-in items with real inventory sale
+    // items, so it can't be handled as one block like sale/pawn quotes can).
     const quoteRow = await client.query(
       `SELECT COALESCE(quote_type, 'pawn') AS quote_type FROM quotes WHERE quote_id = $1`,
       [quote_id]
     );
     const quoteType = quoteRow.rows[0]?.quote_type || 'pawn';
 
-    const itemIdsResult = await client.query('SELECT item_id FROM quote_items WHERE quote_id = $1', [quote_id]);
-    const itemIds = itemIdsResult.rows.map(row => row.item_id);
+    const itemsResult = await client.query(
+      `SELECT qi.item_id, tt.type AS transaction_type
+       FROM quote_items qi
+       LEFT JOIN transaction_type tt ON qi.transaction_type_id = tt.id
+       WHERE qi.quote_id = $1`,
+      [quote_id]
+    );
+    const items = itemsResult.rows;
+    const itemIds = items.map(row => row.item_id);
 
     // Delete all quote_items rows
     await client.query('DELETE FROM quote_items WHERE quote_id = $1', [quote_id]);
 
-    if (itemIds.length > 0) {
-      if (quoteType === 'sale') {
-        // Restore sellable status on real inventory items
+    if (quoteType === 'sale') {
+      // Restore sellable status on real inventory items
+      if (itemIds.length > 0) {
         await client.query(`UPDATE hardgoods SET sellable_status = 'SELLABLE' WHERE item_id = ANY($1)`, [itemIds]);
         await client.query(`UPDATE jewelry   SET sellable_status = 'SELLABLE' WHERE item_id = ANY($1)`, [itemIds]);
-      } else {
-        // Pawn quote — items were created solely for the quote, remove them
-        await client.query('DELETE FROM jewelry WHERE item_id = ANY($1)', [itemIds]);
       }
+    } else if (quoteType === 'trade') {
+      // Sale-side items are real existing inventory — never delete them, just
+      // restore sellable status. Buy-side (trade-in) items are placeholder
+      // jewelry records created solely for the quote — safe to delete.
+      const saleItemIds = items.filter(i => i.transaction_type === 'sale').map(i => i.item_id);
+      const buyItemIds  = items.filter(i => i.transaction_type !== 'sale').map(i => i.item_id);
+      if (saleItemIds.length > 0) {
+        await client.query(`UPDATE hardgoods SET sellable_status = 'SELLABLE' WHERE item_id = ANY($1)`, [saleItemIds]);
+        await client.query(`UPDATE jewelry   SET sellable_status = 'SELLABLE' WHERE item_id = ANY($1)`, [saleItemIds]);
+      }
+      if (buyItemIds.length > 0) {
+        await client.query('DELETE FROM jewelry WHERE item_id = ANY($1)', [buyItemIds]);
+      }
+    } else if (itemIds.length > 0) {
+      // Pawn/buy quote — items were created solely for the quote, remove them
+      await client.query('DELETE FROM jewelry WHERE item_id = ANY($1)', [itemIds]);
     }
 
     // Finally delete the quote
@@ -7261,7 +7500,20 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         itemCounter++;
         status = 'QUOTED';
       } else if (item.buyTicketId) {
-        ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
+        if (!(item.buyTicketId in ticketCounters)) {
+          // Seed the counter from the highest -NN suffix already persisted under this
+          // buy_ticket_id (not just items seen so far in this request, and not a plain
+          // COUNT — a prior failed/partial attempt can leave gaps, e.g. -03/-04 exist
+          // but -01/-02 don't) — otherwise a buy_ticket_id reused across separate
+          // requests/retries restarts at -01 and collides with existing jewelry rows.
+          const maxSeqResult = await client.query(
+            `SELECT COALESCE(MAX(CAST(SUBSTRING(item_id FROM '-([0-9]+)$') AS INTEGER)), 0) AS max_seq
+             FROM buy_ticket WHERE buy_ticket_id = $1`,
+            [item.buyTicketId]
+          );
+          ticketCounters[item.buyTicketId] = parseInt(maxSeqResult.rows[0].max_seq) || 0;
+        }
+        ticketCounters[item.buyTicketId] += 1;
         item_id = `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`;
         status = isPawn ? 'PAWN' : 'HOLD';
       } else {
@@ -7401,38 +7653,59 @@ app.post('/api/jewelry/with-images', uploadJewelryImages, async (req, res) => {
         'jewelry'
       ];
 
-      const jewelryResult = await client.query(jewelryQuery, jewelryValues);
+      // A savepoint around just this item's insert so a duplicate item_id/part_number
+      // (e.g. the item was already created by an earlier request) doesn't abort the
+      // whole batch — skip it and reuse the existing record instead of erroring.
+      await client.query('SAVEPOINT jewelry_item_insert');
+      try {
+        const jewelryResult = await client.query(jewelryQuery, jewelryValues);
 
-      // Insert secondary gems if any
-      if (item.secondary_gems && Array.isArray(item.secondary_gems)) {
-        for (const gem of item.secondary_gems) {
-          const secondaryGemQuery = `
-            INSERT INTO jewelry_secondary_gems (
-              item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
-              secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
-              secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`;
+        // Insert secondary gems if any
+        if (item.secondary_gems && Array.isArray(item.secondary_gems)) {
+          for (const gem of item.secondary_gems) {
+            const secondaryGemQuery = `
+              INSERT INTO jewelry_secondary_gems (
+                item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+                secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+                secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`;
 
-          await client.query(secondaryGemQuery, [
-            item_id,
-            gem.secondary_gem_type || null,
-            gem.secondary_gem_category || null,
-            parseFloat(gem.secondary_gem_size) || null,
-            parseInt(gem.secondary_gem_quantity) || 0,
-            gem.secondary_gem_shape || null,
-            parseFloat(gem.secondary_gem_weight) || 0,
-            gem.secondary_gem_color || null,
-            gem.secondary_gem_exact_color || null,
-            gem.secondary_gem_clarity || null,
-            gem.secondary_gem_cut || null,
-            gem.secondary_gem_lab_grown || false,
-            gem.secondary_gem_authentic || false,
-            parseFloat(gem.secondary_gem_value) || 0
-          ]);
+            await client.query(secondaryGemQuery, [
+              item_id,
+              gem.secondary_gem_type || null,
+              gem.secondary_gem_category || null,
+              parseFloat(gem.secondary_gem_size) || null,
+              parseInt(gem.secondary_gem_quantity) || 0,
+              gem.secondary_gem_shape || null,
+              parseFloat(gem.secondary_gem_weight) || 0,
+              gem.secondary_gem_color || null,
+              gem.secondary_gem_exact_color || null,
+              gem.secondary_gem_clarity || null,
+              gem.secondary_gem_cut || null,
+              gem.secondary_gem_lab_grown || false,
+              gem.secondary_gem_authentic || false,
+              parseFloat(gem.secondary_gem_value) || 0
+            ]);
+          }
+        }
+
+        results.push(jewelryResult.rows[0]);
+      } catch (itemError) {
+        if (itemError.code === '23505') {
+          // Unique violation (item_id or part_number already exists) — roll back
+          // just this insert, reuse the existing jewelry record, and continue.
+          await client.query('ROLLBACK TO SAVEPOINT jewelry_item_insert');
+          console.warn(`Jewelry item ${item_id} already exists, skipping insert and reusing existing record`);
+          const existing = await client.query(
+            'SELECT * FROM jewelry WHERE item_id = $1 OR part_number = $1 LIMIT 1',
+            [item_id]
+          );
+          if (existing.rows.length > 0) results.push(existing.rows[0]);
+        } else {
+          throw itemError;
         }
       }
-
-      results.push(jewelryResult.rows[0]);
+      await client.query('RELEASE SAVEPOINT jewelry_item_insert');
     }
 
     await client.query('COMMIT');
@@ -7507,7 +7780,17 @@ app.post('/api/jewelry', async (req, res) => {
         itemCounter++;
         status = 'QUOTED';
       } else if (item.buyTicketId) {
-        ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
+        if (!(item.buyTicketId in ticketCounters)) {
+          // Seed the counter from the highest -NN suffix already persisted under this
+          // buy_ticket_id — see the matching comment in /api/jewelry/with-images.
+          const maxSeqResult = await client.query(
+            `SELECT COALESCE(MAX(CAST(SUBSTRING(item_id FROM '-([0-9]+)$') AS INTEGER)), 0) AS max_seq
+             FROM buy_ticket WHERE buy_ticket_id = $1`,
+            [item.buyTicketId]
+          );
+          ticketCounters[item.buyTicketId] = parseInt(maxSeqResult.rows[0].max_seq) || 0;
+        }
+        ticketCounters[item.buyTicketId] += 1;
         item_id = `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`;
         status = isPawn ? 'PAWN' : 'HOLD';
       } else {
@@ -7603,55 +7886,75 @@ app.post('/api/jewelry', async (req, res) => {
         'jewelry'                                             // 39
       ];
 
-      const result = await client.query(jewelryQuery, jewelryValues);
-      results.push(result.rows[0]);
-      // Insert secondary gems if any
-      if (item.secondary_gems && Array.isArray(item.secondary_gems)) {
-        for (const gem of item.secondary_gems) {
-          const secondaryGemQuery = `
-            INSERT INTO jewelry_secondary_gems (
-              item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
-              secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
-              secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`;
+      // A savepoint around just this item's insert so a duplicate item_id/part_number
+      // (e.g. the item was already created by an earlier request) doesn't abort the
+      // whole batch — skip it and reuse the existing record instead of erroring.
+      await client.query('SAVEPOINT jewelry_item_insert');
+      try {
+        const result = await client.query(jewelryQuery, jewelryValues);
+        results.push(result.rows[0]);
+        // Insert secondary gems if any
+        if (item.secondary_gems && Array.isArray(item.secondary_gems)) {
+          for (const gem of item.secondary_gems) {
+            const secondaryGemQuery = `
+              INSERT INTO jewelry_secondary_gems (
+                item_id, secondary_gem_type, secondary_gem_category, secondary_gem_size, secondary_gem_quantity,
+                secondary_gem_shape, secondary_gem_weight, secondary_gem_color, secondary_gem_exact_color,
+                secondary_gem_clarity, secondary_gem_cut, secondary_gem_lab_grown, secondary_gem_authentic, secondary_gem_value
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`;
 
-          await client.query(secondaryGemQuery, [
+            await client.query(secondaryGemQuery, [
+              item_id,
+              gem.secondary_gem_type || null,
+              gem.secondary_gem_category || null,
+              parseFloat(gem.secondary_gem_size) || null,
+              parseInt(gem.secondary_gem_quantity) || 0,
+              gem.secondary_gem_shape || null,
+              parseFloat(gem.secondary_gem_weight) || 0,
+              gem.secondary_gem_color || null,
+              gem.secondary_gem_exact_color || null,
+              gem.secondary_gem_clarity || null,
+              gem.secondary_gem_cut || null,
+              gem.secondary_gem_lab_grown || false,
+              gem.secondary_gem_authentic || false,
+              parseFloat(gem.secondary_gem_value) || 0
+            ]);
+          }
+        }
+
+        if (quote_id) {
+          const itemQuery = `
+            INSERT INTO quote_items (
+              quote_id, item_id, transaction_type_id,
+              item_price
+            )
+            VALUES ($1, $2, $3, $4)
+            RETURNING *
+          `;
+
+          await client.query(itemQuery, [
+            quote_id,
             item_id,
-            gem.secondary_gem_type || null,
-            gem.secondary_gem_category || null,
-            parseFloat(gem.secondary_gem_size) || null,
-            parseInt(gem.secondary_gem_quantity) || 0,
-            gem.secondary_gem_shape || null,
-            parseFloat(gem.secondary_gem_weight) || 0,
-            gem.secondary_gem_color || null,
-            gem.secondary_gem_exact_color || null,
-            gem.secondary_gem_clarity || null,
-            gem.secondary_gem_cut || null,
-            gem.secondary_gem_lab_grown || false,
-            gem.secondary_gem_authentic || false,
-            parseFloat(gem.secondary_gem_value) || 0
+            item.transaction_type_id,
+            item.price
           ]);
         }
+      } catch (itemError) {
+        if (itemError.code === '23505') {
+          // Unique violation (item_id or part_number already exists) — roll back
+          // just this insert, reuse the existing jewelry record, and continue.
+          await client.query('ROLLBACK TO SAVEPOINT jewelry_item_insert');
+          console.warn(`Jewelry item ${item_id} already exists, skipping insert and reusing existing record`);
+          const existing = await client.query(
+            'SELECT * FROM jewelry WHERE item_id = $1 OR part_number = $1 LIMIT 1',
+            [item_id]
+          );
+          if (existing.rows.length > 0) results.push(existing.rows[0]);
+        } else {
+          throw itemError;
+        }
       }
-
-      if(quote_id) {
-        const itemQuery = `
-          INSERT INTO quote_items (
-            quote_id, item_id, transaction_type_id,
-            item_price
-          )
-          VALUES ($1, $2, $3, $4)
-          RETURNING *
-        `;
-
-        await client.query(itemQuery, [
-          quote_id,
-          item_id,
-          item.transaction_type_id,
-          item.price
-        ]);
-      }
-
+      await client.query('RELEASE SAVEPOINT jewelry_item_insert');
     }
 
     await client.query('COMMIT');
@@ -8266,6 +8569,148 @@ app.post('/api/sale-ticket', async (req, res) => {
   }
 });
 
+// Trade Ticket API Endpoints
+// A trade ticket doesn't store items directly — the trade-in items live in
+// buy_ticket (under buy_ticket_id) and the items the customer takes home live
+// in sale_ticket (under sale_ticket_id). This table just links the two so a
+// trade's items can be fetched by joining through those tables.
+
+app.get('/api/trade-ticket/last-id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT trade_ticket_id FROM trade_ticket
+      WHERE trade_ticket_id ~ '^TT-[0-9]+$'
+      ORDER BY CAST(SUBSTRING(trade_ticket_id FROM 4) AS INTEGER) DESC
+      LIMIT 1
+    `);
+    if (result.rows.length === 0) return res.json({ last_number: 0, last_id: null });
+    const lastId = result.rows[0].trade_ticket_id;
+    const num    = parseInt(lastId.replace('TT-', ''), 10);
+    res.json({ last_number: num, last_id: lastId });
+  } catch (err) {
+    console.error('Error fetching last trade ticket id:', err);
+    res.status(500).json({ error: 'Failed to fetch last trade ticket id' });
+  }
+});
+
+app.get('/api/trade-ticket', async (req, res) => {
+  try {
+    const { trade_ticket_id, transaction_id } = req.query;
+
+    let query = 'SELECT * FROM trade_ticket';
+    const params = [];
+
+    if (trade_ticket_id) {
+      query += ' WHERE trade_ticket_id = $1';
+      params.push(trade_ticket_id);
+    } else if (transaction_id) {
+      query += ' WHERE transaction_id = $1';
+      params.push(transaction_id);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching trade tickets:', error);
+    res.status(500).json({ error: 'Failed to fetch trade tickets' });
+  }
+});
+
+// GET /api/trade-ticket/:trade_ticket_id/items — fetches the trade-in and
+// sale-out jewelry/hardgoods items by joining through buy_ticket/sale_ticket.
+app.get('/api/trade-ticket/:trade_ticket_id/items', async (req, res) => {
+  try {
+    const { trade_ticket_id } = req.params;
+
+    const ticketResult = await pool.query(
+      'SELECT * FROM trade_ticket WHERE trade_ticket_id = $1',
+      [trade_ticket_id]
+    );
+    if (ticketResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Trade ticket not found' });
+    }
+    const { buy_ticket_id, sale_ticket_id } = ticketResult.rows[0];
+
+    const itemQuery = (idColumn, idValue) => pool.query(`
+      SELECT bt.*,
+        COALESCE(j.short_desc, h.short_desc) AS short_desc,
+        COALESCE(j.long_desc, h.long_desc)   AS long_desc,
+        COALESCE(j.item_price, h.cost_price) AS item_price,
+        COALESCE(j.images, h.images)         AS images
+      FROM ${idColumn === 'buy_ticket_id' ? 'buy_ticket' : 'sale_ticket'} bt
+      LEFT JOIN jewelry   j ON bt.item_id = j.item_id
+      LEFT JOIN hardgoods h ON bt.item_id = h.item_id
+      WHERE bt.${idColumn} = $1
+    `, [idValue]);
+
+    const [tradeInItems, saleOutItems] = await Promise.all([
+      buy_ticket_id  ? itemQuery('buy_ticket_id', buy_ticket_id)   : Promise.resolve({ rows: [] }),
+      sale_ticket_id ? itemQuery('sale_ticket_id', sale_ticket_id) : Promise.resolve({ rows: [] }),
+    ]);
+
+    res.json({
+      trade_ticket: ticketResult.rows[0],
+      trade_in_items: tradeInItems.rows,
+      sale_out_items: saleOutItems.rows,
+    });
+  } catch (error) {
+    console.error('Error fetching trade ticket items:', error);
+    res.status(500).json({ error: 'Failed to fetch trade ticket items' });
+  }
+});
+
+app.post('/api/trade-ticket', async (req, res) => {
+  try {
+    const { trade_ticket_id, buy_ticket_id, sale_ticket_id, transaction_id, ticket_note, show_on_receipt } = req.body;
+
+    if (!trade_ticket_id) {
+      return res.status(400).json({ error: 'trade_ticket_id is required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO trade_ticket (trade_ticket_id, buy_ticket_id, sale_ticket_id, transaction_id, ticket_note, show_on_receipt)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [trade_ticket_id, buy_ticket_id || null, sale_ticket_id || null, transaction_id || null, ticket_note || null, show_on_receipt ?? false]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating trade ticket:', error);
+    res.status(500).json({ error: 'Failed to create trade ticket' });
+  }
+});
+
+// GET /api/customers/:id/trade/stats — mirrors /customers/:id/buy/stats, but
+// counts trade tickets and sums the trade-in side (via the linked buy_ticket).
+app.get('/api/customers/:id/trade/stats', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(`
+      SELECT
+        MAX(t.transaction_date) AS last_trade_date,
+        COUNT(DISTINCT tt.trade_ticket_id) AS total_trades,
+        COALESCE(SUM(COALESCE(j.item_price, h.cost_price, 0)), 0) AS total_trade_in_value
+      FROM trade_ticket tt
+      JOIN transactions t ON tt.transaction_id = t.transaction_id
+      LEFT JOIN buy_ticket bt ON bt.buy_ticket_id = tt.buy_ticket_id
+      LEFT JOIN jewelry   j ON bt.item_id = j.item_id
+      LEFT JOIN hardgoods h ON bt.item_id = h.item_id
+      WHERE t.customer_id = $1
+    `, [id]);
+    const row = result.rows[0];
+    res.json({
+      last_trade_date:      row.last_trade_date || null,
+      total_trades:          parseInt(row.total_trades)         || 0,
+      total_trade_in_value:  parseFloat(row.total_trade_in_value) || 0,
+    });
+  } catch (err) {
+    console.error('Error fetching customer trade stats:', err);
+    res.status(500).json({ error: 'Failed to fetch customer trade stats' });
+  }
+});
+
 // Pawn Ticket API Endpoints
 app.get('/api/pawn-ticket', async (req, res) => {
   try {
@@ -8720,29 +9165,29 @@ app.put('/api/receipt-config', async (req, res) => {
       pawn_receipt,
       layaway_receipt,
       return_receipt,
-      refund_receipt
+      trade_receipt,
+      payment_receipt,
+      repair_receipt,
     } = req.body;
 
-    // Check if a record already exists
     const checkResult = await pool.query('SELECT * FROM receipt_config');
 
     let result;
     if (checkResult.rows.length === 0) {
-      // Insert new record
       result = await pool.query(
-        `INSERT INTO receipt_config (transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt]
+        `INSERT INTO receipt_config (transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, trade_receipt, payment_receipt, repair_receipt)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, trade_receipt, payment_receipt, repair_receipt]
       );
     } else {
-      // Update existing record
       result = await pool.query(
         `UPDATE receipt_config
          SET transaction_receipt = $1, buy_receipt = $2, pawn_receipt = $3,
-             layaway_receipt = $4, return_receipt = $5, refund_receipt = $6,
+             layaway_receipt = $4, return_receipt = $5,
+             trade_receipt = $6, payment_receipt = $7, repair_receipt = $8,
              updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
-        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt]
+        [transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, trade_receipt, payment_receipt, repair_receipt]
       );
     }
 

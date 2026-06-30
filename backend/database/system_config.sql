@@ -169,7 +169,9 @@ BEGIN
         pawn_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
         layaway_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
         return_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
-        refund_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
+        trade_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
+        payment_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
+        repair_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us',
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP
     );
@@ -177,22 +179,31 @@ BEGIN
     -- Add comment for documentation
     COMMENT ON TABLE receipt_config IS 'Stores configurable footer text for different receipt types';
 
-    -- Insert default configuration only if table is empty
-    INSERT INTO receipt_config (transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, refund_receipt)
-    SELECT 'Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us',
-            'Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us'
-    WHERE NOT EXISTS (SELECT 1 FROM receipt_config LIMIT 1);
-
-    -- Add sales_receipt column if it doesn't exist
-    IF NOT EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_name = 'receipt_config'
-        AND column_name = 'sales_receipt'
-    ) THEN
-        ALTER TABLE receipt_config
-        ADD COLUMN sales_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us';
+    -- Add missing columns first (must happen before INSERT to avoid column-not-found errors)
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'receipt_config' AND column_name = 'sales_receipt') THEN
+        ALTER TABLE receipt_config ADD COLUMN sales_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us';
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'receipt_config' AND column_name = 'trade_receipt') THEN
+        ALTER TABLE receipt_config ADD COLUMN trade_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'receipt_config' AND column_name = 'payment_receipt') THEN
+        ALTER TABLE receipt_config ADD COLUMN payment_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'receipt_config' AND column_name = 'repair_receipt') THEN
+        ALTER TABLE receipt_config ADD COLUMN repair_receipt TEXT NOT NULL DEFAULT 'Thank you for shopping with us';
+    END IF;
+
+    -- Drop refund_receipt column if it exists
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'receipt_config' AND column_name = 'refund_receipt') THEN
+        ALTER TABLE receipt_config DROP COLUMN refund_receipt;
+    END IF;
+
+    -- Insert default configuration only if table is empty
+    INSERT INTO receipt_config (transaction_receipt, buy_receipt, pawn_receipt, layaway_receipt, return_receipt, trade_receipt, payment_receipt, repair_receipt)
+    SELECT 'Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us',
+           'Thank you for shopping with us', 'Thank you for shopping with us',
+           'Thank you for shopping with us', 'Thank you for shopping with us', 'Thank you for shopping with us'
+    WHERE NOT EXISTS (SELECT 1 FROM receipt_config LIMIT 1);
 
 END $$;
 

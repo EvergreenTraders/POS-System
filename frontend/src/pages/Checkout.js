@@ -137,6 +137,14 @@ function Checkout() {
     email: ''
   });
   const [checkoutSource, setCheckoutSource] = useState(location.state?.from || null);
+  // Trade tickets tax only the amount the sale exceeds the trade-in allowance,
+  // a ticket-level computation TradeTransactionScreen already did — captured
+  // here once so it survives re-renders rather than re-reading location.state.
+  const [tradeTotal] = useState(location.state?.tradeTotal);
+  // Breakdown behind tradeTotal (trade-in/sale subtotals, taxable difference,
+  // tax rate/amount) — surfaced in the UI so the tax-on-difference rule isn't
+  // a black box to whoever's checking the customer out.
+  const [tradeBreakdown] = useState(location.state?.tradeBreakdown);
   const [taxRate, setTaxRate] = useState(0.13); // Default 13% tax rate
   const [selectedProvince, setSelectedProvince] = useState('ON');
   const [provinceName, setProvinceName] = useState('Ontario');
@@ -239,7 +247,7 @@ function Checkout() {
 
         setIsInitialized(true);
       }
-      else if (fromSource === 'cart' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket') {
+      else if (fromSource === 'cart' || fromSource === 'sale-ticket' || fromSource === 'buy-ticket' || fromSource === 'trade-ticket') {
         // Store the items to checkout and all cart items separately
         const items = itemsToCheckout;
 
@@ -455,6 +463,14 @@ function Checkout() {
   }, [selectedCustomer, setCustomer]);
 
   const calculateSubtotal = useCallback(() => {
+    // A trade ticket's total can't be rebuilt by summing its trade_in/trade_sale
+    // line items here — tax only applies to the portion of the sale that exceeds
+    // the trade-in allowance, a ticket-level computation TradeTransactionScreen
+    // already did. Use that precomputed total directly instead.
+    if (checkoutSource === 'trade-ticket' && tradeTotal !== undefined) {
+      return tradeTotal;
+    }
+
     // Always use checkoutItems if available, as it contains the items selected for checkout
     // Only fall back to cartItems if checkoutItems is empty (e.g., coming from estimator)
     const itemsToCalculate = checkoutItems.length > 0 ? checkoutItems : cartItems;
@@ -510,7 +526,7 @@ function Checkout() {
       // Apply sign based on transaction type
       // Money going OUT (buy/pawn) = negative values
       // Money coming IN (sale/repair/redeem) = positive values
-      if (transactionType === 'buy' || transactionType === 'pawn') {
+      if (transactionType === 'buy' || transactionType === 'pawn' || transactionType === 'trade_in') {
         itemValue = -Math.abs(itemValue);
       } else {
         itemValue = Math.abs(itemValue);
@@ -529,7 +545,7 @@ function Checkout() {
       }
     }
     return subtotal;
-  }, [checkoutItems, cartItems, selectedCustomer, taxRate]);
+  }, [checkoutItems, cartItems, selectedCustomer, taxRate, checkoutSource, tradeTotal]);
 
   const calculateTax = useCallback(() => {
     // Tax is not calculated - all prices already include tax
@@ -888,15 +904,14 @@ function Checkout() {
           } else if (hasJewelryItems) {
             // If coming from estimator, create new jewelry items (only if we have jewelry items)
             // Filter out items from inventory as they already exist in the database
-            // Pre-assign item IDs following BT-XXXXXXXX-XX format (same as hardgoods)
-            const ticketCounters = {};
+            // Don't pre-assign item IDs here — the server computes BT-XXXXXXXX-XX ids
+            // against the DB count for that buy_ticket_id, which is the only way to
+            // avoid colliding with items already persisted under the same ticket in
+            // an earlier request (this naive in-memory counter always restarted at 1).
             const newJewelryItems = checkoutItems.filter(item => !item.fromInventory).map(item => {
-              if (!item.buyTicketId) return item;
-              ticketCounters[item.buyTicketId] = (ticketCounters[item.buyTicketId] || 0) + 1;
               const desc = item.short_desc || item.description || '';
               return {
                 ...item,
-                item_id: `${item.buyTicketId}-${String(ticketCounters[item.buyTicketId]).padStart(2, '0')}`,
                 short_desc: desc,
                 long_desc: item.long_desc || desc,
               };
@@ -1422,42 +1437,113 @@ function Checkout() {
             }
           }
 
-          // Step 2.7: Post trade_ticket records for each unique trade_ticket_id
+          // Step 2.7: Post trade_ticket records. A trade doesn't store items
+          // directly — its trade-in items go into buy_ticket (under the
+          // buyTicketId minted by TradeTransactionScreen) and its sale-out
+          // items go into sale_ticket (under saleTicketId), exactly like a
+          // standalone buy/sale ticket. trade_ticket just links those two ids.
           const tradeTicketIds = new Set();
           checkoutItems.forEach(item => {
-            if (item.tradeTicketId) {
-              tradeTicketIds.add(item.tradeTicketId);
-            }
+            if (item.tradeTicketId) tradeTicketIds.add(item.tradeTicketId);
           });
+
+          // createdJewelryItems only has entries for checkoutItems that were NOT
+          // fromInventory (sale items skip jewelry creation entirely — they already
+          // exist), so its array position doesn't match checkoutItems' position.
+          // Build the real mapping once up front instead of assuming they line up.
+          const tradeJewelryCreationPos = new Map();
+          {
+            let pos = 0;
+            checkoutItems.forEach((item, idx) => {
+              if (!item.fromInventory) tradeJewelryCreationPos.set(idx, pos++);
+            });
+          }
 
           for (const tradeTicketId of tradeTicketIds) {
             const itemsForTicket = checkoutItems
               .map((item, index) => ({ ...item, index }))
               .filter(item => item.tradeTicketId === tradeTicketId);
 
-            for (const item of itemsForTicket) {
-              try {
-                let itemId = null;
-                if (createdJewelryItems && createdJewelryItems.length > 0 && createdJewelryItems[item.index]) {
-                  itemId = createdJewelryItems[item.index].item_id;
-                } else if (item.item_id) {
-                  itemId = item.item_id;
-                }
+            const tradeInItems  = itemsForTicket.filter(item => item.transaction_type === 'trade_in');
+            const tradeSaleItems = itemsForTicket.filter(item => item.transaction_type === 'trade_sale');
+            const buyTicketId  = tradeInItems[0]?.buyTicketId  || null;
+            const saleTicketId = tradeSaleItems[0]?.saleTicketId || null;
 
-                await axios.post(
-                  `${config.apiUrl}/trade-ticket`,
-                  {
-                    trade_ticket_id: tradeTicketId,
-                    transaction_id: realTransactionId,
-                    item_id: itemId
-                  },
-                  {
-                    headers: { Authorization: `Bearer ${token}` }
-                  }
-                );
-              } catch (tradeTicketError) {
-                console.error('Error posting trade_ticket:', tradeTicketError);
+            const resolveItemId = (item) => {
+              // Already in inventory (e.g. a trade_sale item, or a trade-in item
+              // converted from an existing inventory record) — use its real id,
+              // never re-create a jewelry row for it.
+              if (item.fromInventory) return item.item_id || null;
+              const pos = tradeJewelryCreationPos.get(item.index);
+              if (pos !== undefined && createdJewelryItems && createdJewelryItems[pos]) {
+                return createdJewelryItems[pos].item_id;
               }
+              return item.item_id || null;
+            };
+            const resolveInvType = (item) =>
+              item.fromEstimator === 'hardgoods' ? 'HG'
+              : item.fromEstimator === 'jewelry' || item.sourceEstimator === 'jewelry' ? 'JW'
+              : null;
+
+            for (const item of tradeInItems) {
+              try {
+                await axios.post(
+                  `${config.apiUrl}/buy-ticket`,
+                  {
+                    buy_ticket_id:   buyTicketId,
+                    transaction_id:  realTransactionId,
+                    item_id:         resolveItemId(item),
+                    inventory_type:  resolveInvType(item),
+                    ticket_note:     item.ticket_note || null,
+                    show_on_receipt: item.show_on_receipt || false,
+                  },
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+              } catch (buyTicketError) {
+                console.error('Error posting buy_ticket for trade-in item:', buyTicketError);
+              }
+            }
+
+            for (const item of tradeSaleItems) {
+              try {
+                await axios.post(
+                  `${config.apiUrl}/sale-ticket`,
+                  {
+                    sale_ticket_id:  saleTicketId,
+                    transaction_id:  realTransactionId,
+                    item_id:         resolveItemId(item),
+                    inventory_type:  resolveInvType(item),
+                    ticket_note:     item.ticket_note || null,
+                    show_on_receipt: item.show_on_receipt || false,
+                  },
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+              } catch (saleTicketError) {
+                console.error('Error posting sale_ticket for trade sale-out item:', saleTicketError);
+              }
+            }
+
+            try {
+              await axios.post(
+                `${config.apiUrl}/trade-ticket`,
+                {
+                  trade_ticket_id: tradeTicketId,
+                  buy_ticket_id:   buyTicketId,
+                  sale_ticket_id:  saleTicketId,
+                  transaction_id:  realTransactionId,
+                  ticket_note:     itemsForTicket[0]?.ticket_note    || null,
+                  show_on_receipt: itemsForTicket[0]?.show_on_receipt || false,
+                },
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+              // Commit pending ticket IDs so they are not reused on the next
+              // checkout (especially important for the quote→checkout path which
+              // bypasses TradeTransactionScreen's own commit calls).
+              localStorage.removeItem('pendingTTTicketId');
+              if (buyTicketId)  localStorage.removeItem('pendingBTTicketId');
+              if (saleTicketId) localStorage.removeItem('pendingSTTicketId');
+            } catch (tradeTicketError) {
+              console.error('Error posting trade_ticket:', tradeTicketError);
             }
           }
 
@@ -1545,7 +1631,9 @@ function Checkout() {
 
 
             // Only update status for sale transactions with inventory items
-            if (transactionType === 'sale' && item.item_id && item.fromInventory) {
+            // (includes trade_sale — the item the customer takes home in a trade,
+            // which is also pulled from existing inventory)
+            if ((transactionType === 'sale' || transactionType === 'trade_sale') && item.item_id && item.fromInventory) {
               try {
                 const basePrice = parseFloat(item.price) || 0;
                 const isHardgoods = item.fromHardgoodsInventory || item._type === 'hardgoods'
@@ -1674,6 +1762,23 @@ function Checkout() {
             }
           }
 
+          // Trade quotes mix trade-in items (cleaned up automatically when
+          // /api/buy-ticket promotes their QT-prefixed placeholder) with sale
+          // items (linked to real inventory, never auto-removed) — the quote
+          // can be left behind with just the sale item's row still attached,
+          // so it needs this same explicit cleanup. The backend only restores
+          // sellable status on the real inventory item; it never deletes it.
+          if (isFromQuotes && quoteId && checkoutSource === 'trade-ticket') {
+            try {
+              await axios.delete(
+                `${config.apiUrl}/quotes/${quoteId}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+            } catch (err) {
+              console.error('Failed to clean up trade quote after checkout:', err);
+            }
+          }
+
           // Step 4: Clear all storage IMMEDIATELY before any UI updates
           // Clear all ticket items from localStorage FIRST
           const ticketTypes = ['pawn', 'buy', 'trade', 'sale', 'repair', 'payment', 'refund', 'redeem'];
@@ -1748,6 +1853,52 @@ function Checkout() {
                 }
               } catch (e) {
                 console.error('Error clearing sale workspace entry:', e);
+              }
+            }
+          }
+
+          // After successful buy checkout, remove the buy card from workspace localStorage
+          const buyCheckoutCompleted = checkoutSource === 'buy-ticket' &&
+            checkoutItems.some(i => (i.transaction_type || '').toLowerCase() === 'buy');
+          if (buyCheckoutCompleted) {
+            const customerId = selectedCustomer?.id;
+            const buyTicketId = checkoutItems.find(i => i.buyTicketId)?.buyTicketId;
+            if (customerId && buyTicketId) {
+              try {
+                const key = `workspace_${customerId}`;
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const filtered = (parsed.transactions || []).filter(
+                    tx => !(tx.type === 'BUY' && tx.ticketId === buyTicketId)
+                  );
+                  localStorage.setItem(key, JSON.stringify({ ...parsed, transactions: filtered }));
+                }
+              } catch (e) {
+                console.error('Error clearing buy workspace entry:', e);
+              }
+            }
+          }
+
+          // After successful trade checkout, remove the trade card from workspace localStorage
+          const tradeCheckoutCompleted = checkoutSource === 'trade-ticket' &&
+            checkoutItems.some(i => ['trade_in', 'trade_sale'].includes((i.transaction_type || '').toLowerCase()));
+          if (tradeCheckoutCompleted) {
+            const customerId = selectedCustomer?.id;
+            const tradeTicketId = checkoutItems.find(i => i.tradeTicketId)?.tradeTicketId;
+            if (customerId && tradeTicketId) {
+              try {
+                const key = `workspace_${customerId}`;
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const filtered = (parsed.transactions || []).filter(
+                    tx => !(tx.type === 'TRADE' && tx.ticketId === tradeTicketId)
+                  );
+                  localStorage.setItem(key, JSON.stringify({ ...parsed, transactions: filtered }));
+                }
+              } catch (e) {
+                console.error('Error clearing trade workspace entry:', e);
               }
             }
           }
@@ -1851,8 +2002,10 @@ function Checkout() {
   };
 
 const handleBackToEstimation = () => {
-    // If we came from a quote, go back to quote manager
-    if (location.state?.quoteId) {
+    // If we came from a quote, go back to quote manager — except for a trade
+    // quote, where the breadcrumb is labeled "Trade Ticket" and should behave
+    // like one (back to the transactions workspace), not jump to the quote list.
+    if (location.state?.quoteId && checkoutSource !== 'trade-ticket') {
       clearCart();
       setCustomer(null);
       navigate('/quote-manager');
@@ -1869,6 +2022,8 @@ const handleBackToEstimation = () => {
       navigate('/modern-transactions', { state: { returnToSale: true } });
     } else if (checkoutSource === 'buy-ticket') {
       navigate('/modern-transactions', { state: { returnToBuy: true } });
+    } else if (checkoutSource === 'trade-ticket') {
+      navigate('/modern-transactions', { state: { returnToTrade: true } });
     } else if (checkoutSource === 'cart') {
       // Check if this is a pawn-only checkout — navigate back to pawn screen
       const isPawnCheckout = checkoutItems.length > 0 &&
@@ -1998,11 +2153,16 @@ const handleBackToEstimation = () => {
   const isPawnCheckout = checkoutItems.length > 0 &&
     checkoutItems.every(item => (item.transaction_type || '').toLowerCase() === 'pawn');
 
-  const isSaleCheckout = checkoutSource === 'sale-ticket';
-  const isBuyCheckout  = checkoutSource === 'buy-ticket';
-  const themeColor   = isSaleCheckout ? '#2e7d32' : isBuyCheckout ? '#0284c7' : PURPLE;
-  const themeDark    = isSaleCheckout ? '#1b5e20' : isBuyCheckout ? '#0369a1' : PURPLE_DARK;
-  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : isBuyCheckout ? '#e0f2fe' : '#f3e5f5';
+  const isSaleCheckout  = checkoutSource === 'sale-ticket';
+  const isBuyCheckout   = checkoutSource === 'buy-ticket';
+  const isTradeCheckout = checkoutSource === 'trade-ticket';
+  // Trade's color matches the registered transaction_type.color ('#00695c'),
+  // not TradeTransactionScreen's internal accent teal — keeps Checkout visually
+  // consistent with how trade is colored everywhere else in the app (e.g. the
+  // Transactions hub's type buttons).
+  const themeColor   = isSaleCheckout ? '#2e7d32' : isBuyCheckout ? '#0284c7' : isTradeCheckout ? '#00695c' : PURPLE;
+  const themeDark    = isSaleCheckout ? '#1b5e20' : isBuyCheckout ? '#0369a1' : isTradeCheckout ? '#004d40' : PURPLE_DARK;
+  const themeHoverBg = isSaleCheckout ? '#e8f5e9' : isBuyCheckout ? '#e0f2fe' : isTradeCheckout ? '#e0f2f1' : '#f3e5f5';
 
   const breadcrumbSource = isPawnCheckout
     ? 'Pawn Transaction'
@@ -2010,6 +2170,8 @@ const handleBackToEstimation = () => {
     ? 'Sale Transaction'
     : checkoutSource === 'buy-ticket'
     ? 'Buy Transaction'
+    : checkoutSource === 'trade-ticket'
+    ? 'Trade Ticket'
     : checkoutSource === 'coinsbullions'
     ? 'Coins & Bullions'
     : checkoutSource === 'cart'
@@ -2021,7 +2183,7 @@ const handleBackToEstimation = () => {
 
       {/* Breadcrumb */}
       <Box sx={{ bgcolor: themeColor, color: 'white', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        {isBuyCheckout ? (
+        {isBuyCheckout || isTradeCheckout ? (
           <>
             <Typography variant="body2" fontWeight={400}
               sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
@@ -2032,7 +2194,7 @@ const handleBackToEstimation = () => {
             <Typography variant="body2" fontWeight={400}
               sx={{ cursor: 'pointer', opacity: 0.8, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
               onClick={handleBackToEstimation}>
-              Buy Ticket
+              {isTradeCheckout ? 'Trade Ticket' : 'Buy Ticket'}
             </Typography>
           </>
         ) : (
@@ -2356,7 +2518,7 @@ const handleBackToEstimation = () => {
                       // Money going OUT (buy/pawn) = negative values
                       // Money coming IN (sale/repair/other) = positive values
                       let displayPrice = totalPrice;
-                      if (itemTransactionType === 'buy' || itemTransactionType === 'pawn') {
+                      if (itemTransactionType === 'buy' || itemTransactionType === 'pawn' || itemTransactionType === 'trade_in') {
                         displayPrice = -Math.abs(totalPrice);
                       } else {
                         displayPrice = Math.abs(totalPrice);
@@ -2444,10 +2606,26 @@ const handleBackToEstimation = () => {
                     </Box>
                   );
                 })()}
+                {checkoutSource === 'trade-ticket' && tradeBreakdown && (
+                  <Box sx={{ mb: 2, p: 1.5, borderRadius: 1, bgcolor: '#f0f9ff', border: '1px solid #b3e5fc' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, fontStyle: 'italic' }}>
+                      Trade tax rule: tax is only charged on the amount the sale exceeds the trade-in allowance.
+                    </Typography>
+                    {[
+                      { label: 'Taxable Difference (Sale − Trade-In)', value: tradeBreakdown.taxableDifference },
+                      { label: `Tax (${(tradeBreakdown.taxRate * 100).toFixed(3)}%)`, value: tradeBreakdown.taxAmount },
+                    ].map(row => (
+                      <Box key={row.label} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                        <Typography variant="body2" color="text.secondary">{row.label}:</Typography>
+                        <Typography variant="body2">${(parseFloat(row.value) || 0).toFixed(2)}</Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="h6" fontWeight="bold">Total:</Typography>
-                  <Typography variant="h6" fontWeight="bold" color="primary">
-                    ${calculateTotal().toFixed(2)}
+                  <Typography variant="h6" fontWeight="bold">Net Effect:</Typography>
+                  <Typography variant="h6" fontWeight="bold" color={calculateTotal() < 0 ? 'error.main' : 'success.main'}>
+                    {calculateTotal() >= 0 ? '+' : '-'}${Math.abs(calculateTotal()).toFixed(2)}
                   </Typography>
                 </Box>
               </Box>
@@ -2512,8 +2690,8 @@ const handleBackToEstimation = () => {
                   variant="contained"
                   startIcon={<PaymentIcon />}
                   onClick={() => handleSubmit()}
-                  color="primary"
                   disabled={isStoreClosed}
+                  sx={{ bgcolor: themeColor, '&:hover': { bgcolor: themeDark } }}
                 >
                   {parseFloat(paymentDetails.cashAmount || 0) >= Math.abs(remainingAmount)
                     ? 'Process Payment'
