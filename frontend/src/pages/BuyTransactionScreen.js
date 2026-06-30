@@ -59,6 +59,15 @@ function generateBuyTicketId() {
 
 function commitBuyTicketId() { localStorage.removeItem(BT_PENDING_KEY); }
 
+function voidBuyTicketId(id) {
+  const voided = JSON.parse(localStorage.getItem('voidedBuyTickets') || '[]');
+  if (!voided.includes(id)) {
+    voided.push(id);
+    localStorage.setItem('voidedBuyTickets', JSON.stringify(voided));
+  }
+  if (localStorage.getItem(BT_PENDING_KEY) === id) localStorage.removeItem(BT_PENDING_KEY);
+}
+
 function resolveImageUrl(url) {
   if (!url) return null;
   if (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:')) return url;
@@ -1089,6 +1098,7 @@ export default function BuyTransactionScreen({
                 onConvertTo?.({ type: 'trade', item: pendingConvert.item, targetTicketId: pendingConvert.targetTicketId });
                 setPendingConvert(null);
               }
+              voidBuyTicketId(ticketId);
               onRemoveFromWorkspace?.(ticketId);
               setEmptyTicketDialogOpen(false);
             }}>

@@ -6,12 +6,13 @@ import {
   Box, Typography, Paper, Button, IconButton, Chip, Avatar,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   Dialog, DialogTitle, DialogContent, DialogActions, List, ListItemButton, ListItemText,
-  Tooltip, Snackbar, Alert, Select, MenuItem,
+  Tooltip, Snackbar, Alert,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import JewelryIntakeScreen from './JewelryIntakeScreen';
 
 const TRADE_TEAL = '#0891b2';
 const TRADE_DARK = '#0e7490';
@@ -93,8 +94,8 @@ export default function TradeTransactionScreen({
   const [selectedSaleId, setSelectedSaleId] = useState(null);
 
   // Trade-in item editing
-  const [editingTradeId, setEditingTradeId] = useState(null);
-  const [editTradeFields, setEditTradeFields] = useState({});
+  const [tradeIntakeOpen, setTradeIntakeOpen] = useState(false);
+  const [editingTradeIntakeItem, setEditingTradeIntakeItem] = useState(null);
   const [tradeQuickAddMode, setTradeQuickAddMode] = useState(false);
   const [tradeQuickInput, setTradeQuickInput]     = useState('');
   const [tradeScanInput,  setTradeScanInput]      = useState('');
@@ -212,26 +213,42 @@ export default function TradeTransactionScreen({
   };
 
   const startEditTrade = (item) => {
-    setEditingTradeId(item._lineId);
-    setEditTradeFields({
-      category_id: item.category_id || '',
-      description: item.description || '',
-      serial_number: item.serial_number || '',
-      qty: item.qty,
-      tradeAllowance: item.tradeAllowance,
+    const jd = item.jewelryData;
+    const images = item.images?.length ? item.images : (jd?.images || []);
+    setEditingTradeIntakeItem({
+      ...(jd || {}),
+      _lineId: item._lineId,
+      images,
+      // JewelryIntakeScreen reads 'item' for name and 'metal_category' for category
+      item: jd?.item || jd?.short_desc || item.description || '',
+      serial_number: jd?.serial_number || item.serial_number || '',
+      metal_category: jd?.metal_category || jd?.category || item.category_name || '',
+      paid_amount: jd?.paid_amount ?? item.tradeAllowance,
     });
+    setTradeIntakeOpen(true);
   };
 
-  const saveEditTrade = (_lineId) => {
-    setTradeItems(prev => prev.map(i => i._lineId === _lineId
-      ? { ...i, ...editTradeFields,
-          tradeAllowance: parseFloat(editTradeFields.tradeAllowance) || 0,
-          qty: parseInt(editTradeFields.qty) || 1,
-          category_name: categories.find(c => c.id === editTradeFields.category_id)?.name || i.category_name,
+  const handleTradeIntakeBack = () => {
+    setTradeIntakeOpen(false);
+    setEditingTradeIntakeItem(null);
+  };
+
+  const handleTradeIntakeUpdate = (item) => {
+    setTradeItems(prev => prev.map(i => i._lineId === editingTradeIntakeItem?._lineId
+      ? {
+          ...i,
+          category_id: categories.find(c => c.name === item.category)?.id || i.category_id,
+          category_name: item.category || i.category_name,
+          description: item.item || item.short_desc || i.description,
+          serial_number: item.serial_number || item.serial || i.serial_number,
+          images: item.images || i.images,
+          sourceEstimator: 'jewelry',
+          jewelryData: item,
         }
       : i
     ));
-    setEditingTradeId(null);
+    setEditingTradeIntakeItem(null);
+    setTradeIntakeOpen(false);
   };
 
   // ── Sale items ───────────────────────────────────────────────────────────────
@@ -335,6 +352,9 @@ export default function TradeTransactionScreen({
       qty:           parseInt(item.qty) || 1,
       tradeAllowance: parseFloat(item.paid) || 0,
       images:        item.images || [],
+      sourceEstimator: item.sourceEstimator,
+      jewelryData: item.jewelryData,
+      ...(item.fromInventory && { fromInventory: true, item_id: item.item_id }),
     }));
     setTradeItems(prev => [...prev, ...imported]);
     onConsumeWorkspaceBuy?.(selectedBuyId);
@@ -518,6 +538,22 @@ export default function TradeTransactionScreen({
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
+
+  if (tradeIntakeOpen) {
+    return (
+      <JewelryIntakeScreen
+        customer={customer}
+        ticketId={ticketId}
+        ticketLabel="Trade Ticket"
+        initialEntry=""
+        parsedValues={null}
+        editItem={editingTradeIntakeItem}
+        onBack={handleTradeIntakeBack}
+        onSaveItem={handleTradeIntakeBack}
+        onUpdateItem={handleTradeIntakeUpdate}
+      />
+    );
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px)', bgcolor: '#f5f6fa' }}>
@@ -715,53 +751,8 @@ export default function TradeTransactionScreen({
                     </TableRow>
                   )}
                   {tradeItems.map(item => {
-                    const isEditing = editingTradeId === item._lineId;
-                    const catName   = categories.find(c => c.id === item.category_id)?.name || item.category_name || '';
-                    return isEditing ? (
-                      <TableRow key={item._lineId} sx={{ bgcolor: '#f0f9ff' }}>
-                        <TableCell sx={{ py: 0.5 }}><Typography fontSize={11} color="text.secondary">{item.part_no}</Typography></TableCell>
-                        <TableCell sx={{ py: 0.5 }}>
-                          <ImageCell item={item} onCameraClick={() => openCamera('trade', item._lineId)} />
-                        </TableCell>
-                        <TableCell sx={{ py: 0.5 }}>
-                          <Select size="small" value={editTradeFields.category_id || ''} displayEmpty fullWidth
-                            onChange={e => setEditTradeFields(f => ({ ...f, category_id: e.target.value }))}
-                            sx={{ fontSize: 12 }}>
-                            <MenuItem value=""><em>None</em></MenuItem>
-                            {categories.map(c => <MenuItem key={c.id} value={c.id} sx={{ fontSize: 12 }}>{c.name}</MenuItem>)}
-                          </Select>
-                        </TableCell>
-                        <TableCell sx={{ py: 0.5 }}>
-                          <TextField size="small" fullWidth value={editTradeFields.description}
-                            onChange={e => setEditTradeFields(f => ({ ...f, description: e.target.value }))}
-                            placeholder="Description" inputProps={{ style: { fontSize: 12 } }} />
-                        </TableCell>
-                        <TableCell sx={{ py: 0.5 }}>
-                          <TextField size="small" fullWidth value={editTradeFields.serial_number}
-                            onChange={e => setEditTradeFields(f => ({ ...f, serial_number: e.target.value }))}
-                            placeholder="—" inputProps={{ style: { fontSize: 12 } }} />
-                        </TableCell>
-                        <TableCell sx={{ py: 0.5 }}>
-                          <TextField size="small" type="number" value={editTradeFields.qty}
-                            onChange={e => setEditTradeFields(f => ({ ...f, qty: e.target.value }))}
-                            inputProps={{ min: 1, style: { fontSize: 12, width: 36 } }} />
-                        </TableCell>
-                        <TableCell sx={{ py: 0.5 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-                            <Typography fontSize={12} color="text.secondary">$</Typography>
-                            <TextField size="small" type="number" value={editTradeFields.tradeAllowance}
-                              onChange={e => setEditTradeFields(f => ({ ...f, tradeAllowance: e.target.value }))}
-                              variant="standard"
-                              inputProps={{ min: 0, step: 0.01, style: { fontSize: 12, width: 64 } }}
-                              InputProps={{ disableUnderline: false }} />
-                          </Box>
-                        </TableCell>
-                        <TableCell align="center" sx={{ py: 0.5 }}>
-                          <Tooltip title="Save"><IconButton size="small" color="success" onClick={() => saveEditTrade(item._lineId)}><MuiIcons.Check sx={{ fontSize: 16 }} /></IconButton></Tooltip>
-                          <Tooltip title="Cancel"><IconButton size="small" onClick={() => setEditingTradeId(null)}><MuiIcons.Close sx={{ fontSize: 16 }} /></IconButton></Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
+                    const catName = categories.find(c => c.id === item.category_id)?.name || item.category_name || '';
+                    return (
                       <TableRow key={item._lineId} sx={{ '&:hover': { bgcolor: '#f0f9ff' } }}>
                         <TableCell sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 500, py: 0.75 }}>{item.part_no}</TableCell>
                         <TableCell sx={{ py: 0.75 }}>

@@ -17,6 +17,29 @@ const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
 const BUY_BLUE = '#0284c7';
 
+// Maps workspace transaction type to the localStorage keys each ticket screen uses
+// to track voided ticket numbers (so they're never reused) and the in-flight
+// "pending" ticket id (so a voided-but-uncommitted id isn't handed out again).
+const VOID_STORAGE_KEYS = {
+  PAWN:  { voided: 'voidedPawnTickets',  pending: 'pendingPTTicketId' },
+  BUY:   { voided: 'voidedBuyTickets',   pending: 'pendingBTTicketId' },
+  TRADE: { voided: 'voidedTradeTickets', pending: 'pendingTTTicketId' },
+  SALE:  { voided: 'voidedSaleTickets',  pending: 'pendingSTTicketId' },
+};
+
+function voidTicketId(type, ticketId) {
+  const keys = VOID_STORAGE_KEYS[type];
+  if (!keys || !ticketId) return;
+  const voided = JSON.parse(localStorage.getItem(keys.voided) || '[]');
+  if (!voided.includes(ticketId)) {
+    voided.push(ticketId);
+    localStorage.setItem(keys.voided, JSON.stringify(voided));
+  }
+  if (localStorage.getItem(keys.pending) === ticketId) {
+    localStorage.removeItem(keys.pending);
+  }
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 const PAWN_ACCENT = '#6a1b9a';
@@ -808,11 +831,7 @@ export default function ModernTransactions() {
   const handleConfirmVoid = () => {
     if (!voidConfirm) return;
     if (voidConfirm.ticketId) {
-      const voided = JSON.parse(localStorage.getItem('voidedPawnTickets') || '[]');
-      if (!voided.includes(voidConfirm.ticketId)) {
-        voided.push(voidConfirm.ticketId);
-        localStorage.setItem('voidedPawnTickets', JSON.stringify(voided));
-      }
+      voidTicketId(voidConfirm.type, voidConfirm.ticketId);
     }
     setWorkspaceTransactions(prev => prev.filter(t => t.id !== voidConfirm.id));
     setVoidConfirm(null);
@@ -923,6 +942,9 @@ export default function ModernTransactions() {
       qty: tradeItem.qty || 1,
       paid: parseFloat(tradeItem.tradeAllowance) || 0,
       images: tradeItem.images || [],
+      sourceEstimator: tradeItem.sourceEstimator,
+      jewelryData: tradeItem.jewelryData,
+      ...(tradeItem.fromInventory && { fromInventory: true, item_id: tradeItem.item_id }),
     };
     if (targetTicketId) {
       setWorkspaceTransactions(prev => prev.map(t =>
@@ -974,6 +996,9 @@ export default function ModernTransactions() {
         qty,
         tradeAllowance,
         images: item.images || [],
+        sourceEstimator: item.sourceEstimator,
+        jewelryData: item.jewelryData,
+        ...(item.fromInventory && { fromInventory: true, item_id: item.item_id }),
       };
       const buyTicketId = existingBuyData?.ticketId;
       setWorkspaceTransactions(prev => {
