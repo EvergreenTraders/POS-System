@@ -661,8 +661,24 @@ export default function ModernTransactions() {
     }
     return null;
   });
-  const [paymentOpen, setPaymentOpen]     = useState(false);
-  const [existingPaymentData, setExistingPaymentData] = useState(null);
+  const [paymentOpen, setPaymentOpen] = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingPaymentState');
+      return !!raw;
+    }
+    return false;
+  });
+  const [existingPaymentData, setExistingPaymentData] = useState(() => {
+    if (location.state?.customerUpdated) {
+      const raw = sessionStorage.getItem('pendingPaymentState');
+      if (!raw) return null;
+      try {
+        const { ticketId, selectedPayments, notes, ticketNote, showOnReceipt } = JSON.parse(raw);
+        return { ticketId, selectedPayments, notes, ticketNote, showOnReceipt };
+      } catch { return null; }
+    }
+    return null;
+  });
   const [voidConfirm, setVoidConfirm]     = useState(null); // workspace tx to void
   const [noCustomerWarning, setNoCustomerWarning] = useState(false);
   const [workspaceTransactions, setWorkspaceTransactions] = useState([]);
@@ -905,6 +921,26 @@ export default function ModernTransactions() {
     })
       .then(res => setCustomer(res.data))
       .catch(err => console.error('Failed to refresh customer after trade edit:', err));
+  }, [location.state]);
+
+  // Restore payment screen after returning from CustomerEditor
+  useEffect(() => {
+    if (!location.state?.customerUpdated) return;
+    const raw = sessionStorage.getItem('pendingPaymentState');
+    if (!raw) return;
+    let pending;
+    try { pending = JSON.parse(raw); } catch { return; }
+    sessionStorage.removeItem('pendingPaymentState');
+    const { customerId, customer: savedCustomer, ticketId, selectedPayments, notes, ticketNote, showOnReceipt } = pending;
+    if (!customerId) return;
+    if (savedCustomer) setCustomer(savedCustomer);
+    setExistingPaymentData({ ticketId, selectedPayments, notes, ticketNote, showOnReceipt });
+    setPaymentOpen(true);
+    axios.get(`${config.apiUrl}/customers/${customerId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setCustomer(res.data))
+      .catch(err => console.error('Failed to refresh customer after payment edit:', err));
   }, [location.state]);
 
   const handleCustomerSearch = async (query) => {

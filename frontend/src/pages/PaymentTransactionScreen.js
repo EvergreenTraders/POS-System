@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
 import {
   Box, Typography, Paper, Avatar, Button, IconButton, Chip,
   Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   Table, TableBody, TableCell, TableHead, TableRow,
-  Select, MenuItem, Snackbar, Alert, Stack, CircularProgress,
+  Select, MenuItem, Snackbar, Alert, Stack, CircularProgress, Tooltip,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 
@@ -18,11 +19,13 @@ const PMT_PENDING_KEY = 'pendingPMTTicketId';
 const PMT_COUNTER_KEY = 'lastPMTTicketNumber';
 
 function generatePaymentTicketId() {
+  const voided  = JSON.parse(localStorage.getItem('voidedPMTTickets') || '[]');
   const pending = localStorage.getItem(PMT_PENDING_KEY);
-  if (pending) return pending;
-  let last = parseInt(localStorage.getItem(PMT_COUNTER_KEY) || '100000');
-  last += 1;
-  const id = `PMT-${last}`;
+  if (pending && !voided.includes(pending)) return pending;
+  if (pending) localStorage.removeItem(PMT_PENDING_KEY);
+  let last = parseInt(localStorage.getItem(PMT_COUNTER_KEY) || '0');
+  let id;
+  do { last += 1; id = `PMT-${last.toString().padStart(8, '0')}`; } while (voided.includes(id));
   localStorage.setItem(PMT_COUNTER_KEY, last.toString());
   localStorage.setItem(PMT_PENDING_KEY, id);
   return id;
@@ -96,6 +99,17 @@ function TypeIcon({ type }) {
   return null;
 }
 
+function getCustomerImageUrl(customer) {
+  if (!customer?.image) return null;
+  const img = customer.image;
+  if (typeof img === 'object' && img.type === 'Buffer' && img.data) {
+    const base64 = btoa(new Uint8Array(img.data).reduce((d, b) => d + String.fromCharCode(b), ''));
+    return `data:image/jpeg;base64,${base64}`;
+  }
+  if (typeof img === 'string') return img;
+  return null;
+}
+
 export default function PaymentTransactionScreen({
   customer,
   customerStats,
@@ -103,6 +117,9 @@ export default function PaymentTransactionScreen({
   onAddToWorkspace,
   existingPaymentData,
 }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const [ticketId] = useState(() => existingPaymentData?.ticketId || generatePaymentTicketId());
   const [activeFilter, setActiveFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -554,124 +571,129 @@ export default function PaymentTransactionScreen({
       {/* ── Right: Customer + Summary panel ── */}
       <Paper sx={{ width: 280, flexShrink: 0, borderRadius: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderLeft: '1px solid #e5e7eb' }}>
 
-        {/* Customer info */}
-        {customer && (
-          <Box sx={{ p: 2.5, borderBottom: '1px solid #f0f0f0' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
-              <Avatar sx={{ bgcolor: GREEN, width: 44, height: 44, fontSize: 16, fontWeight: 700 }}>
-                {customer.first_name?.[0]}{customer.last_name?.[0]}
-              </Avatar>
-              <Box>
-                <Typography fontWeight={700} fontSize={15}>
-                  {customer.first_name} {customer.last_name}
-                </Typography>
-              </Box>
-            </Box>
-
-            <Stack spacing={0.5}>
-              {customer.phone && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                  <MuiIcons.Phone sx={{ fontSize: 14, color: 'text.secondary' }} />
-                  <Typography fontSize={12} color="text.secondary">{customer.phone}</Typography>
+        {/* ── Customer header ── */}
+        <Box sx={{ p: 2, borderBottom: '2px solid #f0f0f0' }}>
+          {customer ? (() => {
+            const imgUrl = getCustomerImageUrl(customer);
+            return (
+              <>
+                {/* Avatar + name + edit */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <Avatar
+                    src={imgUrl || undefined}
+                    sx={{ width: 48, height: 48, bgcolor: PAYMENT_AMBER, color: '#fff', fontSize: 17, fontWeight: 700, flexShrink: 0 }}
+                  >
+                    {!imgUrl && `${(customer.first_name || '')[0] || ''}${(customer.last_name || '')[0] || ''}`.toUpperCase()}
+                  </Avatar>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography fontWeight={700} fontSize={14} lineHeight={1.2} noWrap>
+                      {customer.first_name} {customer.last_name}
+                    </Typography>
+                    {customer.phone && (
+                      <Typography fontSize={12} color="text.secondary" lineHeight={1.4}>
+                        {customer.phone}
+                      </Typography>
+                    )}
+                  </Box>
+                  <Tooltip title="Edit customer">
+                    <IconButton
+                      size="small"
+                      sx={{ color: PAYMENT_AMBER, border: `1px solid ${PAYMENT_AMBER}`, '&:hover': { bgcolor: '#fff8e1' } }}
+                      onClick={() => {
+                        sessionStorage.setItem('pendingPaymentState', JSON.stringify({
+                          customerId: customer.id,
+                          customer,
+                          ticketId,
+                          selectedPayments,
+                          notes,
+                          ticketNote,
+                          showOnReceipt,
+                        }));
+                        navigate('/customer-editor', {
+                          state: {
+                            customer: {
+                              ...customer,
+                              id_expiry_date: customer.id_expiry_date ? new Date(customer.id_expiry_date).toISOString().substring(0, 10) : '',
+                              date_of_birth:  customer.date_of_birth  ? new Date(customer.date_of_birth).toISOString().substring(0, 10)  : '',
+                            },
+                            mode: 'edit',
+                            returnTo: location.pathname,
+                          },
+                        });
+                      }}
+                    >
+                      <MuiIcons.Edit fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 </Box>
-              )}
-              {customer.email && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                  <MuiIcons.Email sx={{ fontSize: 14, color: 'text.secondary' }} />
-                  <Typography fontSize={12} color="text.secondary" noWrap>{customer.email}</Typography>
-                </Box>
-              )}
-              {customer.created_at && (
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
-                  <Typography fontSize={12} color="text.secondary">Customer Since</Typography>
-                  <Typography fontSize={12} fontWeight={500}>
-                    {new Date(customer.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </Typography>
-                </Box>
-              )}
-              {customerStats?.store_credit != null && (
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Typography fontSize={12} color="text.secondary">Store Credit</Typography>
-                  <Typography fontSize={12} fontWeight={700} color={GREEN}>
-                    ${Number(customerStats.store_credit).toFixed(2)}
-                  </Typography>
-                </Box>
-              )}
-            </Stack>
 
-            <Divider sx={{ my: 1.5 }} />
-
-            {/* Active item counts */}
-            <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'space-between' }}>
-              <Box sx={{ textAlign: 'center' }}>
-                <MuiIcons.LocalOffer sx={{ fontSize: 16, color: PAYMENT_AMBER }} />
-                <Typography fontSize={10} color="text.secondary" display="block">Active Pawns</Typography>
-                <Typography fontSize={14} fontWeight={700}>{customerStats?.active_pawns ?? 0}</Typography>
-              </Box>
-              <Box sx={{ textAlign: 'center' }}>
-                <MuiIcons.CalendarMonth sx={{ fontSize: 16, color: '#7c3aed' }} />
-                <Typography fontSize={10} color="text.secondary" display="block">Active Layaways</Typography>
-                <Typography fontSize={14} fontWeight={700}>{customerStats?.active_layaways ?? 0}</Typography>
-              </Box>
-              <Box sx={{ textAlign: 'center' }}>
-                <MuiIcons.Build sx={{ fontSize: 16, color: '#0891b2' }} />
-                <Typography fontSize={10} color="text.secondary" display="block">Active Repairs</Typography>
-                <Typography fontSize={14} fontWeight={700}>{customerStats?.open_repairs ?? 0}</Typography>
-              </Box>
-            </Box>
-          </Box>
-        )}
-
-        {!customer && (
-          <Box sx={{ p: 2.5, borderBottom: '1px solid #f0f0f0' }}>
+                {/* Customer stats row */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1.5 }}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography fontSize={10} color="text.secondary">Active Pawns</Typography>
+                    <Typography fontSize={14} fontWeight={700} color={PAYMENT_AMBER}>{customerStats?.active_pawns ?? 0}</Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography fontSize={10} color="text.secondary">Store Credit</Typography>
+                    <Typography fontSize={14} fontWeight={700} color={GREEN}>
+                      ${Number(customerStats?.store_credit ?? 0).toFixed(2)}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography fontSize={10} color="text.secondary">Since</Typography>
+                    <Typography fontSize={11} fontWeight={600}>
+                      {customer.created_at
+                        ? new Date(customer.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+                        : '—'}
+                    </Typography>
+                  </Box>
+                </Box>
+              </>
+            );
+          })() : (
             <Typography fontSize={13} color="text.secondary" fontStyle="italic">No customer selected.</Typography>
-          </Box>
-        )}
+          )}
+        </Box>
 
-        {/* Notes */}
-        <Box sx={{ px: 2.5, pb: 0 }}>
-          <Divider sx={{ mb: 2 }} />
+        {/* ── Notes ── */}
+        <Box sx={{ px: 2, py: 1.5, borderBottom: '1px solid #f0f0f0' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1 }}>
-            <MuiIcons.StickyNote2 sx={{ fontSize: 16, color: 'text.secondary' }} />
-            <Typography fontSize={13} fontWeight={600}>Notes</Typography>
-            <Typography fontSize={12} color="text.secondary">(optional)</Typography>
+            <MuiIcons.StickyNote2 sx={{ fontSize: 15, color: 'text.secondary' }} />
+            <Typography fontSize={12} fontWeight={600}>Notes</Typography>
           </Box>
           <TextField
-            fullWidth
-            multiline
-            rows={3}
-            size="small"
+            fullWidth multiline rows={2} size="small"
             placeholder="Add notes about this payment ticket..."
             value={notes}
             onChange={e => setNotes(e.target.value)}
-            sx={{ '& .MuiOutlinedInput-root': { fontSize: 12, bgcolor: '#f9fafb' }, mb: 2 }}
+            sx={{ '& .MuiOutlinedInput-root': { fontSize: 12, bgcolor: '#f9fafb' } }}
           />
         </Box>
 
-        {/* Payment Summary */}
-        <Box sx={{ p: 2.5, flex: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1.5 }}>
-            <MuiIcons.AttachMoney sx={{ color: PAYMENT_AMBER, fontSize: 20 }} />
-            <Typography fontWeight={700} fontSize={14} color={PAYMENT_AMBER}>Payment Summary</Typography>
+        {/* ── Payment Summary ── */}
+        <Box sx={{ p: 2, flex: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1.5, pb: 1, borderBottom: `2px solid ${PAYMENT_AMBER}` }}>
+            <MuiIcons.AttachMoney sx={{ color: PAYMENT_AMBER, fontSize: 18 }} />
+            <Typography fontWeight={700} fontSize={13} color={PAYMENT_AMBER} letterSpacing={0.5}>PAYMENT SUMMARY</Typography>
           </Box>
 
-          <Stack spacing={1}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography fontSize={13} color="text.secondary">Pawn Extensions</Typography>
+          <Stack spacing={0.75}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography fontSize={12} color="text.secondary">Pawn Extensions</Typography>
               <Typography fontSize={13} fontWeight={600}>{fmt(pawnTotal)}</Typography>
             </Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography fontSize={13} color="text.secondary">Layaway Payments</Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography fontSize={12} color="text.secondary">Layaway Payments</Typography>
               <Typography fontSize={13} fontWeight={600}>{fmt(layawayTotal)}</Typography>
             </Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography fontSize={13} color="text.secondary">Repair Payments</Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography fontSize={12} color="text.secondary">Repair Payments</Typography>
               <Typography fontSize={13} fontWeight={600}>{fmt(0)}</Typography>
             </Box>
-            <Divider />
-            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography fontSize={14} fontWeight={700}>Total Payment</Typography>
-              <Typography fontSize={18} fontWeight={800} color={PAYMENT_AMBER}>{fmt(totalPayment)}</Typography>
+            <Divider sx={{ my: 0.5 }} />
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography fontSize={13} fontWeight={700}>Total Payment</Typography>
+              <Typography fontSize={20} fontWeight={800} color={PAYMENT_AMBER}>{fmt(totalPayment)}</Typography>
             </Box>
           </Stack>
         </Box>
