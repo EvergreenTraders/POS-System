@@ -10140,6 +10140,94 @@ app.get('/api/customers/:id/pawns', async (req, res) => {
   }
 });
 
+// GET /api/customers/:id/pmt/stats
+// Returns active/overdue pawn tickets for the customer with everything the
+// Payment Ticket screen needs: principal, rates, due date, days info, and
+// the per-period extension amount.
+app.get('/api/customers/:id/pmt/stats', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const today = new Date();
+
+    const result = await pool.query(`
+      SELECT
+        pt.pawn_ticket_id,
+        pt.status,
+        pt.due_date,
+        pt.term_days,
+        pt.frequency_days,
+        pt.interest_rate,
+        pt.insurance_rate,
+        pt.storage_fee,
+        STRING_AGG(COALESCE(j.short_desc, hg.short_desc), ', ' ORDER BY pt.id) AS item_description,
+        SUM(COALESCE(j.item_price, hg.cost_price, 0))                          AS pawn_amount,
+        MIN(t.transaction_date)                                                 AS transaction_date
+      FROM pawn_ticket pt
+      JOIN transactions t ON t.transaction_id = pt.transaction_id
+      LEFT JOIN jewelry   j  ON j.item_id  = pt.item_id
+      LEFT JOIN hardgoods hg ON hg.item_id = pt.item_id
+      WHERE t.customer_id = $1
+        AND pt.status IN ('ACTIVE', 'OVERDUE')
+      GROUP BY pt.pawn_ticket_id, pt.status, pt.due_date,
+               pt.term_days, pt.frequency_days, pt.interest_rate,
+               pt.insurance_rate, pt.storage_fee
+      ORDER BY
+        CASE WHEN pt.status = 'OVERDUE' THEN 0 ELSE 1 END,
+        pt.due_date ASC
+    `, [id]);
+
+    const pawns = result.rows.map(row => {
+      const principal      = parseFloat(row.pawn_amount)   || 0;
+      const interestRate   = parseFloat(row.interest_rate)  || 0;
+      const insuranceRate  = parseFloat(row.insurance_rate) || 0;
+      const storageFee     = parseFloat(row.storage_fee)    || 0;
+      const frequencyDays  = parseInt(row.frequency_days)   || 30;
+
+      // Extension amount = principal × (interest + insurance) / 100 + storage fee
+      const extensionAmount = Math.round(
+        (principal * (interestRate + insuranceRate) / 100 + storageFee) * 100
+      ) / 100;
+
+      const dueDate = row.due_date ? new Date(row.due_date) : null;
+      const diffDays = dueDate
+        ? Math.round((dueDate - today) / (1000 * 60 * 60 * 24))
+        : null;
+
+      const isOverdue = row.status === 'OVERDUE' || (diffDays !== null && diffDays < 0);
+
+      return {
+        type:             'pawn_extension',
+        ref:              row.pawn_ticket_id,
+        description:      row.item_description || '—',
+        transaction_date: row.transaction_date,
+        status:           isOverdue ? 'OVERDUE' : 'ACTIVE',
+        due_date:         dueDate
+          ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          : '—',
+        due_date_raw:     row.due_date,
+        days_info:        diffDays !== null
+          ? (diffDays < 0
+              ? `${Math.abs(diffDays)} day${Math.abs(diffDays) !== 1 ? 's' : ''} overdue`
+              : `${diffDays} day${diffDays !== 1 ? 's' : ''} left`)
+          : null,
+        days_diff:        diffDays,
+        principal,
+        extension_amount: extensionAmount,
+        frequency_days:   frequencyDays,
+        term_days:        parseInt(row.term_days) || 90,
+        interest_rate:    interestRate,
+        insurance_rate:   insuranceRate,
+        storage_fee:      storageFee,
+      };
+    });
+
+    res.json({ pawns });
+  } catch (err) {
+    console.error('Error fetching customer pmt stats:', err);
+    res.status(500).json({ error: 'Failed to fetch payment stats' });
+  }
+});
+
 app.get('/api/pawn-tickets/:ticketId/receipt-data', async (req, res) => {
   try {
     const { ticketId } = req.params;

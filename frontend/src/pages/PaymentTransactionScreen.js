@@ -1,15 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import config from '../config';
 import {
   Box, Typography, Paper, Avatar, Button, IconButton, Chip,
-  Divider, TextField, InputAdornment,
+  Divider, TextField, InputAdornment, Checkbox, FormControlLabel,
   Table, TableBody, TableCell, TableHead, TableRow,
-  Select, MenuItem, Snackbar, Alert, Stack,
+  Select, MenuItem, Snackbar, Alert, Stack, CircularProgress,
 } from '@mui/material';
 import * as MuiIcons from '@mui/icons-material';
 
 const GREEN = '#1a472a';
 const GREEN_LIGHT = '#2d6a4f';
-const PAYMENT_AMBER = '#d97706';
+const PAYMENT_AMBER = '#f9a825';
+const PAYMENT_DARK  = '#f57f17';
 
 const PMT_PENDING_KEY = 'pendingPMTTicketId';
 const PMT_COUNTER_KEY = 'lastPMTTicketNumber';
@@ -103,15 +106,26 @@ export default function PaymentTransactionScreen({
   const [ticketId] = useState(() => existingPaymentData?.ticketId || generatePaymentTicketId());
   const [activeFilter, setActiveFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [paymentSources] = useState(existingPaymentData?.paymentSources || { pawns: [], layaways: [] });
+  const [pawns, setPawns] = useState(existingPaymentData?.pawns || []);
+  const [loadingPawns, setLoadingPawns] = useState(false);
   const [selectedPayments, setSelectedPayments] = useState(existingPaymentData?.selectedPayments || []);
   const [notes, setNotes] = useState(existingPaymentData?.notes || '');
+  const [ticketNote, setTicketNote] = useState(existingPaymentData?.ticketNote || '');
+  const [showOnReceipt, setShowOnReceipt] = useState(existingPaymentData?.showOnReceipt ?? false);
   const [snack, setSnack] = useState(null);
 
-  const allSources = [
-    ...paymentSources.pawns,
-    ...paymentSources.layaways,
-  ];
+  useEffect(() => {
+    if (!customer?.id) { setPawns([]); return; }
+    setLoadingPawns(true);
+    axios.get(`${config.apiUrl}/customers/${customer.id}/pmt/stats`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then(res => setPawns(res.data.pawns || []))
+      .catch(() => setPawns([]))
+      .finally(() => setLoadingPawns(false));
+  }, [customer?.id]);
+
+  const allSources = pawns;
 
   const filteredSources = allSources.filter(s => {
     if (activeFilter !== 'all' && s.type !== activeFilter) return false;
@@ -196,21 +210,21 @@ export default function PaymentTransactionScreen({
     commitPaymentTicketId();
     onAddToWorkspace({
       ticketId,
+      pawns,
       selectedPayments,
       notes,
+      ticketNote,
+      showOnReceipt,
       totalPayment,
       pawnTotal,
       layawayTotal,
     });
   };
 
-  const pawnExtCount = allSources.filter(s => s.type === 'pawn_extension').length;
-  const layawayCount = allSources.filter(s => s.type === 'layaway').length;
-
   const tabCounts = {
     all: allSources.length,
-    pawn_extension: pawnExtCount,
-    layaway: layawayCount,
+    pawn_extension: allSources.filter(s => s.type === 'pawn_extension').length,
+    layaway: 0,
     repair: 0,
     other: 0,
   };
@@ -221,22 +235,16 @@ export default function PaymentTransactionScreen({
       {/* ── Main content ── */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
 
-        {/* Header */}
-        <Paper elevation={1} sx={{ px: 3, py: 1.5, borderRadius: 0, display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0, zIndex: 10 }}>
-          <IconButton size="small" onClick={onClose}>
-            <MuiIcons.ArrowBack />
-          </IconButton>
-          <Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Typography variant="h6" fontWeight={700}>Payment Ticket</Typography>
-              <Chip
-                label={ticketId}
-                size="small"
-                sx={{ bgcolor: PAYMENT_AMBER, color: '#fff', fontWeight: 700, fontSize: 12 }}
-              />
-            </Box>
-          </Box>
-        </Paper>
+        {/* Breadcrumb — matches Buy / Sale / Trade / Pawn pattern */}
+        <Box sx={{ bgcolor: PAYMENT_AMBER, color: '#fff', px: 2.5, py: 0.875, display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+          <Typography variant="body2" fontWeight={400}
+            sx={{ cursor: 'pointer', opacity: 0.85, '&:hover': { textDecoration: 'underline', opacity: 1 } }}
+            onClick={onClose}>
+            Transactions
+          </Typography>
+          <MuiIcons.ChevronRight sx={{ fontSize: 16, opacity: 0.6 }} />
+          <Typography variant="body2" fontWeight={700}>Payment Ticket ({ticketId})</Typography>
+        </Box>
 
         {/* Search + filter */}
         <Box sx={{ px: 2.5, pt: 2, pb: 1.5, flexShrink: 0 }}>
@@ -270,7 +278,7 @@ export default function PaymentTransactionScreen({
                     bgcolor: active ? PAYMENT_AMBER : undefined,
                     borderColor: active ? PAYMENT_AMBER : undefined,
                     color: active ? '#fff' : 'text.secondary',
-                    '&:hover': { bgcolor: active ? '#b45309' : undefined },
+                    '&:hover': { bgcolor: active ? PAYMENT_DARK : undefined },
                   }}
                 >
                   {f.label}
@@ -296,7 +304,11 @@ export default function PaymentTransactionScreen({
               <Typography fontWeight={700} fontSize={13}>Available Payment Sources</Typography>
             </Box>
 
-            {filteredSources.length === 0 ? (
+            {loadingPawns ? (
+              <Box sx={{ py: 4, textAlign: 'center' }}>
+                <CircularProgress size={24} sx={{ color: PAYMENT_AMBER }} />
+              </Box>
+            ) : filteredSources.length === 0 ? (
               <Box sx={{ py: 4, textAlign: 'center' }}>
                 <Typography color="text.secondary" fontSize={13}>
                   {customer ? 'No active payment sources found.' : 'Select a customer to view payment sources.'}
@@ -334,7 +346,7 @@ export default function PaymentTransactionScreen({
                         <TableCell sx={{ py: 1.25, maxWidth: 180 }}>
                           <Typography fontSize={12} fontWeight={600} noWrap>{source.description}</Typography>
                           <Typography fontSize={11} color="text.secondary">
-                            {source.type === 'pawn_extension' ? `Pawned on ${source.pawned_on}` : `Started on ${source.started_on}`}
+                            {source.transaction_date ? `Pawned on ${formatDate(source.transaction_date)}` : ''}
                           </Typography>
                         </TableCell>
                         <TableCell sx={{ py: 1.25 }}>
@@ -368,7 +380,7 @@ export default function PaymentTransactionScreen({
                               borderColor: alreadyAdded ? undefined : PAYMENT_AMBER,
                               color: alreadyAdded ? undefined : PAYMENT_AMBER,
                               bgcolor: alreadyAdded ? '#16a34a' : undefined,
-                              '&:hover': { borderColor: '#b45309', color: '#b45309' },
+                              '&:hover': { borderColor: PAYMENT_DARK, color: PAYMENT_DARK },
                             }}
                           >
                             {alreadyAdded ? <MuiIcons.Check sx={{ fontSize: 16 }} /> : 'Add'}
@@ -411,7 +423,7 @@ export default function PaymentTransactionScreen({
                       <TableCell sx={{ py: 1.5, maxWidth: 140 }}>
                         <Typography fontSize={12} fontWeight={600} noWrap>{p.description}</Typography>
                         <Typography fontSize={11} color="text.secondary">
-                          {p.type === 'pawn_extension' ? `Pawned on ${p.pawned_on}` : `Started on ${p.started_on}`}
+                          {p.transaction_date ? `Pawned on ${formatDate(p.transaction_date)}` : ''}
                         </Typography>
                       </TableCell>
                       <TableCell sx={{ py: 1.5 }}>
@@ -488,7 +500,7 @@ export default function PaymentTransactionScreen({
               {/* Info note */}
               <Box sx={{ px: 2, py: 1, bgcolor: '#fffbeb', borderTop: '1px solid #fde68a', display: 'flex', alignItems: 'center', gap: 1 }}>
                 <MuiIcons.Info sx={{ fontSize: 16, color: PAYMENT_AMBER, flexShrink: 0 }} />
-                <Typography fontSize={12} color="#92400e">
+                <Typography fontSize={12} color="#e65100">
                   Pawn extension amounts are calculated based on the pawn terms. Use edit to override the amount if needed.
                 </Typography>
               </Box>
@@ -498,24 +510,43 @@ export default function PaymentTransactionScreen({
         </Box>
 
         {/* Bottom action bar */}
-        <Paper elevation={2} sx={{ px: 3, py: 1.5, borderRadius: 0, flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: 1.5 }}>
-          <Button variant="outlined" onClick={onClose} sx={{ borderRadius: 2, minWidth: 90 }}>Cancel</Button>
+        <Paper sx={{ px: 2, py: 1.25, borderRadius: 0, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: 1.25, position: 'sticky', bottom: 0, zIndex: 10 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+            <Typography variant="caption" fontWeight={600} color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+              Ticket Note
+            </Typography>
+            <TextField
+              fullWidth size="small"
+              placeholder="Add a note for this ticket (optional)"
+              value={ticketNote}
+              onChange={e => setTicketNote(e.target.value)}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+            />
+          </Box>
+          <FormControlLabel
+            control={<Checkbox size="small" checked={showOnReceipt} onChange={e => setShowOnReceipt(e.target.checked)} />}
+            label={<Typography variant="caption">Show on receipt</Typography>}
+            sx={{ whiteSpace: 'nowrap', mr: 0 }}
+          />
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+          <Button variant="outlined" onClick={onClose} sx={{ borderRadius: 2, textTransform: 'none', fontSize: 13 }}>
+            Cancel
+          </Button>
           <Button
             variant="outlined"
-            startIcon={<MuiIcons.Dashboard />}
             onClick={handleAddToWorkspace}
             disabled={selectedPayments.length === 0}
-            sx={{ borderRadius: 2, borderColor: PAYMENT_AMBER, color: PAYMENT_AMBER, '&:hover': { borderColor: '#b45309', bgcolor: '#fffbeb' } }}
+            sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, borderColor: PAYMENT_AMBER, color: PAYMENT_AMBER, '&:hover': { borderColor: PAYMENT_DARK, bgcolor: '#fff8e1' } }}
           >
             Add to Workspace
           </Button>
           <Button
             variant="contained"
-            startIcon={<MuiIcons.CreditCard />}
+            endIcon={<MuiIcons.ArrowForward />}
             disabled={selectedPayments.length === 0}
-            sx={{ borderRadius: 2, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, fontWeight: 700 }}
+            sx={{ whiteSpace: 'nowrap', borderRadius: 2, textTransform: 'none', fontSize: 13, bgcolor: GREEN, '&:hover': { bgcolor: GREEN_LIGHT }, fontWeight: 700 }}
           >
-            Checkout
+            Checkout Now
           </Button>
         </Paper>
       </Box>
